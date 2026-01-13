@@ -1,6 +1,6 @@
-﻿using Microsoft.UI.Xaml;
+﻿using App1.Data;
 using Microsoft.Data.Sqlite;
-using App1.Data;
+using Microsoft.UI.Xaml;
 using System;
 
 namespace App1
@@ -8,6 +8,7 @@ namespace App1
     public partial class App : Application
     {
         private Window? _window;
+        public static Window MainWindow { get; private set; }
 
         public App()
         {
@@ -18,9 +19,13 @@ namespace App1
         {
             System.Diagnostics.Debug.WriteLine("APP INICIADA");
             DatabaseInitializer.InitializeDatabase();
+
+#if DEBUG
             TestDatabaseConnection();
+#endif
 
             _window = new App1.FunctionTests.TestRunner();
+            MainWindow = _window;
             _window.Activate();
         }
 
