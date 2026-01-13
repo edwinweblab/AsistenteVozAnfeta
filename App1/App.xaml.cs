@@ -1,5 +1,4 @@
 ﻿using App1.Data;
-using Microsoft.Data.Sqlite;
 using Microsoft.UI.Xaml;
 using System;
 
@@ -8,14 +7,16 @@ namespace App1
     public partial class App : Application
     {
         private Window? _window;
-        public static Window MainWindow { get; private set; }
+
+        // Referencia global (opcional)
+        public static Window? MainWindowInstance { get; private set; }
 
         public App()
         {
             InitializeComponent();
         }
 
-        protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+        protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
             System.Diagnostics.Debug.WriteLine("APP INICIADA");
             DatabaseInitializer.InitializeDatabase();
@@ -24,8 +25,9 @@ namespace App1
             TestDatabaseConnection();
 #endif
 
-            _window = new App1.FunctionTests.TestRunner();
-            MainWindow = _window;
+            // ✅ Abrir la ventana principal
+            _window = new MainWindow();
+            MainWindowInstance = _window;
             _window.Activate();
         }
 

@@ -1,23 +1,36 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace App1.FunctionTests
 {
     public class NotificationTest
     {
-        // Diálogo simple
+        private static XamlRoot? GetXamlRoot()
+        {
+            // Window.Content es object, por eso se castea a FrameworkElement
+            if (App.MainWindowInstance?.Content is FrameworkElement root)
+                return root.XamlRoot;
+
+            return null;
+        }
+
         public static async Task<bool> ShowSimpleNotification(string title, string message)
         {
             try
             {
+                var xamlRoot = GetXamlRoot();
+                if (xamlRoot is null) return false;
+
                 var dialog = new ContentDialog
                 {
                     Title = title,
                     Content = message,
                     CloseButtonText = "OK",
-                    XamlRoot = App.MainWindow.Content.XamlRoot
+                    XamlRoot = xamlRoot
                 };
+
                 await dialog.ShowAsync();
                 return true;
             }
@@ -28,18 +41,20 @@ namespace App1.FunctionTests
             }
         }
 
-        // Diálogo con botones
         public static async Task<bool> ShowNotificationWithButtons(string title, string message)
         {
             try
             {
+                var xamlRoot = GetXamlRoot();
+                if (xamlRoot is null) return false;
+
                 var dialog = new ContentDialog
                 {
                     Title = title,
                     Content = message,
                     PrimaryButtonText = "Aceptar",
                     CloseButtonText = "Cancelar",
-                    XamlRoot = App.MainWindow.Content.XamlRoot
+                    XamlRoot = xamlRoot
                 };
 
                 var result = await dialog.ShowAsync();
