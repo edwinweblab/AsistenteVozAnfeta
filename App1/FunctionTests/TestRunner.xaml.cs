@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace App1.FunctionTests
 {
-    public sealed partial class TestRunner : Window
+    public sealed partial class TestRunner : Page
     {
         public TestRunner()
         {

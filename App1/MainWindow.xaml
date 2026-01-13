@@ -10,13 +10,14 @@
                         IsBackButtonVisible="Collapsed"
                         SelectionChanged="AppNav_SelectionChanged">
 
-            <!-- Opciones del menú -->
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Inicio" Tag="Home" Icon="Home"/>
                 <NavigationViewItem Content="Comandos" Tag="Commands" Icon="Bullets"/>
+                <NavigationViewItem Content="Configuración" Tag="Settings" Icon="Setting"/>
+                <NavigationViewItem Content="Pruebas" Tag="Tests" Icon="Play"/>
             </NavigationView.MenuItems>
 
-            <!-- Aquí se cargan las páginas -->
+            <!-- ✅ ESTE Frame debe llamarse ContentFrame -->
             <Frame x:Name="ContentFrame"/>
         </NavigationView>
     </Grid>
