@@ -124,7 +124,7 @@
                     <TextBlock Text="Versión 1.0.0" 
                    Style="{StaticResource CaptionTextStyle}"/>
                     <TextBlock x:Name="TxtVersionSubtitle"
-                   Text="Sistema de Gestión" 
+                   Text="Asistente" 
                    Style="{StaticResource CaptionTextStyle}"
                    Margin="0,2,0,0"/>
                 </StackPanel>
