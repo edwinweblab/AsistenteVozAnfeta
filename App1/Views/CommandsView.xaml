@@ -1,12 +1,134 @@
-<Page
+﻿<Page
     x:Class="Anfeta.UI.Views.CommandsView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Anfeta.UI.Views"
+    mc:Ignorable="d">
+    <Page.Resources>
 
-    <Grid Padding="24">
-        <StackPanel Spacing="10">
-            <TextBlock Text="Comandos" FontSize="28" FontWeight="SemiBold"/>
-            <TextBlock Text="Aqu� se explican los comandos de voz."/>
+        <CollectionViewSource x:Name="GroupedCommands"
+                          IsSourceGrouped="True"/>
+    </Page.Resources>
+
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- HEADER -->
+        <StackPanel Spacing="6">
+            <TextBlock Text="Comandos" Style="{StaticResource HeaderTextStyle}"/>
+            <TextBlock Text="Aquí se explican los comandos de voz."
+                       Style="{StaticResource CaptionTextStyle}"/>
         </StackPanel>
+
+        <!-- FILTRO + BUSCADOR -->
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <ComboBox x:Name="ModulesCombo"
+                      Height="40"
+                      PlaceholderText="Selecciona un módulo…"
+                      DisplayMemberPath="Name"
+                      SelectionChanged="ModulesCombo_SelectionChanged"/>
+
+            <TextBox x:Name="SearchBox"
+                     Grid.Column="1"
+                     Height="40"
+                     PlaceholderText="Buscar (ID, módulo, título o frase)…"
+                     TextChanged="SearchBox_TextChanged"/>
+
+            <Button Grid.Column="2"
+                    Content="Limpiar"
+                    Style="{StaticResource CompactButtonStyle}"
+                    Click="Clear_Click"/>
+        </Grid>
+
+        <!-- LISTA -->
+        <ScrollViewer Grid.Row="2">
+            <StackPanel Spacing="12">
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{x:Bind SelectedModuleTitle, Mode=OneWay}"
+                                   Style="{StaticResource SubheaderTextStyle}"/>
+                        <TextBlock Text="{x:Bind SelectedModuleSubtitle, Mode=OneWay}"
+                                   Style="{StaticResource CaptionTextStyle}"/>
+                    </StackPanel>
+                </Border>
+
+                <ItemsControl x:Name="CommandsList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:CommandItem">
+                            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,8">
+                                <Grid RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Título + Badges -->
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Spacing="4">
+                                            <!-- Qué hace -->
+                                            <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyLargeTextStyle}"/>
+
+                                            <!-- ID + Módulo -->
+                                            <TextBlock Text="{x:Bind IdAndModule}" Style="{StaticResource CaptionTextStyle}"/>
+
+                                            <!-- Breve explicación -->
+                                            <TextBlock Text="{x:Bind Description}"
+                               Style="{StaticResource BodyTextStyle}"
+                               Opacity="0.85"
+                               TextWrapping="Wrap"/>
+                                        </StackPanel>
+
+                                        <!-- Badges -->
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                                            <Border CornerRadius="10"
+                            Padding="10,4"
+                            Background="{StaticResource AnfetaInfoBrush}">
+                                                <TextBlock Text="{x:Bind InternetBadgeText}" Foreground="White" Style="{StaticResource CaptionTextStyle}"/>
+                                            </Border>
+
+                                            <Border CornerRadius="10"
+                            Padding="10,4"
+                            Background="{StaticResource AnfetaWarningBrush}">
+                                                <TextBlock Text="{x:Bind ConfirmBadgeText}" Foreground="White" Style="{StaticResource CaptionTextStyle}"/>
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Frases -->
+                                    <StackPanel Grid.Row="1" Spacing="4">
+                                        <TextBlock Text="Frases de ejemplo" Style="{StaticResource CaptionTextStyle}"/>
+                                        <TextBlock Text="{x:Bind ExamplesLine}"
+                           Style="{StaticResource BodyTextStyle}"
+                           TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+
+
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Page>
