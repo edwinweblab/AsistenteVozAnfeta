@@ -124,13 +124,13 @@
                     <TextBlock Text="Versión 1.0.0" 
                    Style="{StaticResource CaptionTextStyle}"/>
                     <TextBlock x:Name="TxtVersionSubtitle"
-                   Text="Sistema de Gestión" 
+                   Text="Asistente" 
                    Style="{StaticResource CaptionTextStyle}"
                    Margin="0,2,0,0"/>
                 </StackPanel>
             </NavigationView.PaneFooter>
 
-            <Frame x:Name="ContentFrame" Padding="24"/>
+            <Frame x:Name="ContentFrame"/>
 
             <!-- Estados visuales para responsividad -->
             <VisualStateManager.VisualStateGroups>

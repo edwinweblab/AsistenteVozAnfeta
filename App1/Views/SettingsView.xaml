@@ -1,12 +1,141 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Page
-    x:Class="Anfeta.UI.Views.SettingsView"
+    x:Class="App1.Views.SettingsView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <Grid Padding="24">
-        <StackPanel Spacing="10">
-            <TextBlock Text="Configuraci�n" FontSize="28" FontWeight="SemiBold"/>
-            <TextBlock Text="Ajustes de la aplicaci�n."/>
-        </StackPanel>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid HorizontalAlignment="Center">
+                <StackPanel Spacing="24" MaxWidth="950" MinWidth="750">
+
+                    <!-- Header -->
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon Glyph="&#xE713;" 
+                                      FontSize="28" 
+                                      Foreground="{StaticResource AnfetaAccentBrush}"/>
+                            <TextBlock Text="Configuración" 
+                                       Style="{StaticResource HeaderTextStyle}"/>
+                        </StackPanel>
+                        <TextBlock Text="Personaliza el comportamiento del asistente" 
+                                   Style="{StaticResource BodyTextStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+
+                    <!-- Audio y Micrófono -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="Audio y Micrófono" 
+                                       Style="{StaticResource SubheaderTextStyle}"/>
+
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Dispositivo de entrada (micrófono)" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbInputDevice" 
+                                          PlaceholderText="Selecciona micrófono"
+                                          HorizontalAlignment="Stretch"/>
+                            </StackPanel>
+
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Dispositivo de salida (altavoz)" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbOutputDevice" 
+                                          PlaceholderText="Selecciona altavoz"
+                                          HorizontalAlignment="Stretch"/>
+                            </StackPanel>
+
+                            <Button Content="Probar Micrófono"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="BtnTestMicrophone_Click"/>
+
+                            <Border x:Name="MicTestStatus"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="12"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="TxtMicTestStatus" 
+                                           Style="{StaticResource BodyTextStyle}"
+                                           TextWrapping="Wrap"/>
+                            </Border>
+
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Idioma de reconocimiento" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbLanguage" 
+                                          HorizontalAlignment="Stretch">
+                                    <ComboBoxItem Content="Español (México)" IsSelected="True"/>
+                                    <ComboBoxItem Content="Español (España)"/>
+                                    <ComboBoxItem Content="Inglés (Estados Unidos)"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Notificaciones -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="Notificaciones" 
+                                       Style="{StaticResource SubheaderTextStyle}"/>
+
+                            <ToggleSwitch x:Name="ToggleNotifications" 
+                                          Header="Habilitar notificaciones del sistema"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"
+                                          IsOn="True"/>
+
+                            <ToggleSwitch x:Name="ToggleSoundNotifications" 
+                                          Header="Sonido en notificaciones"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"
+                                          IsOn="True"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Preferencias Generales -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="Preferencias Generales" 
+                                       Style="{StaticResource SubheaderTextStyle}"/>
+
+                            <ToggleSwitch x:Name="ToggleStartup" 
+                                          Header="Iniciar con Windows"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"/>
+
+                            <ToggleSwitch x:Name="ToggleMinimizeTray" 
+                                          Header="Minimizar a bandeja del sistema"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"/>
+
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Tema de la aplicación" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbTheme" 
+                                          SelectionChanged="CbTheme_SelectionChanged"
+                                          HorizontalAlignment="Stretch">
+                                    <ComboBoxItem Content="Sistema" IsSelected="True"/>
+                                    <ComboBoxItem Content="Claro"/>
+                                    <ComboBoxItem Content="Oscuro"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Botones de acción -->
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Content="Guardar Cambios"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Click="BtnSave_Click"/>
+                        <Button Content="Restaurar Predeterminados"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Click="BtnReset_Click"/>
+                    </StackPanel>
+
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
     </Grid>
 </Page>

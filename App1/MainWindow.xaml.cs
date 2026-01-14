@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using System;
 using Anfeta.UI.Views;
 using App1.FunctionTests;
+using App1.Views;
 
 namespace App1
 {
