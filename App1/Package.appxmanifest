@@ -53,9 +53,14 @@
 						</com:ExeServer>
 					</com:ComServer>
 				</com:Extension>
-
 				<desktop:Extension Category="windows.toastNotificationActivation">
 					<desktop:ToastNotificationActivation ToastActivatorCLSID="eb5a0b9d-7f4e-4f3e-9b2a-5c8f6d4e3a1b" />
+				</desktop:Extension>
+				<desktop:Extension Category="windows.startupTask">
+					<desktop:StartupTask
+						TaskId="AnfetaStartup"
+						Enabled="false"
+						DisplayName="Anfeta" />
 				</desktop:Extension>
 			</Extensions>
 

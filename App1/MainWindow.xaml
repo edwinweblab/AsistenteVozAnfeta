@@ -130,7 +130,7 @@
                 </StackPanel>
             </NavigationView.PaneFooter>
 
-            <Frame x:Name="ContentFrame" Padding="24"/>
+            <Frame x:Name="ContentFrame"/>
 
             <!-- Estados visuales para responsividad -->
             <VisualStateManager.VisualStateGroups>

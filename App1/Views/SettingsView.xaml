@@ -1,206 +1,141 @@
+ï»¿<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="App1.Views.SettingsView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <ScrollViewer>
-        <StackPanel Spacing="24" MaxWidth="800">
+    <Grid Padding="24">
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid HorizontalAlignment="Center">
+                <StackPanel Spacing="24" MaxWidth="950" MinWidth="750">
 
-            <!-- Header -->
-            <StackPanel Spacing="8">
-                <StackPanel Orientation="Horizontal" Spacing="12">
-                    <FontIcon Glyph="&#xE713;" 
-                              FontSize="28" 
-                              Foreground="{StaticResource AnfetaAccentBrush}"/>
-                    <TextBlock Text="Configuración" 
-                               Style="{StaticResource HeaderTextStyle}"/>
-                </StackPanel>
-                <TextBlock Text="Personaliza el comportamiento del asistente" 
-                           Style="{StaticResource BodyTextStyle}"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            </StackPanel>
-
-            <!-- Reconocimiento de Voz -->
-            <Border Style="{StaticResource CardStyle}">
-                <StackPanel Spacing="16">
-                    <TextBlock Text="Reconocimiento de Voz" 
-                               Style="{StaticResource SubheaderTextStyle}"/>
-
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Idioma de reconocimiento" 
-                                   Style="{StaticResource BodyTextStyle}"/>
-                        <ComboBox x:Name="CbLanguage" 
-                                  PlaceholderText="Selecciona idioma"
-                                  Width="300"
-                                  HorizontalAlignment="Left">
-                            <ComboBoxItem Content="Español (México)" IsSelected="True"/>
-                            <ComboBoxItem Content="Español (España)"/>
-                            <ComboBoxItem Content="Inglés (Estados Unidos)"/>
-                        </ComboBox>
-                    </StackPanel>
-
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Palabra de activación" 
-                                   Style="{StaticResource BodyTextStyle}"/>
-                        <TextBox x:Name="TxtWakeWord" 
-                                 PlaceholderText="Anfeta"
-                                 Width="300"
-                                 HorizontalAlignment="Left"/>
-                    </StackPanel>
-
-                    <ToggleSwitch x:Name="ToggleAlwaysListen" 
-                                  Header="Escuchar continuamente"
-                                  OnContent="Activado"
-                                  OffContent="Desactivado"/>
-                </StackPanel>
-            </Border>
-
-            <!-- Confirmación de Acciones -->
-            <Border Style="{StaticResource CardStyle}">
-                <StackPanel Spacing="16">
-                    <TextBlock Text="Confirmación de Acciones" 
-                               Style="{StaticResource SubheaderTextStyle}"/>
-
-                    <ToggleSwitch x:Name="ToggleAlwaysConfirm" 
-                                  Header="Confirmar siempre antes de ejecutar"
-                                  OnContent="Activado"
-                                  OffContent="Desactivado"
-                                  IsOn="True"/>
-
-                    <ToggleSwitch x:Name="ToggleVoiceConfirm" 
-                                  Header="Permitir confirmación por voz"
-                                  OnContent="Activado"
-                                  OffContent="Desactivado"/>
-
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Tiempo de espera para confirmación (segundos)" 
-                                   Style="{StaticResource BodyTextStyle}"/>
-                        <Slider x:Name="SliderConfirmTimeout"
-                                Minimum="5"
-                                Maximum="30"
-                                Value="15"
-                                Width="300"
-                                HorizontalAlignment="Left"
-                                TickFrequency="5"
-                                TickPlacement="BottomRight"/>
-                        <TextBlock Text="{x:Bind SliderConfirmTimeout.Value, Mode=OneWay}" 
-                                   Style="{StaticResource CaptionTextStyle}"
+                    <!-- Header -->
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon Glyph="&#xE713;" 
+                                      FontSize="28" 
+                                      Foreground="{StaticResource AnfetaAccentBrush}"/>
+                            <TextBlock Text="ConfiguraciÃ³n" 
+                                       Style="{StaticResource HeaderTextStyle}"/>
+                        </StackPanel>
+                        <TextBlock Text="Personaliza el comportamiento del asistente" 
+                                   Style="{StaticResource BodyTextStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </StackPanel>
-                </StackPanel>
-            </Border>
 
-            <!-- Integraciones API -->
-            <Border Style="{StaticResource CardStyle}">
-                <StackPanel Spacing="16">
-                    <TextBlock Text="Integraciones API" 
-                               Style="{StaticResource SubheaderTextStyle}"/>
+                    <!-- Audio y MicrÃ³fono -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="Audio y MicrÃ³fono" 
+                                       Style="{StaticResource SubheaderTextStyle}"/>
 
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="URL Base Weblab" 
-                                   Style="{StaticResource BodyTextStyle}"/>
-                        <TextBox x:Name="TxtWeblabUrl" 
-                                 PlaceholderText="https://wlserver-production.up.railway.app"
-                                 Width="400"
-                                 HorizontalAlignment="Left"/>
-                    </StackPanel>
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Dispositivo de entrada (micrÃ³fono)" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbInputDevice" 
+                                          PlaceholderText="Selecciona micrÃ³fono"
+                                          HorizontalAlignment="Stretch"/>
+                            </StackPanel>
 
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Device ID" 
-                                   Style="{StaticResource BodyTextStyle}"/>
-                        <Grid Width="400" HorizontalAlignment="Left">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Name="TxtDeviceId" 
-                                     Grid.Column="0"
-                                     PlaceholderText="Generado automáticamente"
-                                     IsReadOnly="True"/>
-                            <Button Grid.Column="1"
-                                    Content="Generar"
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Dispositivo de salida (altavoz)" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbOutputDevice" 
+                                          PlaceholderText="Selecciona altavoz"
+                                          HorizontalAlignment="Stretch"/>
+                            </StackPanel>
+
+                            <Button Content="Probar MicrÃ³fono"
                                     Style="{StaticResource SecondaryButtonStyle}"
-                                    Height="40"
-                                    Margin="8,0,0,0"
-                                    Click="BtnGenerateDeviceId_Click"/>
-                        </Grid>
+                                    Click="BtnTestMicrophone_Click"/>
+
+                            <Border x:Name="MicTestStatus"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="12"
+                                    Visibility="Collapsed">
+                                <TextBlock x:Name="TxtMicTestStatus" 
+                                           Style="{StaticResource BodyTextStyle}"
+                                           TextWrapping="Wrap"/>
+                            </Border>
+
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Idioma de reconocimiento" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbLanguage" 
+                                          HorizontalAlignment="Stretch">
+                                    <ComboBoxItem Content="EspaÃ±ol (MÃ©xico)" IsSelected="True"/>
+                                    <ComboBoxItem Content="EspaÃ±ol (EspaÃ±a)"/>
+                                    <ComboBoxItem Content="InglÃ©s (Estados Unidos)"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Notificaciones -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="Notificaciones" 
+                                       Style="{StaticResource SubheaderTextStyle}"/>
+
+                            <ToggleSwitch x:Name="ToggleNotifications" 
+                                          Header="Habilitar notificaciones del sistema"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"
+                                          IsOn="True"/>
+
+                            <ToggleSwitch x:Name="ToggleSoundNotifications" 
+                                          Header="Sonido en notificaciones"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"
+                                          IsOn="True"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Preferencias Generales -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="Preferencias Generales" 
+                                       Style="{StaticResource SubheaderTextStyle}"/>
+
+                            <ToggleSwitch x:Name="ToggleStartup" 
+                                          Header="Iniciar con Windows"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"/>
+
+                            <ToggleSwitch x:Name="ToggleMinimizeTray" 
+                                          Header="Minimizar a bandeja del sistema"
+                                          OnContent="Activado"
+                                          OffContent="Desactivado"/>
+
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="Tema de la aplicaciÃ³n" 
+                                           Style="{StaticResource BodyTextStyle}"/>
+                                <ComboBox x:Name="CbTheme" 
+                                          SelectionChanged="CbTheme_SelectionChanged"
+                                          HorizontalAlignment="Stretch">
+                                    <ComboBoxItem Content="Sistema" IsSelected="True"/>
+                                    <ComboBoxItem Content="Claro"/>
+                                    <ComboBoxItem Content="Oscuro"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Botones de acciÃ³n -->
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Content="Guardar Cambios"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Click="BtnSave_Click"/>
+                        <Button Content="Restaurar Predeterminados"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Click="BtnReset_Click"/>
                     </StackPanel>
 
-                    <Button Content="Probar Conexión Weblab"
-                            Style="{StaticResource SecondaryButtonStyle}"
-                            Click="BtnTestWeblab_Click"/>
-
-                    <Border Background="{ThemeResource LayerFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="4"
-                            Padding="12"
-                            x:Name="WeblabStatus"
-                            Visibility="Collapsed">
-                        <TextBlock x:Name="TxtWeblabStatus" 
-                                   Style="{StaticResource BodyTextStyle}"
-                                   TextWrapping="Wrap"/>
-                    </Border>
                 </StackPanel>
-            </Border>
-
-            <!-- Notificaciones -->
-            <Border Style="{StaticResource CardStyle}">
-                <StackPanel Spacing="16">
-                    <TextBlock Text="Notificaciones" 
-                               Style="{StaticResource SubheaderTextStyle}"/>
-
-                    <ToggleSwitch x:Name="ToggleNotifications" 
-                                  Header="Habilitar notificaciones del sistema"
-                                  OnContent="Activado"
-                                  OffContent="Desactivado"
-                                  IsOn="True"/>
-
-                    <ToggleSwitch x:Name="ToggleSoundNotifications" 
-                                  Header="Sonido en notificaciones"
-                                  OnContent="Activado"
-                                  OffContent="Desactivado"
-                                  IsOn="True"/>
-                </StackPanel>
-            </Border>
-
-            <!-- Preferencias Generales -->
-            <Border Style="{StaticResource CardStyle}">
-                <StackPanel Spacing="16">
-                    <TextBlock Text="Preferencias Generales" 
-                               Style="{StaticResource SubheaderTextStyle}"/>
-
-                    <ToggleSwitch x:Name="ToggleStartup" 
-                                  Header="Iniciar con Windows"
-                                  OnContent="Activado"
-                                  OffContent="Desactivado"/>
-
-                    <ToggleSwitch x:Name="ToggleMinimizeTray" 
-                                  Header="Minimizar a bandeja del sistema"
-                                  OnContent="Activado"
-                                  OffContent="Desactivado"/>
-
-                    <ComboBox x:Name="CbTheme" 
-                              Header="Tema de la aplicación"
-                              Width="300"
-                              HorizontalAlignment="Left">
-                        <ComboBoxItem Content="Sistema" IsSelected="True"/>
-                        <ComboBoxItem Content="Claro"/>
-                        <ComboBoxItem Content="Oscuro"/>
-                    </ComboBox>
-                </StackPanel>
-            </Border>
-
-            <!-- Botones de acción -->
-            <StackPanel Orientation="Horizontal" Spacing="12">
-                <Button Content="Guardar Cambios"
-                        Style="{StaticResource PrimaryButtonStyle}"
-                        Click="BtnSave_Click"/>
-                <Button Content="Restaurar Predeterminados"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Click="BtnReset_Click"/>
-            </StackPanel>
-
-        </StackPanel>
-    </ScrollViewer>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
 </Page>
