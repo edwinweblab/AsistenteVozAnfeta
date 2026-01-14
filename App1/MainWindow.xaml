@@ -11,7 +11,7 @@
 
         <!-- Barra de estado superior -->
         <Border Grid.Row="0" 
-                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                Background="{ThemeResource AnfetaNeutral900}"
                 BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="16,8">
@@ -110,29 +110,23 @@
                         <FontIcon Glyph="&#xE713;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Pruebas de Sistema" Tag="Tests">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE7C1;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <NavigationView.PaneFooter>
-                <StackPanel>
-                    <!-- Pruebas separado -->
-                    <NavigationViewItem Content="Pruebas de Sistema" Tag="Tests">
-                        <NavigationViewItem.Icon>
-                            <FontIcon Glyph="&#xE7C1;"/>
-                        </NavigationViewItem.Icon>
-                    </NavigationViewItem>
-
-                    <!-- Versión (responsivo) -->
-                    <StackPanel x:Name="VersionInfo"
-                                Padding="16,8" 
-                                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" 
-                                BorderThickness="0,1,0,0">
-                        <TextBlock Text="Versión 1.0.0" 
-                                   Style="{StaticResource CaptionTextStyle}"/>
-                        <TextBlock x:Name="TxtVersionSubtitle"
-                                   Text="Sistema de Gestión" 
-                                   Style="{StaticResource CaptionTextStyle}"
-                                   Margin="0,2,0,0"/>
-                    </StackPanel>
+                <StackPanel Padding="16,8" 
+                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" 
+                BorderThickness="0,1,0,0">
+                    <TextBlock Text="Versión 1.0.0" 
+                   Style="{StaticResource CaptionTextStyle}"/>
+                    <TextBlock x:Name="TxtVersionSubtitle"
+                   Text="Sistema de Gestión" 
+                   Style="{StaticResource CaptionTextStyle}"
+                   Margin="0,2,0,0"/>
                 </StackPanel>
             </NavigationView.PaneFooter>
 
