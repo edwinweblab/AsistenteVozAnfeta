@@ -2,23 +2,160 @@
     x:Class="App1.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="Asistente Voz ANFETA">
-
+    Title="ANFETA - Asistente de Voz Empresarial">
     <Grid>
-        <NavigationView x:Name="AppNav"
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Barra de estado superior -->
+        <Border Grid.Row="0" 
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="16,8">
+            <StackPanel Orientation="Horizontal" Spacing="16" HorizontalAlignment="Right">
+
+                <!-- Internet -->
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon x:Name="IconInternet" 
+                              Glyph="&#xE968;" 
+                              FontSize="16"
+                              Foreground="{StaticResource AnfetaSuccessBrush}"/>
+                    <TextBlock x:Name="TxtInternet" 
+                               Text="Internet" 
+                               FontSize="12"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Notion -->
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon x:Name="IconNotion" 
+                              Glyph="&#xE72E;" 
+                              FontSize="16"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                    <TextBlock x:Name="TxtNotion" 
+                               Text="Notion" 
+                               FontSize="12"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Micrófono -->
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon x:Name="IconMic" 
+                              Glyph="&#xE720;" 
+                              FontSize="16"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                    <TextBlock x:Name="TxtMic" 
+                               Text="Micrófono" 
+                               FontSize="12"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Dropbox -->
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon x:Name="IconDropbox" 
+                              Glyph="&#xEC50;" 
+                              FontSize="16"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                    <TextBlock x:Name="TxtDropbox" 
+                               Text="Dropbox" 
+                               FontSize="12"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+
+        <!-- NavigationView -->
+        <NavigationView Grid.Row="1"
+                        x:Name="AppNav"
                         PaneDisplayMode="Left"
+                        IsPaneOpen="True"
+                        OpenPaneLength="240"
+                        CompactPaneLength="48"
                         IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="False"
                         SelectionChanged="AppNav_SelectionChanged">
 
+            <NavigationView.PaneHeader>
+                <Grid Height="60" Padding="16,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE720;" 
+                                  FontSize="24" 
+                                  Foreground="{StaticResource AnfetaAccentBrush}"/>
+                        <TextBlock Text="ANFETA" 
+                                   Style="{StaticResource SubheaderTextStyle}"
+                                   Margin="12,0,0,0"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </NavigationView.PaneHeader>
+
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Inicio" Tag="Home" Icon="Home"/>
-                <NavigationViewItem Content="Comandos" Tag="Commands" Icon="Bullets"/>
-                <NavigationViewItem Content="Configuración" Tag="Settings" Icon="Setting"/>
-                <NavigationViewItem Content="Pruebas" Tag="Tests" Icon="Play"/>
+                <NavigationViewItem Content="Panel Principal" Tag="Home">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE80F;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Comandos Disponibles" Tag="Commands">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8F1;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItemSeparator/>
+                <NavigationViewItem Content="Configuración" Tag="Settings">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE713;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
 
-            <!-- ✅ ESTE Frame debe llamarse ContentFrame -->
-            <Frame x:Name="ContentFrame"/>
+            <NavigationView.PaneFooter>
+                <StackPanel>
+                    <!-- Pruebas separado -->
+                    <NavigationViewItem Content="Pruebas de Sistema" Tag="Tests">
+                        <NavigationViewItem.Icon>
+                            <FontIcon Glyph="&#xE7C1;"/>
+                        </NavigationViewItem.Icon>
+                    </NavigationViewItem>
+
+                    <!-- Versión (responsivo) -->
+                    <StackPanel x:Name="VersionInfo"
+                                Padding="16,8" 
+                                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" 
+                                BorderThickness="0,1,0,0">
+                        <TextBlock Text="Versión 1.0.0" 
+                                   Style="{StaticResource CaptionTextStyle}"/>
+                        <TextBlock x:Name="TxtVersionSubtitle"
+                                   Text="Sistema de Gestión" 
+                                   Style="{StaticResource CaptionTextStyle}"
+                                   Margin="0,2,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </NavigationView.PaneFooter>
+
+            <Frame x:Name="ContentFrame" Padding="24"/>
+
+            <!-- Estados visuales para responsividad -->
+            <VisualStateManager.VisualStateGroups>
+                <VisualStateGroup>
+                    <VisualState x:Name="Compact">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="0"/>
+                        </VisualState.StateTriggers>
+                        <VisualState.Setters>
+                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Collapsed"/>
+                        </VisualState.Setters>
+                    </VisualState>
+                    <VisualState x:Name="Wide">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="720"/>
+                        </VisualState.StateTriggers>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
         </NavigationView>
     </Grid>
 </Window>

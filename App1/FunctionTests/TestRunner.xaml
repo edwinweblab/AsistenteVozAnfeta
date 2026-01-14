@@ -6,75 +6,111 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="20">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+	<Grid Padding="24">
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
 
-        <TextBlock 
-            Grid.Row="0"
-            Text="PRUEBAS DE FUNCIONES ANFETA"
-            FontSize="24"
-            FontWeight="Bold"
-            Margin="0,0,0,20"
-            HorizontalAlignment="Center"/>
+		<!-- Header -->
+		<StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,24">
+			<FontIcon Glyph="&#xE7C1;" FontSize="28"
+                      Foreground="{StaticResource AnfetaAccentBrush}"
+                      VerticalAlignment="Center"/>
+			<TextBlock Text="Pruebas de Sistema"
+                       Style="{StaticResource HeaderTextStyle}"
+                       Margin="12,0,0,0"
+                       VerticalAlignment="Center"/>
+		</StackPanel>
 
-        <StackPanel Grid.Row="1" Spacing="10" Margin="0,0,0,20">
-            <Button 
-                x:Name="btnTestNetwork"
-                Content="Probar Funciones de Red"
-                Click="BtnTestNetwork_Click"
-                HorizontalAlignment="Stretch"
-                Padding="10"/>
+		<!-- Grid de botones 2x2 -->
+		<Grid Grid.Row="1" Margin="0,0,0,24">
+			<Grid.ColumnDefinitions>
+				<ColumnDefinition Width="*"/>
+				<ColumnDefinition Width="16"/>
+				<ColumnDefinition Width="*"/>
+			</Grid.ColumnDefinitions>
+			<Grid.RowDefinitions>
+				<RowDefinition Height="Auto"/>
+				<RowDefinition Height="12"/>
+				<RowDefinition Height="Auto"/>
+			</Grid.RowDefinitions>
 
-            <Button 
-                x:Name="btnTestNotifications"
-                Content="Probar Notificaciones"
-                Click="BtnTestNotifications_Click"
-                HorizontalAlignment="Stretch"
-                Padding="10"/>
+			<!-- Red -->
+			<Button x:Name="btnTestNetwork"
+                    Grid.Row="0" Grid.Column="0"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    HorizontalAlignment="Stretch"
+                    Click="BtnTestNetwork_Click">
+				<StackPanel Orientation="Horizontal">
+					<FontIcon Glyph="&#xE968;" FontSize="18" Margin="0,0,10,0"/>
+					<TextBlock Text="Red" VerticalAlignment="Center"/>
+				</StackPanel>
+			</Button>
 
-            <Button 
-                x:Name="btnTestSystem"
-                Content="Probar Funciones del Sistema"
-                Click="BtnTestSystem_Click"
-                HorizontalAlignment="Stretch"
-                Padding="10"/>
+			<!-- Notificaciones -->
+			<Button x:Name="btnTestNotifications"
+                    Grid.Row="0" Grid.Column="2"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    HorizontalAlignment="Stretch"
+                    Click="BtnTestNotifications_Click">
+				<StackPanel Orientation="Horizontal">
+					<FontIcon Glyph="&#xE91C;" FontSize="18" Margin="0,0,10,0"/>
+					<TextBlock Text="Notificaciones" VerticalAlignment="Center"/>
+				</StackPanel>
+			</Button>
 
-            <Button 
-                x:Name="btnRunAllTests"
-                Content="Ejecutar TODAS las Pruebas"
-                Click="BtnRunAllTests_Click"
-                HorizontalAlignment="Stretch"
-                Padding="10"
-                FontWeight="Bold"/>
-        </StackPanel>
+			<!-- Sistema -->
+			<Button x:Name="btnTestSystem"
+                    Grid.Row="2" Grid.Column="0"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    HorizontalAlignment="Stretch"
+                    Click="BtnTestSystem_Click">
+				<StackPanel Orientation="Horizontal">
+					<FontIcon Glyph="&#xE770;" FontSize="18" Margin="0,0,10,0"/>
+					<TextBlock Text="Sistema" VerticalAlignment="Center"/>
+				</StackPanel>
+			</Button>
 
-        <ScrollViewer Grid.Row="2" BorderThickness="1" BorderBrush="Gray">
-            <TextBlock 
-                x:Name="txtResults"
-                Text="Presiona un botón para ejecutar las pruebas..."
-                TextWrapping="Wrap"
-                Padding="10"
-                FontFamily="Consolas"
-                FontSize="12"/>
-        </ScrollViewer>
+			<!-- Micrófono -->
+			<Button x:Name="btnTestMicrophone"
+                    Grid.Row="2" Grid.Column="2"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    HorizontalAlignment="Stretch"
+                    Click="BtnTestMicrophone_Click">
+				<StackPanel Orientation="Horizontal">
+					<FontIcon Glyph="&#xE720;" FontSize="18" Margin="0,0,10,0"/>
+					<TextBlock Text="Micrófono" VerticalAlignment="Center"/>
+				</StackPanel>
+			</Button>
+		</Grid>
 
-        <StackPanel Grid.Row="3" Margin="0,10,0,0">
-            <ProgressBar 
-                x:Name="progressBar"
-                Height="4"
-                IsIndeterminate="False"
-                Visibility="Collapsed"/>
-            <TextBlock 
-                x:Name="txtStatus"
-                Text="Listo"
-                Margin="0,5,0,0"
-                FontSize="12"
-                HorizontalAlignment="Center"/>
-        </StackPanel>
-    </Grid>
+		<!-- Área de resultados -->
+		<Border Grid.Row="2"
+                Style="{StaticResource CardStyle}">
+			<ScrollViewer>
+				<TextBlock x:Name="txtResults"
+                           Text="Selecciona una prueba para ejecutar..."
+                           TextWrapping="Wrap"
+                           FontFamily="Consolas"
+                           Style="{StaticResource BodyTextStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+			</ScrollViewer>
+		</Border>
+
+		<!-- Footer -->
+		<StackPanel Grid.Row="3" Margin="0,16,0,0">
+			<ProgressBar x:Name="progressBar"
+                         Height="4"
+                         IsIndeterminate="False"
+                         Visibility="Collapsed"/>
+			<TextBlock x:Name="txtStatus"
+                       Text="Listo"
+                       Margin="0,8,0,0"
+                       Style="{StaticResource CaptionTextStyle}"
+                       HorizontalAlignment="Center"/>
+		</StackPanel>
+	</Grid>
 </Page>
