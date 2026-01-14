@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace App1.FunctionTests
 {
-    public sealed partial class TestRunner : Window
+    public sealed partial class TestRunner : Page
     {
         public TestRunner()
         {
@@ -27,38 +27,9 @@ namespace App1.FunctionTests
             await RunTest("Sistema", SystemFunctionsTest.RunAllTests);
         }
 
-        private async void BtnRunAllTests_Click(object sender, RoutedEventArgs e)
+        private async void BtnTestMicrophone_Click(object sender, RoutedEventArgs e)
         {
-            SetTestingState(true);
-            txtResults.Text = "Ejecutando todas las pruebas...\n\n";
-
-            try
-            {
-                txtStatus.Text = "Pruebas de red...";
-                txtResults.Text += await NetworkTest.RunAllTests() + "\n\n";
-                await Task.Delay(500);
-
-                txtStatus.Text = "Pruebas de notificaciones...";
-                txtResults.Text += await NotificationTest.RunAllTests() + "\n\n";
-                await Task.Delay(500);
-
-                txtStatus.Text = "Pruebas del sistema...";
-                txtResults.Text += await SystemFunctionsTest.RunAllTests() + "\n\n";
-
-                txtResults.Text += "========================================\n";
-                txtResults.Text += "TODAS LAS PRUEBAS COMPLETADAS\n";
-                txtResults.Text += "========================================\n";
-                txtStatus.Text = "Completado";
-            }
-            catch (Exception ex)
-            {
-                txtResults.Text += $"\nError: {ex.Message}\n";
-                txtStatus.Text = "Error";
-            }
-            finally
-            {
-                SetTestingState(false);
-            }
+            await RunTest("Micrófono", MicrophoneTest.RunAllTests);
         }
 
         private async Task RunTest(string testName, Func<Task<string>> testFunc)
@@ -88,8 +59,7 @@ namespace App1.FunctionTests
             btnTestNetwork.IsEnabled = !isTesting;
             btnTestNotifications.IsEnabled = !isTesting;
             btnTestSystem.IsEnabled = !isTesting;
-            btnRunAllTests.IsEnabled = !isTesting;
-
+            btnTestMicrophone.IsEnabled = !isTesting;
             progressBar.Visibility = isTesting ? Visibility.Visible : Visibility.Collapsed;
             progressBar.IsIndeterminate = isTesting;
         }

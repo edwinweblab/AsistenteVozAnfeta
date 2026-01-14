@@ -1,31 +1,45 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices.WindowsRuntime;
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Data;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Navigation;
-using Windows.Foundation;
-using Windows.Foundation.Collections;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using System;
+using Anfeta.UI.Views;
+using App1.FunctionTests;
 
 namespace App1
 {
-    /// <summary>
-    /// An empty window that can be used on its own or navigated to within a Frame.
-    /// </summary>
     public sealed partial class MainWindow : Window
     {
         public MainWindow()
         {
             InitializeComponent();
+
+            // ✅ Arrancar en Home (solo si existe el frame)
+            if (ContentFrame != null)
+                ContentFrame.Navigate(typeof(HomeView));
+
+            if (AppNav != null && AppNav.MenuItems.Count > 0)
+                AppNav.SelectedItem = AppNav.MenuItems[0];
+        }
+
+        private void AppNav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+        {
+            if (ContentFrame == null) return;
+
+            if (args.SelectedItem is not NavigationViewItem item) return;
+
+            var tag = item.Tag as string;
+            if (string.IsNullOrWhiteSpace(tag)) return;
+
+            Type pageType = tag switch
+            {
+                "Home" => typeof(HomeView),
+                "Commands" => typeof(CommandsView),
+                "Settings" => typeof(SettingsView),
+                "Tests" => typeof(TestRunner),
+                _ => typeof(HomeView)
+            };
+
+            if (ContentFrame.CurrentSourcePageType != pageType)
+                ContentFrame.Navigate(pageType);
         }
     }
 }
