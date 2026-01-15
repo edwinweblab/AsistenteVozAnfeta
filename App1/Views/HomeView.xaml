@@ -1,4 +1,4 @@
-<Page
+﻿<Page
     x:Class="Anfeta.UI.Views.HomeView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -6,6 +6,12 @@
     Unloaded="Page_Unloaded">
 
     <Page.Resources>
+        <!-- Colores de marca -->
+        <SolidColorBrush x:Key="AnfetaAccentBrush" Color="#FF6B35"/>
+        <SolidColorBrush x:Key="AnfetaSuccessBrush" Color="#34D399"/>
+        <SolidColorBrush x:Key="AnfetaErrorBrush" Color="#EF4444"/>
+        <SolidColorBrush x:Key="AnfetaWarningBrush" Color="#FBBF24"/>
+
         <!-- Neutrales -->
         <SolidColorBrush x:Key="N50"  Color="#0F172A"/>
         <SolidColorBrush x:Key="N100" Color="#F7FAFC"/>
@@ -16,7 +22,7 @@
         <SolidColorBrush x:Key="N700" Color="#334155"/>
         <SolidColorBrush x:Key="N900" Color="#0B1220"/>
 
-        <!-- Fondo (antes referenciado como BgGradient) -->
+        <!-- Fondo -->
         <LinearGradientBrush x:Key="BgGradient" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#0B1220" Offset="0.0"/>
             <GradientStop Color="#0F172A" Offset="0.45"/>
@@ -26,7 +32,7 @@
         <!-- Rings -->
         <SolidColorBrush x:Key="RingBrush" Color="#FFFFFFFF"/>
 
-        <!-- Glass (para cards) -->
+        <!-- Estilos reutilizables -->
         <Style x:Key="GlassBorder" TargetType="Border">
             <Setter Property="CornerRadius" Value="16"/>
             <Setter Property="Padding" Value="18"/>
@@ -47,7 +53,6 @@
             <Setter Property="Foreground" Value="{StaticResource N500}"/>
         </Style>
 
-        <!-- Estilo del bot�n mic -->
         <Style x:Key="MicButtonStyle" TargetType="Button">
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="CornerRadius" Value="999"/>
@@ -55,283 +60,352 @@
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+
+        <Style x:Key="StatusBadge" TargetType="Border">
+            <Setter Property="CornerRadius" Value="999"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
     </Page.Resources>
 
-    <Grid Padding="30" x:Name="Root">
+    <Grid Padding="30" Background="{StaticResource BgGradient}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Header -->
-        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,18">
+        <!-- ========================================
+             SECCIÓN: HEADER CON ESTADO
+             ======================================== -->
+        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="8" Margin="0,8,0,24">
+            <!-- Título principal -->
             <TextBlock
-                Text="Listo para escuchar"
+                Text="{Binding StatusText}"
                 FontSize="30"
                 FontWeight="SemiBold"
                 Foreground="{StaticResource N200}"
-                HorizontalAlignment="Center"/>
+                HorizontalAlignment="Center"
+                TextAlignment="Center"/>
 
+            <!-- Subtítulo -->
             <TextBlock
                 Text="Habla normal, yo me encargo del resto"
                 FontSize="13"
                 Foreground="{StaticResource N500}"
                 HorizontalAlignment="Center"/>
+
+            <!-- Estado: Idioma + Micrófono -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,8,0,0">
+                <!-- Badge: Idioma -->
+                <Border Style="{StaticResource StatusBadge}" Background="#14FFFFFF">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE774;" FontFamily="Segoe MDL2 Assets" 
+                                  FontSize="12" Foreground="{StaticResource N400}"/>
+                        <TextBlock Text="{Binding CurrentLanguageInfo}"
+                                   FontSize="12"
+                                   Foreground="{StaticResource N400}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Badge: Estado del micrófono -->
+                <Border x:Name="MicStatusBadge" Style="{StaticResource StatusBadge}" 
+                        Background="#14FF6B35" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse Width="8" Height="8" Fill="#FF6B35"/>
+                        <TextBlock x:Name="MicStatusText" Text="Escuchando"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="#FF6B35"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
         </StackPanel>
 
-        <!-- Body -->
-        <Grid Grid.Row="1" x:Name="BodyGrid">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
+        <!-- Botón de ayuda flotante (esquina superior derecha) -->
+        <Button x:Name="HelpButton"
+                Grid.Row="0"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Right"
+                Width="40"
+                Height="40"
+                Background="#14FFFFFF"
+                BorderBrush="#30FFFFFF"
+                CornerRadius="20"
+                Margin="0,8,8,0"
+                ToolTipService.ToolTip="¿Problemas con el micrófono? Click para ver soluciones">
+            <FontIcon Glyph="&#xE897;" 
+                      FontFamily="Segoe MDL2 Assets" 
+                      FontSize="16"
+                      Foreground="{StaticResource N300}"/>
+        </Button>
 
-            <!-- PANEL CENTRAL -->
-            <StackPanel Grid.Row="0" Spacing="14" HorizontalAlignment="Center">
+        <!-- ========================================
+             SECCIÓN: BODY PRINCIPAL
+             ======================================== -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="24" MaxWidth="1200" HorizontalAlignment="Center">
 
-                <!-- Viewbox para que el mic sea responsivo -->
-                <Viewbox Stretch="Uniform" MaxWidth="320" MaxHeight="320">
-                    <Grid Width="280" Height="280">
+                <!-- ========================================
+                     PANEL CENTRAL: MICRÓFONO + TEXTO
+                     ======================================== -->
+                <StackPanel Spacing="16" HorizontalAlignment="Center">
+                    <!-- InfoBar de estado -->
+                    <InfoBar
+                        IsOpen="{Binding ShowInfo}"
+                        Message="{Binding InfoMessage}"
+                        Severity="Informational"/>
 
-                        <!-- Ring 1 -->
-                        <Ellipse x:Name="Ring1"
-                                 Fill="{StaticResource RingBrush}"
-                                 Opacity="0.18"
-                                 RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform>
-                                <ScaleTransform x:Name="Ring1Scale" ScaleX="0.70" ScaleY="0.70"/>
-                            </Ellipse.RenderTransform>
-                        </Ellipse>
+                    <!-- Micrófono con animaciones -->
+                    <Viewbox Stretch="Uniform" MaxWidth="280" MaxHeight="280">
+                        <Grid Width="280" Height="280">
+                            <!-- Ring 1 -->
+                            <Ellipse x:Name="Ring1"
+                                     Fill="{StaticResource RingBrush}"
+                                     Opacity="0.18"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <ScaleTransform x:Name="Ring1Scale" ScaleX="0.70" ScaleY="0.70"/>
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
 
-                        <!-- Ring 2 -->
-                        <Ellipse x:Name="Ring2"
-                                 Fill="{StaticResource RingBrush}"
-                                 Opacity="0.12"
-                                 RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform>
-                                <ScaleTransform x:Name="Ring2Scale" ScaleX="0.62" ScaleY="0.62"/>
-                            </Ellipse.RenderTransform>
-                        </Ellipse>
+                            <!-- Ring 2 -->
+                            <Ellipse x:Name="Ring2"
+                                     Fill="{StaticResource RingBrush}"
+                                     Opacity="0.12"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <ScaleTransform x:Name="Ring2Scale" ScaleX="0.62" ScaleY="0.62"/>
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
 
-                        <!-- Ring 3 -->
-                        <Ellipse x:Name="Ring3"
-                                 Fill="{StaticResource RingBrush}"
-                                 Opacity="0.08"
-                                 RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform>
-                                <ScaleTransform x:Name="Ring3Scale" ScaleX="0.55" ScaleY="0.55"/>
-                            </Ellipse.RenderTransform>
-                        </Ellipse>
+                            <!-- Ring 3 -->
+                            <Ellipse x:Name="Ring3"
+                                     Fill="{StaticResource RingBrush}"
+                                     Opacity="0.08"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <ScaleTransform x:Name="Ring3Scale" ScaleX="0.55" ScaleY="0.55"/>
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
 
-                        <!-- Glow detr�s del mic -->
-                        <Ellipse x:Name="MicGlow"
-                                 Width="200" Height="200"
-                                 HorizontalAlignment="Center"
-                                 VerticalAlignment="Center"
-                                 Fill="{StaticResource AnfetaAccentBrush}"
-                                 Opacity="0.18"
-                                 RenderTransformOrigin="0.5,0.5">
-                            <Ellipse.RenderTransform>
-                                <ScaleTransform x:Name="MicGlowScale" ScaleX="1.0" ScaleY="1.0"/>
-                            </Ellipse.RenderTransform>
-                        </Ellipse>
+                            <!-- Glow -->
+                            <Ellipse x:Name="MicGlow"
+                                     Width="200" Height="200"
+                                     Fill="{StaticResource AnfetaAccentBrush}"
+                                     Opacity="0.18"
+                                     RenderTransformOrigin="0.5,0.5">
+                                <Ellipse.RenderTransform>
+                                    <ScaleTransform x:Name="MicGlowScale" ScaleX="1.0" ScaleY="1.0"/>
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
 
-                        <!-- Mic bot�n -->
-                        <Grid Width="156" Height="156" HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <Ellipse Fill="#000000" Opacity="0.30" Margin="2,6,2,0"/>
-
-                            <Button x:Name="MicButton"
-                                    Style="{StaticResource MicButtonStyle}"
-                                    Width="156" Height="156"
-                                    RenderTransformOrigin="0.5,0.5">
-                                <Button.RenderTransform>
-                                    <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0"/>
-                                </Button.RenderTransform>
-
-                                <Grid>
+                            <!-- Botón del micrófono -->
+                            <Grid Width="156" Height="156">
+                                <Ellipse Fill="#000000" Opacity="0.30" Margin="2,6,2,0"/>
+                                <Button x:Name="MicButton"
+                                        Style="{StaticResource MicButtonStyle}"
+                                        Width="156" Height="156"
+                                        RenderTransformOrigin="0.5,0.5"
+                                        ToolTipService.ToolTip="Click para hablar">
+                                    <Button.RenderTransform>
+                                        <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0"/>
+                                    </Button.RenderTransform>
                                     <FontIcon Glyph="&#xE720;"
                                               FontFamily="Segoe MDL2 Assets"
                                               Foreground="White"
-                                              FontSize="46"
-                                              HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-                                </Grid>
-                            </Button>
+                                              FontSize="46"/>
+                                </Button>
+                            </Grid>
                         </Grid>
-                    </Grid>
-                </Viewbox>
+                    </Viewbox>
 
-                <!-- Hint -->
-                <Border CornerRadius="999"
-                        Padding="12,7"
-                        HorizontalAlignment="Center"
-                        BorderThickness="1"
-                        BorderBrush="#18FFFFFF">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#14FFFFFF" Offset="0.0"/>
-                            <GradientStop Color="#0BFFFFFF" Offset="1.0"/>
-                        </LinearGradientBrush>
-                    </Border.Background>
+                    <!-- Sugerencia de uso -->
+                    <Border CornerRadius="999" Padding="12,7" HorizontalAlignment="Center"
+                            BorderThickness="1" BorderBrush="#18FFFFFF">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#14FFFFFF" Offset="0.0"/>
+                                <GradientStop Color="#0BFFFFFF" Offset="1.0"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <TextBlock FontSize="12" Foreground="{StaticResource N200}">
+                            <Run Text="💡 Di: "/>
+                            <Run Text="&quot;Abrir navegador&quot;" FontWeight="SemiBold"/>
+                        </TextBlock>
+                    </Border>
 
-                    <TextBlock Text="Di: &quot;Abrir navegador&quot;"
-                               FontSize="12"
-                               Foreground="{StaticResource N200}"/>
-                </Border>
-
-            </StackPanel>
-
-            <!-- Cards -->
-            <Grid Grid.Row="1" Margin="0,18,0,0" x:Name="CardsGrid">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-
-                <!-- 2 filas para que Compact funcione (Row 0 y Row 1) -->
-                <Grid.RowDefinitions>
-                    <RowDefinition x:Name="RowCompact1" Height="Auto"/>
-                    <RowDefinition x:Name="RowCompact2" Height="Auto"/>
-                </Grid.RowDefinitions>
-
-                <!-- �ltima acci�n -->
-                <Border x:Name="CardLastAction" Grid.Column="0" Grid.Row="0" Style="{StaticResource GlassBorder}">
-                    <StackPanel Spacing="10">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-
-                            <TextBlock Text="�ltima acci�n"
+                    <!-- Texto detectado -->
+                    <Border Style="{StaticResource GlassBorder}">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Texto detectado"
                                        FontSize="14"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource N300}"/>
 
-                            <Border Grid.Column="1"
-                                    Background="#2034D399"
-                                    CornerRadius="999"
-                                    Padding="10,4">
-                                <TextBlock Text="�xito"
-                                           FontSize="12"
-                                           Foreground="{StaticResource N100}"
-                                           FontWeight="SemiBold"/>
-                            </Border>
-                        </Grid>
+                            <TextBlock Text="{Binding RecognizedText}"
+                                       FontSize="16"
+                                       Foreground="{StaticResource N100}"
+                                       TextWrapping="Wrap"
+                                       MinHeight="24"/>
 
-                        <TextBlock FontSize="16" Foreground="{StaticResource N100}">
-                            <Run Text="Entend�: "/>
-                            <Run Text="Abrir navegador."
-                                 Foreground="{StaticResource AnfetaSuccessBrush}"
-                                 FontWeight="SemiBold"/>
-                        </TextBlock>
+                            <TextBlock Style="{StaticResource CaptionText}">
+                                <Run Text="Tip: "/>
+                                <Run Text="Presiona el micrófono y habla con claridad."/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
 
-                        <TextBlock Style="{StaticResource CaptionText}">
-                            <Run Text="Respuesta: "/>
-                            <Run Text="Acci�n ejecutada correctamente."/>
-                        </TextBlock>
-                    </StackPanel>
-                </Border>
+                <!-- ========================================
+                     SECCIÓN: ÚLTIMA ACCIÓN Y ACTIVIDAD RECIENTE
+                     ======================================== -->
+                <Grid x:Name="CardsGrid">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="14"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-                <!-- Actividad reciente -->
-                <Border x:Name="CardActivity" Grid.Column="1" Grid.Row="0" Style="{StaticResource GlassBorder}">
-                    <StackPanel>
-                        <TextBlock Text="Actividad reciente"
-                                   FontSize="14"
-                                   FontWeight="SemiBold"
-                                   Foreground="{StaticResource N300}"
-                                   Margin="0,0,0,10"/>
-
+                    <!-- Última acción -->
+                    <Border x:Name="CardLastAction" Grid.Column="0" Grid.Row="0" 
+                            Style="{StaticResource GlassBorder}">
                         <StackPanel Spacing="12">
                             <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Última acción"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource N300}"/>
 
-                                <TextBlock Text="Abrir navegador" FontSize="14" Foreground="{StaticResource N100}"/>
-                                <TextBlock Grid.Column="1" Text="10:15 AM" FontSize="12" Foreground="{StaticResource N500}" Margin="10,0,10,0"/>
-                                <FontIcon Grid.Column="2" Glyph="&#xE73E;" FontFamily="Segoe MDL2 Assets"
-                                          Foreground="{StaticResource AnfetaSuccessBrush}" FontSize="14"/>
+                                <Border Background="#2034D399"
+                                        CornerRadius="999"
+                                        Padding="10,4"
+                                        HorizontalAlignment="Right">
+                                    <TextBlock Text="Éxito"
+                                               FontSize="12"
+                                               Foreground="{StaticResource N100}"
+                                               FontWeight="SemiBold"/>
+                                </Border>
                             </Grid>
 
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
+                            <TextBlock FontSize="16" Foreground="{StaticResource N100}" TextWrapping="Wrap">
+                                <Run Text="Entendí: "/>
+                                <Run Text="{Binding RecognizedText}"
+                                     Foreground="{StaticResource AnfetaSuccessBrush}"
+                                     FontWeight="SemiBold"/>
+                            </TextBlock>
 
-                                <TextBlock Text="Crear tarea" FontSize="14" Foreground="{StaticResource N100}"/>
-                                <TextBlock Grid.Column="1" Text="09:45 AM" FontSize="12" Foreground="{StaticResource N500}" Margin="10,0,10,0"/>
-                                <FontIcon Grid.Column="2" Glyph="&#xE73E;" FontFamily="Segoe MDL2 Assets"
-                                          Foreground="{StaticResource AnfetaSuccessBrush}" FontSize="14"/>
-                            </Grid>
-
-                            <TextBlock Text="Entregar informe"
-                                       FontSize="12"
-                                       Foreground="{StaticResource N500}"
-                                       Margin="0,-8,0,0"/>
-
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-
-                                <TextBlock Text="Eliminar archivo" FontSize="14" Foreground="{StaticResource N100}"/>
-                                <TextBlock Grid.Column="1" Text="08:30 AM" FontSize="12" Foreground="{StaticResource N500}" Margin="10,0,10,0"/>
-                                <FontIcon Grid.Column="2" Glyph="&#xEA39;" FontFamily="Segoe MDL2 Assets"
-                                          Foreground="{StaticResource AnfetaErrorBrush}" FontSize="14"/>
-                            </Grid>
+                            <TextBlock Style="{StaticResource CaptionText}">
+                                <Run Text="Respuesta: "/>
+                                <Run Text="Acción ejecutada correctamente."/>
+                            </TextBlock>
                         </StackPanel>
-                    </StackPanel>
-                </Border>
+                    </Border>
 
-                <!-- VisualStates: Wide vs Compact -->
-                <VisualStateManager.VisualStateGroups>
-                    <VisualStateGroup>
+                    <!-- Actividad reciente -->
+                    <Border x:Name="CardActivity" Grid.Column="2" Grid.Row="0" 
+                            Style="{StaticResource GlassBorder}">
+                        <StackPanel>
+                            <TextBlock Text="Actividad reciente"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource N300}"
+                                       Margin="0,0,0,10"/>
 
-                        <!-- Compact: cards en 1 columna (sin tocar ColLeft/ColRight) -->
-                        <VisualState x:Name="Compact">
-                            <VisualState.StateTriggers>
-                                <AdaptiveTrigger MinWindowWidth="0"/>
-                            </VisualState.StateTriggers>
-                            <VisualState.Setters>
-                                <Setter Target="CardLastAction.(Grid.Column)" Value="0"/>
-                                <Setter Target="CardLastAction.(Grid.Row)" Value="0"/>
-                                <Setter Target="CardLastAction.(Grid.ColumnSpan)" Value="2"/>
+                            <StackPanel Spacing="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
 
-                                <Setter Target="CardActivity.(Grid.Column)" Value="0"/>
-                                <Setter Target="CardActivity.(Grid.Row)" Value="1"/>
-                                <Setter Target="CardActivity.(Grid.ColumnSpan)" Value="2"/>
-                                <Setter Target="CardActivity.Margin" Value="0,14,0,0"/>
-                            </VisualState.Setters>
-                        </VisualState>
+                                    <TextBlock Text="Abrir navegador" FontSize="14" Foreground="{StaticResource N100}"/>
+                                    <TextBlock Grid.Column="1" Text="10:15 AM" FontSize="12" 
+                                               Foreground="{StaticResource N500}" Margin="10,0,10,0"/>
+                                    <FontIcon Grid.Column="2" Glyph="&#xE73E;" FontFamily="Segoe MDL2 Assets"
+                                              Foreground="{StaticResource AnfetaSuccessBrush}" FontSize="14"/>
+                                </Grid>
 
-                        <!-- Wide: cards en 2 columnas -->
-                        <VisualState x:Name="Wide">
-                            <VisualState.StateTriggers>
-                                <AdaptiveTrigger MinWindowWidth="900"/>
-                            </VisualState.StateTriggers>
-                            <VisualState.Setters>
-                                <Setter Target="CardLastAction.(Grid.Column)" Value="0"/>
-                                <Setter Target="CardLastAction.(Grid.Row)" Value="0"/>
-                                <Setter Target="CardLastAction.(Grid.ColumnSpan)" Value="1"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
 
-                                <Setter Target="CardActivity.(Grid.Column)" Value="1"/>
-                                <Setter Target="CardActivity.(Grid.Row)" Value="0"/>
-                                <Setter Target="CardActivity.(Grid.ColumnSpan)" Value="1"/>
-                                <Setter Target="CardActivity.Margin" Value="0"/>
-                            </VisualState.Setters>
-                        </VisualState>
+                                    <TextBlock Text="Crear tarea" FontSize="14" Foreground="{StaticResource N100}"/>
+                                    <TextBlock Grid.Column="1" Text="09:45 AM" FontSize="12" 
+                                               Foreground="{StaticResource N500}" Margin="10,0,10,0"/>
+                                    <FontIcon Grid.Column="2" Glyph="&#xE73E;" FontFamily="Segoe MDL2 Assets"
+                                              Foreground="{StaticResource AnfetaSuccessBrush}" FontSize="14"/>
+                                </Grid>
 
-                    </VisualStateGroup>
-                </VisualStateManager.VisualStateGroups>
-            </Grid>
-        </Grid>
+                                <TextBlock Text="Entregar informe"
+                                           FontSize="12"
+                                           Foreground="{StaticResource N500}"
+                                           Margin="0,-8,0,0"/>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Text="Eliminar archivo" FontSize="14" Foreground="{StaticResource N100}"/>
+                                    <TextBlock Grid.Column="1" Text="08:30 AM" FontSize="12" 
+                                               Foreground="{StaticResource N500}" Margin="10,0,10,0"/>
+                                    <FontIcon Grid.Column="2" Glyph="&#xEA39;" FontFamily="Segoe MDL2 Assets"
+                                              Foreground="{StaticResource AnfetaErrorBrush}" FontSize="14"/>
+                                </Grid>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- VisualStates para responsive -->
+                    <VisualStateManager.VisualStateGroups>
+                        <VisualStateGroup>
+
+                            <VisualState x:Name="Compact">
+                                <VisualState.StateTriggers>
+                                    <AdaptiveTrigger MinWindowWidth="0"/>
+                                </VisualState.StateTriggers>
+                                <VisualState.Setters>
+                                    <Setter Target="CardLastAction.(Grid.Column)" Value="0"/>
+                                    <Setter Target="CardLastAction.(Grid.Row)" Value="0"/>
+                                    <Setter Target="CardLastAction.(Grid.ColumnSpan)" Value="3"/>
+
+                                    <Setter Target="CardActivity.(Grid.Column)" Value="0"/>
+                                    <Setter Target="CardActivity.(Grid.Row)" Value="1"/>
+                                    <Setter Target="CardActivity.(Grid.ColumnSpan)" Value="3"/>
+                                    <Setter Target="CardActivity.Margin" Value="0,14,0,0"/>
+                                </VisualState.Setters>
+                            </VisualState>
+
+                            <VisualState x:Name="Wide">
+                                <VisualState.StateTriggers>
+                                    <AdaptiveTrigger MinWindowWidth="900"/>
+                                </VisualState.StateTriggers>
+                                <VisualState.Setters>
+                                    <Setter Target="CardLastAction.(Grid.Column)" Value="0"/>
+                                    <Setter Target="CardLastAction.(Grid.Row)" Value="0"/>
+                                    <Setter Target="CardLastAction.(Grid.ColumnSpan)" Value="1"/>
+
+                                    <Setter Target="CardActivity.(Grid.Column)" Value="2"/>
+                                    <Setter Target="CardActivity.(Grid.Row)" Value="0"/>
+                                    <Setter Target="CardActivity.(Grid.ColumnSpan)" Value="1"/>
+                                    <Setter Target="CardActivity.Margin" Value="0"/>
+                                </VisualState.Setters>
+                            </VisualState>
+
+                        </VisualStateGroup>
+                    </VisualStateManager.VisualStateGroups>
+                </Grid>
+
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Page>

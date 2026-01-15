@@ -1,12 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Anfeta.UI.Services
 {
-    internal class ISpeechToTextService
+    public interface ISpeechToTextService : IDisposable
     {
+        Task InitializeAsync(string languageTag = "es-MX");
+        Task<string?> RecognizeOnceAsync(CancellationToken ct = default);
+        List<LanguageInfo> GetAvailableLanguages();
+        string GetCurrentLanguage();
     }
 }
