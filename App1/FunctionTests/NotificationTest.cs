@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
-namespace App1.FunctionTests
+namespace Anfeta.UI.FunctionTests
 {
     public class NotificationTest
     {

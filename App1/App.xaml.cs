@@ -1,8 +1,8 @@
-﻿using App1.Data;
+﻿using Anfeta.UI.Data;
 using Microsoft.UI.Xaml;
 using System;
 
-namespace App1
+namespace Anfeta.UI
 {
     public partial class App : Application
     {

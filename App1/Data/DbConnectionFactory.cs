@@ -1,6 +1,6 @@
 ﻿using Microsoft.Data.Sqlite;
 
-namespace App1.Data
+namespace Anfeta.UI.Data
 {
     public static class DbConnectionFactory
     {

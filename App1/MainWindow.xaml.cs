@@ -2,10 +2,10 @@
 using Microsoft.UI.Xaml.Controls;
 using System;
 using Anfeta.UI.Views;
-using App1.FunctionTests;
-using App1.Views;
+using Anfeta.UI.FunctionTests;
+using Anfeta.UI.Views;
 
-namespace App1
+namespace Anfeta.UI
 {
     public sealed partial class MainWindow : Window
     {

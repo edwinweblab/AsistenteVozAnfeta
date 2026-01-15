@@ -6,7 +6,7 @@ using Windows.Devices.Enumeration;
 using Windows.Media.Capture;
 using Windows.Media.Devices;
 
-namespace App1.FunctionTests
+namespace Anfeta.UI.FunctionTests
 {
     public static class MicrophoneTest
     {

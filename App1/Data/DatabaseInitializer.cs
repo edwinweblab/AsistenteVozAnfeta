@@ -1,8 +1,8 @@
-using Microsoft.Data.Sqlite;
+Ôªøusing Microsoft.Data.Sqlite;
 using System.IO;
 using Windows.Storage;
 
-namespace App1.Data
+namespace Anfeta.UI.Data
 {
     public static class DatabaseInitializer
     {
@@ -36,7 +36,7 @@ namespace App1.Data
             );
 
             -- ========================
-            -- CONFIGURACI”N DE LA APP
+            -- CONFIGURACI√ìN DE LA APP
             -- ========================
             CREATE TABLE IF NOT EXISTS app_settings (
                 key VARCHAR PRIMARY KEY,
@@ -96,7 +96,7 @@ namespace App1.Data
             );
 
             -- ========================
-            -- POLÕTICAS
+            -- POL√çTICAS
             -- ========================
             CREATE TABLE IF NOT EXISTS policy_rules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,7 +118,7 @@ namespace App1.Data
             );
 
             -- ========================
-            -- SESI”N DE AUTENTICACI”N
+            -- SESI√ìN DE AUTENTICACI√ìN
             -- ========================
             CREATE TABLE IF NOT EXISTS auth_session (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
