@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -10,6 +11,7 @@ namespace Anfeta.UI.ViewModels
     public class HomeViewModel : ObservableObject
     {
         private readonly ISpeechToTextService _speechService;
+        private CancellationTokenSource? _currentRecognitionCts;
 
         private string _statusText = "Listo para escuchar";
         public string StatusText
@@ -82,7 +84,7 @@ namespace Anfeta.UI.ViewModels
                 var languages = _speechService.GetAvailableLanguages();
                 if (languages.Count == 0)
                 {
-                    InfoMessage = "No hay idiomas instalados.";
+                    InfoMessage = "No hay idiomas instalados. Ve a Configuración de Windows → Idioma → Reconocimiento de voz.";
                     StatusText = "Error: No hay idiomas instalados";
                     return;
                 }
@@ -93,7 +95,7 @@ namespace Anfeta.UI.ViewModels
                 var langName = languages.FirstOrDefault(l => l.Tag == current)?.DisplayName ?? current;
 
                 CurrentLanguageInfo = $"Idioma: {langName}";
-                InfoMessage = $"Listo en {langName}. Presiona el micrófono y habla.";
+                InfoMessage = $"Listo. Presiona el micrófono y habla.";
                 StatusText = $"Listo en {langName}";
             }
             catch (UnauthorizedAccessException ex)
@@ -110,7 +112,15 @@ namespace Anfeta.UI.ViewModels
 
         private async Task ListenOnceAsync()
         {
-            if (IsListening) return;
+            // Protección: si ya está escuchando, cancelar y reiniciar
+            if (IsListening)
+            {
+                _currentRecognitionCts?.Cancel();
+                _currentRecognitionCts?.Dispose();
+                _currentRecognitionCts = null;
+                IsListening = false;
+                await Task.Delay(100); // Pequeña pausa para limpieza
+            }
 
             IsListening = true;
             ShowInfo = true;
@@ -118,9 +128,21 @@ namespace Anfeta.UI.ViewModels
             StatusText = "Escuchando... habla ahora";
             RecognizedText = "";
 
+            // Crear nuevo CancellationToken
+            _currentRecognitionCts = new CancellationTokenSource();
+            var ct = _currentRecognitionCts.Token;
+
             try
             {
-                var text = await _speechService.RecognizeOnceAsync();
+                var text = await _speechService.RecognizeOnceAsync(ct);
+
+                // Verificar si fue cancelado
+                if (ct.IsCancellationRequested)
+                {
+                    InfoMessage = "Reconocimiento cancelado.";
+                    StatusText = "Cancelado";
+                    return;
+                }
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
@@ -132,6 +154,11 @@ namespace Anfeta.UI.ViewModels
                 RecognizedText = text;
                 InfoMessage = "Texto detectado correctamente.";
                 StatusText = $"Entendí: {text}";
+            }
+            catch (OperationCanceledException)
+            {
+                InfoMessage = "Reconocimiento cancelado.";
+                StatusText = "Cancelado";
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -146,6 +173,8 @@ namespace Anfeta.UI.ViewModels
             finally
             {
                 IsListening = false;
+                _currentRecognitionCts?.Dispose();
+                _currentRecognitionCts = null;
             }
         }
     }

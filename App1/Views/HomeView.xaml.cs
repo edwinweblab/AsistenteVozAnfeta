@@ -25,6 +25,12 @@ namespace Anfeta.UI.Views
 
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
             MicButton.Click += MicButton_Click;
+            HelpButton.Click += HelpButton_Click; // Nuevo
+        }
+
+        private void HelpButton_Click(object sender, RoutedEventArgs e)
+        {
+            Frame.Navigate(typeof(TroubleshootView));
         }
 
         private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -39,14 +45,14 @@ namespace Anfeta.UI.Views
         {
             if (isListening)
             {
-                // ROJO + animaciones
+                // ESCUCHANDO
                 MicButton.Background = new SolidColorBrush(Colors.Red);
                 StartRingsAnimation();
                 StartListeningAnimation();
             }
             else
             {
-                // NARANJA + detener animaciones
+                // IDLE
                 MicButton.Background = new SolidColorBrush(Color.FromArgb(255, 255, 107, 53));
                 StopAllAnimations();
             }
@@ -96,7 +102,6 @@ namespace Anfeta.UI.Views
 
         private async void MicButton_Click(object sender, RoutedEventArgs e)
         {
-            // USA ListenOnceCommand
             if (_viewModel != null)
                 await _viewModel.ListenOnceCommand.ExecuteAsync(null);
         }
@@ -114,6 +119,7 @@ namespace Anfeta.UI.Views
             _micStoryboard = null;
 
             MicButton.Click -= MicButton_Click;
+            HelpButton.Click -= HelpButton_Click; // Nuevo
 
             if (_viewModel != null)
                 _viewModel.PropertyChanged -= ViewModel_PropertyChanged;

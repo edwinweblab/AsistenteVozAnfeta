@@ -15,6 +15,7 @@
   <ItemGroup>
     <None Remove="FunctionTests\TestRunner.xaml" />
     <None Remove="Resources\Styles.xaml" />
+    <None Remove="Views\TroubleshootView.xaml" />
   </ItemGroup>
   <ItemGroup>
     <Page Remove="Resources\Styles.xaml" />
