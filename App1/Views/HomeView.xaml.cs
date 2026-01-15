@@ -3,6 +3,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Dispatching;
+
+using Anfeta.UI.ViewModels;
+using Anfeta.UI.Services;
 
 namespace Anfeta.UI.Views
 {
@@ -11,9 +15,20 @@ namespace Anfeta.UI.Views
         private Storyboard? _ringsStoryboard;
         private Storyboard? _micStoryboard;
 
+        // ✅ ViewModel accesible si lo ocupas
+        public HomeViewModel ViewModel { get; }
+
         public HomeView()
         {
             InitializeComponent();
+
+            var stt = new WindowsSpeechToTextService();
+            var uiQueue = DispatcherQueue.GetForCurrentThread();
+
+            ViewModel = new HomeViewModel(stt, uiQueue);
+            DataContext = ViewModel;
+
+            MicButton.Click += MicButton_Click;
         }
 
         private void Page_Loaded(object sender, RoutedEventArgs e)
@@ -24,11 +39,23 @@ namespace Anfeta.UI.Views
 
         private void Page_Unloaded(object sender, RoutedEventArgs e)
         {
+            MicButton.Click -= MicButton_Click;
+
             _ringsStoryboard?.Stop();
             _ringsStoryboard = null;
 
             _micStoryboard?.Stop();
             _micStoryboard = null;
+        }
+
+        private async void MicButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Ejecuta el comando del VM
+            if (ViewModel.ToggleMicCommand.CanExecute(null))
+                await ViewModel.ToggleMicCommand.ExecuteAsync(null);
+
+            // (Opcional) Pequeño feedback visual según estado
+            MicGlow.Opacity = ViewModel.IsListening ? 0.28 : 0.18;
         }
 
         private void StartRingsAnimation()

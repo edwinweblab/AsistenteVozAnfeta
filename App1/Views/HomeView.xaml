@@ -1,4 +1,4 @@
-<Page
+ï»¿<Page
     x:Class="Anfeta.UI.Views.HomeView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -16,7 +16,7 @@
         <SolidColorBrush x:Key="N700" Color="#334155"/>
         <SolidColorBrush x:Key="N900" Color="#0B1220"/>
 
-        <!-- Fondo (antes referenciado como BgGradient) -->
+        <!-- Fondo -->
         <LinearGradientBrush x:Key="BgGradient" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#0B1220" Offset="0.0"/>
             <GradientStop Color="#0F172A" Offset="0.45"/>
@@ -47,7 +47,7 @@
             <Setter Property="Foreground" Value="{StaticResource N500}"/>
         </Style>
 
-        <!-- Estilo del botón mic -->
+        <!-- Estilo del botÃ³n mic -->
         <Style x:Key="MicButtonStyle" TargetType="Button">
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="CornerRadius" Value="999"/>
@@ -57,7 +57,7 @@
         </Style>
     </Page.Resources>
 
-    <Grid Padding="30" x:Name="Root">
+    <Grid Padding="30" x:Name="Root" Background="{StaticResource BgGradient}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -72,8 +72,9 @@
                 Foreground="{StaticResource N200}"
                 HorizontalAlignment="Center"/>
 
+            <!-- âœ… Ahora viene del VM -->
             <TextBlock
-                Text="Habla normal, yo me encargo del resto"
+                Text="{Binding StatusText}"
                 FontSize="13"
                 Foreground="{StaticResource N500}"
                 HorizontalAlignment="Center"/>
@@ -124,7 +125,7 @@
                             </Ellipse.RenderTransform>
                         </Ellipse>
 
-                        <!-- Glow detrás del mic -->
+                        <!-- Glow detrÃ¡s del mic -->
                         <Ellipse x:Name="MicGlow"
                                  Width="200" Height="200"
                                  HorizontalAlignment="Center"
@@ -137,14 +138,16 @@
                             </Ellipse.RenderTransform>
                         </Ellipse>
 
-                        <!-- Mic botón -->
+                        <!-- Mic botÃ³n -->
                         <Grid Width="156" Height="156" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Ellipse Fill="#000000" Opacity="0.30" Margin="2,6,2,0"/>
 
+                            <!-- âœ… Ahora ejecuta el comando del VM -->
                             <Button x:Name="MicButton"
                                     Style="{StaticResource MicButtonStyle}"
                                     Width="156" Height="156"
-                                    RenderTransformOrigin="0.5,0.5">
+                                    RenderTransformOrigin="0.5,0.5"
+                                    Command="{Binding ToggleMicCommand}">
                                 <Button.RenderTransform>
                                     <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0"/>
                                 </Button.RenderTransform>
@@ -175,7 +178,8 @@
                         </LinearGradientBrush>
                     </Border.Background>
 
-                    <TextBlock Text="Di: &quot;Abrir navegador&quot;"
+                    <!-- âœ… Ahora viene del VM -->
+                    <TextBlock Text="{Binding LastHeard}"
                                FontSize="12"
                                Foreground="{StaticResource N200}"/>
                 </Border>
@@ -189,13 +193,12 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 2 filas para que Compact funcione (Row 0 y Row 1) -->
                 <Grid.RowDefinitions>
                     <RowDefinition x:Name="RowCompact1" Height="Auto"/>
                     <RowDefinition x:Name="RowCompact2" Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <!-- Última acción -->
+                <!-- Ãšltima acciÃ³n -->
                 <Border x:Name="CardLastAction" Grid.Column="0" Grid.Row="0" Style="{StaticResource GlassBorder}">
                     <StackPanel Spacing="10">
                         <Grid>
@@ -204,7 +207,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Text="Última acción"
+                            <TextBlock Text="Ãšltima acciÃ³n"
                                        FontSize="14"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource N300}"/>
@@ -213,7 +216,7 @@
                                     Background="#2034D399"
                                     CornerRadius="999"
                                     Padding="10,4">
-                                <TextBlock Text="Éxito"
+                                <TextBlock Text="Ã‰xito"
                                            FontSize="12"
                                            Foreground="{StaticResource N100}"
                                            FontWeight="SemiBold"/>
@@ -221,7 +224,7 @@
                         </Grid>
 
                         <TextBlock FontSize="16" Foreground="{StaticResource N100}">
-                            <Run Text="Entendí: "/>
+                            <Run Text="EntendÃ­: "/>
                             <Run Text="Abrir navegador."
                                  Foreground="{StaticResource AnfetaSuccessBrush}"
                                  FontWeight="SemiBold"/>
@@ -229,7 +232,7 @@
 
                         <TextBlock Style="{StaticResource CaptionText}">
                             <Run Text="Respuesta: "/>
-                            <Run Text="Acción ejecutada correctamente."/>
+                            <Run Text="AcciÃ³n ejecutada correctamente."/>
                         </TextBlock>
                     </StackPanel>
                 </Border>
@@ -294,8 +297,6 @@
                 <!-- VisualStates: Wide vs Compact -->
                 <VisualStateManager.VisualStateGroups>
                     <VisualStateGroup>
-
-                        <!-- Compact: cards en 1 columna (sin tocar ColLeft/ColRight) -->
                         <VisualState x:Name="Compact">
                             <VisualState.StateTriggers>
                                 <AdaptiveTrigger MinWindowWidth="0"/>
@@ -312,7 +313,6 @@
                             </VisualState.Setters>
                         </VisualState>
 
-                        <!-- Wide: cards en 2 columnas -->
                         <VisualState x:Name="Wide">
                             <VisualState.StateTriggers>
                                 <AdaptiveTrigger MinWindowWidth="900"/>
@@ -328,7 +328,6 @@
                                 <Setter Target="CardActivity.Margin" Value="0"/>
                             </VisualState.Setters>
                         </VisualState>
-
                     </VisualStateGroup>
                 </VisualStateManager.VisualStateGroups>
             </Grid>

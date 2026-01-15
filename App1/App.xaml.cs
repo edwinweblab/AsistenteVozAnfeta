@@ -1,15 +1,28 @@
-﻿using App1.Data;
+﻿using Anfeta.UI.Services;
+using Anfeta.UI.ViewModels;
+using App1;
+using App1.Data; // si tu Data realmente está en App1.Data, si no, ajusta al namespace real
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.UI.Xaml;
 using System;
 
-namespace App1
+namespace Anfeta.UI
 {
     public partial class App : Application
     {
         private Window? _window;
 
-        // Referencia global (opcional)
         public static Window? MainWindowInstance { get; private set; }
+
+        public static IHost Host { get; } =
+            Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()
+            .ConfigureServices(services =>
+            {
+                services.AddSingleton<ISpeechToTextService, WindowsSpeechToTextService>();
+                services.AddTransient<HomeViewModel>();
+            })
+            .Build();
 
         public App()
         {
@@ -25,7 +38,6 @@ namespace App1
             TestDatabaseConnection();
 #endif
 
-            // ✅ Abrir la ventana principal
             _window = new MainWindow();
             MainWindowInstance = _window;
             _window.Activate();

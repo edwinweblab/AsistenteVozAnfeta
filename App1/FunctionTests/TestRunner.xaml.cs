@@ -3,7 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Threading.Tasks;
 
-namespace App1.FunctionTests
+namespace Anfeta.UI.FunctionTests
 {
     public sealed partial class TestRunner : Page
     {

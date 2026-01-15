@@ -2,7 +2,7 @@
 using Microsoft.UI.Xaml.Controls;
 using System;
 using Anfeta.UI.Views;
-using App1.FunctionTests;
+using Anfeta.UI.FunctionTests; // ✅ aquí está TestRunner
 using App1.Views;
 
 namespace App1

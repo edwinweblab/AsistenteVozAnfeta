@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Threading.Tasks;
 
-namespace App1.FunctionTests
+namespace Anfeta.UI.FunctionTests
 {
     public class SystemFunctionsTest
     {
