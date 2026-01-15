@@ -1,4 +1,4 @@
-<Page
+ï»¿<Page
     x:Class="Anfeta.UI.Views.HomeView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -16,7 +16,7 @@
         <SolidColorBrush x:Key="N700" Color="#334155"/>
         <SolidColorBrush x:Key="N900" Color="#0B1220"/>
 
-        <!-- Fondo (antes referenciado como BgGradient) -->
+        <!-- Fondo -->
         <LinearGradientBrush x:Key="BgGradient" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#0B1220" Offset="0.0"/>
             <GradientStop Color="#0F172A" Offset="0.45"/>
@@ -47,7 +47,7 @@
             <Setter Property="Foreground" Value="{StaticResource N500}"/>
         </Style>
 
-        <!-- Estilo del botón mic -->
+        <!-- Estilo del botÃ³n mic -->
         <Style x:Key="MicButtonStyle" TargetType="Button">
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="CornerRadius" Value="999"/>
@@ -57,7 +57,7 @@
         </Style>
     </Page.Resources>
 
-    <Grid Padding="30" x:Name="Root">
+    <Grid Padding="30" x:Name="Root" Background="{StaticResource BgGradient}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -66,7 +66,7 @@
         <!-- Header -->
         <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,18">
             <TextBlock
-                Text="Listo para escuchar"
+                Text="{Binding StatusText}"
                 FontSize="30"
                 FontWeight="SemiBold"
                 Foreground="{StaticResource N200}"
@@ -89,6 +89,11 @@
 
             <!-- PANEL CENTRAL -->
             <StackPanel Grid.Row="0" Spacing="14" HorizontalAlignment="Center">
+                <InfoBar
+                    IsOpen="{Binding ShowInfo}"
+                    Message="{Binding InfoMessage}"
+                    Severity="Informational"
+                    Margin="0,0,0,12" />
 
                 <!-- Viewbox para que el mic sea responsivo -->
                 <Viewbox Stretch="Uniform" MaxWidth="320" MaxHeight="320">
@@ -124,7 +129,7 @@
                             </Ellipse.RenderTransform>
                         </Ellipse>
 
-                        <!-- Glow detrás del mic -->
+                        <!-- Glow detrÃ¡s del mic -->
                         <Ellipse x:Name="MicGlow"
                                  Width="200" Height="200"
                                  HorizontalAlignment="Center"
@@ -137,14 +142,17 @@
                             </Ellipse.RenderTransform>
                         </Ellipse>
 
-                        <!-- Mic botón -->
+                        <!-- Mic botÃ³n -->
                         <Grid Width="156" Height="156" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Ellipse Fill="#000000" Opacity="0.30" Margin="2,6,2,0"/>
 
                             <Button x:Name="MicButton"
-                                    Style="{StaticResource MicButtonStyle}"
-                                    Width="156" Height="156"
-                                    RenderTransformOrigin="0.5,0.5">
+        Style="{StaticResource MicButtonStyle}"
+        Width="156" Height="156"
+        RenderTransformOrigin="0.5,0.5">
+                                <!-- Nota: dejamos IsEnabled sin converter porque lo manejamos desde code-behind.
+                                     Si quieres 100% MVVM con converter, te lo paso. -->
+
                                 <Button.RenderTransform>
                                     <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0"/>
                                 </Button.RenderTransform>
@@ -180,6 +188,27 @@
                                Foreground="{StaticResource N200}"/>
                 </Border>
 
+                <!-- Texto detectado (nuevo) -->
+                <Border Style="{StaticResource GlassBorder}" MaxWidth="560" Margin="0,6,0,0">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Texto detectado"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource N300}"/>
+
+                        <TextBlock Text="{Binding RecognizedText}"
+                                   FontSize="14"
+                                   Foreground="{StaticResource N100}"
+                                   TextWrapping="Wrap"
+                                   MinHeight="22"/>
+
+                        <TextBlock Style="{StaticResource CaptionText}">
+                            <Run Text="Tip: "/>
+                            <Run Text="Presiona el micrÃ³fono y habla una frase corta."/>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+
             </StackPanel>
 
             <!-- Cards -->
@@ -189,13 +218,12 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 2 filas para que Compact funcione (Row 0 y Row 1) -->
                 <Grid.RowDefinitions>
                     <RowDefinition x:Name="RowCompact1" Height="Auto"/>
                     <RowDefinition x:Name="RowCompact2" Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <!-- Última acción -->
+                <!-- Ãšltima acciÃ³n -->
                 <Border x:Name="CardLastAction" Grid.Column="0" Grid.Row="0" Style="{StaticResource GlassBorder}">
                     <StackPanel Spacing="10">
                         <Grid>
@@ -204,7 +232,7 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Text="Última acción"
+                            <TextBlock Text="Ãšltima acciÃ³n"
                                        FontSize="14"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource N300}"/>
@@ -213,7 +241,7 @@
                                     Background="#2034D399"
                                     CornerRadius="999"
                                     Padding="10,4">
-                                <TextBlock Text="Éxito"
+                                <TextBlock Text="Ã‰xito"
                                            FontSize="12"
                                            Foreground="{StaticResource N100}"
                                            FontWeight="SemiBold"/>
@@ -221,15 +249,15 @@
                         </Grid>
 
                         <TextBlock FontSize="16" Foreground="{StaticResource N100}">
-                            <Run Text="Entendí: "/>
-                            <Run Text="Abrir navegador."
+                            <Run Text="EntendÃ­: "/>
+                            <Run Text="{Binding RecognizedText}"
                                  Foreground="{StaticResource AnfetaSuccessBrush}"
                                  FontWeight="SemiBold"/>
                         </TextBlock>
 
                         <TextBlock Style="{StaticResource CaptionText}">
                             <Run Text="Respuesta: "/>
-                            <Run Text="Acción ejecutada correctamente."/>
+                            <Run Text="AcciÃ³n ejecutada correctamente."/>
                         </TextBlock>
                     </StackPanel>
                 </Border>
@@ -291,11 +319,10 @@
                     </StackPanel>
                 </Border>
 
-                <!-- VisualStates: Wide vs Compact -->
+                <!-- VisualStates -->
                 <VisualStateManager.VisualStateGroups>
                     <VisualStateGroup>
 
-                        <!-- Compact: cards en 1 columna (sin tocar ColLeft/ColRight) -->
                         <VisualState x:Name="Compact">
                             <VisualState.StateTriggers>
                                 <AdaptiveTrigger MinWindowWidth="0"/>
@@ -312,7 +339,6 @@
                             </VisualState.Setters>
                         </VisualState>
 
-                        <!-- Wide: cards en 2 columnas -->
                         <VisualState x:Name="Wide">
                             <VisualState.StateTriggers>
                                 <AdaptiveTrigger MinWindowWidth="900"/>

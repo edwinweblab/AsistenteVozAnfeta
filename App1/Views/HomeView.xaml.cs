@@ -1,8 +1,10 @@
 ﻿using System;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Anfeta.UI.ViewModels;
 
 namespace Anfeta.UI.Views
 {
@@ -14,12 +16,28 @@ namespace Anfeta.UI.Views
         public HomeView()
         {
             InitializeComponent();
+
+            // MVVM: inyectar ViewModel desde DI
+            DataContext = App.AppHost.Services.GetRequiredService<HomeViewModel>();
+
+            // Click del mic
+            MicButton.Click += MicButton_Click;
+        }
+
+        private async void MicButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (DataContext is HomeViewModel vm)
+                await vm.ListenOnceCommand.ExecuteAsync(null);
         }
 
         private void Page_Loaded(object sender, RoutedEventArgs e)
         {
             StartRingsAnimation();
             StartMicBreathing();
+
+            // Inicializar voz al cargar (opcional pero recomendado)
+            if (DataContext is HomeViewModel vm)
+                _ = vm.InitializeSpeechCommand.ExecuteAsync(null);
         }
 
         private void Page_Unloaded(object sender, RoutedEventArgs e)
@@ -29,6 +47,9 @@ namespace Anfeta.UI.Views
 
             _micStoryboard?.Stop();
             _micStoryboard = null;
+
+            // (opcional) desuscribir click
+            MicButton.Click -= MicButton_Click;
         }
 
         private void StartRingsAnimation()

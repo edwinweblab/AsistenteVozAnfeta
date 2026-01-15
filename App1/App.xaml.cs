@@ -1,4 +1,8 @@
 ﻿using Anfeta.UI.Data;
+using Anfeta.UI.Services;
+using Anfeta.UI.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.UI.Xaml;
 using System;
 
@@ -8,24 +12,41 @@ namespace Anfeta.UI
     {
         private Window? _window;
 
-        // Referencia global (opcional)
+        // Ventana global (opcional)
         public static Window? MainWindowInstance { get; private set; }
+
+        // Host DI global
+        public static IHost AppHost { get; private set; } = null!;
 
         public App()
         {
             InitializeComponent();
+
+            // Construimos el contenedor DI al arrancar la app
+            AppHost = Host.CreateDefaultBuilder()
+                .ConfigureServices((context, services) =>
+                {
+                    // Servicios
+                    services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
+
+                    // ViewModels (ejemplo: Home)
+                    services.AddSingleton<HomeViewModel>();
+                })
+                .Build();
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
             System.Diagnostics.Debug.WriteLine("APP INICIADA");
+
+            // BD local (se queda igual)
             DatabaseInitializer.InitializeDatabase();
 
 #if DEBUG
             TestDatabaseConnection();
 #endif
 
-            // ✅ Abrir la ventana principal
+            // Ventana principal
             _window = new MainWindow();
             MainWindowInstance = _window;
             _window.Activate();
