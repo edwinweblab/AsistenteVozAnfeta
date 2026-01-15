@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.UI.Xaml;
 using System;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace Anfeta.UI
 {
@@ -12,24 +14,35 @@ namespace Anfeta.UI
     {
         private Window? _window;
 
-        // Ventana global (opcional)
         public static Window? MainWindowInstance { get; private set; }
-
-        // Host DI global
         public static IHost AppHost { get; private set; } = null!;
 
         public App()
         {
             InitializeComponent();
 
-            // Construimos el contenedor DI al arrancar la app
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
-                    // Servicios
+                    // Speech to text (igual que antes)
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
 
-                    // ViewModels (ejemplo: Home)
+                    // HttpClient para Ollama (timeout mayor)
+                    services.AddSingleton(new HttpClient
+                    {
+                        BaseAddress = new Uri(OllamaConfig.BaseUrl),
+                        Timeout = TimeSpan.FromMinutes(3)
+                    });
+
+                    // Servicios Ollama
+                    services.AddSingleton<IOllamaHealthService, OllamaHealthService>();
+                    services.AddSingleton<ICommandInterpretationService>(sp =>
+                    {
+                        var http = sp.GetRequiredService<HttpClient>();
+                        return new OllamaInterpretationService(http, OllamaConfig.ModelName);
+                    });
+
+                    // ViewModel
                     services.AddSingleton<HomeViewModel>();
                 })
                 .Build();
@@ -39,17 +52,50 @@ namespace Anfeta.UI
         {
             System.Diagnostics.Debug.WriteLine("APP INICIADA");
 
-            // BD local (se queda igual)
             DatabaseInitializer.InitializeDatabase();
 
 #if DEBUG
             TestDatabaseConnection();
 #endif
 
-            // Ventana principal
+            // Verificar Ollama + warmup (no bloquea UI)
+            _ = CheckAndWarmupOllamaAsync();
+
             _window = new MainWindow();
             MainWindowInstance = _window;
             _window.Activate();
+        }
+
+        private async Task CheckAndWarmupOllamaAsync()
+        {
+            try
+            {
+                // 1) Verificar si Ollama responde (rápido)
+                using var quick = new HttpClient
+                {
+                    BaseAddress = new Uri(OllamaConfig.BaseUrl),
+                    Timeout = TimeSpan.FromSeconds(5)
+                };
+
+                var res = await quick.GetAsync("/api/tags");
+                System.Diagnostics.Debug.WriteLine($"OLLAMA STATUS: {(int)res.StatusCode}");
+
+                if (!res.IsSuccessStatusCode)
+                {
+                    System.Diagnostics.Debug.WriteLine("OLLAMA NO RESPONDE OK. Revisa que Ollama esté abierto.");
+                    return;
+                }
+
+                // 2) Warmup del modelo (puede tardar, usa el timeout grande del DI)
+                var interpreter = AppHost.Services.GetRequiredService<ICommandInterpretationService>();
+                await interpreter.InterpretRawAsync("ping");
+
+                System.Diagnostics.Debug.WriteLine("OLLAMA WARMUP OK (modelo listo)");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("OLLAMA CHECK/WARMUP ERROR: " + ex.Message);
+            }
         }
 
         private void TestDatabaseConnection()
