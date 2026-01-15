@@ -6,6 +6,11 @@
     Unloaded="Page_Unloaded">
 
     <Page.Resources>
+
+        <SolidColorBrush x:Key="AnfetaAccentBrush" Color="#FF6B35"/>
+        <SolidColorBrush x:Key="AnfetaSuccessBrush" Color="#34D399"/>
+        <SolidColorBrush x:Key="AnfetaErrorBrush" Color="#EF4444"/>
+        
         <!-- Neutrales -->
         <SolidColorBrush x:Key="N50"  Color="#0F172A"/>
         <SolidColorBrush x:Key="N100" Color="#F7FAFC"/>
@@ -64,19 +69,30 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
+        <!-- Indicador de idioma (NUEVO - agregar después del header) -->
         <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="6" Margin="0,8,0,18">
             <TextBlock
-                Text="{Binding StatusText}"
-                FontSize="30"
-                FontWeight="SemiBold"
-                Foreground="{StaticResource N200}"
-                HorizontalAlignment="Center"/>
+        Text="{Binding StatusText}"
+        FontSize="30"
+        FontWeight="SemiBold"
+        Foreground="{StaticResource N200}"
+        HorizontalAlignment="Center"/>
 
             <TextBlock
-                Text="Habla normal, yo me encargo del resto"
-                FontSize="13"
-                Foreground="{StaticResource N500}"
-                HorizontalAlignment="Center"/>
+        Text="Habla normal, yo me encargo del resto"
+        FontSize="13"
+        Foreground="{StaticResource N500}"
+        HorizontalAlignment="Center"/>
+
+            <Border Background="#14FFFFFF"
+            CornerRadius="8"
+            Padding="12,6"
+            HorizontalAlignment="Center"
+            Margin="0,8,0,0">
+                <TextBlock Text="{Binding CurrentLanguageInfo}"
+                   FontSize="12"
+                   Foreground="{StaticResource N400}"/>
+            </Border>
         </StackPanel>
 
         <!-- Body -->

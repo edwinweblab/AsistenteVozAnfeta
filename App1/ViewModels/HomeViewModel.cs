@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -37,7 +38,6 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // Aviso visual (InfoBar)
         private bool _showInfo;
         public bool ShowInfo
         {
@@ -52,13 +52,19 @@ namespace Anfeta.UI.ViewModels
             set => SetProperty(ref _infoMessage, value);
         }
 
+        private string _currentLanguageInfo = "Idioma: No inicializado";
+        public string CurrentLanguageInfo
+        {
+            get => _currentLanguageInfo;
+            set => SetProperty(ref _currentLanguageInfo, value);
+        }
+
         public IAsyncRelayCommand InitializeSpeechCommand { get; }
         public IAsyncRelayCommand ListenOnceCommand { get; }
 
         public HomeViewModel(ISpeechToTextService speechService)
         {
             _speechService = speechService;
-
             InitializeSpeechCommand = new AsyncRelayCommand(InitializeSpeechAsync);
             ListenOnceCommand = new AsyncRelayCommand(ListenOnceAsync, CanListenOnce);
         }
@@ -73,15 +79,32 @@ namespace Anfeta.UI.ViewModels
                 InfoMessage = "Inicializando micrófono...";
                 StatusText = "Inicializando micrófono...";
 
-                await _speechService.InitializeAsync("es-US");
+                var languages = _speechService.GetAvailableLanguages();
+                if (languages.Count == 0)
+                {
+                    InfoMessage = "No hay idiomas instalados.";
+                    StatusText = "Error: No hay idiomas instalados";
+                    return;
+                }
 
-                InfoMessage = "Listo. Presiona el micrófono y habla.";
-                StatusText = "Listo. Presiona el micrófono y habla.";
+                await _speechService.InitializeAsync("es-MX");
+
+                var current = _speechService.GetCurrentLanguage();
+                var langName = languages.FirstOrDefault(l => l.Tag == current)?.DisplayName ?? current;
+
+                CurrentLanguageInfo = $"Idioma: {langName}";
+                InfoMessage = $"Listo en {langName}. Presiona el micrófono y habla.";
+                StatusText = $"Listo en {langName}";
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                InfoMessage = ex.Message;
+                StatusText = "ERROR: Permiso denegado";
             }
             catch (Exception ex)
             {
-                InfoMessage = "Error al inicializar voz: " + ex.Message;
-                StatusText = "Error al inicializar voz: " + ex.Message;
+                InfoMessage = "Error: " + ex.Message;
+                StatusText = "Error al inicializar voz";
             }
         }
 
@@ -93,8 +116,6 @@ namespace Anfeta.UI.ViewModels
             ShowInfo = true;
             InfoMessage = "Escuchando... habla ahora";
             StatusText = "Escuchando... habla ahora";
-
-            // Limpia para que se note que inició una nueva escucha
             RecognizedText = "";
 
             try
@@ -103,19 +124,24 @@ namespace Anfeta.UI.ViewModels
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
-                    InfoMessage = "No se detectó voz o no se entendió. Intenta otra vez.";
+                    InfoMessage = "No se detectó voz. Intenta hablar más fuerte.";
                     StatusText = "No se entendió. Intenta otra vez.";
                     return;
                 }
 
                 RecognizedText = text;
-                InfoMessage = "Texto detectado.";
-                StatusText = "Entendí: " + text;
+                InfoMessage = "Texto detectado correctamente.";
+                StatusText = $"Entendí: {text}";
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                InfoMessage = ex.Message;
+                StatusText = "ERROR: Permiso denegado";
             }
             catch (Exception ex)
             {
                 InfoMessage = "Error: " + ex.Message;
-                StatusText = "Error: " + ex.Message;
+                StatusText = "Error al reconocer voz";
             }
             finally
             {

@@ -1,76 +1,99 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
-using System.Speech.Recognition;
 using System.Threading;
 using System.Threading.Tasks;
+using Windows.Media.SpeechRecognition;
+using Windows.Globalization;
 
 namespace Anfeta.UI.Services
 {
-    public sealed class SpeechToTextService : ISpeechToTextService
+    public sealed class SpeechToTextService : ISpeechToTextService, IDisposable
     {
-        private SpeechRecognitionEngine? _engine;
+        private SpeechRecognizer? _recognizer;
+        private string _currentLanguage = "";
 
-        public Task InitializeAsync(string languageTag = "es-ES")
+        public List<LanguageInfo> GetAvailableLanguages()
         {
-            if (_engine != null) return Task.CompletedTask;
-
-            // 1) Ver qué recognizers hay instalados
-            var installed = SpeechRecognitionEngine.InstalledRecognizers();
-            if (installed == null || installed.Count == 0)
-                throw new InvalidOperationException("No hay motores de reconocimiento instalados en Windows (Speech Recognition).");
-
-            // 2) Elegir uno que coincida con el idioma (si existe)
-            var chosen = installed
-                .FirstOrDefault(r => r.Culture.Name.Equals(languageTag, StringComparison.OrdinalIgnoreCase))
-                ?? installed.FirstOrDefault(r => r.Culture.TwoLetterISOLanguageName == languageTag.Substring(0, 2))
-                ?? installed[0];
-
-            _engine = new SpeechRecognitionEngine(chosen);
-
-            // 3) Micrófono default
-            _engine.SetInputToDefaultAudioDevice();
-
-            // 4) Gramática (dictation)
-            _engine.LoadGrammar(new DictationGrammar());
-
-            return Task.CompletedTask;
+            var languages = SpeechRecognizer.SupportedTopicLanguages;
+            return languages.Select(l => new LanguageInfo
+            {
+                Tag = l.LanguageTag,
+                DisplayName = l.DisplayName,
+                NativeName = l.NativeName
+            }).ToList();
         }
 
-        public Task<string?> RecognizeOnceAsync(CancellationToken ct = default)
+        public string GetCurrentLanguage() => _currentLanguage;
+
+        public async Task InitializeAsync(string languageTag = "es-MX")
         {
-            if (_engine == null)
-                throw new InvalidOperationException("SpeechToTextService no inicializado. Llama InitializeAsync primero.");
+            _recognizer?.Dispose();
+            _recognizer = null;
 
-            var tcs = new TaskCompletionSource<string?>();
+            var available = SpeechRecognizer.SupportedTopicLanguages;
+            if (available.Count == 0)
+                throw new InvalidOperationException("No hay idiomas instalados.");
 
-            void completed(object? s, RecognizeCompletedEventArgs e)
+            Language? targetLang = available.FirstOrDefault(l =>
+                l.LanguageTag.Equals(languageTag, StringComparison.OrdinalIgnoreCase));
+
+            if (targetLang == null)
+                targetLang = available.First();
+
+            _currentLanguage = targetLang.LanguageTag;
+            _recognizer = new SpeechRecognizer(targetLang);
+
+            _recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(10);
+            _recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(2);
+
+            try
             {
-                _engine!.RecognizeCompleted -= completed;
-
-                if (e.Cancelled) { tcs.TrySetResult("[CANCELADO]"); return; }
-                if (e.Error != null) { tcs.TrySetException(e.Error); return; }
-
-                var text = e.Result?.Text;
-                tcs.TrySetResult(text);
+                await _recognizer.CompileConstraintsAsync();
             }
-
-            _engine.RecognizeCompleted += completed;
-
-            if (ct.CanBeCanceled)
+            catch (System.Runtime.InteropServices.COMException ex)
             {
-                ct.Register(() =>
+                if (ex.HResult == unchecked((int)0x80045509))
                 {
-                    try
-                    {
-                        _engine.RecognizeAsyncCancel();
-                    }
-                    catch { }
-                });
+                    throw new UnauthorizedAccessException(
+                        "Debes activar 'Reconocimiento de voz' en Configuración de Windows → Privacidad → Voz"
+                    );
+                }
+                throw;
             }
-
-            _engine.RecognizeAsync(RecognizeMode.Single);
-
-            return tcs.Task;
         }
+
+        public async Task<string?> RecognizeOnceAsync(CancellationToken ct = default)
+        {
+            if (_recognizer == null)
+                throw new InvalidOperationException("Servicio no inicializado.");
+
+            try
+            {
+                var result = await _recognizer.RecognizeAsync();
+                return result.Status == SpeechRecognitionResultStatus.Success ? result.Text : null;
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+                if (ex.HResult == unchecked((int)0x80045509))
+                {
+                    throw new UnauthorizedAccessException("Debes aceptar la política de privacidad de voz en Windows.");
+                }
+                return null;
+            }
+        }
+
+        public void Dispose()
+        {
+            _recognizer?.Dispose();
+            _recognizer = null;
+        }
+    }
+
+    public class LanguageInfo
+    {
+        public string Tag { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string NativeName { get; set; } = "";
     }
 }
