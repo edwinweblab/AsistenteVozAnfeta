@@ -9,6 +9,11 @@ namespace Anfeta.UI.Services
     {
         Task InitializeAsync(string languageTag = "es-MX");
         Task<string?> RecognizeOnceAsync(CancellationToken ct = default);
+
+        // NUEVO:
+        Task CancelAsync();
+        Task ResetAsync(string languageTag = "es-MX");
+
         List<LanguageInfo> GetAvailableLanguages();
         string GetCurrentLanguage();
     }
