@@ -7,7 +7,12 @@
 // - Confirmación pendiente por voz
 // - Anti-sustitución SOLO para tus 4 apps locales (chrome/calculadora/bloc/explorador)
 // - Siempre re-habilita el botón con NotifyCanExecuteChanged()
-// - SIN segundo plano: NO hotkey, NO overlay, NO TriggerVoiceFromHotkeyAsync
+//
+// + COMPATIBLE CON SEGUNDO PLANO:
+//   - Agrega TriggerVoiceFromHotkeyAsync()
+//   - Modo background: responde por VOZ (TTS) y no depende de UI
+//   - Reutiliza exactamente el MISMO flujo (pending/confirm/cancel incluidos)
+//   - CONFIRMA "mensaje recibido" al captar voz en segundo plano
 // ===============================
 
 using System;
@@ -25,6 +30,7 @@ namespace Anfeta.UI.ViewModels
     {
         private readonly ISpeechToTextService _speechService;
         private readonly ICommandInterpretationService _interpreter;
+        private readonly ITextToSpeechService _tts;
         private readonly LocalActionExecutor _localExecutor = new();
 
         private CancellationTokenSource? _currentRecognitionCts;
@@ -32,6 +38,9 @@ namespace Anfeta.UI.ViewModels
         // ====== control de sesiones para ignorar resultados tardíos ======
         private int _listenSessionId = 0;
         private volatile bool _cancelRequested = false;
+
+        // ====== modo ejecución (Home UI vs Segundo plano) ======
+        private bool _backgroundMode = false;
 
         // Acción pendiente (confirmación)
         private string? _pendingIntent;
@@ -102,30 +111,53 @@ namespace Anfeta.UI.ViewModels
         public IAsyncRelayCommand InitializeSpeechCommand { get; }
         public IAsyncRelayCommand ListenOnceCommand { get; }
 
-        public HomeViewModel(ISpeechToTextService speechService, ICommandInterpretationService interpreter)
+        public HomeViewModel(
+            ISpeechToTextService speechService,
+            ICommandInterpretationService interpreter,
+            ITextToSpeechService tts)
         {
             _speechService = speechService;
             _interpreter = interpreter;
+            _tts = tts;
 
             InitializeSpeechCommand = new AsyncRelayCommand(InitializeSpeechAsync);
             ListenOnceCommand = new AsyncRelayCommand(ListenOnceAsync, CanListenOnce);
 
-            // Estado inicial
             ShowInfo = true;
             InfoMessage = "Cargando modelo... espera un momento.";
             StatusText = "Cargando modelo...";
             IsModelReady = false;
 
             Debug.WriteLine("[VM] HomeViewModel creado. Iniciando warmup IA en background...");
-
-            // Warmup no bloquea UI
             _ = WarmupModelAsync();
         }
 
         private bool CanListenOnce() => !IsListening && IsModelReady;
 
         // ===============================
-        // Helpers de estado (CLAVE)
+        // ENTRYPOINT PARA SEGUNDO PLANO (HOTKEY)
+        // ===============================
+        public async Task TriggerVoiceFromHotkeyAsync()
+        {
+            if (!IsModelReady)
+            {
+                await SpeakSafeAsync("Aún estoy cargando el modelo.");
+                return;
+            }
+
+            _backgroundMode = true;
+            try
+            {
+                await ListenOnceAsync();
+            }
+            finally
+            {
+                _backgroundMode = false;
+            }
+        }
+
+        // ===============================
+        // Helpers
         // ===============================
         private void ClearPending()
         {
@@ -139,19 +171,42 @@ namespace Anfeta.UI.ViewModels
             !string.IsNullOrWhiteSpace(_pendingIntent) &&
             !string.IsNullOrWhiteSpace(_pendingScope);
 
-        private void ResetAfterAction(string infoMessage, string? statusText = null)
+        private async Task SpeakSafeAsync(string text)
         {
-            ClearPending();
+            try { await _tts.SpeakAsync(text); }
+            catch (Exception ex) { Debug.WriteLine("[TTS] ERROR: " + ex); }
+        }
 
-            IsListening = false;
+        private void UpdateUiSafe(string infoMessage, string? statusText = null, string? recognized = null)
+        {
+            // En segundo plano no dependemos de UI
+            if (_backgroundMode) return;
 
             ShowInfo = true;
             InfoMessage = infoMessage;
-            StatusText = statusText ?? "Listo para escuchar";
+            StatusText = statusText ?? StatusText;
 
+            if (recognized != null)
+                RecognizedText = recognized;
+        }
+
+        private void ResetAfterAction(string infoMessage, string? statusText = null)
+        {
+            ClearPending();
+            IsListening = false;
+
+            UpdateUiSafe(infoMessage, statusText ?? "Listo para escuchar");
             ListenOnceCommand.NotifyCanExecuteChanged();
 
             Debug.WriteLine($"[VM] ResetAfterAction -> Status='{StatusText}' Info='{InfoMessage}'");
+        }
+
+        private async Task ResetAfterActionAsync(string infoMessage, string? statusText = null, string? speak = null)
+        {
+            ResetAfterAction(infoMessage, statusText);
+
+            if (_backgroundMode)
+                await SpeakSafeAsync(speak ?? infoMessage);
         }
 
         private static bool IsConfirmationPhrase(string text)
@@ -177,21 +232,25 @@ namespace Anfeta.UI.ViewModels
                 await _interpreter.InterpretRawAsync("ping");
 
                 IsModelReady = true;
-                ShowInfo = true;
-                InfoMessage = "Modelo listo. Presiona el micrófono y habla.";
-                StatusText = "Listo para escuchar";
-                ListenOnceCommand.NotifyCanExecuteChanged();
 
+                UpdateUiSafe(
+                    infoMessage: "Modelo listo. Presiona el micrófono y habla.",
+                    statusText: "Listo para escuchar"
+                );
+
+                ListenOnceCommand.NotifyCanExecuteChanged();
                 Debug.WriteLine("[IA] Warmup OK -> modelo listo");
             }
             catch (Exception ex)
             {
                 IsModelReady = false;
-                ShowInfo = true;
-                InfoMessage = "No pude conectar con el modelo. Abre Ollama e intenta reiniciar la app.";
-                StatusText = "Modelo no disponible";
-                ListenOnceCommand.NotifyCanExecuteChanged();
 
+                UpdateUiSafe(
+                    infoMessage: "No pude conectar con el modelo. Abre Ollama e intenta reiniciar la app.",
+                    statusText: "Modelo no disponible"
+                );
+
+                ListenOnceCommand.NotifyCanExecuteChanged();
                 Debug.WriteLine("[IA] Warmup ERROR: " + ex);
             }
         }
@@ -221,9 +280,10 @@ namespace Anfeta.UI.ViewModels
                 _speechInitialized = true;
 
                 var current = _speechService.GetCurrentLanguage();
-                CurrentLanguageInfo = $"Idioma: {current}";
-                Debug.WriteLine("[STT] Inicialización OK. CurrentLanguage=" + current);
+                if (!_backgroundMode)
+                    CurrentLanguageInfo = $"Idioma: {current}";
 
+                Debug.WriteLine("[STT] Inicialización OK. CurrentLanguage=" + current);
                 return true;
             }
             catch (Exception ex)
@@ -239,15 +299,13 @@ namespace Anfeta.UI.ViewModels
         }
 
         // ===============================
-        // Init Speech (botón en pantalla principal)
+        // Init Speech (botón en Home)
         // ===============================
         private async Task InitializeSpeechAsync()
         {
             try
             {
-                ShowInfo = true;
-                InfoMessage = "Inicializando micrófono...";
-                StatusText = "Inicializando micrófono...";
+                UpdateUiSafe("Inicializando micrófono...", "Inicializando micrófono...");
                 Debug.WriteLine("[UI] InitializeSpeechAsync: start");
 
                 var languages = _speechService.GetAvailableLanguages();
@@ -255,8 +313,10 @@ namespace Anfeta.UI.ViewModels
 
                 if (languages.Count == 0)
                 {
-                    InfoMessage = "No hay idiomas instalados. Ve a Configuración de Windows → Idioma → Reconocimiento de voz.";
-                    StatusText = "Error: No hay idiomas instalados";
+                    UpdateUiSafe(
+                        "No hay idiomas instalados. Ve a Configuración de Windows → Idioma → Reconocimiento de voz.",
+                        "Error: No hay idiomas instalados"
+                    );
                     Debug.WriteLine("[STT] No hay idiomas instalados");
                     return;
                 }
@@ -264,45 +324,42 @@ namespace Anfeta.UI.ViewModels
                 var ok = await EnsureSpeechReadyAsync();
                 if (!ok)
                 {
-                    InfoMessage = "No pude inicializar el micrófono. Revisa permisos y dispositivo.";
-                    StatusText = "Error micrófono";
+                    UpdateUiSafe("No pude inicializar el micrófono. Revisa permisos y dispositivo.", "Error micrófono");
                     return;
                 }
 
                 var current = _speechService.GetCurrentLanguage();
                 var langName = languages.Find(l => l.Tag == current)?.DisplayName ?? current;
-                CurrentLanguageInfo = $"Idioma: {langName}";
+
+                if (!_backgroundMode)
+                    CurrentLanguageInfo = $"Idioma: {langName}";
 
                 if (!IsModelReady)
                 {
-                    InfoMessage = "Micrófono listo. Aún cargando modelo...";
-                    StatusText = "Cargando modelo...";
+                    UpdateUiSafe("Micrófono listo. Aún cargando modelo...", "Cargando modelo...");
                     Debug.WriteLine("[UI] Mic OK pero modelo aún no listo");
                     return;
                 }
 
-                InfoMessage = "Listo. Presiona el micrófono y habla.";
-                StatusText = $"Listo en {langName}";
+                UpdateUiSafe("Listo. Presiona el micrófono y habla.", $"Listo en {langName}");
                 Debug.WriteLine("[UI] InitializeSpeechAsync OK");
             }
             catch (UnauthorizedAccessException ex)
             {
                 _speechInitialized = false;
-                InfoMessage = ex.Message;
-                StatusText = "ERROR: Permiso denegado";
+                UpdateUiSafe(ex.Message, "ERROR: Permiso denegado");
                 Debug.WriteLine("[STT] UnauthorizedAccessException: " + ex);
             }
             catch (Exception ex)
             {
                 _speechInitialized = false;
-                InfoMessage = "Error: " + ex.Message;
-                StatusText = "Error al inicializar voz";
+                UpdateUiSafe("Error: " + ex.Message, "Error al inicializar voz");
                 Debug.WriteLine("[STT] InitializeSpeechAsync ERROR: " + ex);
             }
         }
 
         // ===============================
-        // POLICY confirmación (igual a tu versión)
+        // POLICY confirmación
         // ===============================
         private bool RequiresConfirmation(string intent, string scope, string? appKey)
         {
@@ -319,7 +376,7 @@ namespace Anfeta.UI.ViewModels
         }
 
         // ===============================
-        // Anti-sustitución SOLO para tus 4 apps locales
+        // Anti-sustitución SOLO para 4 apps
         // ===============================
         private static string? ExtractRequestedAppFromSpeech(string speech)
         {
@@ -365,17 +422,17 @@ namespace Anfeta.UI.ViewModels
                 _currentRecognitionCts = null;
             }
 
-            ResetAfterAction(uiMessage, uiStatus);
+            await ResetAfterActionAsync(uiMessage, uiStatus, speak: uiMessage);
         }
 
         // ===============================
         // Confirmación pendiente
         // ===============================
-        private void ExecutePendingIfAny()
+        private async Task ExecutePendingIfAnyAsync()
         {
             if (!HasPending())
             {
-                ResetAfterAction("No hay ninguna acción pendiente.", "Sin acción pendiente");
+                await ResetAfterActionAsync("No hay ninguna acción pendiente.", "Sin acción pendiente", speak: "No hay ninguna acción pendiente.");
                 return;
             }
 
@@ -388,15 +445,15 @@ namespace Anfeta.UI.ViewModels
 
             if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
             {
-                ResetAfterAction(msg, "Acción no disponible");
+                await ResetAfterActionAsync(msg, "Acción no disponible", speak: msg);
                 return;
             }
 
-            ResetAfterAction(msg, msg);
+            await ResetAfterActionAsync(msg, msg, speak: msg);
         }
 
         // ===============================
-        // LISTEN ONCE
+        // LISTEN ONCE (Home y Segundo plano)
         // ===============================
         private async Task ListenOnceAsync()
         {
@@ -404,13 +461,13 @@ namespace Anfeta.UI.ViewModels
 
             if (!IsModelReady)
             {
-                ResetAfterAction("Aún estoy cargando el modelo. Espera un momento.", "Cargando modelo...");
+                await ResetAfterActionAsync("Aún estoy cargando el modelo. Espera un momento.", "Cargando modelo...", speak: "Aún estoy cargando el modelo.");
                 return;
             }
 
             if (!await EnsureSpeechReadyAsync())
             {
-                ResetAfterAction("No pude inicializar el micrófono. Revisa permisos/dispositivo.", "Error micrófono");
+                await ResetAfterActionAsync("No pude inicializar el micrófono. Revisa permisos/dispositivo.", "Error micrófono", speak: "No pude inicializar el micrófono.");
                 return;
             }
 
@@ -427,10 +484,11 @@ namespace Anfeta.UI.ViewModels
             var mySession = Interlocked.Increment(ref _listenSessionId);
 
             IsListening = true;
-            ShowInfo = true;
-            InfoMessage = "Escuchando... habla ahora";
-            StatusText = "Escuchando... habla ahora";
-            RecognizedText = "";
+
+            UpdateUiSafe("Escuchando... habla ahora", "Escuchando... habla ahora", recognized: "");
+
+            if (_backgroundMode)
+                await SpeakSafeAsync("Te escucho.");
 
             _currentRecognitionCts = new CancellationTokenSource();
             var ct = _currentRecognitionCts.Token;
@@ -446,59 +504,70 @@ namespace Anfeta.UI.ViewModels
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[STT] Resultado ignorado por cancel/sesion nueva");
-                    ResetAfterAction("Reconocimiento cancelado.", "Cancelado");
+                    await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
                     return;
                 }
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
-                    ResetAfterAction("No se detectó voz. Intenta otra vez.", "No se entendió");
+                    await ResetAfterActionAsync("No se detectó voz. Intenta otra vez.", "No se entendió", speak: "No detecté voz. Intenta de nuevo.");
                     return;
                 }
 
-                RecognizedText = text;
-                InfoMessage = "Texto detectado correctamente.";
-                StatusText = $"Entendí: {text}";
+                // UI (solo Home)
+                UpdateUiSafe("Texto detectado correctamente.", $"Entendí: {text}", recognized: text);
+
+                // CONFIRMACION EN SEGUNDO PLANO
+                if (_backgroundMode)
+                {
+                    // Solo confirmar:
+                    await SpeakSafeAsync("Mensaje recibido.");
+
+                    // Si quieres repetir lo que entendió, reemplaza por:
+                    // await SpeakSafeAsync($"Mensaje recibido: {text}");
+                }
 
                 // Verificación antes de lógica pesada
                 if (_cancelRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[VM] Cancel detectado post-texto -> no interpretar");
-                    ResetAfterAction("Reconocimiento cancelado.", "Cancelado");
+                    await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
                     return;
                 }
 
+                // Si hay pending: este texto se usa para confirmar/cancelar
                 if (HasPending())
                 {
                     Debug.WriteLine("[POLICY] Hay pending. Texto: " + text);
 
                     if (IsConfirmationPhrase(text))
                     {
-                        ExecutePendingIfAny();
+                        await ExecutePendingIfAnyAsync();
                         return;
                     }
 
                     if (IsCancelPhrase(text))
                     {
-                        ResetAfterAction("Acción cancelada.", "Cancelado");
+                        await ResetAfterActionAsync("Acción cancelada.", "Cancelado", speak: "Acción cancelada.");
                         return;
                     }
 
-                    ResetAfterAction(
+                    await ResetAfterActionAsync(
                         "Hay una acción pendiente. Di 'confirmar' para ejecutar o 'cancelar' para abortar.",
-                        "Confirmación requerida"
+                        "Confirmación requerida",
+                        speak: "Hay una acción pendiente. Di confirmar o cancelar."
                     );
                     return;
                 }
 
-                var requestedFromSpeech = ExtractRequestedAppFromSpeech(RecognizedText);
+                var requestedFromSpeech = ExtractRequestedAppFromSpeech(text);
                 Debug.WriteLine("[STT] requestedFromSpeech=" + (requestedFromSpeech ?? "<null>"));
 
                 // Antes de interpretar, valida cancel/sesion inválida
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[IA] Cancel/sesion inválida antes de interpretar -> abortar");
-                    ResetAfterAction("Reconocimiento cancelado.", "Cancelado");
+                    await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
                     return;
                 }
 
@@ -509,7 +578,7 @@ namespace Anfeta.UI.ViewModels
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[IA] Resultado IA ignorado por cancel/sesion nueva");
-                    ResetAfterAction("Reconocimiento cancelado.", "Cancelado");
+                    await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
                     return;
                 }
 
@@ -542,9 +611,10 @@ namespace Anfeta.UI.ViewModels
                     !string.IsNullOrWhiteSpace(appKey) &&
                     !requestedFromSpeech.Equals(appKey, StringComparison.OrdinalIgnoreCase))
                 {
-                    ResetAfterAction(
+                    await ResetAfterActionAsync(
                         $"Pediste '{requestedFromSpeech}', pero interpreté '{appKey}'. No ejecutaré nada.",
-                        "Acción no disponible"
+                        "Acción no disponible",
+                        speak: "No ejecutaré nada porque no coincide lo que pediste."
                     );
                     return;
                 }
@@ -553,7 +623,7 @@ namespace Anfeta.UI.ViewModels
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[EXEC] Cancel/sesion inválida antes de ejecutar -> abortar");
-                    ResetAfterAction("Reconocimiento cancelado.", "Cancelado");
+                    await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
                     return;
                 }
 
@@ -570,9 +640,13 @@ namespace Anfeta.UI.ViewModels
                     IsListening = false;
                     ListenOnceCommand.NotifyCanExecuteChanged();
 
-                    ShowInfo = true;
-                    InfoMessage = $"Confirmación requerida para: {intent} {(appKey ?? "")}. Di 'confirmar' o 'cancelar'.";
-                    StatusText = "Confirmación requerida";
+                    UpdateUiSafe(
+                        $"Confirmación requerida para: {intent} {(appKey ?? "")}. Di 'confirmar' o 'cancelar'.",
+                        "Confirmación requerida"
+                    );
+
+                    if (_backgroundMode)
+                        await SpeakSafeAsync("Confirmación requerida. Di confirmar o cancelar.");
 
                     Debug.WriteLine("[POLICY] Acción guardada como pending. Esperando confirmación...");
                     return;
@@ -580,27 +654,31 @@ namespace Anfeta.UI.ViewModels
 
                 if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
                 {
-                    ResetAfterAction(msg + " " + AllowedAppsMessage(), "Acción no disponible");
+                    await ResetAfterActionAsync(
+                        msg + " " + AllowedAppsMessage(),
+                        "Acción no disponible",
+                        speak: msg
+                    );
                     return;
                 }
 
-                ResetAfterAction(msg, msg);
+                await ResetAfterActionAsync(msg, msg, speak: msg);
             }
             catch (OperationCanceledException)
             {
                 Debug.WriteLine("[STT] OperationCanceledException");
-                ResetAfterAction("Reconocimiento cancelado.", "Cancelado");
+                await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
             }
             catch (UnauthorizedAccessException ex)
             {
                 Debug.WriteLine("[STT] UnauthorizedAccessException: " + ex);
                 _speechInitialized = false;
-                ResetAfterAction(ex.Message, "ERROR: Permiso denegado");
+                await ResetAfterActionAsync(ex.Message, "ERROR: Permiso denegado", speak: "Permiso denegado para el micrófono.");
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("[VM] ERROR: " + ex);
-                ResetAfterAction("Error al procesar el comando.", "Error");
+                await ResetAfterActionAsync("Error al procesar el comando.", "Error", speak: "Ocurrió un error.");
             }
             finally
             {
