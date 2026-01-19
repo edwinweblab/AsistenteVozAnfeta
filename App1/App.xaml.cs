@@ -1,12 +1,21 @@
-﻿using Anfeta.UI.Data;
+﻿// ===============================
+// App.xaml.cs (COMPLETO)
+// - DI ya existente
+// - Expone HomeVM global para hotkey (funciona en cualquier pantalla)
+// - Fuerza creación del HomeViewModel al iniciar para que warmup arranque
+// ===============================
+
+using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.UI.Xaml;
 using System;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Threading.Tasks;
+
 
 namespace Anfeta.UI
 {
@@ -17,6 +26,9 @@ namespace Anfeta.UI
         public static Window? MainWindowInstance { get; private set; }
         public static IHost AppHost { get; private set; } = null!;
 
+        // ✅ VM GLOBAL (singleton real del contenedor)
+        public static HomeViewModel HomeVM => AppHost.Services.GetRequiredService<HomeViewModel>();
+
         public App()
         {
             InitializeComponent();
@@ -24,25 +36,23 @@ namespace Anfeta.UI
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
-                    // Speech to text (igual que antes)
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
 
-                    // HttpClient para Ollama (timeout mayor)
                     services.AddSingleton(new HttpClient
                     {
                         BaseAddress = new Uri(OllamaConfig.BaseUrl),
                         Timeout = TimeSpan.FromMinutes(3)
                     });
 
-                    // Servicios Ollama
                     services.AddSingleton<IOllamaHealthService, OllamaHealthService>();
+
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
                         var http = sp.GetRequiredService<HttpClient>();
                         return new OllamaInterpretationService(http, OllamaConfig.ModelName);
                     });
 
-                    // ViewModel
+                    // ✅ Tu VM se queda singleton
                     services.AddSingleton<HomeViewModel>();
                 })
                 .Build();
@@ -50,7 +60,7 @@ namespace Anfeta.UI
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
-            System.Diagnostics.Debug.WriteLine("APP INICIADA");
+            Debug.WriteLine("APP INICIADA");
 
             DatabaseInitializer.InitializeDatabase();
 
@@ -58,7 +68,10 @@ namespace Anfeta.UI
             TestDatabaseConnection();
 #endif
 
-            // Verificar Ollama + warmup (no bloquea UI)
+            // ✅ Fuerza creación del VM (para que arranque su warmup aunque no entres a Home)
+            _ = HomeVM;
+
+            // Warmup adicional (opcional)
             _ = CheckAndWarmupOllamaAsync();
 
             _window = new MainWindow();
@@ -70,7 +83,6 @@ namespace Anfeta.UI
         {
             try
             {
-                // 1) Verificar si Ollama responde (rápido)
                 using var quick = new HttpClient
                 {
                     BaseAddress = new Uri(OllamaConfig.BaseUrl),
@@ -78,23 +90,22 @@ namespace Anfeta.UI
                 };
 
                 var res = await quick.GetAsync("/api/tags");
-                System.Diagnostics.Debug.WriteLine($"OLLAMA STATUS: {(int)res.StatusCode}");
+                Debug.WriteLine($"OLLAMA STATUS: {(int)res.StatusCode}");
 
                 if (!res.IsSuccessStatusCode)
                 {
-                    System.Diagnostics.Debug.WriteLine("OLLAMA NO RESPONDE OK. Revisa que Ollama esté abierto.");
+                    Debug.WriteLine("OLLAMA NO RESPONDE OK. Revisa que Ollama esté abierto.");
                     return;
                 }
 
-                // 2) Warmup del modelo (puede tardar, usa el timeout grande del DI)
                 var interpreter = AppHost.Services.GetRequiredService<ICommandInterpretationService>();
                 await interpreter.InterpretRawAsync("ping");
 
-                System.Diagnostics.Debug.WriteLine("OLLAMA WARMUP OK (modelo listo)");
+                Debug.WriteLine("OLLAMA WARMUP OK (modelo listo)");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("OLLAMA CHECK/WARMUP ERROR: " + ex.Message);
+                Debug.WriteLine("OLLAMA CHECK/WARMUP ERROR: " + ex.Message);
             }
         }
 
@@ -104,14 +115,16 @@ namespace Anfeta.UI
             {
                 using var connection = DbConnectionFactory.Create();
                 connection.Open();
+
                 using var command = connection.CreateCommand();
                 command.CommandText = "SELECT 1;";
                 var result = command.ExecuteScalar();
-                System.Diagnostics.Debug.WriteLine("CONEXION A SQLITE EXITOSA. RESULTADO: " + result);
+
+                Debug.WriteLine("CONEXION A SQLITE EXITOSA. RESULTADO: " + result);
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("ERROR AL CONECTAR CON SQLITE: " + ex.Message);
+                Debug.WriteLine("ERROR AL CONECTAR CON SQLITE: " + ex.Message);
             }
         }
     }

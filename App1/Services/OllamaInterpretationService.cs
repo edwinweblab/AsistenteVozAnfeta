@@ -81,42 +81,43 @@ namespace Anfeta.UI.Services
         }
 
         private static string BuildPrompt(string userMessage)
-{
-    userMessage ??= "";
-    userMessage = userMessage.Replace("\"", "\\\"");
+        {
+            userMessage ??= "";
+            userMessage = userMessage.Replace("\"", "\\\"");
 
-    // Usamos un string normal + concatenación para evitar problemas con { } del JSON
-    return
-        "Devuelve SOLO un JSON válido.\n\n" +
-        "Formato exacto:\n" +
-        "{\n" +
-        "  \"plain_text\": \"string corto para el usuario\",\n" +
-        "  \"interpretation\": {\n" +
-        "    \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|Unknown|CreateTask|ListFiles|GetAppointments\",\n" +
-        "    \"scope\": \"LOCAL|API\",\n" +
-        "    \"app_key\": \"calculadora|bloc|explorador|chrome|null\",\n" +
-        "    \"provider\": \"notion|dropbox|weblab|null\",\n" +
-        "    \"confidence\": 0.0,\n" +
-        "    \"params\": {},\n" +
-        "    \"needs_confirmation\": true,\n" +
-        "    \"reason\": \"string breve\"\n" +
-        "  }\n" +
-        "}\n\n" +
-        "LOCAL allowed intents:\n" +
-        "- OpenApp, CloseApp, MinimizeAll, SwitchWindow\n\n" +
-        "LOCAL allowed apps:\n" +
-        "- calculadora, bloc, explorador, chrome\n\n" +
-        "Blocked apps:\n" +
-        "- cmd, powershell, regedit, taskmgr, msiexec\n\n" +
-        "Reglas:\n" +
-        "- LOCAL: abrir/cerrar/minimizar/cambiar ventana\n" +
-        "- API: Notion/Dropbox/Weblab u otros externos (solo estructura; no ejecutar)\n" +
-        "- Si es API, app_key=null\n" +
-        "- needs_confirmation=true siempre\n\n" +
-        "Entrada:\n" +
-        "\"" + userMessage + "\"\n\n" +
-        "Responde SOLO JSON.\n";
-}
+            return
+                "Devuelve SOLO un JSON válido. Sin texto extra.\n\n" +
+
+                "Formato exacto:\n" +
+                "{\n" +
+                "  \"plain_text\": \"string corto para el usuario\",\n" +
+                "  \"interpretation\": {\n" +
+                "    \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|Unknown|CreateTask|ListFiles|GetAppointments\",\n" +
+                "    \"scope\": \"LOCAL|API\",\n" +
+                "    \"app_key\": \"string|null\",\n" +
+                "    \"provider\": \"notion|dropbox|weblab|null\",\n" +
+                "    \"confidence\": 0.0,\n" +
+                "    \"params\": {},\n" +
+                "    \"needs_confirmation\": true,\n" +
+                "    \"reason\": \"string breve\"\n" +
+                "  }\n" +
+                "}\n\n" +
+
+                "Reglas IMPORTANTES:\n" +
+                "1) Si el usuario pide abrir/cerrar/minimizar/cambiar ventana en el equipo: scope=\"LOCAL\".\n" +
+                "2) Para LOCAL con OpenApp/CloseApp:\n" +
+                "   - app_key debe ser el nombre de la aplicación mencionada por el usuario, en minusculas, sin extension.\n" +
+                "   - Ejemplos: \"excel\", \"word\", \"powerpoint\", \"chrome\", \"edge\", \"spotify\", \"notepad\", \"explorador\".\n" +
+                "   - NO inventes otra app distinta. Si hay duda, intent=\"Unknown\" y app_key=null.\n" +
+                "3) Si es API (notion/dropbox/weblab u otro externo): scope=\"API\" y app_key=null.\n" +
+                "4) needs_confirmation=true siempre.\n" +
+                "5) reason: explica breve por qué elegiste intent/scope/app_key.\n\n" +
+
+                "Entrada:\n" +
+                "\"" + userMessage + "\"\n\n" +
+                "Responde SOLO JSON.\n";
+        }
+
 
 
         private static string ExtractOllamaResponse(string ollamaJson)

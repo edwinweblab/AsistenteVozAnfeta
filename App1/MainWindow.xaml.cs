@@ -1,9 +1,10 @@
 ﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
+using System.Diagnostics;
+
 using Anfeta.UI.Views;
 using Anfeta.UI.FunctionTests;
-using Anfeta.UI.Views;
 
 namespace Anfeta.UI
 {
@@ -13,18 +14,21 @@ namespace Anfeta.UI
         {
             InitializeComponent();
 
-            // ✅ Arrancar en Home (solo si existe el frame)
+            // Arrancar en Home
             if (ContentFrame != null)
                 ContentFrame.Navigate(typeof(HomeView));
 
             if (AppNav != null && AppNav.MenuItems.Count > 0)
                 AppNav.SelectedItem = AppNav.MenuItems[0];
+
+            this.Closed += MainWindow_Closed;
+
+            Debug.WriteLine("MAINWINDOW: constructor OK (sin segundo plano)");
         }
 
         private void AppNav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
         {
             if (ContentFrame == null) return;
-
             if (args.SelectedItem is not NavigationViewItem item) return;
 
             var tag = item.Tag as string;
@@ -41,6 +45,11 @@ namespace Anfeta.UI
 
             if (ContentFrame.CurrentSourcePageType != pageType)
                 ContentFrame.Navigate(pageType);
+        }
+
+        private void MainWindow_Closed(object sender, WindowEventArgs args)
+        {
+            Debug.WriteLine("MAINWINDOW: Closed (sin segundo plano)");
         }
     }
 }
