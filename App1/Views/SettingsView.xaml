@@ -193,11 +193,11 @@
                                 Click="BtnChangeHotkey_Click"
                                 Style="{StaticResource SecondaryButtonStyle}"
                                 HorizontalAlignment="Left"
-                                MinWidth="180">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon Glyph="&#xE70F;" FontSize="16"/>
-                                <TextBlock Text="Cambiar Atajo"/>
-                            </StackPanel>
+                                MinWidth="48"
+                                Height="48"
+                                Padding="0"
+                                ToolTipService.ToolTip="Cambiar atajo de teclado">  
+                            <FontIcon Glyph="&#xE70F;" FontSize="18"/>
                         </Button>
                     </Grid>
                 </Border>

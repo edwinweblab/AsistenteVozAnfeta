@@ -204,12 +204,16 @@ namespace Anfeta.UI.Views
 
         private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new HotkeyPickerDialog(_appState) { XamlRoot = this.XamlRoot };
+            var dialog = new HotkeyPickerDialog(_appState, _settingsService)
+            {
+                XamlRoot = this.XamlRoot
+            };
+
             var result = await dialog.ShowAsync();
 
             if (result == ContentDialogResult.Primary)
             {
-                ShowStatus("Atajo actualizado", InfoBarSeverity.Success);
+                ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
             }
         }
 

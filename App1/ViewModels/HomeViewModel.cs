@@ -1,20 +1,4 @@
-﻿// ===============================
-// HomeViewModel.cs (COMPLETO)
-// - Gate de “modelo listo” (warmup) antes de permitir escuchar
-// - Micrófono LAZY: se inicializa SOLO si se necesita (botón)
-// - Cancelación real: invalida sesión + StopRecognitionAsync via CancelAsync()
-// - Evita interpretar después de cancelar (aunque llegue texto tarde)
-// - Confirmación pendiente por voz
-// - Anti-sustitución SOLO para tus 4 apps locales (chrome/calculadora/bloc/explorador)
-// - Siempre re-habilita el botón con NotifyCanExecuteChanged()
-//
-// + COMPATIBLE CON SEGUNDO PLANO:
-//   - Agrega TriggerVoiceFromHotkeyAsync()
-//   - Modo background: responde por VOZ (TTS) y no depende de UI
-//   - Reutiliza exactamente el MISMO flujo (pending/confirm/cancel incluidos)
-//   - CONFIRMA "mensaje recibido" al captar voz en segundo plano
-// ===============================
-
+﻿// HomeViewModel.cs
 using System;
 using System.Diagnostics;
 using System.Text.Json;

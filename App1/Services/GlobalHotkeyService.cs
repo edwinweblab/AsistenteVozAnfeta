@@ -10,16 +10,28 @@ namespace Anfeta.UI.Services
         private const int HOTKEY_ID = 9001;
 
         private readonly AppStateService _appState;
+        private readonly SettingsService _settingsService;
         private IntPtr _hwnd = IntPtr.Zero;
         private bool _registered;
         private WndProcDelegate? _wndProc;
         private GCHandle _wndProcHandle;
 
-        public event EventHandler? HotkeyPressed;
+        // Backup del último hotkey que funcionó
+        private uint _lastWorkingModifiers;
+        private uint _lastWorkingKey;
 
-        public GlobalHotkeyService(AppStateService appState)
+        public event EventHandler? HotkeyPressed;
+        public event EventHandler<string>? RegistrationFailed;
+
+        public GlobalHotkeyService(AppStateService appState, SettingsService settingsService)
         {
             _appState = appState;
+            _settingsService = settingsService;
+
+            // Guardar default como "último que funcionó"
+            _lastWorkingModifiers = appState.HotkeyModifiers;
+            _lastWorkingKey = appState.HotkeyKey;
+
             _appState.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(AppStateService.HotkeyModifiers) ||
@@ -42,12 +54,37 @@ namespace Anfeta.UI.Services
             if (_hwnd == IntPtr.Zero) return;
 
             _registered = RegisterHotKey(_hwnd, HOTKEY_ID, _appState.HotkeyModifiers, _appState.HotkeyKey);
-            Debug.WriteLine($"[HOTKEY] Registrado: Mods={_appState.HotkeyModifiers} Key={_appState.HotkeyKey} => {_registered}");
+            Debug.WriteLine($"[HOTKEY] Intento registro: Mods={_appState.HotkeyModifiers} Key={_appState.HotkeyKey} => {_registered}");
 
             if (!_registered)
             {
                 var err = Marshal.GetLastWin32Error();
                 Debug.WriteLine($"[HOTKEY] ERROR RegisterHotKey. Win32Error={err}");
+
+                // Restaurar último hotkey que funcionó
+                Debug.WriteLine($"[HOTKEY] Restaurando hotkey anterior: Mods={_lastWorkingModifiers} Key={_lastWorkingKey}");
+                _appState.HotkeyModifiers = _lastWorkingModifiers;
+                _appState.HotkeyKey = _lastWorkingKey;
+                _settingsService.SaveHotkey(_lastWorkingModifiers, _lastWorkingKey);
+
+                // Notificar fallo
+                var keyName = ((System.Windows.Forms.Keys)_appState.HotkeyKey).ToString();
+                var modsParts = new System.Collections.Generic.List<string>();
+                if ((_appState.HotkeyModifiers & 0x0002) != 0) modsParts.Add("Ctrl");
+                if ((_appState.HotkeyModifiers & 0x0001) != 0) modsParts.Add("Alt");
+                if ((_appState.HotkeyModifiers & 0x0004) != 0) modsParts.Add("Shift");
+                if ((_appState.HotkeyModifiers & 0x0008) != 0) modsParts.Add("Win");
+                modsParts.Add(keyName);
+
+                var hotkeyDisplay = string.Join(" + ", modsParts);
+                RegistrationFailed?.Invoke(this, $"El atajo '{hotkeyDisplay}' ya está en uso por otra aplicación. Se restauró el atajo anterior.");
+            }
+            else
+            {
+                // Guardar como "último que funcionó"
+                _lastWorkingModifiers = _appState.HotkeyModifiers;
+                _lastWorkingKey = _appState.HotkeyKey;
+                Debug.WriteLine("[HOTKEY] Registro exitoso");
             }
         }
 
@@ -139,9 +176,26 @@ namespace Anfeta.UI.Services
             return DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
+        public void Pause()
+        {
+            if (_hwnd == IntPtr.Zero || !_registered) return;
+
+            UnregisterHotKey(_hwnd, HOTKEY_ID);
+            _registered = false;
+            Debug.WriteLine("[HOTKEY] Pausado temporalmente");
+        }
+
+        public void Resume()
+        {
+            if (_hwnd == IntPtr.Zero || _registered) return;
+
+            RegisterCurrentHotkey();
+            Debug.WriteLine("[HOTKEY] Reanudado");
+        }
+
         public void Dispose() => Stop();
 
-        // P/Invoke (igual que antes)
+        // P/Invoke
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)]

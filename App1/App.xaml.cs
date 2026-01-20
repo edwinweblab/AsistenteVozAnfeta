@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Diagnostics;
 using System.Net.Http;
@@ -89,6 +90,7 @@ namespace Anfeta.UI
             _hotkey = AppHost.Services.GetRequiredService<GlobalHotkeyService>();
             _hotkey.Start();
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
+            _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
 
             _window.Activate();
         }
@@ -101,12 +103,43 @@ namespace Anfeta.UI
             {
                 try
                 {
+                    // Restaurar ventana si está minimizada
+                    if (_window != null)
+                    {
+                        var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(
+                            Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
+                                WinRT.Interop.WindowNative.GetWindowHandle(_window)
+                            )
+                        );
+
+                        if (appWindow != null)
+                        {
+                            appWindow.Show(true); // Traer al frente
+                        }
+                    }
+
                     await HomeVM.TriggerVoiceFromHotkeyAsync();
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine("[HOTKEY] ERROR: " + ex);
                 }
+            });
+        }
+
+        private void Hotkey_RegistrationFailed(object? sender, string message)
+        {
+            UIQueue?.TryEnqueue(async () =>
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "Error al configurar atajo",
+                    Content = message,
+                    CloseButtonText = "Entendido",
+                    XamlRoot = _window?.Content?.XamlRoot
+                };
+
+                await dialog.ShowAsync();
             });
         }
 
