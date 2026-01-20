@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Globalization;
 using Windows.Media.SpeechRecognition;
+using NAudio.CoreAudioApi;
 
 namespace Anfeta.UI.Services
 {
@@ -15,6 +16,7 @@ namespace Anfeta.UI.Services
         private bool _initialized;
         private SpeechRecognizer? _activeRecognizer;
         private readonly SemaphoreSlim _lock = new(1, 1);
+        private string? _originalDefaultDevice;
 
         public SpeechToTextService(AppStateService appState)
         {
@@ -78,6 +80,57 @@ namespace Anfeta.UI.Services
             }
         }
 
+        /// <summary>Cambia temporalmente el dispositivo predeterminado del sistema</summary>
+        private void SetTemporaryDefaultDevice(int naudioId)
+        {
+            try
+            {
+                var enumerator = new MMDeviceEnumerator();
+
+                // Guardar dispositivo predeterminado actual
+                var currentDefault = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                _originalDefaultDevice = currentDefault.ID;
+
+                // Obtener dispositivo objetivo
+                var captureDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active).ToList();
+
+                if (naudioId >= 0 && naudioId < captureDevices.Count)
+                {
+                    var target = captureDevices[naudioId];
+                    System.Diagnostics.Debug.WriteLine($"[STT] Cambiando a device: {target.FriendlyName}");
+
+                    var policyConfig = new PolicyConfigClient();
+                    policyConfig.SetDefaultEndpoint(target.ID, 2); // 2 = Communications
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[STT] Error al cambiar device: {ex.Message}");
+            }
+        }
+
+        /// <summary>Restaura el dispositivo predeterminado original</summary>
+        private void RestoreDefaultDevice()
+        {
+            if (_originalDefaultDevice != null)
+            {
+                try
+                {
+                    System.Diagnostics.Debug.WriteLine("[STT] Restaurando device original");
+                    var policyConfig = new PolicyConfigClient();
+                    policyConfig.SetDefaultEndpoint(_originalDefaultDevice, 2);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[STT] Error al restaurar device: {ex.Message}");
+                }
+                finally
+                {
+                    _originalDefaultDevice = null;
+                }
+            }
+        }
+
         public async Task<string?> RecognizeOnceAsync(CancellationToken ct = default)
         {
             if (!_initialized)
@@ -93,45 +146,49 @@ namespace Anfeta.UI.Services
                     l.LanguageTag.Equals(_currentLanguage, StringComparison.OrdinalIgnoreCase));
                 lang ??= available.First();
 
-                var recognizer = new SpeechRecognizer(lang);
-                recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(
-                    SpeechRecognitionScenario.Dictation, "dictation"));
-
-                recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(3.5);
-                recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.2);
-                recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
-
-                // NUEVO: Usar device seleccionado si existe
+                // Cambiar dispositivo predeterminado temporalmente
                 if (_appState.InputDeviceId.HasValue)
                 {
-                    var deviceId = _appState.InputDeviceId.Value;
-                    System.Diagnostics.Debug.WriteLine($"[STT] Usando micrófono ID: {deviceId}");
-                    // Windows.Media.SpeechRecognition NO permite cambiar device directamente
-                    // El device seleccionado en SettingsView se usa en NAudio para tests
-                    // Para STT, Windows usa el default del sistema
+                    SetTemporaryDefaultDevice(_appState.InputDeviceId.Value);
                 }
 
-                _activeRecognizer = recognizer;
-
+                SpeechRecognizer? recognizer = null;
                 try
                 {
+                    recognizer = new SpeechRecognizer(lang);
+                    recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(
+                        SpeechRecognitionScenario.Dictation, "dictation"));
+
+                    recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(3.5);
+                    recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.2);
+                    recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
+
+                    _activeRecognizer = recognizer;
+
                     var compile = await recognizer.CompileConstraintsAsync();
                     if (compile.Status != SpeechRecognitionResultStatus.Success)
                         return null;
-                }
-                catch (System.Runtime.InteropServices.COMException ex)
-                {
-                    if (ex.HResult == unchecked((int)0x80045509))
-                        throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
+
+                    using var reg = ct.Register(() => _ = CancelAsync());
+
+                    SpeechRecognitionResult result;
+                    try
+                    {
+                        result = await recognizer.RecognizeAsync();
+                    }
+                    catch (System.Runtime.InteropServices.COMException ex)
+                    {
+                        if (ex.HResult == unchecked((int)0x80045509))
+                            throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
+                        return null;
+                    }
+
+                    if (ct.IsCancellationRequested) return null;
+
+                    if (result?.Status == SpeechRecognitionResultStatus.Success)
+                        return result.Text;
+
                     return null;
-                }
-
-                using var reg = ct.Register(() => _ = CancelAsync());
-
-                SpeechRecognitionResult result;
-                try
-                {
-                    result = await recognizer.RecognizeAsync();
                 }
                 catch (System.Runtime.InteropServices.COMException ex)
                 {
@@ -141,17 +198,13 @@ namespace Anfeta.UI.Services
                 }
                 finally
                 {
-                    try { recognizer.Dispose(); } catch { }
+                    try { recognizer?.Dispose(); } catch { }
                     if (ReferenceEquals(_activeRecognizer, recognizer))
                         _activeRecognizer = null;
+
+                    // Restaurar dispositivo original
+                    RestoreDefaultDevice();
                 }
-
-                if (ct.IsCancellationRequested) return null;
-
-                if (result?.Status == SpeechRecognitionResultStatus.Success)
-                    return result.Text;
-
-                return null;
             }
             finally
             {

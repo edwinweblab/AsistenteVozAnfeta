@@ -58,4 +58,5 @@ namespace Anfeta.UI.ViewModels
 
         public void Dispose() => _audioService?.Dispose();
     }
+
 }

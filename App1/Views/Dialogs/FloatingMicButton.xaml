@@ -1,0 +1,78 @@
+﻿<Window
+    x:Class="Anfeta.UI.Views.Dialogs.FloatingMicButton"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="RootGrid" Background="Transparent" 
+          PointerEntered="RootGrid_PointerEntered" 
+          PointerExited="RootGrid_PointerExited">
+
+        <Grid.ContextFlyout>
+            <MenuFlyout>
+                <MenuFlyoutItem Text="Abrir Anfeta" Click="OpenApp_Click">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE8A7;"/>
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator/>
+                <MenuFlyoutItem Text="Cerrar Anfeta" Click="Exit_Click">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE711;"/>
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+            </MenuFlyout>
+        </Grid.ContextFlyout>
+
+        <Border x:Name="CompactView" Width="55" Height="55" CornerRadius="28" 
+                Background="#DD1E3A5F" BorderBrush="#60FFFFFF" BorderThickness="1.5"
+                PointerPressed="CompactView_Click">
+            <Grid>
+                <Ellipse x:Name="PulseRing" Fill="#FF8000" Opacity="0" 
+                         RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <ScaleTransform x:Name="PulseScale" ScaleX="0.5" ScaleY="0.5"/>
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <FontIcon Glyph="&#xE720;" FontSize="22" Foreground="#FF8000"/>
+                <Ellipse x:Name="StatusDot" Width="10" Height="10" 
+                         HorizontalAlignment="Right" VerticalAlignment="Top" 
+                         Fill="#34D399" Margin="0,4,4,0"/>
+            </Grid>
+        </Border>
+
+        <Border x:Name="ExpandedView" Width="180" Height="55" CornerRadius="32" 
+                Background="#DD1E3A5F" BorderBrush="#60FFFFFF" BorderThickness="1.5"
+                Visibility="Collapsed" Padding="8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="48"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" CornerRadius="24" 
+                        PointerPressed="MicButton_Click">
+                    <Grid>
+                        <Ellipse Fill="#FF8000" Opacity="0.15"/>
+                        <FontIcon Glyph="&#xE720;" FontSize="20" Foreground="#FF8000"/>
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,8,0">
+                    <TextBlock x:Name="StatusText" Text="Listo" FontSize="12" 
+                               FontWeight="SemiBold" Foreground="White"/>
+                    <TextBlock x:Name="HotkeyDisplay" Text="Ctrl + Alt + V" 
+                               FontSize="9" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                </StackPanel>
+
+                <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" 
+                        Width="32" Height="32" CornerRadius="16" Background="Transparent"
+                        Margin="0,0,8,0" PointerPressed="ExpandedView_PointerPressed">
+                    <FontIcon Glyph="&#xE8A7;" FontSize="14" Foreground="#94A3B8"/>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

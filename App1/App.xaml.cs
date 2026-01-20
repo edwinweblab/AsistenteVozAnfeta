@@ -1,9 +1,11 @@
 ﻿using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.ViewModels;
+using Anfeta.UI.Views.Dialogs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
@@ -17,6 +19,7 @@ namespace Anfeta.UI
     {
         private Window? _window;
         private GlobalHotkeyService? _hotkey;
+        private FloatingMicButton? _floatingButton;
 
         public static Window? MainWindowInstance { get; private set; }
         public static IHost AppHost { get; private set; } = null!;
@@ -30,40 +33,23 @@ namespace Anfeta.UI
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
-                    // Estado global (Single Source of Truth)
                     services.AddSingleton<AppStateService>();
-
-                    // Configuración persistente
                     services.AddSingleton<SettingsService>();
-
-                    // Audio
                     services.AddSingleton<AudioService>();
-
-                    // STT
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
-
-                    // TTS
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
-
-                    // Hotkey global
                     services.AddSingleton<GlobalHotkeyService>();
-
-                    // HTTP base para Ollama
                     services.AddSingleton(new HttpClient
                     {
                         BaseAddress = new Uri(OllamaConfig.BaseUrl),
                         Timeout = TimeSpan.FromMinutes(3)
                     });
-
                     services.AddSingleton<IOllamaHealthService, OllamaHealthService>();
-
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
                         var http = sp.GetRequiredService<HttpClient>();
                         return new OllamaInterpretationService(http, OllamaConfig.ModelName);
                     });
-
-                    // VM singleton
                     services.AddSingleton<HomeViewModel>();
                 })
                 .Build();
@@ -82,49 +68,150 @@ namespace Anfeta.UI
             MainWindowInstance = _window;
             UIQueue = DispatcherQueue.GetForCurrentThread();
 
-            // Fuerza creación del VM (arranca warmup)
             _ = HomeVM;
             _ = CheckAndWarmupOllamaAsync();
 
-            // Iniciar hotkey global
             _hotkey = AppHost.Services.GetRequiredService<GlobalHotkeyService>();
             _hotkey.Start();
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
             _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
 
+            ((MainWindow)_window).SizeChanged += Window_SizeChanged;
+
+            HomeVM.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(HomeViewModel.IsListening))
+                    _floatingButton?.SetListeningState(HomeVM.IsListening);
+            };
+
             _window.Activate();
+        }
+
+        private void Window_SizeChanged(object sender, WindowSizeChangedEventArgs e)
+        {
+            var appWindow = AppWindow.GetFromWindowId(
+                Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
+                    WinRT.Interop.WindowNative.GetWindowHandle(_window)
+                )
+            );
+
+            if (appWindow?.Presenter is OverlappedPresenter presenter)
+            {
+                if (presenter.State == OverlappedPresenterState.Minimized)
+                    ShowFloatingButton();
+                else
+                    HideFloatingButton();
+            }
         }
 
         private void Hotkey_HotkeyPressed(object? sender, EventArgs e)
         {
-            Debug.WriteLine("[HOTKEY] Detectado -> UI thread");
+            Debug.WriteLine("[HOTKEY] Detectado -> mostrar flotante + UI thread");
+            ShowFloatingButton();
 
             UIQueue?.TryEnqueue(async () =>
             {
+                BringMainWindowToFront();
+                await HomeVM.TriggerVoiceFromHotkeyAsync();
+            });
+        }
+
+        private void ShowFloatingButton()
+        {
+            UIQueue?.TryEnqueue(() =>
+            {
+                if (_floatingButton == null)
+                {
+                    _floatingButton = new FloatingMicButton();
+                    _floatingButton.OpenAppRequested += (s, e) => BringMainWindowToFront();
+                    _floatingButton.ExitRequested += (s, e) => CleanupAndExit();
+                    _floatingButton.VoiceActivationRequested += async (s, e) =>
+                    {
+                        await HomeVM.ListenOnceCommand.ExecuteAsync(null);
+                    };
+
+                    var appState = AppHost.Services.GetRequiredService<AppStateService>();
+                    _floatingButton.UpdateHotkeyDisplay(appState.GetHotkeyDisplayString());
+                }
+                _floatingButton.Activate();
+            });
+        }
+
+        private void HideFloatingButton()
+        {
+            UIQueue?.TryEnqueue(() =>
+            {
                 try
                 {
-                    // Restaurar ventana si está minimizada
-                    if (_window != null)
+                    if (_floatingButton != null)
                     {
-                        var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(
-                            Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
-                                WinRT.Interop.WindowNative.GetWindowHandle(_window)
-                            )
-                        );
-
-                        if (appWindow != null)
-                        {
-                            appWindow.Show(true); // Traer al frente
-                        }
+                        _floatingButton.Close();
+                        _floatingButton = null;
                     }
-
-                    await HomeVM.TriggerVoiceFromHotkeyAsync();
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("[HOTKEY] ERROR: " + ex);
+                    Debug.WriteLine($"[APP] Error ocultando flotante: {ex.Message}");
                 }
             });
+        }
+
+        private void BringMainWindowToFront()
+        {
+            if (_window != null)
+            {
+                var appWindow = AppWindow.GetFromWindowId(
+                    Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
+                        WinRT.Interop.WindowNative.GetWindowHandle(_window)
+                    )
+                );
+                appWindow?.Show(true);
+            }
+        }
+
+        private void CleanupAndExit()
+        {
+            Debug.WriteLine("[APP] Iniciando cierre limpio...");
+
+            try
+            {
+                // 1. Detener hotkey primero
+                _hotkey?.Stop();
+                _hotkey?.Dispose();
+                _hotkey = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error deteniendo hotkey: {ex.Message}");
+            }
+
+            try
+            {
+                // 2. Cerrar ventana flotante
+                if (_floatingButton != null)
+                {
+                    _floatingButton.Close();
+                    _floatingButton = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error cerrando flotante: {ex.Message}");
+            }
+
+            try
+            {
+                // 3. Cerrar ventana principal
+                _window?.Close();
+                _window = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error cerrando ventana: {ex.Message}");
+            }
+
+            // 4. Salir
+            Environment.Exit(0);
         }
 
         private void Hotkey_RegistrationFailed(object? sender, string message)
@@ -138,7 +225,6 @@ namespace Anfeta.UI
                     CloseButtonText = "Entendido",
                     XamlRoot = _window?.Content?.XamlRoot
                 };
-
                 await dialog.ShowAsync();
             });
         }

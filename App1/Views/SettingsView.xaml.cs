@@ -29,13 +29,11 @@ namespace Anfeta.UI.Views
             _settingsService = App.AppHost.Services.GetRequiredService<SettingsService>();
             _appState = App.AppHost.Services.GetRequiredService<AppStateService>();
 
-            // Bindear AppStateService al DataContext para mostrar InputDeviceName/OutputDeviceName
             DataContext = _appState;
 
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _statusTimer.Tick += (s, e) => { InfoStatus.IsOpen = false; _statusTimer.Stop(); };
 
-            // Actualizar display de hotkey
             TxtHotkeyDisplay.Text = _appState.GetHotkeyDisplayString();
             _appState.PropertyChanged += (s, e) =>
             {
@@ -46,11 +44,16 @@ namespace Anfeta.UI.Views
                 }
             };
 
-            // Lazy load: cargar devices cuando ComboBox reciba foco
-            CbInputDevice.GotFocus += (s, e) => { if (!_devicesLoaded) _ = LoadDevicesAsync(); };
-            CbOutputDevice.GotFocus += (s, e) => { if (!_devicesLoaded) _ = LoadDevicesAsync(); };
+            TxtCurrentInput.Text = $"Entrada: {_appState.InputDeviceName}";
+            TxtCurrentOutput.Text = $"Salida: {_appState.OutputDeviceName}";
 
+            Loaded += Page_Loaded;  // Cargar devices cada vez que se abre
             Unloaded += OnUnloaded;
+        }
+
+        private async void Page_Loaded(object sender, RoutedEventArgs e)
+        {
+            await LoadDevicesAsync();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -62,8 +65,9 @@ namespace Anfeta.UI.Views
         // Lazy load devices
         private async Task LoadDevicesAsync()
         {
-            if (_devicesLoaded) return;
-            _devicesLoaded = true;
+            // Desuscribir eventos temporalmente
+            CbInputDevice.SelectionChanged -= CbInputDevice_SelectionChanged;
+            CbOutputDevice.SelectionChanged -= CbOutputDevice_SelectionChanged;
 
             await Task.Run(() =>
             {
@@ -80,15 +84,11 @@ namespace Anfeta.UI.Views
                     foreach (var device in _outputDevices)
                         CbOutputDevice.Items.Add(device.DeviceName);
 
-                    // Restaurar selección desde AppStateService
+                    // Restaurar selección
                     if (_appState.InputDeviceId.HasValue)
                     {
                         int idx = _inputDevices.FindIndex(d => d.NAudioId == _appState.InputDeviceId.Value);
                         if (idx >= 0) CbInputDevice.SelectedIndex = idx;
-                    }
-                    else if (_inputDevices.Count > 0)
-                    {
-                        CbInputDevice.SelectedIndex = 0;
                     }
 
                     if (_appState.OutputDeviceId.HasValue)
@@ -96,12 +96,13 @@ namespace Anfeta.UI.Views
                         int idx = _outputDevices.FindIndex(d => d.NAudioId == _appState.OutputDeviceId.Value);
                         if (idx >= 0) CbOutputDevice.SelectedIndex = idx;
                     }
-                    else if (_outputDevices.Count > 0)
-                    {
-                        CbOutputDevice.SelectedIndex = 0;
-                    }
+
                     TxtCurrentInput.Text = $"Entrada: {_appState.InputDeviceName}";
                     TxtCurrentOutput.Text = $"Salida: {_appState.OutputDeviceName}";
+
+                    // Re-suscribir eventos
+                    CbInputDevice.SelectionChanged += CbInputDevice_SelectionChanged;
+                    CbOutputDevice.SelectionChanged += CbOutputDevice_SelectionChanged;
                 });
             });
         }
@@ -119,7 +120,8 @@ namespace Anfeta.UI.Views
                 await capture.InitializeAsync(settings);
                 capture.Dispose();
 
-                _settingsService.SaveInputDevice(device.NAudioId);
+                _settingsService.SaveInputDevice(device.NAudioId, device.DeviceName);
+                TxtCurrentInput.Text = $"Entrada: {device.DeviceName}";
                 ShowStatus("Micrófono configurado", InfoBarSeverity.Success);
             }
             catch
@@ -133,7 +135,8 @@ namespace Anfeta.UI.Views
             if (CbOutputDevice.SelectedIndex < 0 || _outputDevices == null) return;
 
             var device = _outputDevices[CbOutputDevice.SelectedIndex];
-            _settingsService.SaveOutputDevice(device.NAudioId);
+            _settingsService.SaveOutputDevice(device.NAudioId, device.DeviceName);
+            TxtCurrentOutput.Text = $"Salida: {device.DeviceName}";
             ShowStatus("Altavoces configurados", InfoBarSeverity.Success);
         }
 
