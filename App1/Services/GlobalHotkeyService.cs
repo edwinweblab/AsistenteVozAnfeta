@@ -6,14 +6,10 @@ namespace Anfeta.UI.Services
 {
     public sealed class GlobalHotkeyService : IDisposable
     {
-        // Win32
         private const int WM_HOTKEY = 0x0312;
-
-        private const uint MOD_ALT = 0x0001;
-        private const uint MOD_CONTROL = 0x0002;
-
         private const int HOTKEY_ID = 9001;
 
+        private readonly AppStateService _appState;
         private IntPtr _hwnd = IntPtr.Zero;
         private bool _registered;
         private WndProcDelegate? _wndProc;
@@ -21,17 +17,32 @@ namespace Anfeta.UI.Services
 
         public event EventHandler? HotkeyPressed;
 
+        public GlobalHotkeyService(AppStateService appState)
+        {
+            _appState = appState;
+            _appState.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(AppStateService.HotkeyModifiers) ||
+                    e.PropertyName == nameof(AppStateService.HotkeyKey))
+                {
+                    UpdateHotkey();
+                }
+            };
+        }
+
         public void Start()
         {
-            if (_hwnd != IntPtr.Zero)
-                return;
-
+            if (_hwnd != IntPtr.Zero) return;
             CreateMessageWindow();
+            RegisterCurrentHotkey();
+        }
 
-            // Ctrl + Alt + V
-            // VK_V = 0x56
-            _registered = RegisterHotKey(_hwnd, HOTKEY_ID, MOD_CONTROL | MOD_ALT, 0x56);
-            Debug.WriteLine($"[HOTKEY] RegisterHotKey Ctrl+Alt+V => {_registered}");
+        private void RegisterCurrentHotkey()
+        {
+            if (_hwnd == IntPtr.Zero) return;
+
+            _registered = RegisterHotKey(_hwnd, HOTKEY_ID, _appState.HotkeyModifiers, _appState.HotkeyKey);
+            Debug.WriteLine($"[HOTKEY] Registrado: Mods={_appState.HotkeyModifiers} Key={_appState.HotkeyKey} => {_registered}");
 
             if (!_registered)
             {
@@ -40,16 +51,27 @@ namespace Anfeta.UI.Services
             }
         }
 
-        public void Stop()
+        private void UpdateHotkey()
         {
-            if (_hwnd == IntPtr.Zero)
-                return;
+            if (_hwnd == IntPtr.Zero) return;
 
             if (_registered)
             {
                 UnregisterHotKey(_hwnd, HOTKEY_ID);
                 _registered = false;
-                Debug.WriteLine("[HOTKEY] UnregisterHotKey OK");
+            }
+
+            RegisterCurrentHotkey();
+        }
+
+        public void Stop()
+        {
+            if (_hwnd == IntPtr.Zero) return;
+
+            if (_registered)
+            {
+                UnregisterHotKey(_hwnd, HOTKEY_ID);
+                _registered = false;
             }
 
             DestroyMessageWindow();
@@ -74,30 +96,19 @@ namespace Anfeta.UI.Services
             if (atom == 0)
             {
                 var err = Marshal.GetLastWin32Error();
-                // Si ya existe la clase, RegisterClassEx puede fallar. Igual podemos intentar CreateWindowEx.
-                Debug.WriteLine($"[HOTKEY] RegisterClassEx atom=0 err={err} (puede ser OK si ya existe)");
+                Debug.WriteLine($"[HOTKEY] RegisterClassEx atom=0 err={err}");
             }
 
-            // HWND_MESSAGE = -3 => ventana solo para mensajes (no visible)
             IntPtr HWND_MESSAGE = new IntPtr(-3);
 
-            _hwnd = CreateWindowEx(
-                0,
-                "AnfetaHotkeyMsgWindow",
-                "AnfetaHotkeyMsgWindow",
-                0,
-                0, 0, 0, 0,
-                HWND_MESSAGE,
-                IntPtr.Zero,
-                hInstance,
-                IntPtr.Zero
-            );
+            _hwnd = CreateWindowEx(0, "AnfetaHotkeyMsgWindow", "AnfetaHotkeyMsgWindow",
+                0, 0, 0, 0, 0, HWND_MESSAGE, IntPtr.Zero, hInstance, IntPtr.Zero);
 
             if (_hwnd == IntPtr.Zero)
             {
                 var err = Marshal.GetLastWin32Error();
                 Debug.WriteLine($"[HOTKEY] ERROR CreateWindowEx. Win32Error={err}");
-                throw new InvalidOperationException("No se pudo crear la ventana oculta para el hotkey.");
+                throw new InvalidOperationException("No se pudo crear ventana hotkey.");
             }
 
             Debug.WriteLine("[HOTKEY] Message-only window creada OK");
@@ -109,7 +120,6 @@ namespace Anfeta.UI.Services
             {
                 DestroyWindow(_hwnd);
                 _hwnd = IntPtr.Zero;
-                Debug.WriteLine("[HOTKEY] Message-only window destruida");
             }
 
             if (_wndProcHandle.IsAllocated)
@@ -120,28 +130,20 @@ namespace Anfeta.UI.Services
 
         private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
         {
-            if (msg == WM_HOTKEY)
+            if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
             {
-                int id = wParam.ToInt32();
-                if (id == HOTKEY_ID)
-                {
-                    Debug.WriteLine("[HOTKEY] Ctrl+Alt+V detectado");
-                    HotkeyPressed?.Invoke(this, EventArgs.Empty);
-                }
+                Debug.WriteLine("[HOTKEY] Detectado");
+                HotkeyPressed?.Invoke(this, EventArgs.Empty);
             }
 
             return DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
-        public void Dispose()
-        {
-            Stop();
-        }
+        public void Dispose() => Stop();
 
-        // Delegado WndProc
+        // P/Invoke (igual que antes)
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-        // P/Invoke
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
@@ -152,19 +154,9 @@ namespace Anfeta.UI.Services
         private static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
 
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr CreateWindowEx(
-            int dwExStyle,
-            string lpClassName,
-            string lpWindowName,
-            int dwStyle,
-            int x,
-            int y,
-            int nWidth,
-            int nHeight,
-            IntPtr hWndParent,
-            IntPtr hMenu,
-            IntPtr hInstance,
-            IntPtr lpParam);
+        private static extern IntPtr CreateWindowEx(int dwExStyle, string lpClassName, string lpWindowName,
+            int dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu,
+            IntPtr hInstance, IntPtr lpParam);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyWindow(IntPtr hWnd);

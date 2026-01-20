@@ -1,58 +1,31 @@
 ﻿// ViewModels/SettingsViewModel.cs
 using Anfeta.UI.Models;
 using Anfeta.UI.Services;
-using NAudio.CoreAudioApi;
 using System;
 using System.Collections.ObjectModel;
-using System.Linq;
 using System.Threading.Tasks;
-using Windows.Storage;
 
 namespace Anfeta.UI.ViewModels
 {
-    /// <summary>Gestiona configuración de audio</summary>
     public class SettingsViewModel : IDisposable
     {
         private readonly AudioService _audioService;
-        private readonly ApplicationDataContainer _settings;
+        private readonly SettingsService _settingsService;
+        private readonly AppStateService _appState;
 
         public ObservableCollection<AudioDeviceInfo> InputDevices { get; }
         public ObservableCollection<AudioDeviceInfo> OutputDevices { get; }
 
-        private AudioDeviceInfo _selectedInputDevice;
-        public AudioDeviceInfo SelectedInputDevice
+        public SettingsViewModel(AudioService audioService, SettingsService settingsService, AppStateService appState)
         {
-            get => _selectedInputDevice;
-            set
-            {
-                _selectedInputDevice = value;
-                if (value != null) UseSystemDefaultInput = false;
-            }
-        }
+            _audioService = audioService;
+            _settingsService = settingsService;
+            _appState = appState;
 
-        private AudioDeviceInfo _selectedOutputDevice;
-        public AudioDeviceInfo SelectedOutputDevice
-        {
-            get => _selectedOutputDevice;
-            set
-            {
-                _selectedOutputDevice = value;
-                if (value != null) UseSystemDefaultOutput = false;
-            }
-        }
-
-        public bool UseSystemDefaultInput { get; set; }
-        public bool UseSystemDefaultOutput { get; set; }
-
-        public SettingsViewModel()
-        {
-            _audioService = new AudioService();
-            _settings = ApplicationData.Current.LocalSettings;
             InputDevices = new ObservableCollection<AudioDeviceInfo>();
             OutputDevices = new ObservableCollection<AudioDeviceInfo>();
         }
 
-        /// <summary>Carga dispositivos async para no bloquear UI</summary>
         public async Task LoadDevicesAsync()
         {
             await Task.Run(() =>
@@ -60,60 +33,29 @@ namespace Anfeta.UI.ViewModels
                 var inputs = _audioService.GetInputDevices();
                 var outputs = _audioService.GetOutputDevices();
 
-                // Volver a UI thread
-                Windows.ApplicationModel.Core.CoreApplication.MainView.CoreWindow.Dispatcher.RunAsync(
-                    Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
-                    {
-                        InputDevices.Clear();
-                        foreach (var device in inputs) InputDevices.Add(device);
+                App.UIQueue?.TryEnqueue(() =>
+                {
+                    InputDevices.Clear();
+                    foreach (var device in inputs) InputDevices.Add(device);
 
-                        OutputDevices.Clear();
-                        foreach (var device in outputs) OutputDevices.Add(device);
-
-                        LoadSavedSettings();
-                    });
+                    OutputDevices.Clear();
+                    foreach (var device in outputs) OutputDevices.Add(device);
+                });
             });
         }
 
-        private void LoadSavedSettings()
+        public async Task TestMicAsync(int deviceId, Action<float> callback)
         {
-            UseSystemDefaultInput = _settings.Values.ContainsKey("UseSystemDefaultInput")
-                && (bool)_settings.Values["UseSystemDefaultInput"];
-
-            UseSystemDefaultOutput = _settings.Values.ContainsKey("UseSystemDefaultOutput")
-                && (bool)_settings.Values["UseSystemDefaultOutput"];
-
-            if (!UseSystemDefaultInput && _settings.Values.ContainsKey("InputCoreAudioId"))
-            {
-                var id = _settings.Values["InputCoreAudioId"].ToString();
-                SelectedInputDevice = InputDevices.FirstOrDefault(d => d.CoreAudioId == id);
-            }
-
-            if (!UseSystemDefaultOutput && _settings.Values.ContainsKey("OutputCoreAudioId"))
-            {
-                var id = _settings.Values["OutputCoreAudioId"].ToString();
-                SelectedOutputDevice = OutputDevices.FirstOrDefault(d => d.CoreAudioId == id);
-            }
-        }
-
-        public async Task TestMicrophoneAsync(Action<float> levelCallback)
-        {
-            if (SelectedInputDevice == null) return;
-
-            _audioService.StartMicTest(SelectedInputDevice.NAudioId, levelCallback);
-            await Task.Delay(5000);
+            _audioService.StartMicTest(deviceId, callback);
+            await Task.Delay(3000);
             _audioService.StopMicTest();
         }
 
-        public async Task TestSpeakerAsync()
+        public async Task TestSpeakerAsync(int deviceId)
         {
-            if (SelectedOutputDevice == null) return;
-            await _audioService.PlayTestSound(SelectedOutputDevice.NAudioId);
+            await _audioService.PlayTestSound(deviceId);
         }
 
-        public void Dispose()
-        {
-            _audioService?.Dispose();
-        }
+        public void Dispose() => _audioService?.Dispose();
     }
 }

@@ -10,8 +10,8 @@ namespace Anfeta.UI.Services
     public class AudioService : IDisposable
     {
         private readonly MMDeviceEnumerator _enumerator;
-        private WaveInEvent _waveIn;
-        private WaveOutEvent _waveOut;
+        private WaveInEvent? _waveIn;
+        private WaveOutEvent? _waveOut;
 
         public AudioService()
         {

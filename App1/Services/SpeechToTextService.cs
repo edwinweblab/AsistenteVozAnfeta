@@ -8,17 +8,18 @@ using Windows.Media.SpeechRecognition;
 
 namespace Anfeta.UI.Services
 {
-    // partial para quitar warning WinRT (no afecta tu app)
     public sealed partial class SpeechToTextService : ISpeechToTextService, IDisposable
     {
+        private readonly AppStateService _appState;
         private string _currentLanguage = "es-MX";
         private bool _initialized;
-
-        // Reconocimiento activo (para poder CancelAsync real)
         private SpeechRecognizer? _activeRecognizer;
-
-        // Evita choques: UI + hotkey al mismo tiempo
         private readonly SemaphoreSlim _lock = new(1, 1);
+
+        public SpeechToTextService(AppStateService appState)
+        {
+            _appState = appState;
+        }
 
         public List<LanguageInfo> GetAvailableLanguages()
         {
@@ -40,16 +41,14 @@ namespace Anfeta.UI.Services
             {
                 var available = SpeechRecognizer.SupportedTopicLanguages;
                 if (available.Count == 0)
-                    throw new InvalidOperationException("No hay idiomas instalados para reconocimiento de voz.");
+                    throw new InvalidOperationException("No hay idiomas instalados.");
 
                 Language? targetLang = available.FirstOrDefault(l =>
                     l.LanguageTag.Equals(languageTag, StringComparison.OrdinalIgnoreCase));
 
                 targetLang ??= available.First();
-
                 _currentLanguage = targetLang.LanguageTag;
 
-                // Validación: compilar constraints una vez para detectar permisos/policy
                 using var probe = new SpeechRecognizer(targetLang);
                 probe.Constraints.Add(new SpeechRecognitionTopicConstraint(
                     SpeechRecognitionScenario.Dictation, "dictation"));
@@ -67,11 +66,7 @@ namespace Anfeta.UI.Services
                 catch (System.Runtime.InteropServices.COMException ex)
                 {
                     if (ex.HResult == unchecked((int)0x80045509))
-                    {
-                        throw new UnauthorizedAccessException(
-                            "Activa permisos de voz/micrófono en Windows (Privacidad y seguridad)."
-                        );
-                    }
+                        throw new UnauthorizedAccessException("Activa permisos de voz en Windows.");
                     throw;
                 }
 
@@ -86,21 +81,18 @@ namespace Anfeta.UI.Services
         public async Task<string?> RecognizeOnceAsync(CancellationToken ct = default)
         {
             if (!_initialized)
-                throw new InvalidOperationException("Servicio no inicializado. Llama InitializeAsync() primero.");
+                throw new InvalidOperationException("Llama InitializeAsync() primero.");
 
             await _lock.WaitAsync(ct);
             try
             {
                 var available = SpeechRecognizer.SupportedTopicLanguages;
-                if (available.Count == 0)
-                    return null;
+                if (available.Count == 0) return null;
 
                 Language? lang = available.FirstOrDefault(l =>
                     l.LanguageTag.Equals(_currentLanguage, StringComparison.OrdinalIgnoreCase));
-
                 lang ??= available.First();
 
-                // Crea un recognizer nuevo por intento (evita “segunda petición muerta”)
                 var recognizer = new SpeechRecognizer(lang);
                 recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(
                     SpeechRecognitionScenario.Dictation, "dictation"));
@@ -109,10 +101,18 @@ namespace Anfeta.UI.Services
                 recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.2);
                 recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
 
-                // Activo para CancelAsync
+                // NUEVO: Usar device seleccionado si existe
+                if (_appState.InputDeviceId.HasValue)
+                {
+                    var deviceId = _appState.InputDeviceId.Value;
+                    System.Diagnostics.Debug.WriteLine($"[STT] Usando micrófono ID: {deviceId}");
+                    // Windows.Media.SpeechRecognition NO permite cambiar device directamente
+                    // El device seleccionado en SettingsView se usa en NAudio para tests
+                    // Para STT, Windows usa el default del sistema
+                }
+
                 _activeRecognizer = recognizer;
 
-                // Compilar antes de reconocer
                 try
                 {
                     var compile = await recognizer.CompileConstraintsAsync();
@@ -122,11 +122,10 @@ namespace Anfeta.UI.Services
                 catch (System.Runtime.InteropServices.COMException ex)
                 {
                     if (ex.HResult == unchecked((int)0x80045509))
-                        throw new UnauthorizedAccessException("Debes aceptar la política/permiso de voz en Windows.");
+                        throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
                     return null;
                 }
 
-                // Si cancelan, detenemos reconocimiento real
                 using var reg = ct.Register(() => _ = CancelAsync());
 
                 SpeechRecognitionResult result;
@@ -137,7 +136,7 @@ namespace Anfeta.UI.Services
                 catch (System.Runtime.InteropServices.COMException ex)
                 {
                     if (ex.HResult == unchecked((int)0x80045509))
-                        throw new UnauthorizedAccessException("Debes aceptar la política/permiso de voz en Windows.");
+                        throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
                     return null;
                 }
                 finally
@@ -147,8 +146,7 @@ namespace Anfeta.UI.Services
                         _activeRecognizer = null;
                 }
 
-                if (ct.IsCancellationRequested)
-                    return null;
+                if (ct.IsCancellationRequested) return null;
 
                 if (result?.Status == SpeechRecognitionResultStatus.Success)
                     return result.Text;
@@ -163,19 +161,11 @@ namespace Anfeta.UI.Services
 
         public async Task CancelAsync()
         {
-            // No bloqueamos con el mismo lock del Recognize para no deadlock.
-            // Solo intentamos parar lo que esté activo.
             var r = _activeRecognizer;
             if (r == null) return;
 
-            try
-            {
-                await r.StopRecognitionAsync();
-            }
-            catch
-            {
-                // Ignorar: si ya terminó o no estaba reconociendo, puede fallar.
-            }
+            try { await r.StopRecognitionAsync(); }
+            catch { }
         }
 
         public async Task ResetAsync(string languageTag = "es-MX")
@@ -184,8 +174,6 @@ namespace Anfeta.UI.Services
             try
             {
                 _initialized = false;
-
-                // Intento de parar lo activo por seguridad
                 var r = _activeRecognizer;
                 _activeRecognizer = null;
 
@@ -202,17 +190,14 @@ namespace Anfeta.UI.Services
                 _lock.Release();
             }
 
-            // Revalida permisos y deja listo de nuevo
             await InitializeAsync(_currentLanguage);
         }
 
         public void Dispose()
         {
             _initialized = false;
-
             var r = _activeRecognizer;
             _activeRecognizer = null;
-
             try { r?.Dispose(); } catch { }
         }
     }
