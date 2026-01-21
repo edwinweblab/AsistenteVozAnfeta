@@ -6,7 +6,9 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid x:Name="RootGrid" Background="Transparent" 
+    <Grid x:Name="RootGrid" 
+          Background="Transparent" 
+          Padding="7.5"
           PointerEntered="RootGrid_PointerEntered" 
           PointerExited="RootGrid_PointerExited">
 
@@ -26,8 +28,12 @@
             </MenuFlyout>
         </Grid.ContextFlyout>
 
-        <Border x:Name="CompactView" Width="55" Height="55" CornerRadius="28" 
-                Background="#DD1E3A5F" BorderBrush="#60FFFFFF" BorderThickness="1.5"
+        <!-- Vista compacta: 85x85 dentro de ventana 100x100 -->
+        <Border x:Name="CompactView" 
+                CornerRadius="6"
+                Background="#DD1E3A5F" 
+                BorderBrush="#60FFFFFF" 
+                BorderThickness="1.5"
                 PointerPressed="CompactView_Click">
             <Grid>
                 <Ellipse x:Name="PulseRing" Fill="#FF8000" Opacity="0" 
@@ -36,41 +42,51 @@
                         <ScaleTransform x:Name="PulseScale" ScaleX="0.5" ScaleY="0.5"/>
                     </Ellipse.RenderTransform>
                 </Ellipse>
-                <FontIcon Glyph="&#xE720;" FontSize="22" Foreground="#FF8000"/>
-                <Ellipse x:Name="StatusDot" Width="10" Height="10" 
+                <FontIcon Glyph="&#xE720;" FontSize="32" Foreground="#FF8000"/>
+                <Ellipse x:Name="StatusDot" Width="14" Height="14" 
                          HorizontalAlignment="Right" VerticalAlignment="Top" 
-                         Fill="#34D399" Margin="0,4,4,0"/>
+                         Fill="#34D399" Margin="0,8,8,0"/>
             </Grid>
         </Border>
 
-        <Border x:Name="ExpandedView" Width="180" Height="55" CornerRadius="32" 
-                Background="#DD1E3A5F" BorderBrush="#60FFFFFF" BorderThickness="1.5"
-                Visibility="Collapsed" Padding="8">
+        <!-- Vista expandida: 265x85 dentro de ventana 280x100 -->
+        <Border x:Name="ExpandedView" 
+                CornerRadius="6"
+                Background="#DD1E3A5F" 
+                BorderBrush="#60FFFFFF" 
+                BorderThickness="1.5"
+                Visibility="Collapsed" 
+                Padding="12">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="48"/>
+                    <ColumnDefinition Width="70"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0" CornerRadius="24" 
+                <Border Grid.Column="0" CornerRadius="4" 
                         PointerPressed="MicButton_Click">
                     <Grid>
-                        <Ellipse Fill="#FF8000" Opacity="0.15"/>
-                        <FontIcon Glyph="&#xE720;" FontSize="20" Foreground="#FF8000"/>
+                        <Rectangle Fill="#FF8000" Opacity="0.15" RadiusX="4" RadiusY="4"/>
+                        <FontIcon Glyph="&#xE720;" FontSize="32" Foreground="#FF8000"/>
                     </Grid>
                 </Border>
 
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,8,0">
-                    <TextBlock x:Name="StatusText" Text="Listo" FontSize="12" 
-                               FontWeight="SemiBold" Foreground="White"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0,12,0">
+                    <TextBlock x:Name="StatusText" Text="Listo" 
+                               FontSize="15" FontWeight="SemiBold" Foreground="White"/>
                     <TextBlock x:Name="HotkeyDisplay" Text="Ctrl + Alt + V" 
-                               FontSize="9" Foreground="#94A3B8" Margin="0,2,0,0"/>
+                               FontSize="11" Foreground="#94A3B8" Margin="0,4,0,0"/>
                 </StackPanel>
 
-                <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center" 
-                        Width="32" Height="32" CornerRadius="16" Background="Transparent"
-                        Margin="0,0,8,0" PointerPressed="ExpandedView_PointerPressed">
-                    <FontIcon Glyph="&#xE8A7;" FontSize="14" Foreground="#94A3B8"/>
+                <Border Grid.Column="1" 
+                    HorizontalAlignment="Right" 
+                    VerticalAlignment="Center" 
+                    Width="44" Height="44" 
+                    CornerRadius="4" 
+                    Background="Transparent"
+                    Margin="0,0,4,0" 
+                    PointerPressed="OpenAppButton_Click">
+                    <FontIcon Glyph="&#xE8A7;" FontSize="18" Foreground="#94A3B8"/>
                 </Border>
             </Grid>
         </Border>
