@@ -1,5 +1,6 @@
 ﻿using Anfeta.UI.Data;
 using Anfeta.UI.Services;
+using Anfeta.UI.Services.Auth;
 using Anfeta.UI.ViewModels;
 using Anfeta.UI.Views.Dialogs;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,23 +34,69 @@ namespace Anfeta.UI
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
+                    // =========================
+                    // Core app services
+                    // =========================
                     services.AddSingleton<AppStateService>();
                     services.AddSingleton<SettingsService>();
                     services.AddSingleton<AudioService>();
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
+
+                    // =========================
+                    // Ollama 
+                    // =========================
                     services.AddSingleton(new HttpClient
                     {
                         BaseAddress = new Uri(OllamaConfig.BaseUrl),
                         Timeout = TimeSpan.FromMinutes(3)
                     });
+
                     services.AddSingleton<IOllamaHealthService, OllamaHealthService>();
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
-                        var http = sp.GetRequiredService<HttpClient>();
+                        var http = sp.GetRequiredService<HttpClient>(); // <- ESTE ES EL DE OLLAMA
                         return new OllamaInterpretationService(http, OllamaConfig.ModelName);
                     });
+
+                    // =========================
+                    // Auth / Weblab (AGREGADO)
+                    // =========================
+                    services.AddSingleton<ITokenStore, LocalTokenStore>();
+                    services.AddSingleton<AuthStateService>();
+                    services.AddSingleton<ShellViewModel>();
+                    services.AddSingleton<LinkAccountViewModel>();
+
+                    // =========================
+                    // HttpClientFactory + Auth header 
+                    // =========================
+                    services.AddSingleton<AuthHeaderHandler>();
+
+                    services.AddHttpClient("WeblabAuthed", client =>
+                    {
+                        client.BaseAddress = new Uri("https://wlserver-production.up.railway.app");
+                        client.Timeout = TimeSpan.FromSeconds(30);
+                    })
+                    .AddHttpMessageHandler<AuthHeaderHandler>();
+
+                    // AuthClient 
+                    services.AddHttpClient<WeblabAuthClient>(client =>
+                    {
+                        client.BaseAddress = new Uri("https://wlserver-production.up.railway.app");
+                        client.Timeout = TimeSpan.FromSeconds(30);
+                    });
+
+                    // UsersClient 
+                    services.AddSingleton<WeblabUsersClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new WeblabUsersClient(factory.CreateClient("WeblabAuthed"));
+                    });
+
+                    // =========================
+                    // ViewModels
+                    // =========================
                     services.AddSingleton<HomeViewModel>();
                 })
                 .Build();
@@ -58,19 +105,44 @@ namespace Anfeta.UI
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
             Debug.WriteLine("APP INICIADA");
+
+            // 1) Crear/asegurar esquema SQLite
             DatabaseInitializer.InitializeDatabase();
 
 #if DEBUG
             TestDatabaseConnection();
 #endif
 
+            // 2) Crear ventana ANTES del bootstrap auth (evita carreras de UI)
             _window = new MainWindow();
             MainWindowInstance = _window;
             UIQueue = DispatcherQueue.GetForCurrentThread();
 
+            // 3) Mantener tu flujo actual
             _ = HomeVM;
             _ = CheckAndWarmupOllamaAsync();
 
+            // 4) Asegurar device activo (genera/lee de SQLite)
+            //    + Bootstrap auth (check-device) sin bloquear UI
+            try
+            {
+                var deviceId = DeviceRepository.EnsureActiveDevice();
+                Debug.WriteLine($"DEVICE OK: {deviceId}");
+
+#if DEBUG
+                DebugDumpDeviceRows();
+#endif
+                // Auto-login / check-device (no bloquea)
+                _ = BootstrapAuthAsync(deviceId);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"DEVICE ERROR: {ex.Message}");
+                Debug.WriteLine("Si el error menciona 'is_active', tu asistente.db es viejo. " +
+                                "Borra la BD (carpeta LocalFolder) para regenerarla con el esquema nuevo.");
+            }
+
+            // 5) Hotkey
             _hotkey = AppHost.Services.GetRequiredService<GlobalHotkeyService>();
             _hotkey.Start();
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
@@ -85,6 +157,45 @@ namespace Anfeta.UI
             };
 
             _window.Activate();
+        }
+        private async Task BootstrapAuthAsync(string deviceId)
+        {
+            try
+            {
+                var auth = AppHost.Services.GetRequiredService<AuthStateService>();
+                var authApi = AppHost.Services.GetRequiredService<WeblabAuthClient>();
+
+                // 1) Cargar token local si existe (LocalSettings)
+                await auth.InitializeAsync();
+
+                // 2) Fuente real: backend por deviceId
+                var check = await authApi.CheckDeviceAsync(deviceId);
+
+                if (check.Ok && !string.IsNullOrWhiteSpace(check.Token))
+                {
+                    await auth.SetSignedInAsync(check.Token!);
+                    Debug.WriteLine("AUTH: device vinculado -> token OK");
+                    return;
+                }
+
+                if (check.NeedsRegister)
+                {
+                    // Backend confirma que este device NO está registrado
+                    // -limpiar token local para evitar estado inconsistente
+                    await auth.SignOutAsync();
+                    Debug.WriteLine("AUTH: device NO registrado -> needsRegister");
+                    return;
+                }
+
+                // Si llegamos aquí, el backend devolvió algo inesperado o error:
+                // NO borres el token local (puede ser offline / fallo temporal)
+                Debug.WriteLine($"AUTH: check-device error/inesperado -> {check.RawError}");
+            }
+            catch (Exception ex)
+            {
+                // NO borres el token local aquí tampoco (offline / timeout)
+                Debug.WriteLine("AUTH BOOTSTRAP ERROR: " + ex.Message);
+            }
         }
 
         private void Window_SizeChanged(object sender, WindowSizeChangedEventArgs e)
@@ -175,7 +286,6 @@ namespace Anfeta.UI
 
             try
             {
-                // 1. Detener hotkey primero
                 _hotkey?.Stop();
                 _hotkey?.Dispose();
                 _hotkey = null;
@@ -187,7 +297,6 @@ namespace Anfeta.UI
 
             try
             {
-                // 2. Cerrar ventana flotante
                 if (_floatingButton != null)
                 {
                     _floatingButton.Close();
@@ -201,7 +310,6 @@ namespace Anfeta.UI
 
             try
             {
-                // 3. Cerrar ventana principal
                 _window?.Close();
                 _window = null;
             }
@@ -210,7 +318,6 @@ namespace Anfeta.UI
                 Debug.WriteLine($"[APP] Error cerrando ventana: {ex.Message}");
             }
 
-            // 4. Salir
             Environment.Exit(0);
         }
 
@@ -275,5 +382,37 @@ namespace Anfeta.UI
                 Debug.WriteLine("SQLITE ERROR: " + ex.Message);
             }
         }
+
+#if DEBUG
+        private void DebugDumpDeviceRows()
+        {
+            try
+            {
+                using var connection = DbConnectionFactory.Create();
+                connection.Open();
+
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT device_id, is_active, last_seen_at
+                    FROM device
+                    ORDER BY id DESC
+                    LIMIT 5;
+                ";
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    var id = reader.IsDBNull(0) ? "" : reader.GetString(0);
+                    var active = reader.IsDBNull(1) ? -1 : reader.GetInt32(1);
+                    var seen = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                    Debug.WriteLine($"DEVICE ROW -> id={id} active={active} seen={seen}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("DEVICE DUMP ERROR: " + ex.Message);
+            }
+        }
+#endif
     }
 }
