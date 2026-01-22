@@ -100,7 +100,7 @@ namespace Anfeta.UI.Services
                     System.Diagnostics.Debug.WriteLine($"[STT] Cambiando a device: {target.FriendlyName}");
 
                     var policyConfig = new PolicyConfigClient();
-                    policyConfig.SetDefaultEndpoint(target.ID, 2); // 2 = Communications
+                    policyConfig.SetDefaultEndpoint(target.ID, 2); 
                 }
             }
             catch (Exception ex)
