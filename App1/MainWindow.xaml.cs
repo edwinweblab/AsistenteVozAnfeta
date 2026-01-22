@@ -65,7 +65,8 @@ namespace Anfeta.UI
 
         private void MainWindow_Closed(object sender, WindowEventArgs args)
         {
-            Debug.WriteLine("MAINWINDOW: Closed (sin segundo plano)");
+            Debug.WriteLine("MAINWINDOW: Closed");
+            ((App)Application.Current).CleanupAndExit();
         }
     }
 }

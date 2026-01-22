@@ -21,6 +21,7 @@ namespace Anfeta.UI
         private Window? _window;
         private GlobalHotkeyService? _hotkey;
         private FloatingMicButton? _floatingButton;
+        private bool _isShuttingDown = false;
 
         public static Window? MainWindowInstance { get; private set; }
         public static IHost AppHost { get; private set; } = null!;
@@ -280,9 +281,13 @@ namespace Anfeta.UI
             }
         }
 
-        private void CleanupAndExit()
+        /// <summary>Limpia componentes sin cerrar ventana (llamado por MainWindow_Closed)</summary>
+        public void CleanupComponents()
         {
-            Debug.WriteLine("[APP] Iniciando cierre limpio...");
+            if (_isShuttingDown) return;
+            _isShuttingDown = true;
+
+            Debug.WriteLine("[APP] Limpiando componentes...");
 
             try
             {
@@ -292,7 +297,7 @@ namespace Anfeta.UI
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[APP] Error deteniendo hotkey: {ex.Message}");
+                Debug.WriteLine($"[APP] Error hotkey: {ex.Message}");
             }
 
             try
@@ -305,7 +310,42 @@ namespace Anfeta.UI
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[APP] Error cerrando flotante: {ex.Message}");
+                Debug.WriteLine($"[APP] Error flotante: {ex.Message}");
+            }
+
+            Application.Current.Exit();
+        }
+
+        /// <summary>Cierre completo (llamado por FloatingMicButton.ExitRequested)</summary>
+        public void CleanupAndExit()
+        {
+            if (_isShuttingDown) return;
+            _isShuttingDown = true;
+
+            Debug.WriteLine("[APP] Cierre completo...");
+
+            try
+            {
+                _hotkey?.Stop();
+                _hotkey?.Dispose();
+                _hotkey = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error hotkey: {ex.Message}");
+            }
+
+            try
+            {
+                if (_floatingButton != null)
+                {
+                    _floatingButton.Close();
+                    _floatingButton = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error flotante: {ex.Message}");
             }
 
             try
@@ -315,7 +355,7 @@ namespace Anfeta.UI
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[APP] Error cerrando ventana: {ex.Message}");
+                Debug.WriteLine($"[APP] Error ventana: {ex.Message}");
             }
 
             Environment.Exit(0);
