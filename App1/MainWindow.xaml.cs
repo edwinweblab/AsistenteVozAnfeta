@@ -6,15 +6,30 @@ using System.Diagnostics;
 using Anfeta.UI.Views;
 using Anfeta.UI.FunctionTests;
 
+using Anfeta.UI.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace Anfeta.UI
 {
     public sealed partial class MainWindow : Window
     {
+        private readonly ShellViewModel _shell;
+
         public MainWindow()
         {
             InitializeComponent();
 
-            // Arrancar en Home
+            _shell = App.AppHost.Services.GetRequiredService<ShellViewModel>();
+
+            // WinUI 3: Window no tiene DataContext -> asigna al root visual
+            Root.DataContext = _shell;
+
+            _shell.RequestOpenLinkAccount += () =>
+            {
+                if (ContentFrame?.CurrentSourcePageType != typeof(LinkAccountView))
+                    ContentFrame?.Navigate(typeof(LinkAccountView));
+            };
+
             if (ContentFrame != null)
                 ContentFrame.Navigate(typeof(HomeView));
 
@@ -38,7 +53,7 @@ namespace Anfeta.UI
             {
                 "Home" => typeof(HomeView),
                 "Commands" => typeof(CommandsView),
-                "Search"=> typeof(SearchView),
+                "Search" => typeof(SearchView),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
                 _ => typeof(HomeView)
