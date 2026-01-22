@@ -32,6 +32,7 @@
     <SolidColorBrush x:Key="AnfetaWarningBrush" Color="{StaticResource AnfetaWarningColor}"/>
     <SolidColorBrush x:Key="AnfetaErrorBrush" Color="{StaticResource AnfetaErrorColor}"/>
     <SolidColorBrush x:Key="AnfetaInfoBrush" Color="{StaticResource AnfetaInfoColor}"/>
+    <SolidColorBrush x:Key="BgGradient" Color="#111111"/>
 
     <!-- ========== TIPOGRAFÍA ========== -->
     <FontFamily x:Key="PrimaryFontFamily">Segoe UI</FontFamily>

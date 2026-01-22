@@ -1,32 +1,29 @@
-﻿// ===============================
-// App.xaml.cs (COMPLETO)
-// - DI ya existente
-// - Expone HomeVM global para hotkey (funciona en cualquier pantalla)
-// - Fuerza creación del HomeViewModel al iniciar para que warmup arranque
-// ===============================
-
-using Anfeta.UI.Data;
+﻿using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.ViewModels;
+using Anfeta.UI.Views.Dialogs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Threading.Tasks;
-
 
 namespace Anfeta.UI
 {
     public partial class App : Application
     {
         private Window? _window;
+        private GlobalHotkeyService? _hotkey;
+        private FloatingMicButton? _floatingButton;
 
         public static Window? MainWindowInstance { get; private set; }
         public static IHost AppHost { get; private set; } = null!;
-
-        // ✅ VM GLOBAL (singleton real del contenedor)
+        public static DispatcherQueue? UIQueue { get; private set; }
         public static HomeViewModel HomeVM => AppHost.Services.GetRequiredService<HomeViewModel>();
 
         public App()
@@ -36,23 +33,23 @@ namespace Anfeta.UI
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
+                    services.AddSingleton<AppStateService>();
+                    services.AddSingleton<SettingsService>();
+                    services.AddSingleton<AudioService>();
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
-
+                    services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
+                    services.AddSingleton<GlobalHotkeyService>();
                     services.AddSingleton(new HttpClient
                     {
                         BaseAddress = new Uri(OllamaConfig.BaseUrl),
                         Timeout = TimeSpan.FromMinutes(3)
                     });
-
                     services.AddSingleton<IOllamaHealthService, OllamaHealthService>();
-
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
                         var http = sp.GetRequiredService<HttpClient>();
                         return new OllamaInterpretationService(http, OllamaConfig.ModelName);
                     });
-
-                    // ✅ Tu VM se queda singleton
                     services.AddSingleton<HomeViewModel>();
                 })
                 .Build();
@@ -61,22 +58,175 @@ namespace Anfeta.UI
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
             Debug.WriteLine("APP INICIADA");
-
             DatabaseInitializer.InitializeDatabase();
 
 #if DEBUG
             TestDatabaseConnection();
 #endif
 
-            // ✅ Fuerza creación del VM (para que arranque su warmup aunque no entres a Home)
-            _ = HomeVM;
-
-            // Warmup adicional (opcional)
-            _ = CheckAndWarmupOllamaAsync();
-
             _window = new MainWindow();
             MainWindowInstance = _window;
+            UIQueue = DispatcherQueue.GetForCurrentThread();
+
+            _ = HomeVM;
+            _ = CheckAndWarmupOllamaAsync();
+
+            _hotkey = AppHost.Services.GetRequiredService<GlobalHotkeyService>();
+            _hotkey.Start();
+            _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
+            _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
+
+            ((MainWindow)_window).SizeChanged += Window_SizeChanged;
+
+            HomeVM.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(HomeViewModel.IsListening))
+                    _floatingButton?.SetListeningState(HomeVM.IsListening);
+            };
+
             _window.Activate();
+        }
+
+        private void Window_SizeChanged(object sender, WindowSizeChangedEventArgs e)
+        {
+            var appWindow = AppWindow.GetFromWindowId(
+                Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
+                    WinRT.Interop.WindowNative.GetWindowHandle(_window)
+                )
+            );
+
+            if (appWindow?.Presenter is OverlappedPresenter presenter)
+            {
+                if (presenter.State == OverlappedPresenterState.Minimized)
+                    ShowFloatingButton();
+                else
+                    HideFloatingButton();
+            }
+        }
+
+        private void Hotkey_HotkeyPressed(object? sender, EventArgs e)
+        {
+            Debug.WriteLine("[HOTKEY] Detectado -> mostrar flotante + UI thread");
+            ShowFloatingButton();
+
+            UIQueue?.TryEnqueue(async () =>
+            {
+                BringMainWindowToFront();
+                await HomeVM.TriggerVoiceFromHotkeyAsync();
+            });
+        }
+
+        private void ShowFloatingButton()
+        {
+            UIQueue?.TryEnqueue(() =>
+            {
+                if (_floatingButton == null)
+                {
+                    _floatingButton = new FloatingMicButton();
+                    _floatingButton.OpenAppRequested += (s, e) => BringMainWindowToFront();
+                    _floatingButton.ExitRequested += (s, e) => CleanupAndExit();
+                    _floatingButton.VoiceActivationRequested += async (s, e) =>
+                    {
+                        await HomeVM.ListenOnceCommand.ExecuteAsync(null);
+                    };
+
+                    var appState = AppHost.Services.GetRequiredService<AppStateService>();
+                    _floatingButton.UpdateHotkeyDisplay(appState.GetHotkeyDisplayString());
+                }
+                _floatingButton.Activate();
+            });
+        }
+
+        private void HideFloatingButton()
+        {
+            UIQueue?.TryEnqueue(() =>
+            {
+                try
+                {
+                    if (_floatingButton != null)
+                    {
+                        _floatingButton.Close();
+                        _floatingButton = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[APP] Error ocultando flotante: {ex.Message}");
+                }
+            });
+        }
+
+        private void BringMainWindowToFront()
+        {
+            if (_window != null)
+            {
+                var appWindow = AppWindow.GetFromWindowId(
+                    Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
+                        WinRT.Interop.WindowNative.GetWindowHandle(_window)
+                    )
+                );
+                appWindow?.Show(true);
+            }
+        }
+
+        private void CleanupAndExit()
+        {
+            Debug.WriteLine("[APP] Iniciando cierre limpio...");
+
+            try
+            {
+                // 1. Detener hotkey primero
+                _hotkey?.Stop();
+                _hotkey?.Dispose();
+                _hotkey = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error deteniendo hotkey: {ex.Message}");
+            }
+
+            try
+            {
+                // 2. Cerrar ventana flotante
+                if (_floatingButton != null)
+                {
+                    _floatingButton.Close();
+                    _floatingButton = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error cerrando flotante: {ex.Message}");
+            }
+
+            try
+            {
+                // 3. Cerrar ventana principal
+                _window?.Close();
+                _window = null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[APP] Error cerrando ventana: {ex.Message}");
+            }
+
+            // 4. Salir
+            Environment.Exit(0);
+        }
+
+        private void Hotkey_RegistrationFailed(object? sender, string message)
+        {
+            UIQueue?.TryEnqueue(async () =>
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "Error al configurar atajo",
+                    Content = message,
+                    CloseButtonText = "Entendido",
+                    XamlRoot = _window?.Content?.XamlRoot
+                };
+                await dialog.ShowAsync();
+            });
         }
 
         private async Task CheckAndWarmupOllamaAsync()
@@ -94,18 +244,18 @@ namespace Anfeta.UI
 
                 if (!res.IsSuccessStatusCode)
                 {
-                    Debug.WriteLine("OLLAMA NO RESPONDE OK. Revisa que Ollama esté abierto.");
+                    Debug.WriteLine("OLLAMA NO RESPONDE OK.");
                     return;
                 }
 
                 var interpreter = AppHost.Services.GetRequiredService<ICommandInterpretationService>();
                 await interpreter.InterpretRawAsync("ping");
 
-                Debug.WriteLine("OLLAMA WARMUP OK (modelo listo)");
+                Debug.WriteLine("OLLAMA WARMUP OK");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("OLLAMA CHECK/WARMUP ERROR: " + ex.Message);
+                Debug.WriteLine("OLLAMA CHECK ERROR: " + ex.Message);
             }
         }
 
@@ -115,16 +265,14 @@ namespace Anfeta.UI
             {
                 using var connection = DbConnectionFactory.Create();
                 connection.Open();
-
                 using var command = connection.CreateCommand();
                 command.CommandText = "SELECT 1;";
                 var result = command.ExecuteScalar();
-
-                Debug.WriteLine("CONEXION A SQLITE EXITOSA. RESULTADO: " + result);
+                Debug.WriteLine("SQLITE OK: " + result);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("ERROR AL CONECTAR CON SQLITE: " + ex.Message);
+                Debug.WriteLine("SQLITE ERROR: " + ex.Message);
             }
         }
     }

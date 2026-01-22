@@ -1,111 +1,201 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Microsoft.UI.Dispatching;
-using Microsoft.UI.Xaml;
-using WinRT.Interop;
 
 namespace Anfeta.UI.Services
 {
-    [Flags]
-    public enum HotkeyModifiers : uint
-    {
-        None = 0,
-        Alt = 1,
-        Control = 2,
-        Shift = 4,
-        Win = 8
-    }
-
     public sealed class GlobalHotkeyService : IDisposable
     {
-        private readonly IntPtr _hWnd;
-        private readonly int _hotkeyId;
-        private readonly DispatcherQueue _dispatcher;
-
         private const int WM_HOTKEY = 0x0312;
-        private const int GWL_WNDPROC = -4;
+        private const int HOTKEY_ID = 9001;
 
-        // Mantener delegate vivo SIEMPRE
-        private readonly WndProcDelegate _newWndProc;
-        private readonly IntPtr _newWndProcPtr;
-        private IntPtr _oldWndProcPtr;
+        private readonly AppStateService _appState;
+        private readonly SettingsService _settingsService;
+        private IntPtr _hwnd = IntPtr.Zero;
+        private bool _registered;
+        private WndProcDelegate? _wndProc;
+        private GCHandle _wndProcHandle;
+
+        // Backup del último hotkey que funcionó
+        private uint _lastWorkingModifiers;
+        private uint _lastWorkingKey;
 
         public event EventHandler? HotkeyPressed;
+        public event EventHandler<string>? RegistrationFailed;
 
-        public GlobalHotkeyService(Window window, int hotkeyId = 9001)
+        public GlobalHotkeyService(AppStateService appState, SettingsService settingsService)
         {
-            _hotkeyId = hotkeyId;
+            _appState = appState;
+            _settingsService = settingsService;
 
-            // Dispatcher del hilo UI donde creaste MainWindow
-            _dispatcher = DispatcherQueue.GetForCurrentThread();
+            // Guardar default como "último que funcionó"
+            _lastWorkingModifiers = appState.HotkeyModifiers;
+            _lastWorkingKey = appState.HotkeyKey;
 
-            _hWnd = WindowNative.GetWindowHandle(window);
-
-            Debug.WriteLine($"[HOTKEY] ctor. hWnd=0x{_hWnd.ToInt64():X} id={_hotkeyId}");
-
-            _newWndProc = WndProc;
-            _newWndProcPtr = Marshal.GetFunctionPointerForDelegate(_newWndProc);
-
-            // Hook correcto: SetWindowLongPtr con IntPtr
-            _oldWndProcPtr = SetWindowLongPtr(_hWnd, GWL_WNDPROC, _newWndProcPtr);
-
-            Debug.WriteLine($"[HOTKEY] WndProc hook ok. oldWndProc=0x{_oldWndProcPtr.ToInt64():X}");
+            _appState.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(AppStateService.HotkeyModifiers) ||
+                    e.PropertyName == nameof(AppStateService.HotkeyKey))
+                {
+                    UpdateHotkey();
+                }
+            };
         }
 
-        public void Register(HotkeyModifiers modifiers, uint virtualKey)
+        public void Start()
         {
-            Debug.WriteLine($"[HOTKEY] Register -> mods={(uint)modifiers} vk=0x{virtualKey:X} id={_hotkeyId}");
+            if (_hwnd != IntPtr.Zero) return;
+            CreateMessageWindow();
+            RegisterCurrentHotkey();
+        }
 
-            if (!RegisterHotKey(_hWnd, _hotkeyId, (uint)modifiers, virtualKey))
+        private void RegisterCurrentHotkey()
+        {
+            if (_hwnd == IntPtr.Zero) return;
+
+            _registered = RegisterHotKey(_hwnd, HOTKEY_ID, _appState.HotkeyModifiers, _appState.HotkeyKey);
+            Debug.WriteLine($"[HOTKEY] Intento registro: Mods={_appState.HotkeyModifiers} Key={_appState.HotkeyKey} => {_registered}");
+
+            if (!_registered)
             {
                 var err = Marshal.GetLastWin32Error();
-                Debug.WriteLine($"[HOTKEY] RegisterHotKey FAIL. err={err}");
-                throw new InvalidOperationException($"RegisterHotKey falló. Win32Error={err}");
+                Debug.WriteLine($"[HOTKEY] ERROR RegisterHotKey. Win32Error={err}");
+
+                // Restaurar último hotkey que funcionó
+                Debug.WriteLine($"[HOTKEY] Restaurando hotkey anterior: Mods={_lastWorkingModifiers} Key={_lastWorkingKey}");
+                _appState.HotkeyModifiers = _lastWorkingModifiers;
+                _appState.HotkeyKey = _lastWorkingKey;
+                _settingsService.SaveHotkey(_lastWorkingModifiers, _lastWorkingKey);
+
+                // Notificar fallo
+                var keyName = ((System.Windows.Forms.Keys)_appState.HotkeyKey).ToString();
+                var modsParts = new System.Collections.Generic.List<string>();
+                if ((_appState.HotkeyModifiers & 0x0002) != 0) modsParts.Add("Ctrl");
+                if ((_appState.HotkeyModifiers & 0x0001) != 0) modsParts.Add("Alt");
+                if ((_appState.HotkeyModifiers & 0x0004) != 0) modsParts.Add("Shift");
+                if ((_appState.HotkeyModifiers & 0x0008) != 0) modsParts.Add("Win");
+                modsParts.Add(keyName);
+
+                var hotkeyDisplay = string.Join(" + ", modsParts);
+                RegistrationFailed?.Invoke(this, $"El atajo '{hotkeyDisplay}' ya está en uso por otra aplicación. Se restauró el atajo anterior.");
             }
-
-            Debug.WriteLine("[HOTKEY] RegisterHotKey OK");
-        }
-
-        public void Unregister()
-        {
-            Debug.WriteLine("[HOTKEY] Unregister");
-            UnregisterHotKey(_hWnd, _hotkeyId);
-        }
-
-        public void Dispose()
-        {
-            Debug.WriteLine("[HOTKEY] Dispose");
-            try { Unregister(); } catch (Exception ex) { Debug.WriteLine("[HOTKEY] Unregister error: " + ex); }
-
-            // Restaurar WndProc original
-            if (_oldWndProcPtr != IntPtr.Zero)
+            else
             {
-                SetWindowLongPtr(_hWnd, GWL_WNDPROC, _oldWndProcPtr);
-                Debug.WriteLine($"[HOTKEY] WndProc restored. oldWndProc=0x{_oldWndProcPtr.ToInt64():X}");
-                _oldWndProcPtr = IntPtr.Zero;
+                // Guardar como "último que funcionó"
+                _lastWorkingModifiers = _appState.HotkeyModifiers;
+                _lastWorkingKey = _appState.HotkeyKey;
+                Debug.WriteLine("[HOTKEY] Registro exitoso");
+            }
+        }
+
+        private void UpdateHotkey()
+        {
+            if (_hwnd == IntPtr.Zero) return;
+
+            if (_registered)
+            {
+                UnregisterHotKey(_hwnd, HOTKEY_ID);
+                _registered = false;
             }
 
-            // No liberamos el delegate: queda para vida de este objeto y ya se va al GC al destruirse
+            RegisterCurrentHotkey();
+        }
+
+        public void Stop()
+        {
+            if (_hwnd == IntPtr.Zero) return;
+
+            if (_registered)
+            {
+                UnregisterHotKey(_hwnd, HOTKEY_ID);
+                _registered = false;
+            }
+
+            DestroyMessageWindow();
+        }
+
+        private void CreateMessageWindow()
+        {
+            _wndProc = WndProc;
+            _wndProcHandle = GCHandle.Alloc(_wndProc);
+
+            var hInstance = GetModuleHandle(null);
+
+            var cls = new WNDCLASSEX
+            {
+                cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
+                lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
+                hInstance = hInstance,
+                lpszClassName = "AnfetaHotkeyMsgWindow"
+            };
+
+            ushort atom = RegisterClassEx(ref cls);
+            if (atom == 0)
+            {
+                var err = Marshal.GetLastWin32Error();
+                Debug.WriteLine($"[HOTKEY] RegisterClassEx atom=0 err={err}");
+            }
+
+            IntPtr HWND_MESSAGE = new IntPtr(-3);
+
+            _hwnd = CreateWindowEx(0, "AnfetaHotkeyMsgWindow", "AnfetaHotkeyMsgWindow",
+                0, 0, 0, 0, 0, HWND_MESSAGE, IntPtr.Zero, hInstance, IntPtr.Zero);
+
+            if (_hwnd == IntPtr.Zero)
+            {
+                var err = Marshal.GetLastWin32Error();
+                Debug.WriteLine($"[HOTKEY] ERROR CreateWindowEx. Win32Error={err}");
+                throw new InvalidOperationException("No se pudo crear ventana hotkey.");
+            }
+
+            Debug.WriteLine("[HOTKEY] Message-only window creada OK");
+        }
+
+        private void DestroyMessageWindow()
+        {
+            if (_hwnd != IntPtr.Zero)
+            {
+                DestroyWindow(_hwnd);
+                _hwnd = IntPtr.Zero;
+            }
+
+            if (_wndProcHandle.IsAllocated)
+                _wndProcHandle.Free();
+
+            _wndProc = null;
         }
 
         private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
         {
-            if (msg == WM_HOTKEY)
+            if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
             {
-                Debug.WriteLine($"[HOTKEY] WM_HOTKEY recibido. wParam={wParam} lParam=0x{lParam.ToInt64():X}");
+                Debug.WriteLine("[HOTKEY] Detectado");
+                HotkeyPressed?.Invoke(this, EventArgs.Empty);
             }
 
-            if (msg == WM_HOTKEY && wParam.ToInt32() == _hotkeyId)
-            {
-                Debug.WriteLine("[HOTKEY] WM_HOTKEY coincide con id -> disparando evento (UI thread)");
-                _dispatcher.TryEnqueue(() => HotkeyPressed?.Invoke(this, EventArgs.Empty));
-                return IntPtr.Zero;
-            }
-
-            return CallWindowProc(_oldWndProcPtr, hWnd, msg, wParam, lParam);
+            return DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
+        public void Pause()
+        {
+            if (_hwnd == IntPtr.Zero || !_registered) return;
+
+            UnregisterHotKey(_hwnd, HOTKEY_ID);
+            _registered = false;
+            Debug.WriteLine("[HOTKEY] Pausado temporalmente");
+        }
+
+        public void Resume()
+        {
+            if (_hwnd == IntPtr.Zero || _registered) return;
+
+            RegisterCurrentHotkey();
+            Debug.WriteLine("[HOTKEY] Reanudado");
+        }
+
+        public void Dispose() => Stop();
+
+        // P/Invoke
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -114,11 +204,38 @@ namespace Anfeta.UI.Services
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-        // Firma correcta x64/x86 (IntPtr)
-        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-        private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
 
-        [DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
-        private static extern IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr CreateWindowEx(int dwExStyle, string lpClassName, string lpWindowName,
+            int dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu,
+            IntPtr hInstance, IntPtr lpParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool DestroyWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WNDCLASSEX
+        {
+            public uint cbSize;
+            public uint style;
+            public IntPtr lpfnWndProc;
+            public int cbClsExtra;
+            public int cbWndExtra;
+            public IntPtr hInstance;
+            public IntPtr hIcon;
+            public IntPtr hCursor;
+            public IntPtr hbrBackground;
+            public string? lpszMenuName;
+            public string lpszClassName;
+            public IntPtr hIconSm;
+        }
     }
 }
