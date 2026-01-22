@@ -1,58 +1,41 @@
-﻿using Anfeta.UI.Dialogs;
-using Anfeta.UI.Models;
+﻿using Anfeta.UI.Models;
 using Anfeta.UI.Services;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Windows.Media.Capture;
+using Windows.UI;
 
 namespace Anfeta.UI.Views
 {
     public sealed partial class SettingsView : Page
     {
-        private readonly AudioService _audioService;
-        private readonly SettingsService _settingsService;
-        private readonly AppStateService _appState;
-        private List<AudioDeviceInfo>? _inputDevices;
-        private List<AudioDeviceInfo>? _outputDevices;
-        private readonly DispatcherTimer _statusTimer;
-        private bool _devicesLoaded;
+        private AudioService _audioService;
+        private SettingsService _settingsService;
+        private List<AudioDeviceInfo> _inputDevices;
+        private List<AudioDeviceInfo> _outputDevices;
+        private DispatcherTimer _statusTimer;
 
         public SettingsView()
         {
             InitializeComponent();
-
-            _audioService = App.AppHost.Services.GetRequiredService<AudioService>();
-            _settingsService = App.AppHost.Services.GetRequiredService<SettingsService>();
-            _appState = App.AppHost.Services.GetRequiredService<AppStateService>();
-
-            DataContext = _appState;
-
+            _audioService = new AudioService();
+            _settingsService = new SettingsService(new AppStateService());
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _statusTimer.Tick += (s, e) => { InfoStatus.IsOpen = false; _statusTimer.Stop(); };
 
-            TxtHotkeyDisplay.Text = _appState.GetHotkeyDisplayString();
-            _appState.PropertyChanged += (s, e) =>
-            {
-                if (e.PropertyName == nameof(AppStateService.HotkeyModifiers) ||
-                    e.PropertyName == nameof(AppStateService.HotkeyKey))
-                {
-                    DispatcherQueue.TryEnqueue(() => TxtHotkeyDisplay.Text = _appState.GetHotkeyDisplayString());
-                }
-            };
-
-            TxtCurrentInput.Text = $"Entrada: {_appState.InputDeviceName}";
-            TxtCurrentOutput.Text = $"Salida: {_appState.OutputDeviceName}";
-
-            Loaded += Page_Loaded;  // Cargar devices cada vez que se abre
+            Loaded += OnLoaded;
             Unloaded += OnUnloaded;
         }
 
-        private async void Page_Loaded(object sender, RoutedEventArgs e)
+        private async void OnLoaded(object sender, RoutedEventArgs e)
         {
+            await RequestMicPermissionAsync();
             await LoadDevicesAsync();
         }
 
@@ -60,15 +43,31 @@ namespace Anfeta.UI.Views
         {
             _audioService?.StopMicTest();
             _audioService?.StopTestSound();
+            _audioService?.Dispose();
         }
 
-        // Lazy load devices
+        /// <summary>Solicita permiso de micrófono</summary>
+        private async Task RequestMicPermissionAsync()
+        {
+            try
+            {
+                var settings = new MediaCaptureInitializationSettings
+                {
+                    StreamingCaptureMode = StreamingCaptureMode.Audio
+                };
+
+                var capture = new MediaCapture();
+                await capture.InitializeAsync(settings);
+                capture.Dispose();
+            }
+            catch
+            {
+                ShowStatus("Permiso de micrófono denegado. Habilítalo en Configuración de Windows.", InfoBarSeverity.Warning);
+            }
+        }
+
         private async Task LoadDevicesAsync()
         {
-            // Desuscribir eventos temporalmente
-            CbInputDevice.SelectionChanged -= CbInputDevice_SelectionChanged;
-            CbOutputDevice.SelectionChanged -= CbOutputDevice_SelectionChanged;
-
             await Task.Run(() =>
             {
                 _inputDevices = _audioService.GetInputDevices();
@@ -78,76 +77,82 @@ namespace Anfeta.UI.Views
                 {
                     CbInputDevice.Items.Clear();
                     foreach (var device in _inputDevices)
-                        CbInputDevice.Items.Add(device.DeviceName);
+                    {
+                        CbInputDevice.Items.Add(device.DisplayName);
+                    }
 
                     CbOutputDevice.Items.Clear();
                     foreach (var device in _outputDevices)
-                        CbOutputDevice.Items.Add(device.DeviceName);
-
-                    // Restaurar selección
-                    if (_appState.InputDeviceId.HasValue)
                     {
-                        int idx = _inputDevices.FindIndex(d => d.NAudioId == _appState.InputDeviceId.Value);
-                        if (idx >= 0) CbInputDevice.SelectedIndex = idx;
+                        CbOutputDevice.Items.Add(device.DisplayName);
                     }
 
-                    if (_appState.OutputDeviceId.HasValue)
+                    if (_inputDevices.Count > 0)
                     {
-                        int idx = _outputDevices.FindIndex(d => d.NAudioId == _appState.OutputDeviceId.Value);
-                        if (idx >= 0) CbOutputDevice.SelectedIndex = idx;
+                        CbInputDevice.SelectedIndex = 0;
                     }
 
-                    TxtCurrentInput.Text = $"Entrada: {_appState.InputDeviceName}";
-                    TxtCurrentOutput.Text = $"Salida: {_appState.OutputDeviceName}";
+                    if (_outputDevices.Count > 0)
+                    {
+                        CbOutputDevice.SelectedIndex = 0;
+                    }
 
-                    // Re-suscribir eventos
-                    CbInputDevice.SelectionChanged += CbInputDevice_SelectionChanged;
-                    CbOutputDevice.SelectionChanged += CbOutputDevice_SelectionChanged;
+                    UpdateCurrentDeviceLabels();
                 });
             });
         }
-
-        private async void CbInputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void UpdateCurrentDeviceLabels()
         {
-            if (CbInputDevice.SelectedIndex < 0 || _inputDevices == null) return;
-
-            var device = _inputDevices[CbInputDevice.SelectedIndex];
-
-            try
+            if (CbInputDevice.SelectedIndex >= 0 && CbInputDevice.SelectedIndex < _inputDevices.Count)
             {
-                var settings = new MediaCaptureInitializationSettings { StreamingCaptureMode = StreamingCaptureMode.Audio };
-                var capture = new MediaCapture();
-                await capture.InitializeAsync(settings);
-                capture.Dispose();
-
-                _settingsService.SaveInputDevice(device.NAudioId, device.DeviceName);
+                var device = _inputDevices[CbInputDevice.SelectedIndex];
                 TxtCurrentInput.Text = $"Entrada: {device.DeviceName}";
-                ShowStatus("Micrófono configurado", InfoBarSeverity.Success);
             }
-            catch
+
+            if (CbOutputDevice.SelectedIndex >= 0 && CbOutputDevice.SelectedIndex < _outputDevices.Count)
             {
-                ShowStatus("Permiso de micrófono denegado", InfoBarSeverity.Warning);
+                var device = _outputDevices[CbOutputDevice.SelectedIndex];
+                TxtCurrentOutput.Text = $"Salida: {device.DeviceName}";
+            }
+        }
+
+        private void CbInputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (CbInputDevice.SelectedIndex >= 0 && _inputDevices != null)
+            {
+                var device = _inputDevices[CbInputDevice.SelectedIndex];
+                _settingsService.SaveInputDevice(device.NAudioId, device.DeviceName);
+                UpdateCurrentDeviceLabels();
+                ShowStatus("Micrófono configurado", InfoBarSeverity.Success);
             }
         }
 
         private void CbOutputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (CbOutputDevice.SelectedIndex < 0 || _outputDevices == null) return;
-
-            var device = _outputDevices[CbOutputDevice.SelectedIndex];
-            _settingsService.SaveOutputDevice(device.NAudioId, device.DeviceName);
-            TxtCurrentOutput.Text = $"Salida: {device.DeviceName}";
-            ShowStatus("Altavoces configurados", InfoBarSeverity.Success);
+            if (CbOutputDevice.SelectedIndex >= 0 && _outputDevices != null)
+            {
+                var device = _outputDevices[CbOutputDevice.SelectedIndex];
+                _settingsService.SaveOutputDevice(device.NAudioId, device.DeviceName);
+                UpdateCurrentDeviceLabels();
+                ShowStatus("Altavoces configurados", InfoBarSeverity.Success);
+            }
         }
 
         private async void BtnTestMic_Click(object sender, RoutedEventArgs e)
         {
-            if (CbInputDevice.SelectedIndex < 0) return;
+            if (CbInputDevice.SelectedIndex < 0 || CbInputDevice.SelectedIndex >= _inputDevices.Count)
+            {
+                ShowStatus("Selecciona un micrófono", InfoBarSeverity.Warning);
+                return;
+            }
+
             var device = _inputDevices[CbInputDevice.SelectedIndex];
 
             try
             {
                 PnlMicLevel.Visibility = Visibility.Visible;
+                PgMicLevel.ShowPaused = false;
+                PgMicLevel.ShowError = false;
                 BtnTestMic.IsEnabled = false;
                 IconTestMic.Glyph = "\uE769";
                 TxtTestMic.Text = "Escuchando...";
@@ -165,11 +170,14 @@ namespace Anfeta.UI.Views
                 _audioService.StopMicTest();
 
                 PnlMicLevel.Visibility = Visibility.Collapsed;
+                PgMicLevel.Value = 0;
+                TxtMicLevel.Text = "0%";
                 ShowStatus("Prueba completada", InfoBarSeverity.Success);
             }
             catch (Exception ex)
             {
                 ShowStatus($"Error: {ex.Message}", InfoBarSeverity.Error);
+                _audioService.StopMicTest();
             }
             finally
             {
@@ -181,7 +189,12 @@ namespace Anfeta.UI.Views
 
         private async void BtnTestSpeaker_Click(object sender, RoutedEventArgs e)
         {
-            if (CbOutputDevice.SelectedIndex < 0) return;
+            if (CbOutputDevice.SelectedIndex < 0 || CbOutputDevice.SelectedIndex >= _outputDevices.Count)
+            {
+                ShowStatus("Selecciona altavoces", InfoBarSeverity.Warning);
+                return;
+            }
+
             var device = _outputDevices[CbOutputDevice.SelectedIndex];
 
             try
@@ -191,7 +204,7 @@ namespace Anfeta.UI.Views
                 TxtTestSpeaker.Text = "Reproduciendo...";
 
                 await _audioService.PlayTestSound(device.NAudioId);
-                ShowStatus("Sonido reproducido", InfoBarSeverity.Success);
+                ShowStatus("Sonido reproducido correctamente", InfoBarSeverity.Success);
             }
             catch (Exception ex)
             {
@@ -205,31 +218,123 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new HotkeyPickerDialog(_appState, _settingsService)
-            {
-                XamlRoot = this.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-
-            if (result == ContentDialogResult.Primary)
-            {
-                ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
-            }
-        }
-
         private async void BtnOpenWindowsSettings_Click(object sender, RoutedEventArgs e)
         {
             await Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:sound"));
         }
 
+        private void BtnShowTroubleshoot_Click(object sender, RoutedEventArgs e)
+        {
+            var flyout = new Flyout
+            {
+                Placement = FlyoutPlacementMode.Bottom
+            };
+
+            var scrollViewer = new ScrollViewer
+            {
+                MaxHeight = 500,
+                Width = 400,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+
+            var content = new StackPanel { Spacing = 20, Padding = new Thickness(16) };
+
+            // Problema: Dispositivo predeterminado
+            content.Children.Add(CreateProblemSection(
+                "\uE767",
+                "Windows usa dispositivos predeterminados",
+                "El reconocimiento de voz SIEMPRE usa el micrófono predeterminado de Windows, no el que seleccionas aquí.",
+                new[]
+                {
+            "1. Win + I → Sistema → Sonido",
+            "2. En 'Entrada', selecciona tu micrófono preferido",
+            "3. Hazlo predeterminado",
+            "4. Reinicia esta app"
+                }
+            ));
+
+            // Problema: Política de privacidad
+            content.Children.Add(CreateProblemSection(
+                "\uE7BA",
+                "Error: Política de privacidad no aceptada",
+                "Si ves \"The speech privacy policy was not accepted\":",
+                new[]
+                {
+            "1. Win + I → Privacidad y seguridad → Voz",
+            "2. Activa \"Reconocimiento de voz en línea\"",
+            "3. Reinicia esta app"
+                }
+            ));
+
+            scrollViewer.Content = content;
+            flyout.Content = scrollViewer;
+            flyout.ShowAt(BtnShowTroubleshoot);
+        }
+        /// <summary>Crea cada sección del dialog de problemas</summary>
+        private StackPanel CreateProblemSection(string icon, string title, string description, string[] steps)
+        {
+            var section = new StackPanel { Spacing = 10 };
+
+            // Header con icono
+            var header = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10
+            };
+
+            header.Children.Add(new FontIcon
+            {
+                Glyph = icon,
+                FontSize = 18,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 251, 191, 36))
+            });
+
+            header.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold
+            });
+
+            section.Children.Add(header);
+
+            // Descripción
+            section.Children.Add(new TextBlock
+            {
+                Text = description,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 148, 163, 184))
+            });
+
+            // Pasos
+            var stepsList = new StackPanel { Spacing = 6, Margin = new Thickness(20, 4, 0, 0) };
+            foreach (var step in steps)
+            {
+                stepsList.Children.Add(new TextBlock
+                {
+                    Text = step,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 13
+                });
+            }
+            section.Children.Add(stepsList);
+
+            return section;
+        }
+
+        private void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
+        {
+            // TODO: implementar cambio de hotkey
+            ShowStatus("Funcionalidad en desarrollo", InfoBarSeverity.Informational);
+        }
+
+        /// <summary>Muestra mensaje con auto-cierre en 3 segundos</summary>
         private void ShowStatus(string message, InfoBarSeverity severity)
         {
             InfoStatus.Message = message;
             InfoStatus.Severity = severity;
             InfoStatus.IsOpen = true;
+
             _statusTimer.Stop();
             _statusTimer.Start();
         }

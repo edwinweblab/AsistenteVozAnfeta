@@ -1,37 +1,160 @@
 ﻿<Page
     x:Class="Anfeta.UI.Views.LinkAccountView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{StaticResource BgGradient}">
 
-    <Grid Padding="32"
-          HorizontalAlignment="Center"
-          VerticalAlignment="Center"
-          MaxWidth="420">
+    <Page.Resources>
+        <Style x:Key="GlassBorder" TargetType="Border">
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="32"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#20FFFFFF"/>
+            <Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#24000000" Offset="0.0"/>
+                        <GradientStop Color="#16000000" Offset="1.0"/>
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
-        <StackPanel Spacing="16">
+        <Style x:Key="InputBox" TargetType="TextBox">
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="#F7FAFC"/>
+            <Setter Property="Background" Value="#14FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+            <Setter Property="CornerRadius" Value="8"/>
+        </Style>
+    </Page.Resources>
 
-            <TextBlock Text="Vincular cuenta"
-                       FontSize="24"
-                       FontWeight="SemiBold" />
+    <Grid>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup>
+                <VisualState x:Name="Narrow">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0"/>
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="MainCard.MaxWidth" Value="500"/>
+                        <Setter Target="MainCard.Margin" Value="20"/>
+                        <Setter Target="InfoPanel.Visibility" Value="Collapsed"/>
+                        <Setter Target="RootGrid.ColumnDefinitions[1].Width" Value="0"/>
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="Wide">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="900"/>
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="MainCard.MaxWidth" Value="500"/>
+                        <Setter Target="MainCard.Margin" Value="0,0,32,0"/>
+                        <Setter Target="InfoPanel.Visibility" Value="Visible"/>
+                        <Setter Target="RootGrid.ColumnDefinitions[1].Width" Value="340"/>
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
 
-            <TextBox Header="Correo electrónico"
-                     PlaceholderText="correo@empresa.com"
-                     Text="{Binding Email, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+        <Grid x:Name="RootGrid" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="900">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="340"/>
+            </Grid.ColumnDefinitions>
 
-            <TextBlock x:Name="ErrorText"
-                       Foreground="Red"
-                       TextWrapping="Wrap"
-                       Text="{Binding ErrorMessage}"
-                       Visibility="Collapsed" />
+            <!-- Card principal -->
+            <Border x:Name="MainCard" Grid.Column="0" Style="{StaticResource GlassBorder}">
+                <StackPanel Spacing="24" MinWidth="440">
+                    <!-- Logo + Título -->
+                    <StackPanel Spacing="12" HorizontalAlignment="Center">
+                        <Border Width="68" Height="68" CornerRadius="34" Background="{StaticResource AnfetaAccentBrush}">
+                            <TextBlock Text="WL" FontSize="26" FontWeight="Bold" Foreground="White" 
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Text="Vincular cuenta" FontSize="30" FontWeight="SemiBold" 
+                                   Foreground="#F7FAFC" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Introduce tu correo para acceder" FontSize="14" 
+                                   Foreground="#94A3B8" HorizontalAlignment="Center" TextWrapping="Wrap"
+                                   MaxWidth="360" TextAlignment="Center"/>
+                    </StackPanel>
 
-            <!-- SIN converter: se controla con CanLink -->
-            <Button Content="Vincular cuenta"
-                    Command="{Binding LinkCommand}"
-                    IsEnabled="{Binding CanLink}" />
+                    <!-- Inputs -->
+                    <StackPanel Spacing="18">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Correo electrónico" FontSize="13" Foreground="#CBD5E1" FontWeight="SemiBold"/>
+                            <TextBox Style="{StaticResource InputBox}"
+                                     PlaceholderText="correo@empresa.com"
+                                     Text="{Binding Email, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                <TextBox.Resources>
+                                    <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#F7FAFC"/>
+                                    <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#F7FAFC"/>
+                                </TextBox.Resources>
+                            </TextBox>
+                        </StackPanel>
 
-            <Button Content="Cancelar"
-                    Click="OnCancelClicked" />
+                        <!-- Error message -->
+                        <Border Visibility="Collapsed" 
+                        Background="#20EF4444" BorderBrush="#EF4444" BorderThickness="1" 
+                        CornerRadius="8" Padding="12,10">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE7BA;" FontSize="16" Foreground="#EF4444"/>
+                                <TextBlock x:Name="ErrorText" Text="{Binding ErrorMessage}" 
+                   FontSize="13" Foreground="#FECACA" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
 
-        </StackPanel>
+                    <!-- Botones -->
+                    <StackPanel Spacing="12">
+                        <Button Content="Vincular cuenta"
+                                Command="{Binding LinkCommand}"
+                                IsEnabled="{Binding CanLink}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                HorizontalAlignment="Stretch"/>
+
+                        <Button Content="Cancelar"
+                                Click="OnCancelClicked"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Stretch"/>
+                    </StackPanel>
+
+                    <!-- Footer link -->
+                    <HyperlinkButton HorizontalAlignment="Center" Padding="0">
+                        <TextBlock FontSize="12" Foreground="#94A3B8">
+                            <Run Text="¿No tienes acceso? "/>
+                            <Run Text="Contacta al admin" Foreground="{StaticResource AnfetaAccentBrush}" FontWeight="SemiBold"/>
+                        </TextBlock>
+                    </HyperlinkButton>
+                </StackPanel>
+            </Border>
+
+            <!-- Panel informativo -->
+            <StackPanel x:Name="InfoPanel" Grid.Column="1" Spacing="18" 
+                        VerticalAlignment="Center" Margin="32,0,0,0">
+                <Border Background="#14FF6B35" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE72E;" FontSize="20" Foreground="{StaticResource AnfetaAccentBrush}"/>
+                            <TextBlock Text="Acceso seguro" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                        </StackPanel>
+                        <TextBlock Text="Usa las credenciales del equipo para acceder. El token permanecerá almacenado de forma segura." 
+                                   FontSize="13" Foreground="#CBD5E1" TextWrapping="Wrap" LineHeight="20"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#143EC8A0" CornerRadius="12" Padding="20">
+                    <StackPanel Spacing="10">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE73E;" FontSize="16" Foreground="#34D399"/>
+                            <TextBlock Text="Sincronización automática" FontSize="14" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                        </StackPanel>
+                        <TextBlock Text="Los datos se sincronizan en tiempo real con el servidor." 
+                                   FontSize="12" Foreground="#A7F3D0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
     </Grid>
 </Page>
