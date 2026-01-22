@@ -38,6 +38,7 @@ namespace Anfeta.UI
             {
                 "Home" => typeof(HomeView),
                 "Commands" => typeof(CommandsView),
+                "Search"=> typeof(SearchView),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
                 _ => typeof(HomeView)

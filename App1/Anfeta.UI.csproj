@@ -15,8 +15,7 @@
   <ItemGroup>
     <None Remove="FunctionTests\TestRunner.xaml" />
     <None Remove="Resources\Styles.xaml" />
-    <None Remove="Views\Dialogs\FloatingMicButton.xaml" />
-    <None Remove="Views\Dialogs\HotkeyPickerDialog.xaml" />
+    <None Remove="Views\SearchView.xaml" />
     <None Remove="Views\TroubleshootView.xaml" />
   </ItemGroup>
   <ItemGroup>
@@ -62,12 +61,7 @@
 		<Folder Include="Helpers\" />
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\Dialogs\FloatingMicButton.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
-	</ItemGroup>
-	<ItemGroup>
-	  <Page Update="Views\Dialogs\HotkeyPickerDialog.xaml">
+	  <Page Update="Views\SearchView.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </Page>
 	</ItemGroup>
