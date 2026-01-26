@@ -1,29 +1,45 @@
-﻿using System;
+﻿using System.ComponentModel;
+using System.Runtime.CompilerServices;
 
 namespace Anfeta.UI.Models
 {
-    public class SearchResultRow
+    public class SearchResultRow : INotifyPropertyChanged
     {
-        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
         public string NodeId { get; set; } = "";
-
         public string Name { get; set; } = "";
-
-        public string Target { get; set; } = ""; // ruta local o link dropbox
-        public string PathLower { get; set; } = "";
-
-        public SearchSource Source { get; set; }
-        public string Type { get; set; } = "";         // file / folder
-        public long Size { get; set; }                 // bytes
-        public string MimeType { get; set; } = "";
+        public string Target { get; set; } = "";
+        public string Type { get; set; } = ""; // FILE/FOLDER
+        public long Size { get; set; }
         public string ServerModified { get; set; } = "";
-        public string SharedLink { get; set; } = "";   // si viene en /search
-        public string SizeText => Size > 0 ? $"{Size / 1024:N0} KB" : "—";
-        public string ModifiedText => string.IsNullOrWhiteSpace(ServerModified) ? "—" : ServerModified;
+        public SearchSource Source { get; set; }
 
+        private bool _isBookmarked;
+        public bool IsBookmarked
+        {
+            get => _isBookmarked;
+            set
+            {
+                if (_isBookmarked == value) return;
+                _isBookmarked = value;
+                StarGlyph = value ? "★" : "☆";
+                OnPropertyChanged();
+            }
+        }
 
-        // Texto amigable para la UI
-        public string SourceText =>
-            Source == SearchSource.Local ? "Local" : "Dropbox";
+        private string _starGlyph = "☆";
+        public string StarGlyph
+        {
+            get => _starGlyph;
+            set
+            {
+                if (_starGlyph == value) return;
+                _starGlyph = value;
+                OnPropertyChanged();
+            }
+        }
     }
 }

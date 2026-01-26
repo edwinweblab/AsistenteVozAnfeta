@@ -7,11 +7,8 @@
     <Grid Padding="16" RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <!-- Header -->
             <RowDefinition Height="*"/>
-            <!-- Body -->
             <RowDefinition Height="Auto"/>
-            <!-- Footer -->
         </Grid.RowDefinitions>
 
         <!-- HEADER -->
@@ -23,13 +20,15 @@
                 <Grid ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
-                        <!-- Collapse -->
+                        <!-- Collapse folders -->
                         <ColumnDefinition Width="*"/>
                         <!-- Search -->
                         <ColumnDefinition Width="Auto"/>
                         <!-- Notion -->
                         <ColumnDefinition Width="Auto"/>
                         <!-- Sync -->
+                        <ColumnDefinition Width="Auto"/>
+                        <!-- Details toggle -->
                         <ColumnDefinition Width="Auto"/>
                         <!-- More -->
                     </Grid.ColumnDefinitions>
@@ -60,8 +59,16 @@
                             Click="BtnSync_Click"
                             ToolTipService.ToolTip="Sincronizar (delta)"/>
 
+                    <!-- NEW: Toggle detalles -->
+                    <ToggleButton x:Name="ToggleDetailsPane"
+                                  Grid.Column="4"
+                                  Content="Detalles"
+                                  IsChecked="False"
+                                  Click="ToggleDetailsPane_Click"
+                                  ToolTipService.ToolTip="Mostrar/ocultar panel de detalles"/>
+
                     <Button x:Name="BtnMore"
-                            Grid.Column="4"
+                            Grid.Column="5"
                             Content="⋯">
                         <Button.Flyout>
                             <MenuFlyout>
@@ -87,6 +94,7 @@
                         <ToggleButton x:Name="ChipXlsx" Content="XLSX" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipImg" Content="IMG" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipRecent" Content="Recientes" Click="ChipFilter_Click"/>
+                        <ToggleButton x:Name="ChipBookmarks" Content="⭐ Bookmarks" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipFolders" Content="Solo carpetas" Click="ChipFilter_Click"/>
                     </StackPanel>
 
@@ -111,11 +119,9 @@
         <Grid Grid.Row="1" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="FoldersPaneCol" Width="320"/>
-                <!-- Left -->
                 <ColumnDefinition Width="*"/>
-                <!-- Results -->
-                <ColumnDefinition Width="340"/>
-                <!-- Details -->
+                <!-- NEW: Details col (colapsable) -->
+                <ColumnDefinition x:Name="DetailsCol" Width="0"/>
             </Grid.ColumnDefinitions>
 
             <!-- LEFT: Folders -->
@@ -129,16 +135,23 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="220"/>
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Text="Carpetas" FontWeight="SemiBold"/>
 
-                    <!-- Tree + placeholder -->
                     <Grid Grid.Row="1">
                         <TreeView x:Name="FolderTree"
-                                  ItemInvoked="FolderTree_ItemInvoked"/>
+          ItemInvoked="FolderTree_ItemInvoked"
+          Expanding="FolderTree_Expanding">
+                            <TreeView.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
 
-                        <!-- Placeholder visual (se controla por code después si quieres) -->
+
                         <StackPanel x:Name="EmptyTreeHint"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -161,18 +174,16 @@
             </Border>
 
             <!-- CENTER: Results -->
-            <Border Grid.Column="1" CornerRadius="12" Padding="12"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <Border Grid.Column="1"
+        CornerRadius="12"
+        Padding="12"
+        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <Grid RowSpacing="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <!-- Breadcrumbs -->
                         <RowDefinition Height="Auto"/>
-                        <!-- Header row -->
                         <RowDefinition Height="*"/>
-                        <!-- List -->
                         <RowDefinition Height="Auto"/>
-                        <!-- Paging -->
                     </Grid.RowDefinitions>
 
                     <!-- Breadcrumbs -->
@@ -181,85 +192,61 @@
                         <TextBlock x:Name="BreadcrumbText" Text="/" FontWeight="SemiBold"/>
                     </StackPanel>
 
-                    <!-- Table header -->
-                    <Grid Grid.Row="1" Padding="6" ColumnSpacing="10" Opacity="0.85">
+                    <!-- Header row: SOLO NOMBRE -->
+                    <Grid Grid.Row="1" Padding="6" Opacity="0.85">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="260"/>
-                            <ColumnDefinition Width="90"/>
-                            <ColumnDefinition Width="140"/>
-                            <ColumnDefinition Width="90"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="0" Text="Nombre" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="1" Text="Ubicación" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="2" Text="Tipo" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="3" Text="Modificado" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Column="4" Text="Tamaño" FontWeight="SemiBold"/>
                     </Grid>
 
                     <!-- Results list -->
                     <Grid Grid.Row="2">
                         <ProgressRing x:Name="LoadingRing"
-                                      IsActive="False"
-                                      Visibility="Collapsed"
-                                      HorizontalAlignment="Center"
-                                      VerticalAlignment="Center"/>
+                          IsActive="False"
+                          Visibility="Collapsed"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"/>
 
                         <ListView x:Name="ResultsList"
-                                  SelectionMode="Single"
-                                  SelectionChanged="ResultsList_SelectionChanged"
-                                  DoubleTapped="ResultsList_DoubleTapped"
-                                  RightTapped="ResultsList_RightTapped">
+                      SelectionMode="Single"
+                      SelectionChanged="ResultsList_SelectionChanged"
+                      DoubleTapped="ResultsList_DoubleTapped"
+                      RightTapped="ResultsList_RightTapped">
+
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="models:SearchResultRow">
-                                    <Grid Padding="8" ColumnSpacing="10">
+                                    <Grid Padding="10" ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="260"/>
-                                            <ColumnDefinition Width="90"/>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="90"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
 
                                         <TextBlock Grid.Column="0"
-                                                   Text="{x:Bind Name}"
-                                                   FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis"/>
+                   Text="{x:Bind Name}"
+                   FontWeight="SemiBold"
+                   TextTrimming="CharacterEllipsis"/>
 
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{x:Bind Target}"
-                                                   Opacity="0.75"
-                                                   TextTrimming="CharacterEllipsis"/>
-
-                                        <!-- Badge visual de tipo (placeholder) -->
-                                        <Border Grid.Column="2"
-                                                CornerRadius="10"
-                                                Padding="8,4"
-                                                Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}">
-                                            <TextBlock Text="FILE" FontSize="12" Opacity="0.85"/>
-                                        </Border>
-
-                                        <TextBlock Grid.Column="3" Text="—" Opacity="0.7"/>
-                                        <TextBlock Grid.Column="4" Text="—" Opacity="0.7"/>
-
-                                        <Button Grid.Column="5"
-                                                Content="⭐"
-                                                Click="BtnStar_Click"
-                                                ToolTipService.ToolTip="Agregar a bookmarks"/>
+                                        <!-- ⭐ -->
+                                        <Button Grid.Column="1"
+                MinWidth="38"
+                Content="{x:Bind StarGlyph, Mode=OneWay}"
+                Tag="{x:Bind}"
+                Click="BtnStar_Click"
+                ToolTipService.ToolTip="Agregar / quitar bookmark"/>
                                     </Grid>
                                 </DataTemplate>
+
                             </ListView.ItemTemplate>
 
-                            <!-- Context Menu (Everything-like) -->
                             <ListView.ContextFlyout>
                                 <MenuFlyout>
                                     <MenuFlyoutItem Text="Abrir" Click="CtxOpen_Click"/>
                                     <MenuFlyoutItem Text="Abrir en Dropbox Web" Click="CtxOpenWeb_Click"/>
                                     <MenuFlyoutSeparator/>
-                                    <MenuFlyoutItem Text="Copiar ruta Dropbox" Click="CtxCopyPath_Click"/>
+                                    <MenuFlyoutItem Text="Copiar ruta" Click="CtxCopyPath_Click"/>
                                     <MenuFlyoutItem Text="Copiar link" Click="CtxCopyLink_Click"/>
                                     <MenuFlyoutSeparator/>
                                     <MenuFlyoutItem Text="Renombrar…" Click="CtxRename_Click"/>
@@ -271,14 +258,14 @@
                         </ListView>
 
                         <TextBlock x:Name="EmptyResultsHint"
-                                   Text="No hay resultados"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   Opacity="0.6"
-                                   IsHitTestVisible="False"/>
+                       Text="No hay resultados"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Opacity="0.6"
+                       IsHitTestVisible="False"/>
                     </Grid>
 
-                    <!-- Paging (visual) -->
+                    <!-- Paging -->
                     <Grid Grid.Row="3" ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
@@ -292,16 +279,16 @@
                         <Button Grid.Column="1" Content="⟩" Click="BtnNextPage_Click"/>
 
                         <TextBlock Grid.Column="3"
-                                   x:Name="PageInfoText"
-                                   Text="Página 1"
-                                   VerticalAlignment="Center"
-                                   Opacity="0.75"/>
+                       x:Name="PageInfoText"
+                       Text="Página 1"
+                       VerticalAlignment="Center"
+                       Opacity="0.75"/>
 
                         <ComboBox Grid.Column="4"
-                                  x:Name="PageSizeCombo"
-                                  Width="110"
-                                  PlaceholderText="Tamaño"
-                                  SelectionChanged="PageSizeCombo_SelectionChanged">
+                      x:Name="PageSizeCombo"
+                      Width="110"
+                      PlaceholderText="Tamaño"
+                      SelectionChanged="PageSizeCombo_SelectionChanged">
                             <ComboBoxItem Content="25" Tag="25"/>
                             <ComboBoxItem Content="50" Tag="50"/>
                             <ComboBoxItem Content="100" Tag="100"/>
@@ -310,9 +297,16 @@
                 </Grid>
             </Border>
 
-            <!-- RIGHT: Details panel -->
-            <Border Grid.Column="2" CornerRadius="12" Padding="12"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+
+
+            <!-- RIGHT: Details panel (COLAPSABLE) -->
+            <Border x:Name="DetailsPane"
+                    Grid.Column="2"
+                    CornerRadius="12"
+                    Padding="12"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    Visibility="Collapsed">
+
                 <Grid RowSpacing="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -346,7 +340,6 @@
                         </Border>
                     </StackPanel>
 
-                    <!-- Details toolbar (mejorado) -->
                     <Grid Grid.Row="3" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -357,19 +350,17 @@
 
                         <TextBlock Grid.Column="0"
                                    x:Name="DetailsHint"
-                                   Text="Acciones disponibles al seleccionar un elemento"
+                                   Text="Acciones disponibles"
                                    Opacity="0.6"
                                    VerticalAlignment="Center"/>
 
                         <Button Grid.Column="1"
-                                Content="Abrir"
-                                Click="CtxOpen_Click"
-                                ToolTipService.ToolTip="Acción principal"/>
+                                Content="Abrir Web"
+                                Click="CtxOpen_Click"/>
 
                         <Button Grid.Column="2"
-                                Content="Link"
-                                Click="BtnDetailsLink_Click"
-                                ToolTipService.ToolTip="Asegurar link compartido"/>
+                                Content="Abrir Ubicacion"
+                                Click="BtnDetailsLink_Click"/>
 
                         <Button Grid.Column="3"
                                 Content="⋯">
