@@ -1,11 +1,11 @@
-﻿using System;
-using System.Diagnostics;
-using System.Threading.Tasks;
-using Anfeta.UI.Data;
+﻿using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Auth;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System;
+using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace Anfeta.UI.ViewModels
 {

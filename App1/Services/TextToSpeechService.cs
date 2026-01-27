@@ -1,11 +1,11 @@
-﻿using System;
+﻿using NAudio.CoreAudioApi;
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Media.SpeechSynthesis;
-using NAudio.CoreAudioApi;
 
 namespace Anfeta.UI.Services
 {

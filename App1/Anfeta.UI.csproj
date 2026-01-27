@@ -57,8 +57,10 @@
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.2" />
 		<PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.251106002" />
 		<PackageReference Include="NAudio" Version="2.2.1" />
+		<PackageReference Include="Vosk" Version="0.3.38" />
 	</ItemGroup>
 	<ItemGroup>
+		<Folder Include="Assets\vosk-model-es\" />
 		<Folder Include="Helpers\" />
 	</ItemGroup>
 	<ItemGroup>

@@ -41,9 +41,20 @@ namespace Anfeta.UI
                     services.AddSingleton<AppStateService>();
                     services.AddSingleton<SettingsService>();
                     services.AddSingleton<AudioService>();
-                    services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
+                    services.AddSingleton<ISpeechToTextService, VoskSpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
+
+                    // Context system (ORDEN IMPORTA)
+                    services.AddSingleton<CapabilityRegistry>();
+                    services.AddSingleton<FastCommandClassifier>();
+                    services.AddSingleton<InterpretationCache>();
+                    services.AddSingleton<ContextManager>();
+                    services.AddSingleton<PromptBuilder>();
+                    services.AddSingleton<IntentValidator>();
+
+                    // LocalActionExecutor NECESITA CapabilityRegistry
+                    services.AddSingleton<LocalActionExecutor>();
 
                     // =========================
                     // Ollama 
@@ -57,8 +68,9 @@ namespace Anfeta.UI
                     services.AddSingleton<IOllamaHealthService, OllamaHealthService>();
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
-                        var http = sp.GetRequiredService<HttpClient>(); // <- ESTE ES EL DE OLLAMA
-                        return new OllamaInterpretationService(http, OllamaConfig.ModelName);
+                        var httpClient = sp.GetRequiredService<HttpClient>();
+                        var promptBuilder = sp.GetRequiredService<PromptBuilder>();
+                        return new OllamaInterpretationService(httpClient, OllamaConfig.ModelName, promptBuilder);  // ✅ AHORA USA OllamaConfig.ModelName
                     });
 
                     // =========================

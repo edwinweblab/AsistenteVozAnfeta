@@ -1,13 +1,13 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Anfeta.UI.Services;
+using Anfeta.UI.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
-using Anfeta.UI.ViewModels;
-using Anfeta.UI.Services;
-using Windows.UI;
 using System;
+using Windows.UI;
 
 namespace Anfeta.UI.Views
 {
@@ -39,7 +39,7 @@ namespace Anfeta.UI.Views
 
         private void HelpButton_Click(object sender, RoutedEventArgs e)
         {
-            Frame.Navigate(typeof(TroubleshootView));   
+            Frame.Navigate(typeof(TroubleshootView));
         }
 
         // Reaccionar a cambios en AppStateService (audio devices)
