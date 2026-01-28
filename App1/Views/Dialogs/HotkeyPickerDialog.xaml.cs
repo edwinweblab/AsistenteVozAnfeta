@@ -35,7 +35,13 @@ namespace Anfeta.UI.Dialogs
             PrimaryButtonClick += OnSave;
             Closed += OnClosed;
 
-            // Pausar hotkey global mientras el diálogo está abierto
+            // AGREGAR ESTO:
+            Loaded += (s, e) =>
+            {
+                var stackPanel = Content as StackPanel;
+                stackPanel?.Focus(FocusState.Programmatic);
+            };
+
             _hotkeyService.Pause();
         }
 

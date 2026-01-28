@@ -103,7 +103,7 @@ namespace Anfeta.UI.Services
                 "{\n" +
                 "  \"plain_text\": \"string corto para el usuario\",\n" +
                 "  \"interpretation\": {\n" +
-                "    \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|Unknown|CreateTask|ListFiles|GetAppointments\",\n" +
+                "    \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|Unknown\",\n" +
                 "    \"scope\": \"LOCAL|API\",\n" +
                 "    \"app_key\": \"string|null\",\n" +
                 "    \"provider\": \"notion|dropbox|weblab|null\",\n" +
@@ -113,18 +113,25 @@ namespace Anfeta.UI.Services
                 "    \"reason\": \"string breve\"\n" +
                 "  }\n" +
                 "}\n\n" +
-                "Reglas IMPORTANTES:\n" +
-                "1) Si el usuario pide abrir/cerrar/minimizar/cambiar ventana en el equipo: scope=\"LOCAL\".\n" +
+                "APPS LOCALES PERMITIDAS (solo estas 4):\n" +
+                "1. chrome - navegador web\n" +
+                "2. calculadora - calculadora de Windows\n" +
+                "3. bloc - bloc de notas (notepad, blog)\n" +
+                "4. explorador - explorador de archivos\n\n" +
+                "REGLAS CRÍTICAS:\n" +
+                "1) Si el usuario menciona una app NO EN LA LISTA ANTERIOR:\n" +
+                "   -> intent=\"Unknown\", app_key=null, confidence=0.1\n" +
                 "2) Para LOCAL con OpenApp/CloseApp:\n" +
-                "   - app_key debe ser el nombre de la aplicación mencionada por el usuario, en minusculas, sin extension.\n" +
-                "   - Ejemplos: \"excel\", \"word\", \"powerpoint\", \"chrome\", \"edge\", \"spotify\", \"notepad\", \"explorador\".\n" +
-                "   - NO inventes otra app distinta. Si hay duda, intent=\"Unknown\" y app_key=null.\n" +
-                "3) Si es API (notion/dropbox/weblab u otro externo): scope=\"API\" y app_key=null.\n" +
-                "4) needs_confirmation=true siempre.\n" +
-                "5) reason: explica breve por qué elegiste intent/scope/app_key.\n\n" +
-                "Entrada:\n" +
+                "   -> app_key SOLO puede ser: chrome, calculadora, bloc, explorador\n" +
+                "   -> Si menciona \"blog\", \"word\", \"excel\", etc: intent=\"Unknown\", app_key=null\n" +
+                "3) Si pide abrir un sitio web SIN mencionar chrome:\n" +
+                "   -> intent=\"Unknown\" (no asumas navegador)\n" +
+                "4) MinimizeAll no necesita app_key\n" +
+                "5) needs_confirmation=true siempre\n" +
+                "6) reason: explica tu decisión brevemente\n\n" +
+                "Entrada del usuario:\n" +
                 "\"" + userMessage + "\"\n\n" +
-                "Responde SOLO JSON.\n";
+                "Responde SOLO JSON válido.\n";
         }
 
         private static string ExtractGroqAssistantContent(string json)

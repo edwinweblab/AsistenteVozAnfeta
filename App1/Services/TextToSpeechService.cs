@@ -1,6 +1,7 @@
 ﻿using NAudio.CoreAudioApi;
 using System;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Core;
@@ -47,9 +48,15 @@ namespace Anfeta.UI.Services
                     policyConfig.SetDefaultEndpoint(target.ID, 1); // 1 = Multimedia
                 }
             }
+            catch (COMException)
+            {
+                // Silenciar error COM - usar dispositivo predeterminado del sistema
+                _originalDefaultDevice = null;
+            }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[TTS] Error al cambiar device: {ex.Message}");
+                _originalDefaultDevice = null;
             }
         }
 
@@ -63,6 +70,10 @@ namespace Anfeta.UI.Services
                     System.Diagnostics.Debug.WriteLine("[TTS] Restaurando device original");
                     var policyConfig = new PolicyConfigClient();
                     policyConfig.SetDefaultEndpoint(_originalDefaultDevice, 1);
+                }
+                catch (COMException)
+                {
+                    // Silenciar error COM
                 }
                 catch (Exception ex)
                 {
@@ -98,10 +109,15 @@ namespace Anfeta.UI.Services
                 _player.MediaEnded += (s, e) => RestoreDefaultDevice();
                 _player.Play();
             }
-            catch
+            catch (OperationCanceledException)
             {
                 RestoreDefaultDevice();
                 throw;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TTS] Error en SpeakAsync: {ex.Message}");
+                RestoreDefaultDevice();
             }
         }
 

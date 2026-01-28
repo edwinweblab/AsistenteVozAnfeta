@@ -39,7 +39,7 @@ namespace Anfeta.UI.Services
                     Category = "editor",
                     FriendlyName = "Bloc de Notas",
                     Capabilities = new List<string> { "editar_texto", "cerrar", "minimizar" },
-                    Synonyms = new List<string> { "notepad", "notas", "editor", "texto" }  // ✅ NUEVO
+                    Synonyms = new List<string> { "notepad", "notas", "editor", "texto", "blog" }  // ✅ nuevo
                 },
                 ["explorador"] = new AppCapability
                 {

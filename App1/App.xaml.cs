@@ -23,6 +23,7 @@ namespace Anfeta.UI
         private GlobalHotkeyService? _hotkey;
         private FloatingMicButton? _floatingButton;
         private bool _isShuttingDown = false;
+        private readonly object _floatingButtonLock = new object();
 
         public static Window? MainWindowInstance { get; private set; }
         public static IHost AppHost { get; private set; } = null!;
@@ -77,8 +78,8 @@ namespace Anfeta.UI
 
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
-                        var http = sp.GetRequiredService<HttpClient>(); // <- ESTE ES EL DE OLLAMA
-                        return new OllamaInterpretationService(http, OllamaConfig.ModelName);
+                        var http = sp.GetRequiredService<HttpClient>();
+                        return new GroqInterpretationService(http, GroqConfig.ModelName);
                     });
 
                     // =========================
@@ -169,8 +170,6 @@ namespace Anfeta.UI
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
             _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
 
-            ((MainWindow)_window).SizeChanged += Window_SizeChanged;
-
             HomeVM.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(HomeViewModel.IsListening))
@@ -220,30 +219,13 @@ namespace Anfeta.UI
             }
         }
 
-        private void Window_SizeChanged(object sender, WindowSizeChangedEventArgs e)
-        {
-            var appWindow = AppWindow.GetFromWindowId(
-                Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
-                    WinRT.Interop.WindowNative.GetWindowHandle(_window)
-                )
-            );
-
-            if (appWindow?.Presenter is OverlappedPresenter presenter)
-            {
-                if (presenter.State == OverlappedPresenterState.Minimized)
-                    ShowFloatingButton();
-                else
-                    HideFloatingButton();
-            }
-        }
-
         private void Hotkey_HotkeyPressed(object? sender, EventArgs e)
         {
             Debug.WriteLine("[HOTKEY] Detectado -> mostrar flotante + UI thread");
-            ShowFloatingButton();
 
             UIQueue?.TryEnqueue(async () =>
             {
+                ShowFloatingButton();
                 BringMainWindowToFront();
                 await HomeVM.TriggerVoiceFromHotkeyAsync();
             });
@@ -251,10 +233,18 @@ namespace Anfeta.UI
 
         private void ShowFloatingButton()
         {
-            UIQueue?.TryEnqueue(() =>
+            lock (_floatingButtonLock)
             {
-                if (_floatingButton == null)
+                try
                 {
+                    if (_floatingButton != null)
+                    {
+                        Debug.WriteLine("[APP] Flotante ya existe -> reutilizar");
+                        _floatingButton.Activate();
+                        return;
+                    }
+
+                    Debug.WriteLine("[APP] Creando nuevo flotante...");
                     _floatingButton = new FloatingMicButton();
                     _floatingButton.OpenAppRequested += (s, e) => BringMainWindowToFront();
                     _floatingButton.ExitRequested += (s, e) => CleanupAndExit();
@@ -265,28 +255,38 @@ namespace Anfeta.UI
 
                     var appState = AppHost.Services.GetRequiredService<AppStateService>();
                     _floatingButton.UpdateHotkeyDisplay(appState.GetHotkeyDisplayString());
+
+                    _floatingButton.Activate();
+                    Debug.WriteLine("[APP] Flotante creado y activado OK");
                 }
-                _floatingButton.Activate();
-            });
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[APP] Error creando flotante: {ex.Message}");
+                    _floatingButton = null;
+                }
+            }
         }
 
         private void HideFloatingButton()
         {
-            UIQueue?.TryEnqueue(() =>
+            lock (_floatingButtonLock)
             {
                 try
                 {
                     if (_floatingButton != null)
                     {
+                        Debug.WriteLine("[APP] Cerrando flotante...");
                         _floatingButton.Close();
                         _floatingButton = null;
+                        Debug.WriteLine("[APP] Flotante cerrado OK");
                     }
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"[APP] Error ocultando flotante: {ex.Message}");
+                    _floatingButton = null;
                 }
-            });
+            }
         }
 
         private void BringMainWindowToFront()

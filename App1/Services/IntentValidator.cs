@@ -1,5 +1,6 @@
 ﻿using Anfeta.UI.Models;
 using System;
+using System.Linq;
 
 namespace Anfeta.UI.Services
 {
@@ -19,6 +20,12 @@ namespace Anfeta.UI.Services
         public ValidationResult Validate(InterpretationResult result, string originalSpeech)
         {
             var ctx = _contextManager.GetContext();
+
+            // NORMALIZAR app_key usando sinónimos
+            if (!string.IsNullOrWhiteSpace(result.AppKey))
+            {
+                result.AppKey = NormalizeAppKey(result.AppKey);
+            }
 
             // Caso 1: CloseApp sin app activa
             if (result.Intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
@@ -88,6 +95,28 @@ namespace Anfeta.UI.Services
             }
 
             return ValidationResult.Ok();
+        }
+
+        /// <summary>Convierte sinónimos a app_key canónico</summary>
+        private string NormalizeAppKey(string appKey)
+        {
+            // Primero intenta match directo
+            if (_registry.IsRegistered(appKey))
+                return appKey;
+
+            // Busca en sinónimos
+            var allApps = _registry.GetAllApps();
+            foreach (var app in allApps)
+            {
+                if (app.Synonyms != null &&
+                    app.Synonyms.Any(s => s.Equals(appKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return app.AppKey;
+                }
+            }
+
+            // No encontrado, devuelve original
+            return appKey;
         }
     }
 
