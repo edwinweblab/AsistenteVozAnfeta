@@ -12,6 +12,7 @@ using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
 namespace Anfeta.UI
@@ -46,23 +47,31 @@ namespace Anfeta.UI
                     services.AddSingleton<GlobalHotkeyService>();
 
                     // =========================
-                    // Ollama 
+                    // GROQ (sustituye Ollama)
                     // =========================
-                    services.AddSingleton(new HttpClient
+                    services.AddSingleton(sp =>
                     {
-                        BaseAddress = new Uri(OllamaConfig.BaseUrl),
-                        Timeout = TimeSpan.FromMinutes(3)
+                        var http = new HttpClient
+                        {
+                            BaseAddress = new Uri(GroqConfig.BaseUrl),
+                            Timeout = TimeSpan.FromSeconds(60)
+                        };
+
+                        // TEMP: key pegada en código
+                        http.DefaultRequestHeaders.Authorization =
+                            new AuthenticationHeaderValue("Bearer", GroqConfig.ApiKey);
+
+                        return http;
                     });
 
-                    services.AddSingleton<IOllamaHealthService, OllamaHealthService>();
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
-                        var http = sp.GetRequiredService<HttpClient>(); // <- ESTE ES EL DE OLLAMA
-                        return new OllamaInterpretationService(http, OllamaConfig.ModelName);
+                        var http = sp.GetRequiredService<HttpClient>(); // <- ESTE ES EL DE GROQ
+                        return new GroqInterpretationService(http, GroqConfig.ModelName);
                     });
 
                     // =========================
-                    // Auth / Weblab (AGREGADO)
+                    // Auth / Weblab
                     // =========================
                     services.AddSingleton<ITokenStore, LocalTokenStore>();
                     services.AddSingleton<AuthStateService>();
@@ -70,7 +79,7 @@ namespace Anfeta.UI
                     services.AddSingleton<LinkAccountViewModel>();
 
                     // =========================
-                    // HttpClientFactory + Auth header 
+                    // HttpClientFactory + Auth header
                     // =========================
                     services.AddSingleton<AuthHeaderHandler>();
 
@@ -81,14 +90,14 @@ namespace Anfeta.UI
                     })
                     .AddHttpMessageHandler<AuthHeaderHandler>();
 
-                    // AuthClient 
+                    // AuthClient
                     services.AddHttpClient<WeblabAuthClient>(client =>
                     {
                         client.BaseAddress = new Uri("https://wlserver-production.up.railway.app");
                         client.Timeout = TimeSpan.FromSeconds(30);
                     });
 
-                    // UsersClient 
+                    // UsersClient
                     services.AddSingleton<WeblabUsersClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
@@ -121,7 +130,7 @@ namespace Anfeta.UI
 
             // 3) Mantener tu flujo actual
             _ = HomeVM;
-            _ = CheckAndWarmupOllamaAsync();
+            _ = CheckAndWarmupGroqAsync();
 
             // 4) Asegurar device activo (genera/lee de SQLite)
             //    + Bootstrap auth (check-device) sin bloquear UI
@@ -159,6 +168,7 @@ namespace Anfeta.UI
 
             _window.Activate();
         }
+
         private async Task BootstrapAuthAsync(string deviceId)
         {
             try
@@ -281,7 +291,6 @@ namespace Anfeta.UI
             }
         }
 
-        /// <summary>Limpia componentes sin cerrar ventana (llamado por MainWindow_Closed)</summary>
         public void CleanupComponents()
         {
             if (_isShuttingDown) return;
@@ -316,7 +325,6 @@ namespace Anfeta.UI
             Application.Current.Exit();
         }
 
-        /// <summary>Cierre completo (llamado por FloatingMicButton.ExitRequested)</summary>
         public void CleanupAndExit()
         {
             if (_isShuttingDown) return;
@@ -376,33 +384,17 @@ namespace Anfeta.UI
             });
         }
 
-        private async Task CheckAndWarmupOllamaAsync()
+        private async Task CheckAndWarmupGroqAsync()
         {
             try
             {
-                using var quick = new HttpClient
-                {
-                    BaseAddress = new Uri(OllamaConfig.BaseUrl),
-                    Timeout = TimeSpan.FromSeconds(5)
-                };
-
-                var res = await quick.GetAsync("/api/tags");
-                Debug.WriteLine($"OLLAMA STATUS: {(int)res.StatusCode}");
-
-                if (!res.IsSuccessStatusCode)
-                {
-                    Debug.WriteLine("OLLAMA NO RESPONDE OK.");
-                    return;
-                }
-
                 var interpreter = AppHost.Services.GetRequiredService<ICommandInterpretationService>();
                 await interpreter.InterpretRawAsync("ping");
-
-                Debug.WriteLine("OLLAMA WARMUP OK");
+                Debug.WriteLine("GROQ WARMUP OK");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("OLLAMA CHECK ERROR: " + ex.Message);
+                Debug.WriteLine("GROQ WARMUP ERROR: " + ex.Message);
             }
         }
 
