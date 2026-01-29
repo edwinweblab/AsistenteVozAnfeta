@@ -23,6 +23,9 @@ namespace Anfeta.UI.ViewModels
         private readonly FastCommandClassifier _fastClassifier;
         private readonly InterpretationCache _interpretationCache;
 
+        private readonly LocalActionExecutor _localExecutor;
+        private readonly ApiActionExecutor _apiExecutor;
+
         private CancellationTokenSource? _currentRecognitionCts;
 
         // Control de sesiones para ignorar resultados tardíos
@@ -32,10 +35,13 @@ namespace Anfeta.UI.ViewModels
         // Modo ejecución (Home UI vs Segundo plano)
         private bool _backgroundMode = false;
 
-        // Acción pendiente (confirmación)
         private string? _pendingIntent;
         private string? _pendingScope;
         private string? _pendingAppKey;
+        private string? _pendingProvider;
+        private string? _pendingResource;
+        private string? _pendingAction;
+        private string? _pendingParamsJson;
         private string _pendingRawJson = "";
 
         // Gate "modelo listo"
@@ -71,9 +77,7 @@ namespace Anfeta.UI.ViewModels
             set
             {
                 if (SetProperty(ref _isListening, value))
-                {
                     ListenOnceCommand.NotifyCanExecuteChanged();
-                }
             }
         }
 
@@ -120,6 +124,9 @@ namespace Anfeta.UI.ViewModels
             _fastClassifier = fastClassifier;
             _interpretationCache = interpretationCache;
 
+            _localExecutor = localExecutor;
+            _apiExecutor = apiExecutor;
+
             InitializeSpeechCommand = new AsyncRelayCommand(InitializeSpeechAsync);
             ListenOnceCommand = new AsyncRelayCommand(ListenOnceAsync, CanListenOnce);
 
@@ -145,14 +152,8 @@ namespace Anfeta.UI.ViewModels
             }
 
             _backgroundMode = true;
-            try
-            {
-                await ListenOnceAsync();
-            }
-            finally
-            {
-                _backgroundMode = false;
-            }
+            try { await ListenOnceAsync(); }
+            finally { _backgroundMode = false; }
         }
 
         /// <summary>Limpiar acción pendiente</summary>
@@ -161,6 +162,10 @@ namespace Anfeta.UI.ViewModels
             _pendingIntent = null;
             _pendingScope = null;
             _pendingAppKey = null;
+            _pendingProvider = null;
+            _pendingResource = null;
+            _pendingAction = null;
+            _pendingParamsJson = null;
             _pendingRawJson = "";
         }
 
@@ -205,7 +210,6 @@ namespace Anfeta.UI.ViewModels
         private async Task ResetAfterActionAsync(string infoMessage, string? statusText = null, string? speak = null)
         {
             ResetAfterAction(infoMessage, statusText);
-
             if (_backgroundMode)
                 await SpeakSafeAsync(speak ?? infoMessage);
         }
@@ -247,7 +251,7 @@ namespace Anfeta.UI.ViewModels
                 IsModelReady = false;
 
                 UpdateUiSafe(
-                    infoMessage: "No pude conectar con el modelo. Abre Ollama e intenta reiniciar la app.",
+                    infoMessage: "No pude conectar con el modelo. Revisa el servicio e intenta reiniciar la app.",
                     statusText: "Modelo no disponible"
                 );
 
@@ -430,7 +434,7 @@ namespace Anfeta.UI.ViewModels
             if (t.Contains("explorador") || t.Contains("archivos") || t.Contains("file explorer"))
                 return "explorador";
 
-            return null;
+            return true;
         }
 
         /// <summary>Mensaje de apps permitidas</summary>
@@ -465,7 +469,11 @@ namespace Anfeta.UI.ViewModels
         {
             if (!HasPending())
             {
-                await ResetAfterActionAsync("No hay ninguna acción pendiente.", "Sin acción pendiente", speak: "No hay ninguna acción pendiente.");
+                await ResetAfterActionAsync(
+                    "No hay ninguna acción pendiente.",
+                    "Sin acción pendiente",
+                    speak: "No hay ninguna acción pendiente."
+                );
                 return;
             }
 
@@ -476,11 +484,13 @@ namespace Anfeta.UI.ViewModels
             Debug.WriteLine("[POLICY] EJECUTANDO ACCION PENDIENTE:");
             Debug.WriteLine(_pendingRawJson);
 
-            if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
+            if (string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
             {
-                await ResetAfterActionAsync(msg, "Acción no disponible", speak: msg);
-                return;
-            }
+                if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
+                {
+                    await ResetAfterActionAsync(msg, "Acción no disponible", speak: msg);
+                    return;
+                }
 
             // Actualizar contexto después de ejecutar
             _contextManager.AddToHistory(intent, appKey);
@@ -503,17 +513,24 @@ namespace Anfeta.UI.ViewModels
 
             if (!IsModelReady)
             {
-                await ResetAfterActionAsync("Aún estoy cargando el modelo. Espera un momento.", "Cargando modelo...", speak: "Aún estoy cargando el modelo.");
+                await ResetAfterActionAsync(
+                    "Aún estoy cargando el modelo. Espera un momento.",
+                    "Cargando modelo...",
+                    speak: "Aún estoy cargando el modelo."
+                );
                 return;
             }
 
             if (!await EnsureSpeechReadyAsync())
             {
-                await ResetAfterActionAsync("No pude inicializar el micrófono. Revisa permisos/dispositivo.", "Error micrófono", speak: "No pude inicializar el micrófono.");
+                await ResetAfterActionAsync(
+                    "No pude inicializar el micrófono. Revisa permisos/dispositivo.",
+                    "Error micrófono",
+                    speak: "No pude inicializar el micrófono."
+                );
                 return;
             }
 
-            // Toggle: si ya está escuchando, cancela
             if (IsListening)
             {
                 Debug.WriteLine("[STT] Ya estaba escuchando -> cancelar");
@@ -521,7 +538,6 @@ namespace Anfeta.UI.ViewModels
                 return;
             }
 
-            // Inicia sesión
             _cancelRequested = false;
             var mySession = Interlocked.Increment(ref _listenSessionId);
 
@@ -542,7 +558,6 @@ namespace Anfeta.UI.ViewModels
 
                 Debug.WriteLine("[STT] RecognizeOnceAsync result: " + (text ?? "<null>"));
 
-                // Si cancelaron o cambió la sesión, NO seguimos
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[STT] Resultado ignorado por cancel/sesion nueva");
@@ -556,7 +571,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // UI (solo Home)
                 UpdateUiSafe("Texto detectado correctamente.", $"Entendí: {text}", recognized: text);
 
                 // Confirmación en segundo plano
@@ -573,7 +587,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Si hay pending: este texto se usa para confirmar/cancelar
+                // pending confirmación
                 if (HasPending())
                 {
                     Debug.WriteLine("[POLICY] Hay pending. Texto: " + text);
@@ -598,7 +612,8 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                var requestedFromSpeech = ExtractRequestedAppFromSpeech(text);
+                // Reparación/anti-sustitución local
+                var requestedFromSpeech = _localExecutor.ResolveAppKeyFromSpeech(text);
                 Debug.WriteLine("[STT] requestedFromSpeech=" + (requestedFromSpeech ?? "<null>"));
 
                 // CLASIFICACIÓN RÁPIDA (bypass IA para comandos obvios)
@@ -719,7 +734,21 @@ namespace Anfeta.UI.ViewModels
                     if (root.TryGetProperty("app_key", out var appEl) && appEl.ValueKind != JsonValueKind.Null)
                         appKey = appEl.GetString();
 
-                    Debug.WriteLine($"[IA] Parsed -> intent={intent}, scope={scope}, app_key={appKey}");
+                string? provider = null;
+                if (root.TryGetProperty("provider", out var provEl) && provEl.ValueKind != JsonValueKind.Null)
+                    provider = provEl.GetString();
+
+                string? resource = null;
+                if (root.TryGetProperty("resource", out var resEl) && resEl.ValueKind != JsonValueKind.Null)
+                    resource = resEl.GetString();
+
+                string? action = null;
+                if (root.TryGetProperty("action", out var actEl) && actEl.ValueKind != JsonValueKind.Null)
+                    action = actEl.GetString();
+
+                string? paramsJson = null;
+                if (root.TryGetProperty("params", out var pr) && pr.ValueKind == JsonValueKind.Object)
+                    paramsJson = pr.GetRawText();
 
                     parsedResult = new InterpretationResult
                     {
@@ -777,68 +806,89 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                var requiresConfirmation = RequiresConfirmation(intent, scope, appKey);
-                Debug.WriteLine($"[POLICY] requires_confirmation={requiresConfirmation}");
-
                 if (requiresConfirmation)
                 {
                     _pendingIntent = intent;
                     _pendingScope = scope;
                     _pendingAppKey = appKey;
-                    _pendingRawJson = JsonSerializer.Serialize(parsedResult);
+                    _pendingProvider = provider;
+                    _pendingResource = resource;
+                    _pendingAction = action;
+                    _pendingParamsJson = paramsJson;
+                    _pendingRawJson = ia.Json;
 
                     IsListening = false;
                     ListenOnceCommand.NotifyCanExecuteChanged();
 
+                    var what = scope.ToUpperInvariant() switch
+                    {
+                        "LOCAL" => $"{intent} {(appKey ?? "")}".Trim(),
+                        "API" => $"{provider ?? "api"} {resource ?? ""} {action ?? ""}".Trim(),
+                        "BROWSER" => $"{action ?? "browser"}".Trim(),
+                        _ => $"{intent}".Trim()
+                    };
+
                     UpdateUiSafe(
-                        $"Confirmación requerida para: {intent} {(appKey ?? "")}. Di 'confirmar' o 'cancelar'.",
+                        $"Confirmación requerida para: {what}. Di 'confirmar' o 'cancelar'.",
                         "Confirmación requerida"
                     );
 
                     if (_backgroundMode)
                         await SpeakSafeAsync("Confirmación requerida. Di confirmar o cancelar.");
 
-                    Debug.WriteLine("[POLICY] Acción guardada como pending. Esperando confirmación...");
                     return;
                 }
 
-                if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
+                if (string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
                 {
-                    await ResetAfterActionAsync(
-                        msg + " " + AllowedAppsMessage(),
-                        "Acción no disponible",
-                        speak: msg
+                    if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
+                    {
+                        await ResetAfterActionAsync(
+                            msg + " " + AllowedAppsMessage(),
+                            "Acción no disponible",
+                            speak: msg
+                        );
+                        return;
+                    }
+
+                    await ResetAfterActionAsync(msg, msg, speak: msg);
+                    return;
+                }
+
+                if (string.Equals(scope, "API", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (ok, msg) = await _apiExecutor.ExecuteAsync(
+                        provider,
+                        resource,
+                        action,
+                        paramsJson ?? "{}",
+                        ct
                     );
+
+                    if (!ok)
+                    {
+                        await ResetAfterActionAsync(msg, "API no disponible", speak: msg);
+                        return;
+                    }
+
+                    // Mostrar y hablar el resultado real
+                    await ResetAfterActionAsync(msg, "Listo.", speak: msg);
                     return;
                 }
 
-                // Actualizar contexto después de ejecutar
-                _contextManager.AddToHistory(intent, appKey);
-                if (intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(appKey))
-                {
-                    _contextManager.SetActiveApp(appKey);
-                }
-                else if (intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
-                {
-                    _contextManager.ClearActiveApp();
-                }
-
-                await ResetAfterActionAsync(msg, msg, speak: msg);
+                await ResetAfterActionAsync("Acción no soportada.", "No soportado", speak: "Acción no soportada.");
             }
             catch (OperationCanceledException)
             {
-                Debug.WriteLine("[STT] OperationCanceledException");
                 await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
             }
             catch (UnauthorizedAccessException ex)
             {
-                Debug.WriteLine("[STT] UnauthorizedAccessException: " + ex);
                 _speechInitialized = false;
                 await ResetAfterActionAsync(ex.Message, "ERROR: Permiso denegado", speak: "Permiso denegado para el micrófono.");
             }
-            catch (Exception ex)
+            catch
             {
-                Debug.WriteLine("[VM] ERROR: " + ex);
                 await ResetAfterActionAsync("Error al procesar el comando.", "Error", speak: "Ocurrió un error.");
             }
             finally

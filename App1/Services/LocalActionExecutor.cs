@@ -1,4 +1,5 @@
-﻿using System;
+﻿// LocalActionExecutor.cs
+using System;
 using System.Diagnostics;
 
 namespace Anfeta.UI.Services
@@ -32,7 +33,7 @@ namespace Anfeta.UI.Services
             {
                 message = "Acción no es LOCAL.";
                 return false;
-            }
+            }   
 
             if (!string.Equals(intent, "OpenApp", StringComparison.OrdinalIgnoreCase))
             {
@@ -40,7 +41,8 @@ namespace Anfeta.UI.Services
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(appKey))
+            var key = NormalizeAppKey(appKey);
+            if (string.IsNullOrWhiteSpace(key))
             {
                 message = "Falta app_key para OpenApp.";
                 return false;
@@ -65,7 +67,7 @@ namespace Anfeta.UI.Services
             }
             catch (Exception ex)
             {
-                message = $"Error al ejecutar {appKey}: {ex.Message}";
+                message = $"Error al ejecutar {key}: {ex.Message}";
                 return false;
             }
         }

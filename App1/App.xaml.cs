@@ -1,6 +1,7 @@
 ﻿using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Auth;
+using Anfeta.UI.Services.Weblab;
 using Anfeta.UI.ViewModels;
 using Anfeta.UI.Views.Dialogs;
 using Microsoft.Extensions.DependencyInjection;
@@ -120,6 +121,15 @@ namespace Anfeta.UI
                     // ViewModels
                     // =========================
                     services.AddSingleton<HomeViewModel>();
+
+                    services.AddSingleton<WeblabActividadesClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"));
+                    });
+                    services.AddSingleton<LocalActionExecutor>();
+                    services.AddSingleton<ApiActionExecutor>();
+
                 })
                 .Build();
         }

@@ -1,4 +1,5 @@
-﻿using System;
+﻿// GroqInterpretationService.cs
+using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -31,7 +32,7 @@ namespace Anfeta.UI.Services
                 return new InterpretationResponse
                 {
                     PlainText = "No se detectó texto para interpretar.",
-                    Json = "{\"intent\":\"Unknown\",\"scope\":\"LOCAL\",\"confidence\":0.0,\"needs_confirmation\":false,\"params\":{}}"
+                    Json = "{\"intent\":\"Unknown\",\"scope\":\"LOCAL\",\"app_key\":null,\"provider\":null,\"resource\":null,\"action\":\"unknown\",\"confidence\":0.0,\"params\":{},\"reason\":\"\"}"
                 };
             }
 
@@ -59,7 +60,7 @@ namespace Anfeta.UI.Services
             resp.EnsureSuccessStatusCode();
 
             var respJson = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var modelText = ExtractGroqAssistantContent(respJson);
+            var modelText = ExtractAssistantContent(respJson);
 
             var wrapperJson = ExtractFirstJson(modelText);
             if (string.IsNullOrWhiteSpace(wrapperJson))
@@ -67,7 +68,7 @@ namespace Anfeta.UI.Services
                 return new InterpretationResponse
                 {
                     PlainText = "No pude interpretar el comando (salida no válida).",
-                    Json = "{\"intent\":\"Unknown\",\"scope\":\"LOCAL\",\"confidence\":0.2,\"needs_confirmation\":false,\"params\":{}}"
+                    Json = "{\"intent\":\"Unknown\",\"scope\":\"LOCAL\",\"app_key\":null,\"provider\":null,\"resource\":null,\"action\":\"unknown\",\"confidence\":0.2,\"params\":{},\"reason\":\"\"}"
                 };
             }
 
@@ -80,7 +81,7 @@ namespace Anfeta.UI.Services
 
             string interpretationJson = root.TryGetProperty("interpretation", out var interp)
                 ? interp.GetRawText()
-                : "{\"intent\":\"Unknown\",\"scope\":\"LOCAL\",\"confidence\":0.2,\"needs_confirmation\":false,\"params\":{}}";
+                : "{\"intent\":\"Unknown\",\"scope\":\"LOCAL\",\"app_key\":null,\"provider\":null,\"resource\":null,\"action\":\"unknown\",\"confidence\":0.2,\"params\":{},\"reason\":\"\"}";
 
             // Forzar confirmación true siempre (tu policy require_confirmation=true)
             interpretationJson = ForceNeedsConfirmationTrue(interpretationJson);
@@ -103,38 +104,47 @@ namespace Anfeta.UI.Services
                 "{\n" +
                 "  \"plain_text\": \"string corto para el usuario\",\n" +
                 "  \"interpretation\": {\n" +
-                "    \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|Unknown\",\n" +
-                "    \"scope\": \"LOCAL|API\",\n" +
+                "    \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|ApiCall|Unknown\",\n" +
+                "    \"scope\": \"LOCAL|API|BROWSER\",\n" +
+                "    \"provider\": \"weblab|notion|dropbox|google|null\",\n" +
                 "    \"app_key\": \"string|null\",\n" +
-                "    \"provider\": \"notion|dropbox|weblab|null\",\n" +
+                "    \"resource\": \"system|actividades|proyectos|recordatorios|reportes|usuarios|opciones|presence|revisiones|agenda|pendientes|null\",\n" +
+                "    \"action\": \"open|close|minimize|switch|list|get|search|create|update|delete|navigate|new_tab|close_tab|find|unknown\",\n" +
                 "    \"confidence\": 0.0,\n" +
                 "    \"params\": {},\n" +
                 "    \"needs_confirmation\": true,\n" +
                 "    \"reason\": \"string breve\"\n" +
                 "  }\n" +
                 "}\n\n" +
-                "APPS LOCALES PERMITIDAS (solo estas 4):\n" +
-                "1. chrome - navegador web\n" +
-                "2. calculadora - calculadora de Windows\n" +
-                "3. bloc - bloc de notas (notepad, blog)\n" +
-                "4. explorador - explorador de archivos\n\n" +
-                "REGLAS CRÍTICAS:\n" +
-                "1) Si el usuario menciona una app NO EN LA LISTA ANTERIOR:\n" +
-                "   -> intent=\"Unknown\", app_key=null, confidence=0.1\n" +
-                "2) Para LOCAL con OpenApp/CloseApp:\n" +
-                "   -> app_key SOLO puede ser: chrome, calculadora, bloc, explorador\n" +
-                "   -> Si menciona \"blog\", \"word\", \"excel\", etc: intent=\"Unknown\", app_key=null\n" +
-                "3) Si pide abrir un sitio web SIN mencionar chrome:\n" +
-                "   -> intent=\"Unknown\" (no asumas navegador)\n" +
-                "4) MinimizeAll no necesita app_key\n" +
-                "5) needs_confirmation=true siempre\n" +
-                "6) reason: explica tu decisión brevemente\n\n" +
-                "Entrada del usuario:\n" +
+                "REGLAS CLAVE (NO inventes nada):\n" +
+                "1) LOCAL (Windows) = abrir/cerrar apps o acciones del sistema.\n" +
+                "   - scope=\"LOCAL\", provider=null, resource=\"system\".\n" +
+                "   - intent: OpenApp|CloseApp|MinimizeAll|SwitchWindow.\n" +
+                "   - Para OpenApp/CloseApp: app_key obligatorio.\n" +
+                "   - 'abrir navegador' o 'abrir chrome' SIEMPRE es LOCAL (app_key=\"chrome\").\n" +
+                "   - 'calculadora' => app_key=\"calculadora\".\n" +
+                "   - 'bloc de notas/notepad' => app_key=\"bloc\".\n" +
+                "   - 'explorador/archivos/file explorer' => app_key=\"explorador\".\n" +
+                "2) API (Weblab módulos) cuando el usuario pide ver/listar cosas del sistema:\n" +
+                "   - scope=\"API\", provider=\"weblab\", app_key=null.\n" +
+                "   - resource debe ser uno de: actividades, proyectos, recordatorios, reportes, usuarios, opciones, presence, revisiones, agenda, pendientes.\n" +
+                "   - Heurísticas:\n" +
+                "       'ver/mostrar/listar/dame' => action=\"list\"\n" +
+                "       'actividad 12' => action=\"get\" y params.id=12\n" +
+                "       'busca X' => action=\"search\" y params.q=\"X\"\n" +
+                "       'crear/agregar' => action=\"create\"\n" +
+                "       'actualizar/editar' => action=\"update\"\n" +
+                "       'eliminar/borrar' => action=\"delete\"\n" +
+                "3) BROWSER solo si pide acciones dentro del navegador (internet):\n" +
+                "   - ejemplos: 'busca en internet...', 've a google.com', 'abre nueva pestaña', 'cierra pestaña'.\n" +
+                "4) Si el texto dice 'actividades/proyectos/...' NO es app local: es API.\n" +
+                "5) Si hay duda: intent=\"Unknown\", scope=\"LOCAL\", action=\"unknown\", app_key=null.\n\n" +
+                "Entrada:\n" +
                 "\"" + userMessage + "\"\n\n" +
-                "Responde SOLO JSON válido.\n";
+                "Responde SOLO JSON.\n";
         }
 
-        private static string ExtractGroqAssistantContent(string json)
+        private static string ExtractAssistantContent(string json)
         {
             using var doc = JsonDocument.Parse(json);
 
