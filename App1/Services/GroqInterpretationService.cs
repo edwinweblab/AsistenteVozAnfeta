@@ -1,7 +1,6 @@
 ﻿// GroqInterpretationService.cs
 using System;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -22,6 +21,9 @@ namespace Anfeta.UI.Services
             _modelName = modelName ?? throw new ArgumentNullException(nameof(modelName));
         }
 
+        // Interpreta texto reconocido y devuelve JSON estructurado
+        // Entrada: recognizedText (texto del usuario), ct (token cancelación)
+        // Salida: InterpretationResponse con PlainText y Json
         public async Task<InterpretationResponse> InterpretRawAsync(string recognizedText, CancellationToken ct = default)
         {
             recognizedText ??= "";
@@ -38,13 +40,11 @@ namespace Anfeta.UI.Services
 
             var prompt = BuildPrompt(recognizedText);
 
-            // Groq (OpenAI compatible): chat.completions
             var payload = new
             {
                 model = _modelName,
                 temperature = 0.1,
                 top_p = 0.9,
-                // Importante: forzar salida JSON limpia (aun así validamos con ExtractFirstJson)
                 response_format = new { type = "json_object" },
                 messages = new object[]
                 {
@@ -83,9 +83,6 @@ namespace Anfeta.UI.Services
                 ? interp.GetRawText()
                 : "{\"intent\":\"Unknown\",\"scope\":\"LOCAL\",\"app_key\":null,\"provider\":null,\"resource\":null,\"action\":\"unknown\",\"confidence\":0.2,\"params\":{},\"reason\":\"\"}";
 
-            // Forzar confirmación true siempre (tu policy require_confirmation=true)
-            interpretationJson = ForceNeedsConfirmationTrue(interpretationJson);
-
             return new InterpretationResponse
             {
                 PlainText = plain.Trim(),
@@ -93,62 +90,65 @@ namespace Anfeta.UI.Services
             };
         }
 
+        // Construye prompt optimizado para Groq
+        // Entrada: userMessage (comando del usuario)
+        // Salida: Prompt completo para enviar a Groq
         private static string BuildPrompt(string userMessage)
         {
             userMessage ??= "";
             userMessage = userMessage.Replace("\"", "\\\"");
 
             return
-                "Devuelve SOLO un JSON válido. Sin texto extra.\n\n" +
-                "Formato exacto:\n" +
+                "Return ONLY valid JSON. No extra text.\n\n" +
+                "Format:\n" +
                 "{\n" +
-                "  \"plain_text\": \"string corto para el usuario\",\n" +
+                "  \"plain_text\": \"short message\",\n" +
                 "  \"interpretation\": {\n" +
-                "    \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|ApiCall|Unknown\",\n" +
+                "    \"intent\": \"OpenApp|ApiCall|Unknown\",\n" +
                 "    \"scope\": \"LOCAL|API|BROWSER\",\n" +
-                "    \"provider\": \"weblab|notion|dropbox|google|null\",\n" +
+                "    \"provider\": \"weblab|null\",\n" +
                 "    \"app_key\": \"string|null\",\n" +
-                "    \"resource\": \"system|actividades|proyectos|recordatorios|reportes|usuarios|opciones|presence|revisiones|agenda|pendientes|null\",\n" +
-                "    \"action\": \"open|close|minimize|switch|list|get|search|create|update|delete|navigate|new_tab|close_tab|find|unknown\",\n" +
+                "    \"resource\": \"actividades|proyectos|revisiones|usuarios|null\",\n" +
+                "    \"action\": \"open|list|get|search|today|en-curso|unknown\",\n" +
                 "    \"confidence\": 0.0,\n" +
                 "    \"params\": {},\n" +
-                "    \"needs_confirmation\": true,\n" +
-                "    \"reason\": \"string breve\"\n" +
+                "    \"reason\": \"brief\"\n" +
                 "  }\n" +
                 "}\n\n" +
-                "REGLAS CLAVE (NO inventes nada):\n" +
-                "1) LOCAL (Windows) = abrir/cerrar apps o acciones del sistema.\n" +
-                "   - scope=\"LOCAL\", provider=null, resource=\"system\".\n" +
-                "   - intent: OpenApp|CloseApp|MinimizeAll|SwitchWindow.\n" +
-                "   - Para OpenApp/CloseApp: app_key obligatorio.\n" +
-                "   - 'abrir navegador' o 'abrir chrome' SIEMPRE es LOCAL (app_key=\"chrome\").\n" +
-                "   - 'calculadora' => app_key=\"calculadora\".\n" +
-                "   - 'bloc de notas/notepad' => app_key=\"bloc\".\n" +
-                "   - 'explorador/archivos/file explorer' => app_key=\"explorador\".\n" +
-                "2) API (Weblab módulos) cuando el usuario pide ver/listar cosas del sistema:\n" +
-                "   - scope=\"API\", provider=\"weblab\", app_key=null.\n" +
-                "   - resource debe ser uno de: actividades, proyectos, recordatorios, reportes, usuarios, opciones, presence, revisiones, agenda, pendientes.\n" +
-                "   - Heurísticas:\n" +
-                "       'ver/mostrar/listar/dame' => action=\"list\"\n" +
-                "       'actividad 12' => action=\"get\" y params.id=12\n" +
-                "       'busca X' => action=\"search\" y params.q=\"X\"\n" +
-                "       'crear/agregar' => action=\"create\"\n" +
-                "       'actualizar/editar' => action=\"update\"\n" +
-                "       'eliminar/borrar' => action=\"delete\"\n" +
-                "3) BROWSER solo si pide acciones dentro del navegador (internet):\n" +
-                "   - ejemplos: 'busca en internet...', 've a google.com', 'abre nueva pestaña', 'cierra pestaña'.\n" +
-                "4) Si el texto dice 'actividades/proyectos/...' NO es app local: es API.\n" +
-                "5) Si hay duda: intent=\"Unknown\", scope=\"LOCAL\", action=\"unknown\", app_key=null.\n\n" +
-                "Entrada:\n" +
-                "\"" + userMessage + "\"\n\n" +
-                "Responde SOLO JSON.\n";
+                "CRITICAL RULES:\n" +
+                "1. LOCAL scope = Windows apps (chrome, calculadora, bloc, explorador)\n" +
+                "   Example: 'abrir chrome' -> intent:OpenApp, scope:LOCAL, app_key:chrome, resource:null, action:open\n\n" +
+                "2. API scope = Weblab data queries - ALWAYS include resource + action\n" +
+                "   Examples:\n" +
+                "   'ver actividades' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:list\n" +
+                "   'qué tengo hoy' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:today\n" +
+                "   'detalles de la actividad ABC123' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:get, params:{\"id\":\"ABC123\"}\n" +
+                "   'qué revisiones tengo hoy' -> intent:ApiCall, scope:API, provider:weblab, resource:revisiones, action:today\n" +
+                "   'en qué estoy trabajando' -> intent:ApiCall, scope:API, provider:weblab, resource:revisiones, action:en-curso\n\n" +
+                "3. Action mapping:\n" +
+                "   'ver/mostrar/listar/dame' (no 'hoy', no 'detalles') -> action:list\n" +
+                "   'hoy/del día/de hoy' -> action:today (NEVER action:list if 'hoy' present)\n" +
+                "   'detalles/detalle/información de' -> action:get, extract ID to params.id\n" +
+                "   'busca/encuentra' -> action:search\n" +
+                "   'en qué estoy/activa/en curso' -> action:en-curso\n\n" +
+                "4. Resource mapping:\n" +
+                "   'actividades/actividad/tareas' -> resource:actividades\n" +
+                "   'revisiones/revisión' -> resource:revisiones\n" +
+                "   'proyectos/proyecto' -> resource:proyectos\n\n" +
+                "5. ID extraction:\n" +
+                "   If user says 'detalles de X' or 'actividad X', extract X as params.id\n" +
+                "   Example: 'detalles de XYZ' -> params:{\"id\":\"XYZ\"}\n\n" +
+                "User input: \"" + userMessage + "\"\n\n" +
+                "MUST include resource and action for API calls. Return JSON only:\n";
         }
 
+        // Extrae contenido de la respuesta de Groq
+        // Entrada: json (respuesta completa de Groq API)
+        // Salida: Contenido del mensaje del asistente
         private static string ExtractAssistantContent(string json)
         {
             using var doc = JsonDocument.Parse(json);
 
-            // choices[0].message.content
             if (!doc.RootElement.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
                 return "";
 
@@ -159,42 +159,23 @@ namespace Anfeta.UI.Services
             return content.GetString() ?? "";
         }
 
+        // Extrae primer objeto JSON válido del texto
+        // Entrada: text (texto que puede contener JSON)
+        // Salida: JSON extraído o null si no se encuentra
         private static string? ExtractFirstJson(string text)
         {
             var match = Regex.Match(text, @"\{[\s\S]*\}", RegexOptions.Multiline);
             if (!match.Success) return null;
 
             var candidate = match.Value.Trim();
-            try { using var _ = JsonDocument.Parse(candidate); return candidate; }
-            catch { return null; }
-        }
-
-        private static string ForceNeedsConfirmationTrue(string interpretationJson)
-        {
             try
             {
-                using var doc = JsonDocument.Parse(interpretationJson);
-                var root = doc.RootElement;
-
-                var obj = new
-                {
-                    intent = root.TryGetProperty("intent", out var i) ? (i.GetString() ?? "Unknown") : "Unknown",
-                    scope = root.TryGetProperty("scope", out var s) ? (s.GetString() ?? "LOCAL") : "LOCAL",
-                    app_key = root.TryGetProperty("app_key", out var a) && a.ValueKind != JsonValueKind.Null ? a.GetString() : null,
-                    provider = root.TryGetProperty("provider", out var p) && p.ValueKind != JsonValueKind.Null ? p.GetString() : null,
-                    confidence = root.TryGetProperty("confidence", out var c) ? c.GetDouble() : 0.2,
-                    @params = root.TryGetProperty("params", out var pr) && pr.ValueKind == JsonValueKind.Object
-                        ? JsonSerializer.Deserialize<object>(pr.GetRawText())
-                        : new { },
-                    needs_confirmation = true,
-                    reason = root.TryGetProperty("reason", out var rs) ? (rs.GetString() ?? "") : ""
-                };
-
-                return JsonSerializer.Serialize(obj);
+                using var _ = JsonDocument.Parse(candidate);
+                return candidate;
             }
             catch
             {
-                return interpretationJson;
+                return null;
             }
         }
     }

@@ -93,7 +93,6 @@ namespace Anfeta.UI.Services
             await StopAsync();
             ct.ThrowIfCancellationRequested();
 
-            // Cambiar dispositivo predeterminado temporalmente
             if (_appState.OutputDeviceId.HasValue)
             {
                 SetTemporaryDefaultDevice(_appState.OutputDeviceId.Value);
@@ -123,15 +122,28 @@ namespace Anfeta.UI.Services
 
         public Task StopAsync()
         {
+            Stop();
+            return Task.CompletedTask;
+        }
+
+        public void Stop()
+        {
             try
             {
-                _player?.Pause();
-                _player?.Dispose();
-                _player = null;
+                if (_player != null)
+                {
+                    _player.Pause();
+                    _player.Source = null;
+                    _player.Dispose();
+                    _player = null;
+                    System.Diagnostics.Debug.WriteLine("[TTS] Detenido y liberado");
+                }
                 RestoreDefaultDevice();
             }
-            catch { }
-            return Task.CompletedTask;
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TTS] Error al detener: {ex.Message}");
+            }
         }
     }
 }

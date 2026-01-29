@@ -33,7 +33,7 @@ namespace Anfeta.UI.Services
             {
                 message = "Acción no es LOCAL.";
                 return false;
-            }   
+            }
 
             if (!string.Equals(intent, "OpenApp", StringComparison.OrdinalIgnoreCase))
             {
@@ -48,10 +48,10 @@ namespace Anfeta.UI.Services
                 return false;
             }
 
-            var appDef = _registry.GetApp(appKey);
+            var appDef = _registry.GetApp(key);
             if (appDef == null)
             {
-                message = $"La aplicación '{appKey}' no está disponible.";
+                message = $"La aplicación '{key}' no está disponible.";
                 return false;
             }
 
@@ -70,6 +70,17 @@ namespace Anfeta.UI.Services
                 message = $"Error al ejecutar {key}: {ex.Message}";
                 return false;
             }
+        }
+
+        // Normaliza app_key a formato estándar
+        // Entrada: appKey (puede ser null)
+        // Salida: appKey en minúsculas y sin espacios, o null si era null/vacío
+        private static string? NormalizeAppKey(string? appKey)
+        {
+            if (string.IsNullOrWhiteSpace(appKey))
+                return null;
+
+            return appKey.Trim().ToLowerInvariant();
         }
     }
 }

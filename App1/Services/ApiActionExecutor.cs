@@ -4,19 +4,28 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Anfeta.UI.Services.Weblab;
+using Anfeta.UI.Services.Auth;
 
 namespace Anfeta.UI.Services
 {
     public sealed class ApiActionExecutor
     {
         private readonly WeblabActividadesClient _actividades;
+        private readonly WeblabRevisionesClient _revisiones;
+        private readonly WeblabAuthClient _auth;
+        private string? _cachedAssignee;
 
-        public ApiActionExecutor(WeblabActividadesClient actividades)
+        public ApiActionExecutor(
+            WeblabActividadesClient actividades,
+            WeblabRevisionesClient revisiones,
+            WeblabAuthClient auth)
         {
             _actividades = actividades;
+            _revisiones = revisiones;
+            _auth = auth;
         }
 
-        // Nombre consistente con tu HomeViewModel actual (ExecuteAsync)
+        // Ejecuta llamada API basada en provider/resource/action
         public Task<(bool ok, string message)> ExecuteAsync(
             string? provider,
             string? resource,
@@ -36,9 +45,16 @@ namespace Anfeta.UI.Services
             resource = (resource ?? "").Trim().ToLowerInvariant();
             action = (action ?? "").Trim().ToLowerInvariant();
 
-            if (provider != "weblab")
-                return (false, "Acción API inválida: provider no soportado.");
+            if (string.IsNullOrWhiteSpace(provider) || provider != "weblab")
+                return (false, $"Provider no soportado: '{provider}'. Solo 'weblab' está disponible.");
 
+            if (string.IsNullOrWhiteSpace(resource))
+                return (false, "Falta especificar el resource (actividades, proyectos, revisiones, etc).");
+
+            if (string.IsNullOrWhiteSpace(action))
+                return (false, "Falta especificar la action (list, search, get, today, etc).");
+
+            // ACTIVIDADES
             if (resource == "actividades")
             {
                 if (action == "list")
@@ -53,16 +69,68 @@ namespace Anfeta.UI.Services
                     var q = TryGetString(paramsJson, "q");
                     if (string.IsNullOrWhiteSpace(q))
                         return (false, "Búsqueda inválida: falta params.q.");
-
                     var limit = TryGetInt(paramsJson, "limit") ?? 10;
                     var r = await _actividades.SearchTitlesAsync(q!, limit, ct);
                     return (r.Ok, r.PlainText);
                 }
 
-                return (false, $"Acción actividades no soportada: {action}.");
+                if (action == "today")
+                {
+                    var assignee = await GetOrFetchAssigneeAsync(ct);
+                    if (string.IsNullOrWhiteSpace(assignee))
+                        return (false, "No pude identificar tu usuario.");
+
+                    var r = await _actividades.GetTodayActivitiesAsync(assignee, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                if (action == "get")
+                {
+                    var id = TryGetString(paramsJson, "id");
+                    if (string.IsNullOrWhiteSpace(id))
+                        return (false, "Falta el ID de la actividad.");
+
+                    var r = await _actividades.GetActivityByIdAsync(id!, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, search, today, get.");
             }
 
-            return (false, $"Resource no soportado: {resource}.");
+            // REVISIONES
+            if (resource == "revisiones")
+            {
+                if (action == "today")
+                {
+                    var r = await _revisiones.GetTodayRevisionsAsync(ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                if (action == "en-curso" || action == "activa")
+                {
+                    var r = await _revisiones.GetActiveRevisionsAsync(ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                return (false, $"Acción '{action}' no soportada para revisiones. Disponibles: today, en-curso.");
+            }
+
+            return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones.");
+        }
+
+        private async Task<string?> GetOrFetchAssigneeAsync(CancellationToken ct)
+        {
+            if (!string.IsNullOrWhiteSpace(_cachedAssignee))
+                return _cachedAssignee;
+
+            var (ok, assignee, _) = await _auth.GetCurrentUserAsync(ct);
+            if (ok && !string.IsNullOrWhiteSpace(assignee))
+            {
+                _cachedAssignee = assignee;
+                return assignee;
+            }
+
+            return null;
         }
 
         private static string? TryGetString(string? json, string prop)

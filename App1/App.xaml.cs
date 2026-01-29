@@ -56,9 +56,6 @@ namespace Anfeta.UI
                     services.AddSingleton<PromptBuilder>();
                     services.AddSingleton<IntentValidator>();
 
-                    // LocalActionExecutor NECESITA CapabilityRegistry
-                    services.AddSingleton<LocalActionExecutor>();
-
                     // =========================
                     // GROQ (sustituye Ollama)
                     // =========================
@@ -103,32 +100,56 @@ namespace Anfeta.UI
                     })
                     .AddHttpMessageHandler<AuthHeaderHandler>();
 
-                    // AuthClient
-                    services.AddHttpClient<WeblabAuthClient>(client =>
+                    // =========================
+                    // Weblab API Clients
+                    // =========================
+
+                    // WeblabAuthClient - Para operaciones de autenticación
+                    services.AddSingleton<Anfeta.UI.Services.Auth.WeblabAuthClient>(sp =>
                     {
-                        client.BaseAddress = new Uri("https://wlserver-production.up.railway.app");
-                        client.Timeout = TimeSpan.FromSeconds(30);
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new Anfeta.UI.Services.Auth.WeblabAuthClient(factory.CreateClient("WeblabAuthed"));
                     });
 
-                    // UsersClient
+                    // WeblabUsersClient - Para búsqueda de usuarios
                     services.AddSingleton<WeblabUsersClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new WeblabUsersClient(factory.CreateClient("WeblabAuthed"));
                     });
 
-                    // =========================
-                    // ViewModels
-                    // =========================
-                    services.AddSingleton<HomeViewModel>();
-
+                    // WeblabActividadesClient - Para gestión de actividades
                     services.AddSingleton<WeblabActividadesClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"));
                     });
+
+                    // WeblabRevisionesClient - Para gestión de revisiones
+                    services.AddSingleton<WeblabRevisionesClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new WeblabRevisionesClient(factory.CreateClient("WeblabAuthed"));
+                    });
+
+                    // =========================
+                    // Action Executors
+                    // =========================
                     services.AddSingleton<LocalActionExecutor>();
-                    services.AddSingleton<ApiActionExecutor>();
+
+                    // ApiActionExecutor con todos los clientes necesarios
+                    services.AddSingleton<ApiActionExecutor>(sp =>
+                    {
+                        var actividades = sp.GetRequiredService<WeblabActividadesClient>();
+                        var revisiones = sp.GetRequiredService<WeblabRevisionesClient>();
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new ApiActionExecutor(actividades, revisiones, auth);
+                    });
+
+                    // =========================
+                    // ViewModels
+                    // =========================
+                    services.AddSingleton<HomeViewModel>();
 
                 })
                 .Build();
@@ -194,7 +215,7 @@ namespace Anfeta.UI
             try
             {
                 var auth = AppHost.Services.GetRequiredService<AuthStateService>();
-                var authApi = AppHost.Services.GetRequiredService<WeblabAuthClient>();
+                var authApi = AppHost.Services.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
 
                 // 1) Cargar token local si existe (LocalSettings)
                 await auth.InitializeAsync();
