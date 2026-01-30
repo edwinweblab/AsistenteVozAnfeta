@@ -104,42 +104,37 @@ namespace Anfeta.UI.Services
                 "{\n" +
                 "  \"plain_text\": \"short message\",\n" +
                 "  \"interpretation\": {\n" +
-                "    \"intent\": \"OpenApp|ApiCall|Unknown\",\n" +
+                "   \"intent\": \"OpenApp|CloseApp|MinimizeAll|SwitchWindow|ApiCall|Unknown\",\n" +
                 "    \"scope\": \"LOCAL|API|BROWSER\",\n" +
-                "    \"provider\": \"weblab|null\",\n" +
+                "    \"provider\": \"weblab|notion|dropbox|google|null\",\n" +
                 "    \"app_key\": \"string|null\",\n" +
-                "    \"resource\": \"actividades|proyectos|revisiones|usuarios|null\",\n" +
-                "    \"action\": \"open|list|get|search|today|en-curso|unknown\",\n" +
+                "    \"resource\": \"system|actividades|proyectos|recordatorios|reportes|usuarios|opciones|presence|revisiones|agenda|pendientes|null\",\n" +
+                "    \"action\": \"open|close|minimize|switch|list|get|search|create|update|delete|navigate|new_tab|close_tab|find|unknown\",\n" +
                 "    \"confidence\": 0.0,\n" +
                 "    \"params\": {},\n" +
-                "    \"reason\": \"brief\"\n" +
+                "    \"reason\": \"string breve\"\n" +
                 "  }\n" +
                 "}\n\n" +
                 "CRITICAL RULES:\n" +
-                "1. LOCAL scope = Windows apps (chrome, calculadora, bloc, explorador)\n" +
-                "   Example: 'abrir chrome' -> intent:OpenApp, scope:LOCAL, app_key:chrome, resource:null, action:open\n\n" +
-                "2. API scope = Weblab data queries - ALWAYS include resource + action\n" +
+                "1. Set confidence to 1.0 for clear commands, 0.7 for ambiguous, 0.3 for unclear\n\n" +  // ⬅️ NUEVO
+                "2. LOCAL scope = Windows apps (chrome, calculadora, bloc, explorador)\n" +
+                "   Example: 'abrir chrome' -> intent:OpenApp, scope:LOCAL, app_key:chrome, confidence:1.0\n\n" +
+                "3. API scope = Weblab data queries - ALWAYS include resource + action\n" +
                 "   Examples:\n" +
-                "   'ver actividades' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:list\n" +
-                "   'qué tengo hoy' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:today\n" +
-                "   'detalles de la actividad ABC123' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:get, params:{\"id\":\"ABC123\"}\n" +
-                "   'qué revisiones tengo hoy' -> intent:ApiCall, scope:API, provider:weblab, resource:revisiones, action:today\n" +
-                "   'en qué estoy trabajando' -> intent:ApiCall, scope:API, provider:weblab, resource:revisiones, action:en-curso\n\n" +
-                "3. Action mapping:\n" +
+                "   'ver actividades' -> resource:actividades, action:list, confidence:1.0\n" +
+                "   'qué tengo hoy' -> resource:actividades, action:today, confidence:1.0\n" +
+                "   'detalles de ABC123' -> resource:actividades, action:get, params:{id:ABC123}, confidence:1.0\n" +
+                "   'qué revisiones hoy' -> resource:revisiones, action:today, confidence:1.0\n" +
+                "   'en qué estoy' -> resource:revisiones, action:en-curso, confidence:1.0\n\n" +
+                "4. Action mapping:\n" +
                 "   'ver/mostrar/listar/dame' (no 'hoy', no 'detalles') -> action:list\n" +
-                "   'hoy/del día/de hoy' -> action:today (NEVER action:list if 'hoy' present)\n" +
-                "   'detalles/detalle/información de' -> action:get, extract ID to params.id\n" +
+                "   'hoy/del día/de hoy' -> action:today\n" +
+                "   'detalles/detalle' -> action:get, extract ID to params.id\n" +
                 "   'busca/encuentra' -> action:search\n" +
                 "   'en qué estoy/activa/en curso' -> action:en-curso\n\n" +
-                "4. Resource mapping:\n" +
-                "   'actividades/actividad/tareas' -> resource:actividades\n" +
-                "   'revisiones/revisión' -> resource:revisiones\n" +
-                "   'proyectos/proyecto' -> resource:proyectos\n\n" +
-                "5. ID extraction:\n" +
-                "   If user says 'detalles de X' or 'actividad X', extract X as params.id\n" +
-                "   Example: 'detalles de XYZ' -> params:{\"id\":\"XYZ\"}\n\n" +
-                "User input: \"" + userMessage + "\"\n\n" +
-                "MUST include resource and action for API calls. Return JSON only:\n";
+                "5. Resource: actividades/revisiones/proyectos/usuarios\n\n" +
+                "User: \"" + userMessage + "\"\n\n" +
+                "Return JSON with confidence >= 0.7 for valid commands:\n";
         }
 
         // Extrae contenido de la respuesta de Groq
