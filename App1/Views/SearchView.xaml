@@ -93,6 +93,7 @@
                         <ToggleButton x:Name="ChipDocx" Content="DOCX" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipXlsx" Content="XLSX" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipImg" Content="IMG" Click="ChipFilter_Click"/>
+                        <ToggleButton x:Name="ChipUrl" Content="URL" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipRecent" Content="Recientes" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipBookmarks" Content="⭐ Bookmarks" Click="ChipFilter_Click"/>
                         <ToggleButton x:Name="ChipFolders" Content="Solo carpetas" Click="ChipFilter_Click"/>
@@ -224,10 +225,24 @@
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
 
-                                        <TextBlock Grid.Column="0"
-                   Text="{x:Bind Name}"
-                   FontWeight="SemiBold"
-                   TextTrimming="CharacterEllipsis"/>
+                                        <StackPanel Grid.Column="0"
+            Orientation="Horizontal"
+            Spacing="10"
+            VerticalAlignment="Center">
+
+                                            <IconSourceElement IconSource="{x:Bind Icon,Mode=OneWay}"
+                       Width="18"
+                       Height="18"/>
+
+                                            <TextBlock x:Name="NameText"
+           DataContextChanged="NameText_DataContextChanged"
+           FontWeight="SemiBold"
+           TextTrimming="CharacterEllipsis"/>
+
+
+
+                                        </StackPanel>
+
 
                                         <!-- ⭐ -->
                                         <Button Grid.Column="1"
@@ -237,7 +252,8 @@
                 Click="BtnStar_Click"
                 ToolTipService.ToolTip="Agregar / quitar bookmark"/>
                                     </Grid>
-                                </DataTemplate>
+                                </DataTemplate> 
+                                
 
                             </ListView.ItemTemplate>
 

@@ -1,4 +1,6 @@
 ﻿using Anfeta.UI.Models;
+using Anfeta.UI.Services;
+using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Search;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -6,14 +8,14 @@ using Microsoft.UI.Xaml.Input;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using System.IO;
-using Anfeta.UI.Services.Bookmarks;
-using System.Text.Json;
-using System.Runtime.InteropServices;
+
 
     
 
@@ -23,6 +25,8 @@ namespace Anfeta.UI.Views
     public sealed partial class SearchView : Page 
 
     {
+        private List<string> _highlightTerms = new();
+        private readonly ShellIconService _iconService = new ShellIconService();
         private string _currentFolder = DROPBOX_ROOT;
         private bool _isBrowsing = false; // false=buscar, true=explorar carpeta 
         private bool _onlyBookmarks = false;
@@ -71,6 +75,92 @@ namespace Anfeta.UI.Views
 
         // colapsable
         private bool _foldersPaneVisible = true;
+        private sealed class RowView : AdvancedQueryV3.IItemView
+        {
+            private readonly SearchResultRow _x;
+            public RowView(SearchResultRow x) => _x = x;
+
+            public string? Name => _x.Name;
+            public string? Path => _x.Target;
+
+            public string? Folder =>
+                System.IO.Path.GetDirectoryName(_x.Target ?? "");
+
+            public string? Extension =>
+                System.IO.Path.GetExtension(_x.Target ?? "").TrimStart('.');
+
+            public string? Type =>
+                string.Equals(_x.Type, "FOLDER", StringComparison.OrdinalIgnoreCase) ? "folder" : "file";
+
+            public long SizeBytes => _x.Size;
+
+            public DateTime ModifiedLocalDate => ParseServerModified(_x.ServerModified);
+
+            public int DaysModified =>
+                ModifiedLocalDate == DateTime.MinValue
+                    ? int.MaxValue
+                    : (int)(DateTime.Now.Date - ModifiedLocalDate.Date).TotalDays;
+
+            public string? SearchText => $"{_x.Name} {_x.Target}";
+
+            private static DateTime ParseServerModified(string? s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return DateTime.MinValue;
+
+                // Dropbox suele traer ISO 8601: 2026-01-28T08:...
+                if (DateTime.TryParse(
+                    s,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeLocal,
+                    out var dt))
+                    return dt;
+
+                return DateTime.MinValue;
+            }
+        }
+        private sealed class BookmarkView : AdvancedQueryV3.IItemView
+        {
+            private readonly BookmarkItem _b;
+            public BookmarkView(BookmarkItem b) => _b = b;
+
+            public string? Name => _b.Title;
+            public string? Path => _b.LocalPath;
+
+            public string? Folder =>
+                System.IO.Path.GetDirectoryName(_b.LocalPath ?? "");
+
+            public string? Extension =>
+                System.IO.Path.GetExtension(_b.LocalPath ?? _b.Title ?? "").TrimStart('.');
+
+            public string? Type =>
+                string.Equals(_b.Type, "FOLDER", StringComparison.OrdinalIgnoreCase) ? "folder" : "file";
+
+            public long SizeBytes => _b.Size;
+
+            public DateTime ModifiedLocalDate => ParseDate(_b.Modified);
+
+            public int DaysModified =>
+                ModifiedLocalDate == DateTime.MinValue
+                    ? int.MaxValue
+                    : (int)(DateTime.Now.Date - ModifiedLocalDate.Date).TotalDays;
+
+            public string? SearchText => $"{_b.Title} {_b.LocalPath}";
+
+            private static DateTime ParseDate(string? s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return DateTime.MinValue;
+
+                if (DateTime.TryParse(
+                    s,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeLocal,
+                    out var dt))
+                    return dt;
+
+                return DateTime.MinValue;
+            }
+        }
+
 
         public SearchView()
         {
@@ -304,6 +394,18 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            // ✅ Entramos a modo Explorer (browse)
+            _mode = ViewMode.Explorer;
+            _isBrowsing = true;
+
+            // ✅ IMPORTANTÍSIMO: al navegar carpeta, salimos del “modo búsqueda”
+            // (evita residuos visuales y highlight aplicándose donde no toca)
+
+            // ⚠️ OJO: si NO quieres resetear los chips al navegar, comenta estas 3 líneas:
+            _onlyBookmarks = false;
+            _onlyFolders = false;
+            _extFilter = null;
+
             // historial
             if (pushHistory)
             {
@@ -315,7 +417,6 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            _isBrowsing = true;
             _currentFolder = folder;
 
             LoadingRing.IsActive = true;
@@ -330,34 +431,112 @@ namespace Anfeta.UI.Views
                 BreadcrumbText.Text = $"Ruta: {pretty}";
                 ModeText.Text = "Modo: Explorar (Local)";
 
+                // ✅ LIMPIAR + FORZAR REFRESH (evita “filas fantasma”)
                 Results.Clear();
+                ResultsList.ItemsSource = null;
 
+                // -------------------------
                 // Carpetas primero
-                foreach (var dir in Directory.EnumerateDirectories(folder))
+                // -------------------------
+                IEnumerable<string> dirs;
+                try
                 {
-                    Results.Add(new SearchResultRow
+                    dirs = Directory.EnumerateDirectories(folder);
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: No pude leer carpetas → {ex.Message}";
+                    return;
+                }
+
+                foreach (var dir in dirs)
+                {
+                    if (string.IsNullOrWhiteSpace(dir)) continue;
+
+                    string name;
+                    try
                     {
-                        Name = Path.GetFileName(dir),
+                        name = new DirectoryInfo(dir).Name;
+                    }
+                    catch
+                    {
+                        name = "";
+                    }
+
+                    // ✅ filtra solo basura REAL (no filtres "_")
+                    if (string.IsNullOrWhiteSpace(name) || name == "—")
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[BROWSE][FOLDER] SKIP Name='{name}' Target='{dir}'");
+                        continue;
+                    }
+
+                    var row = new SearchResultRow
+                    {
+                        Name = name,
                         Target = dir,
                         Type = "FOLDER",
                         Source = SearchSource.Local
-                    });
+                    };
+
+                    row.Icon = _iconService.GetIcon(row.Type, row.Target);
+
+                    Results.Add(row);
                 }
 
+                // -------------------------
                 // Archivos
-                foreach (var file in Directory.EnumerateFiles(folder))
+                // -------------------------
+                IEnumerable<string> files;
+                try
                 {
-                    var fi = new FileInfo(file);
-                    Results.Add(new SearchResultRow
+                    files = Directory.EnumerateFiles(folder);
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: No pude leer archivos → {ex.Message}";
+                    return;
+                }
+
+                foreach (var file in files)
+                {
+                    if (string.IsNullOrWhiteSpace(file)) continue;
+
+                    FileInfo fi;
+                    try
                     {
-                        Name = Path.GetFileName(file),
+                        fi = new FileInfo(file);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    var name = fi.Name ?? "";
+
+                    // ✅ filtra solo basura REAL
+                    if (string.IsNullOrWhiteSpace(name) || name == "—")
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[BROWSE][FILE] SKIP Name='{name}' Target='{file}'");
+                        continue;
+                    }
+
+                    var row = new SearchResultRow
+                    {
+                        Name = name,
                         Target = file,
                         Type = "FILE",
-                        Size = fi.Length,
-                        ServerModified = fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm"),
+                        Size = fi.Exists ? fi.Length : 0,
+                        ServerModified = fi.Exists ? fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm") : "",
                         Source = SearchSource.Local
-                    });
+                    };
+
+                    row.Icon = _iconService.GetIcon(row.Type, row.Target);
+
+                    Results.Add(row);
                 }
+
+                // ✅ REASIGNAR SOURCE para que WinUI no recicle mal los containers
+                ResultsList.ItemsSource = Results;
 
                 CountText.Text = $"{Results.Count} resultados";
                 EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -373,7 +552,11 @@ namespace Anfeta.UI.Views
                 LoadingRing.IsActive = false;
                 LoadingRing.Visibility = Visibility.Collapsed;
             }
+
+            await Task.CompletedTask;
         }
+
+
 
         // ===== SEARCH (Everything-like) =====
         private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -446,6 +629,7 @@ namespace Anfeta.UI.Views
             else if (sender == ChipDocx) _extFilter = ChipDocx.IsChecked == true ? "docx" : null;
             else if (sender == ChipXlsx) _extFilter = ChipXlsx.IsChecked == true ? "xlsx" : null;
             else if (sender == ChipImg) _extFilter = ChipImg.IsChecked == true ? "img" : null;
+            else if (sender == ChipUrl) _extFilter = ChipUrl.IsChecked == true ? "url" : null; // ✅ NUEVO
 
             // Apagar SOLO los otros chips de extensión (NO tocar Bookmarks/Folders)
             if (_extFilter != null)
@@ -454,12 +638,13 @@ namespace Anfeta.UI.Views
                 if (sender != ChipDocx) ChipDocx.IsChecked = false;
                 if (sender != ChipXlsx) ChipXlsx.IsChecked = false;
                 if (sender != ChipImg) ChipImg.IsChecked = false;
+                if (sender != ChipUrl) ChipUrl.IsChecked = false; // ✅ NUEVO
             }
 
             // --- 3) Decide qué pintar según modo ---
             if (_onlyBookmarks)
             {
-                await ShowBookmarksAsync();      // aplica filtros con tus vars actuales
+                await ShowBookmarksAsync();
                 FinishUi();
                 return;
             }
@@ -467,6 +652,7 @@ namespace Anfeta.UI.Views
             await RunLocalSearchAsync(SearchBox.Text ?? "");
             FinishUi();
         }
+
 
 
         private async void SortCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -482,58 +668,6 @@ namespace Anfeta.UI.Views
             FinishUi();
         }
 
-
-        private void ApplyFiltersAndSort()
-        {
-            IEnumerable<DropboxNode> q = _raw;
-
-            if (_onlyFolders)
-                q = q.Where(n => n.IsFolder);
-
-            if (!string.IsNullOrWhiteSpace(_extFilter))
-            {
-                q = q.Where(n =>
-                {
-                    var name = n.Name ?? "";
-                    var ext = System.IO.Path.GetExtension(name).TrimStart('.').ToLowerInvariant();
-
-                    if (_extFilter == "img")
-                        return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
-
-                    return ext == _extFilter;
-                });
-            }
-
-            // sort (por ahora name/path)
-            q = _sortKey switch
-            {
-                "name_desc" => q.OrderByDescending(n => n.Name),
-                _ => q.OrderBy(n => n.Name)
-            };
-
-            // pintar en UI
-            Results.Clear();
-            foreach (var n in q)
-            {
-                var typeNorm = n.IsFolder ? "FOLDER" : "FILE";
-
-                Results.Add(new SearchResultRow
-                {
-                    NodeId = n.Id,
-                    Name = n.Name,
-                    Target = n.Path,                 // lo que muestras en lista
-                    Source = SearchSource.Dropbox,
-
-                    Type = n.Type,                   // file/folder
-                    Size = n.Size,
-                    ServerModified = n.ServerModified,
-                });
-
-
-
-            }
-
-        }
 
         // ===== Results interactions (por ahora UI/Details) =====
         private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -645,36 +779,89 @@ namespace Anfeta.UI.Views
                 LoadingRing.Visibility = Visibility.Collapsed;
             }
         }
-        private Task RunLocalSearchAsync(string query)
+        private async Task RunLocalSearchAsync(string query)
         {
             _mode = ViewMode.Explorer;
-
             Results.Clear();
 
-            var q = (query ?? "").Trim().ToLowerInvariant();
-            IEnumerable<SearchResultRow> items = _localIndex;
+            var rawQuery = (query ?? "").Trim();
+            IEnumerable<SearchResultRow> items = _localIndex ?? Enumerable.Empty<SearchResultRow>();
 
-            // filtro por texto
-            if (!string.IsNullOrWhiteSpace(q))
-                items = items.Where(x => (x.Name ?? "").ToLowerInvariant().Contains(q));
+            var parsed = AdvancedQueryV3.Parse(rawQuery);
+            UpdateHighlightTerms(rawQuery, parsed);
 
-            // filtro solo carpetas
+            if (string.IsNullOrWhiteSpace(rawQuery))
+            {
+                // nada
+            }
+            else
+            {
+                if (rawQuery == "-")
+                    return;
+
+                if (!LooksAdvanced(rawQuery))
+                {
+                    var q = rawQuery.ToLowerInvariant();
+                    items = items.Where(x => (x.Name ?? "").ToLowerInvariant().Contains(q));
+                }
+                else
+                {
+                    // ✅ AQUÍ YA NO vuelvas a parsear
+                    // 1) Expr lógico
+                    items = items.Where(x => AdvancedQueryV3.Evaluate(parsed.Expr, new RowView(x)));
+
+                    // 2) PLAN (B: no tocar UI)
+                    if (!string.IsNullOrWhiteSpace(parsed.Plan.FolderContains))
+                    {
+                        var f = parsed.Plan.FolderContains.ToLowerInvariant();
+                        items = items.Where(x => (x.Target ?? "").ToLowerInvariant().Contains(f));
+                    }
+
+                    if (parsed.Plan.OnlyFolders.HasValue)
+                    {
+                        var wantFolder = parsed.Plan.OnlyFolders.Value;
+                        items = items.Where(x =>
+                            wantFolder
+                                ? (x.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase)
+                                : (x.Type ?? "").Equals("FILE", StringComparison.OrdinalIgnoreCase));
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(parsed.Plan.Ext))
+                    {
+                        var e = parsed.Plan.Ext;
+                        items = items.Where(x =>
+                        {
+                            var ext = Path.GetExtension(x.Target ?? x.Name ?? "")
+                                .TrimStart('.')
+                                .ToLowerInvariant();
+
+                            if (e == "img")
+                                return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
+
+                            return ext == e;
+                        });
+                    }
+                }
+            }
+
             if (_onlyFolders)
                 items = items.Where(x => (x.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase));
 
-            // filtro por extensión
             if (!string.IsNullOrWhiteSpace(_extFilter))
             {
                 items = items.Where(x =>
                 {
-                    var ext = Path.GetExtension(x.Name ?? "").TrimStart('.').ToLowerInvariant();
+                    var ext = Path.GetExtension(x.Target ?? x.Name ?? "")
+                        .TrimStart('.')
+                        .ToLowerInvariant();
+
                     if (_extFilter == "img")
                         return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
+
                     return ext == _extFilter;
                 });
             }
 
-            // sort
             items = _sortKey switch
             {
                 "name_desc" => items.OrderByDescending(x => x.Name),
@@ -683,15 +870,177 @@ namespace Anfeta.UI.Views
 
             foreach (var it in items.Take(500))
             {
-                // ⭐ estrella según bookmarks (usa LocalPath guardado)
                 it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
+
+                // 🔥 ICONO SIEMPRE
+                it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
+
                 Results.Add(it);
             }
+
+            // ✅ refresca templates (para highlight)
+            ResultsList.ItemsSource = null;
+            ResultsList.ItemsSource = Results;
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-            return Task.CompletedTask;
+            await Task.CompletedTask;
+
+        }
+
+        private void UpdateHighlightTerms(string rawQuery, Anfeta.UI.Services.Search.ParsedQuery parsed)
+        {
+            rawQuery ??= "";
+            rawQuery = rawQuery.Trim();
+
+            if (string.IsNullOrWhiteSpace(rawQuery))
+            {
+                _highlightTerms = new List<string>();
+                return;
+            }
+
+            // Si no es avanzado: resalta la cadena completa
+            if (!LooksAdvanced(rawQuery))
+            {
+                _highlightTerms = new List<string> { rawQuery };
+                return;
+            }
+
+            // Avanzado: extrae TextTerm del AST, ignorando lo negado (NOT)
+            var list = new List<string>();
+            CollectHighlightTerms(parsed.Expr, list, insideNot: false);
+
+            _highlightTerms = list
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(s => s.Length) // frases ganan a palabras
+                .ToList();
+        }
+
+
+        private static void CollectHighlightTerms(
+            Anfeta.UI.Services.Search.QNode? node,
+            List<string> outList,
+            bool insideNot)
+        {
+            if (node is null) return;
+
+            switch (node)
+            {
+                case Anfeta.UI.Services.Search.TextTerm t:
+                    if (!insideNot)
+                        outList.Add(t.Pattern);
+                    break;
+
+                case Anfeta.UI.Services.Search.Not n:
+                    CollectHighlightTerms(n.X, outList, insideNot: true); // NO resaltar lo negado
+                    break;
+
+                case Anfeta.UI.Services.Search.And a:
+                    CollectHighlightTerms(a.L, outList, insideNot);
+                    CollectHighlightTerms(a.R, outList, insideNot);
+                    break;
+
+                case Anfeta.UI.Services.Search.Or o:
+                    CollectHighlightTerms(o.L, outList, insideNot);
+                    CollectHighlightTerms(o.R, outList, insideNot);
+                    break;
+
+                    // FieldTerm y otros: NO se resaltan
+            }
+        }
+        private void NameText_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Microsoft.UI.Xaml.Controls.TextBlock tb) return;
+            if (tb.DataContext is not Anfeta.UI.Models.SearchResultRow row) return;
+
+            ApplyHighlightToTextBlock(tb, row.Name ?? "");
+        }
+
+        private void ApplyHighlightToTextBlock(Microsoft.UI.Xaml.Controls.TextBlock tb, string text)
+        {
+            tb.Inlines.Clear();
+            text ??= "";
+
+            if (_highlightTerms == null || _highlightTerms.Count == 0 || text.Length == 0)
+            {
+                tb.Text = text;
+                return;
+            }
+
+            int i = 0;
+            while (i < text.Length)
+            {
+                int bestIndex = -1;
+                string? bestNeedle = null;
+
+                foreach (var n in _highlightTerms)
+                {
+                    var idx = text.IndexOf(n, i, StringComparison.OrdinalIgnoreCase);
+                    if (idx < 0) continue;
+
+                    if (bestIndex < 0 || idx < bestIndex)
+                    {
+                        bestIndex = idx;
+                        bestNeedle = n;
+                        if (bestIndex == i) break;
+                    }
+                }
+
+                if (bestIndex < 0 || bestNeedle is null)
+                {
+                    tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = text.Substring(i) });
+                    break;
+                }
+
+                if (bestIndex > i)
+                    tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = text.Substring(i, bestIndex - i) });
+
+                tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run
+                {
+                    Text = text.Substring(bestIndex, bestNeedle.Length),
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["SystemControlHighlightAccentBrush"]
+                });
+
+                i = bestIndex + bestNeedle.Length;
+            }
+        }
+
+
+        private static bool LooksAdvanced(string q)
+        {
+            if (string.IsNullOrWhiteSpace(q)) return false;
+
+            // Frases, OR con |, paréntesis, NOT con - (lo que ya tenías)
+            if (q.Contains('"')) return true;
+            if (q.Contains('|')) return true;
+            if (q.Contains('(') || q.Contains(')')) return true;
+
+            // Operadores de palabra
+            var up = q.ToUpperInvariant();
+            if (up.Contains(" AND ") || up.Contains(" OR ") || up.Contains(" NOT ")) return true;
+
+            // Exclude
+            if (q.StartsWith("-", StringComparison.Ordinal)) return true;
+            if (q.Contains(" -", StringComparison.Ordinal)) return true;
+
+            // ✅ NUEVO: comandos con :
+            // (no usamos solo q.Contains(':') porque podría activar por rutas tipo C:\)
+            string[] cmd = {
+        "ext:", "type:", "folder:", "sort:", "limit:", "page:",
+        "size:", "date:", "dm:", "year:", "month:", "name:", "path:", "content:", "id:", "status:", "meta:", "author:", "creator:", "access:", "shared:"
+    };
+
+            for (int i = 0; i < cmd.Length; i++)
+            {
+                if (up.Contains(cmd[i].ToUpperInvariant(), StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
         }
 
 
@@ -802,25 +1151,58 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private static string SafeFileName(string fullPath)
+        {
+            fullPath ??= "";
+
+            // Normaliza separadores y quita slash final
+            fullPath = fullPath.Trim().TrimEnd('\\', '/');
+
+            // nombre “normal”
+            var name = System.IO.Path.GetFileName(fullPath);
+
+            // fallback: si quedó vacío, usa el path mismo o algo visible
+            if (string.IsNullOrWhiteSpace(name))
+                name = fullPath;
+
+            return name;
+        }
 
 
-        private Task ShowBookmarksAsync()
+        private async Task ShowBookmarksAsync()
         {
             _mode = ViewMode.Bookmarks;
 
             Results.Clear();
 
-            // 1) base: TODOS los bookmarks (siempre)
             var list = _bookmarks ?? new List<BookmarkItem>();
             IEnumerable<BookmarkItem> items = list;
+            var rawQuery = (SearchBox?.Text ?? "").Trim();
+            var parsed = AdvancedQueryV3.Parse(rawQuery);
+            UpdateHighlightTerms(rawQuery, parsed);
 
-            // 2) filtro por texto (usa SearchBox igual que Explorer)
-            var q = (SearchBox?.Text ?? "").Trim();
-            if (!string.IsNullOrWhiteSpace(q))
+            if (!string.IsNullOrWhiteSpace(rawQuery))
             {
-                var qq = q.ToLowerInvariant();
-                items = items.Where(b => (b.Title ?? "").ToLowerInvariant().Contains(qq));
+                if (!LooksAdvanced(rawQuery))
+                {
+                    var qq = rawQuery.ToLowerInvariant();
+                    items = items.Where(b => (b.Title ?? "").ToLowerInvariant().Contains(qq));
+                }
+                else
+                {
+
+                    items = items.Where(b => AdvancedQueryV3.Evaluate(parsed.Expr, new BookmarkView(b)));
+
+                }
             }
+            items = items.Where(b => AdvancedQueryV3.Evaluate(parsed.Expr, new BookmarkView(b)));
+
+            if (!string.IsNullOrWhiteSpace(parsed.Plan.FolderContains))
+            {
+                var f = parsed.Plan.FolderContains.ToLowerInvariant();
+                items = items.Where(b => (b.LocalPath ?? "").ToLowerInvariant().Contains(f));
+            }
+
 
             // 3) filtros: reutiliza los mismos switches que Explorer
             if (_onlyFolders)
@@ -852,19 +1234,23 @@ namespace Anfeta.UI.Views
             {
                 var localPath = (b.LocalPath ?? "").Trim();
 
-                Results.Add(new SearchResultRow
+                var row = new SearchResultRow
                 {
                     Name = b.Title ?? "",
-                    Target = localPath,                 // 🔥 SIEMPRE LocalPath aquí
+                    Target = localPath,
                     Type = b.Type ?? "",
                     Size = b.Size,
                     ServerModified = b.Modified ?? "",
                     Source = b.Source,
-
-                    // 🔥 En vez de forzarlo, lo calculamos por existencia real
                     IsBookmarked = !string.IsNullOrWhiteSpace(localPath)
-                                   && _bookmarksService.Exists(_bookmarks, localPath)
-                });
+                    && _bookmarksService.Exists(_bookmarks, localPath)
+                };
+
+                row.Icon = _iconService.GetIcon(row.Type, row.Target);
+                System.Diagnostics.Debug.WriteLine($"{row.Name} icon={(row.Icon == null ? "NULL" : row.Icon.GetType().Name)}");
+
+                Results.Add(row);
+
             }
 
             BreadcrumbText.Text = "Bookmarks";
@@ -872,9 +1258,24 @@ namespace Anfeta.UI.Views
             CountText.Text = $"{Results.Count} bookmarks";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-            return Task.CompletedTask;
+            await Task.CompletedTask;
         }
 
+        private void NameText_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
+        {
+            if (sender is not TextBlock tb) return;
+
+            // args.NewValue es el item real
+            if (args.NewValue is SearchResultRow row)
+            {
+                ApplyHighlightToTextBlock(tb, row.Name ?? "");
+            }
+            else
+            {
+                // fallback por seguridad (nunca dejes vacío)
+                tb.Text = "";
+            }
+        }
 
         private async Task EnterBookmarksModeAsync()
         {

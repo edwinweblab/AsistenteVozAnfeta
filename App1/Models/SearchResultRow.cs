@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿using Microsoft.UI.Xaml.Controls;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace Anfeta.UI.Models
@@ -9,6 +10,7 @@ namespace Anfeta.UI.Models
         private void OnPropertyChanged([CallerMemberName] string? name = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
+        public IconSource? Icon { get; set; }  // para IconSourceElement
         public string NodeId { get; set; } = "";
         public string Name { get; set; } = "";
         public string Target { get; set; } = "";
