@@ -2,7 +2,9 @@
     x:Class="Anfeta.UI.Views.SearchView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:models="using:Anfeta.UI.Models">
+    xmlns:models="using:Anfeta.UI.Models"
+    Loaded="SearchView_Loaded"
+    NavigationCacheMode="Enabled">
 
     <Grid Padding="16" RowSpacing="12">
         <Grid.RowDefinitions>

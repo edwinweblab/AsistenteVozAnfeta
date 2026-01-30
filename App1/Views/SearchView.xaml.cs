@@ -14,7 +14,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
-using System.Threading.Tasks;
+using System.Threading.Tasks; 
 
 
     
@@ -30,6 +30,8 @@ namespace Anfeta.UI.Views
         private string _currentFolder = DROPBOX_ROOT;
         private bool _isBrowsing = false; // false=buscar, true=explorar carpeta 
         private bool _onlyBookmarks = false;
+        private LocalIndexService Index => App.LocalIndex;
+
         private enum ViewMode { Explorer, Bookmarks }
         private ViewMode _mode = ViewMode.Explorer;
 
@@ -196,8 +198,9 @@ namespace Anfeta.UI.Views
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
             }
         }
-            private async void SearchView_Loaded(object sender, RoutedEventArgs e)
+        private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
+            // 1) Bookmarks (como ya lo tienes)
             try
             {
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
@@ -209,7 +212,29 @@ namespace Anfeta.UI.Views
                 _bookmarks = new();
             }
 
+            // 2) Index cache (para no sincronizar al volver al módulo)
+            if (App.LocalIndex.HasData)
+            {
+                var count = App.LocalIndex.GetAll().Count;
+
+                // Si quieres, puedes mantener ambos estados en el texto:
+                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Index cache ✅ ({count} items)";
+
+                // opcional: mostrar raíz al entrar (sin meter historial)
+                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+
+                // opcional: si hay texto en SearchBox, corre búsqueda al entrar
+                var q = (SearchBox?.Text ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(q))
+                    await RunLocalSearchAsync(q);
+            }
+            else
+            {
+                // No hay index todavía, no sincronizamos solos (modo estable)
+                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Sin index (pulsa Sync)";
+            }
         }
+
         private static bool NeedsHydration(string path)
         {
             try
@@ -227,6 +252,7 @@ namespace Anfeta.UI.Views
                 return true;
             }
         }
+       
 
         private async Task<bool> EnsureHydratedAsync(string path, CancellationToken ct)
         {
@@ -762,11 +788,12 @@ namespace Anfeta.UI.Views
                 StatusText.Text = "Estado: Indexando carpeta local de Dropbox…";
 
                 await BuildLocalIndexAsync();
+
                 LoadFoldersRoot();
                 BuildTreeRoot();
                 await BrowseFolderAsync(DROPBOX_ROOT);
 
-                StatusText.Text = $"Estado: Index local listo ✅ ({_localIndex.Count} items)";
+                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
                 await RunLocalSearchAsync(SearchBox.Text ?? "");
             }
             catch (Exception ex)
@@ -779,13 +806,17 @@ namespace Anfeta.UI.Views
                 LoadingRing.Visibility = Visibility.Collapsed;
             }
         }
+
+
+
         private async Task RunLocalSearchAsync(string query)
         {
             _mode = ViewMode.Explorer;
             Results.Clear();
 
             var rawQuery = (query ?? "").Trim();
-            IEnumerable<SearchResultRow> items = _localIndex ?? Enumerable.Empty<SearchResultRow>();
+            IEnumerable<SearchResultRow> items = App.LocalIndex.GetAll();
+
 
             var parsed = AdvancedQueryV3.Parse(rawQuery);
             UpdateHighlightTerms(rawQuery, parsed);
@@ -1297,32 +1328,31 @@ namespace Anfeta.UI.Views
 
         private async Task BuildLocalIndexAsync()
         {
-            await Task.Run(() =>
+            var list = await Task.Run(() =>
             {
-                var list = new List<SearchResultRow>();
+                var tmp = new List<SearchResultRow>();
 
-                if (!System.IO.Directory.Exists(DROPBOX_ROOT))
+                if (!Directory.Exists(DROPBOX_ROOT))
                     throw new Exception($"No existe la ruta: {DROPBOX_ROOT}");
 
-                // Recorrido (puedes limitar profundidad si quieres)
-                foreach (var dir in System.IO.Directory.EnumerateDirectories(DROPBOX_ROOT, "*", System.IO.SearchOption.AllDirectories))
+                foreach (var dir in Directory.EnumerateDirectories(DROPBOX_ROOT, "*", SearchOption.AllDirectories))
                 {
-                    list.Add(new SearchResultRow
+                    tmp.Add(new SearchResultRow
                     {
-                        Name = System.IO.Path.GetFileName(dir),
+                        Name = Path.GetFileName(dir),
                         Target = dir,
                         Type = "FOLDER",
                         Source = SearchSource.Local
                     });
                 }
 
-                foreach (var file in System.IO.Directory.EnumerateFiles(DROPBOX_ROOT, "*", System.IO.SearchOption.AllDirectories))
+                foreach (var file in Directory.EnumerateFiles(DROPBOX_ROOT, "*", SearchOption.AllDirectories))
                 {
-                    var info = new System.IO.FileInfo(file);
+                    var info = new FileInfo(file);
 
-                    list.Add(new SearchResultRow
+                    tmp.Add(new SearchResultRow
                     {
-                        Name = System.IO.Path.GetFileName(file),
+                        Name = Path.GetFileName(file),
                         Target = file,
                         Type = "FILE",
                         Size = info.Length,
@@ -1331,9 +1361,17 @@ namespace Anfeta.UI.Views
                     });
                 }
 
-                _localIndex = list;
+                return tmp;
             });
+
+            // ✅ AQUÍ se guarda GLOBAL (persistente entre módulos)
+            App.LocalIndex.Set(list);
+
+            // (opcional) si quieres seguir usando _localIndex en el mismo SearchView, lo puedes apuntar:
+            _localIndex = list;
         }
+
+
 
         private void BuildTreeRoot()
         {

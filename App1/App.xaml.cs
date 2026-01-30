@@ -13,6 +13,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Threading.Tasks;
 
+
 namespace Anfeta.UI
 {
     public partial class App : Application
@@ -25,6 +26,8 @@ namespace Anfeta.UI
         public static IHost AppHost { get; private set; } = null!;
         public static DispatcherQueue? UIQueue { get; private set; }
         public static HomeViewModel HomeVM => AppHost.Services.GetRequiredService<HomeViewModel>();
+        //Nefta
+        public static LocalIndexService LocalIndex { get; } = new LocalIndexService();
 
         public App()
         {
