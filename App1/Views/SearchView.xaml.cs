@@ -14,10 +14,11 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
-using System.Threading.Tasks; 
+using System.Threading.Tasks;
+using Windows.Storage;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 
-
-    
 
 namespace Anfeta.UI.Views
 {
@@ -27,7 +28,6 @@ namespace Anfeta.UI.Views
     {
         private List<string> _highlightTerms = new();
         private readonly ShellIconService _iconService = new ShellIconService();
-        private string _currentFolder = DROPBOX_ROOT;
         private bool _isBrowsing = false; // false=buscar, true=explorar carpeta 
         private bool _onlyBookmarks = false;
         private LocalIndexService Index => App.LocalIndex;
@@ -50,9 +50,12 @@ namespace Anfeta.UI.Views
         private readonly DropboxNotionFilesApi _api = new(new HttpClient());
         private readonly Stack<string> _backStack = new();
         private readonly Stack<string> _forwardStack = new();
-        private ObservableCollection<FolderNode> _treeRoots = new(); 
+        private ObservableCollection<FolderNode> _treeRoots = new();
 
 
+        // Navegación / Explorador
+        private string _currentFolder = "";  // ✅ YA EXISTE
+ 
 
         public ObservableCollection<SearchResultRow> Results { get; } = new();
 
@@ -61,7 +64,12 @@ namespace Anfeta.UI.Views
 
         private CancellationTokenSource? _cts;
         private List<DropboxNode> _raw = new();
-        private const string DROPBOX_ROOT = @"C:\Users\nanoc\Dropbox";
+
+        private const string DROPBOX_PATH_KEY = "DropboxRootPath";
+        private const string LS_DropboxRoot = "DropboxRootPath";
+        // ✅ Root dinámico (ya no const fijo)
+        private string DROPBOX_ROOT = "";
+
 
         // cache del “índice” local
         private List<SearchResultRow> _localIndex = new();
@@ -163,7 +171,50 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private void LoadDropboxRootFromSettings()
+        {
+            var v = ApplicationData.Current.LocalSettings.Values[DROPBOX_PATH_KEY] as string;
+            DROPBOX_ROOT = (v ?? "").Trim();
+            DropboxPathBox.Text = DROPBOX_ROOT;
+        }
 
+        private void SaveDropboxRootToSettings(string path)
+        {
+            ApplicationData.Current.LocalSettings.Values[DROPBOX_PATH_KEY] = path;
+            DROPBOX_ROOT = path;
+            DropboxPathBox.Text = DROPBOX_ROOT;
+        }
+
+        private async void BtnPickDropboxFolder_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var picker = new FolderPicker();
+                picker.FileTypeFilter.Add("*");
+
+                // ✅ importantísimo en WinUI3
+                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                InitializeWithWindow.Initialize(picker, hwnd);
+
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder == null) return;
+
+                SaveDropboxRootToSettings(folder.Path);
+
+                StatusText.Text = $"Estado: Ruta guardada ✅";
+                // opcional: refrescar árbol si ya estás aquí
+                if (Directory.Exists(DROPBOX_ROOT))
+                {
+                    LoadFoldersRoot();
+                    BuildTreeRoot();
+                    await BrowseFolderAsync(DROPBOX_ROOT);
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error eligiendo ruta → {ex.Message}";
+            }
+        }
         public SearchView()
         {
             InitializeComponent();
@@ -212,6 +263,19 @@ namespace Anfeta.UI.Views
                 _bookmarks = new();
             }
 
+            // ✅ Cargar DropboxRoot guardado
+            var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
+            if (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved))
+            {
+                DROPBOX_ROOT = saved;
+                DropboxPathBox.Text = saved;
+
+                StatusText.Text = "Estado: Ruta Dropbox cargada ✅";
+            }
+            else
+            {
+                StatusText.Text = "Estado: Selecciona la ruta de Dropbox (Elegir...)";
+            }
             // 2) Index cache (para no sincronizar al volver al módulo)
             if (App.LocalIndex.HasData)
             {
@@ -783,6 +847,11 @@ namespace Anfeta.UI.Views
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+                {
+                    StatusText.Text = "Estado: Selecciona una ruta válida de Dropbox primero.";
+                    return;
+                }
                 LoadingRing.IsActive = true;
                 LoadingRing.Visibility = Visibility.Visible;
                 StatusText.Text = "Estado: Indexando carpeta local de Dropbox…";
@@ -792,6 +861,7 @@ namespace Anfeta.UI.Views
                 LoadFoldersRoot();
                 BuildTreeRoot();
                 await BrowseFolderAsync(DROPBOX_ROOT);
+
 
                 StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
                 await RunLocalSearchAsync(SearchBox.Text ?? "");
@@ -1490,6 +1560,26 @@ namespace Anfeta.UI.Views
         private async void BtnGoRoot_Click(object sender, RoutedEventArgs e)
         {
             await BrowseFolderAsync(DROPBOX_ROOT);
+        }
+
+        private async void BtnPickDropbox_Click(object sender, RoutedEventArgs e)
+        {
+            var picker = new FolderPicker();
+            picker.FileTypeFilter.Add("*");
+
+            // WinUI3: hay que “amarrar” el picker a la ventana
+            var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+            InitializeWithWindow.Initialize(picker, hwnd);
+
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder == null) return;
+
+            DROPBOX_ROOT = folder.Path;
+            DropboxPathBox.Text = DROPBOX_ROOT;
+
+            ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = DROPBOX_ROOT;
+
+            StatusText.Text = $"Estado: DropboxRoot guardado ✅ ({DROPBOX_ROOT})";
         }
 
         private async void BtnOpen_Click(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
