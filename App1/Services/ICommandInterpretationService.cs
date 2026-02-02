@@ -1,6 +1,6 @@
-﻿using System.Threading;
+﻿using Anfeta.UI.Models;
+using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Models;
 
 namespace Anfeta.UI.Services
 {

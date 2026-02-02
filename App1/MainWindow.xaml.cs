@@ -1,13 +1,11 @@
-﻿using Microsoft.UI.Xaml;
+﻿using Anfeta.UI.FunctionTests;
+using Anfeta.UI.ViewModels;
+using Anfeta.UI.Views;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Diagnostics;
-
-using Anfeta.UI.Views;
-using Anfeta.UI.FunctionTests;
-
-using Anfeta.UI.ViewModels;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Anfeta.UI
 {

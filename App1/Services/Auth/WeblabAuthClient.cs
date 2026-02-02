@@ -1,6 +1,8 @@
-﻿using System.Net.Http;
+﻿using System;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Anfeta.UI.Services.Auth
@@ -75,6 +77,57 @@ namespace Anfeta.UI.Services.Auth
 
             return AuthTokenResult.FromOk(token!);
         }
+
+        // GET /api/auth/me -> Obtiene usuario actual autenticado
+        // Entrada: ninguna (usa token en headers automáticamente)
+        // Salida: (ok, assignee, name) - assignee es el collaboratorId
+        public async Task<(bool ok, string? assignee, string? name)> GetCurrentUserAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                using var resp = await _http.GetAsync("/api/auth/me", ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                    return (false, null, null);
+
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("user", out var userEl) || userEl.ValueKind != JsonValueKind.Object)
+                    return (false, null, null);
+
+                var collaboratorId = userEl.TryGetProperty("collaboratorId", out var cEl) && cEl.ValueKind == JsonValueKind.String
+                    ? cEl.GetString()
+                    : null;
+
+                var firstName = userEl.TryGetProperty("firstName", out var fnEl) && fnEl.ValueKind == JsonValueKind.String
+                    ? fnEl.GetString()
+                    : null;
+
+                var lastName = userEl.TryGetProperty("lastName", out var lnEl) && lnEl.ValueKind == JsonValueKind.String
+                    ? lnEl.GetString()
+                    : null;
+
+                var fullName = !string.IsNullOrWhiteSpace(firstName) && !string.IsNullOrWhiteSpace(lastName)
+                    ? $"{firstName} {lastName}"
+                    : firstName ?? lastName ?? "Usuario";
+
+                if (string.IsNullOrWhiteSpace(collaboratorId))
+                    return (false, null, fullName);
+
+                return (true, collaboratorId, fullName);
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, null, null);
+            }
+            catch
+            {
+                return (false, null, null);
+            }
+        }
+
     }
 
     public sealed record CheckDeviceResult(bool Ok, bool NeedsRegister, string? Token, string? RawError)

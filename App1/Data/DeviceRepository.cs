@@ -1,6 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
-using System;
-using Anfeta.UI.Data;
+﻿using System;
 
 namespace Anfeta.UI.Data
 {

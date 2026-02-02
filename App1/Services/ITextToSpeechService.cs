@@ -7,5 +7,6 @@ namespace Anfeta.UI.Services
     {
         Task SpeakAsync(string text, CancellationToken ct = default);
         Task StopAsync();
+        void Stop();
     }
 }

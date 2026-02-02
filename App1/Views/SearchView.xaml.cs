@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 
 namespace Anfeta.UI.Views
 {
-    public sealed partial class SearchView : Page 
+    public sealed partial class SearchView : Page
 
     {
         private DropboxFileInfo? _selectedInfo;

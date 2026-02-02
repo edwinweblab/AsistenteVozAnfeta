@@ -1,6 +1,7 @@
 ﻿using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Auth;
+using Anfeta.UI.Services.Weblab;
 using Anfeta.UI.ViewModels;
 using Anfeta.UI.Views.Dialogs;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +24,7 @@ namespace Anfeta.UI
         private GlobalHotkeyService? _hotkey;
         private FloatingMicButton? _floatingButton;
         private bool _isShuttingDown = false;
+        private readonly object _floatingButtonLock = new object();
 
         public static Window? MainWindowInstance { get; private set; }
         public static IHost AppHost { get; private set; } = null!;
@@ -42,9 +44,17 @@ namespace Anfeta.UI
                     services.AddSingleton<AppStateService>();
                     services.AddSingleton<SettingsService>();
                     services.AddSingleton<AudioService>();
-                    services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
+                    services.AddSingleton<ISpeechToTextService, VoskSpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
+
+                    // Context system (ORDEN IMPORTA)
+                    services.AddSingleton<CapabilityRegistry>();
+                    services.AddSingleton<FastCommandClassifier>();
+                    services.AddSingleton<InterpretationCache>();
+                    services.AddSingleton<ContextManager>();
+                    services.AddSingleton<PromptBuilder>();
+                    services.AddSingleton<IntentValidator>();
 
                     // =========================
                     // GROQ (sustituye Ollama)
@@ -66,7 +76,7 @@ namespace Anfeta.UI
 
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
-                        var http = sp.GetRequiredService<HttpClient>(); // <- ESTE ES EL DE GROQ
+                        var http = sp.GetRequiredService<HttpClient>();
                         return new GroqInterpretationService(http, GroqConfig.ModelName);
                     });
 
@@ -85,29 +95,62 @@ namespace Anfeta.UI
 
                     services.AddHttpClient("WeblabAuthed", client =>
                     {
-                        client.BaseAddress = new Uri("https://wlserver-production.up.railway.app");
+                        client.BaseAddress = new Uri("https://wlserver-production-6735.up.railway.app");
                         client.Timeout = TimeSpan.FromSeconds(30);
                     })
                     .AddHttpMessageHandler<AuthHeaderHandler>();
 
-                    // AuthClient
-                    services.AddHttpClient<WeblabAuthClient>(client =>
+                    // =========================
+                    // Weblab API Clients
+                    // =========================
+
+                    // WeblabAuthClient - Para operaciones de autenticación
+                    services.AddSingleton<Anfeta.UI.Services.Auth.WeblabAuthClient>(sp =>
                     {
-                        client.BaseAddress = new Uri("https://wlserver-production.up.railway.app");
-                        client.Timeout = TimeSpan.FromSeconds(30);
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new Anfeta.UI.Services.Auth.WeblabAuthClient(factory.CreateClient("WeblabAuthed"));
                     });
 
-                    // UsersClient
+                    // WeblabUsersClient - Para búsqueda de usuarios
                     services.AddSingleton<WeblabUsersClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new WeblabUsersClient(factory.CreateClient("WeblabAuthed"));
                     });
 
+                    // WeblabActividadesClient - Para gestión de actividades
+                    services.AddSingleton<WeblabActividadesClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"));
+                    });
+
+                    // WeblabRevisionesClient - Para gestión de revisiones
+                    services.AddSingleton<WeblabRevisionesClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new WeblabRevisionesClient(factory.CreateClient("WeblabAuthed"));
+                    });
+
+                    // =========================
+                    // Action Executors
+                    // =========================
+                    services.AddSingleton<LocalActionExecutor>();
+
+                    // ApiActionExecutor con todos los clientes necesarios
+                    services.AddSingleton<ApiActionExecutor>(sp =>
+                    {
+                        var actividades = sp.GetRequiredService<WeblabActividadesClient>();
+                        var revisiones = sp.GetRequiredService<WeblabRevisionesClient>();
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new ApiActionExecutor(actividades, revisiones, auth);
+                    });
+
                     // =========================
                     // ViewModels
                     // =========================
                     services.AddSingleton<HomeViewModel>();
+
                 })
                 .Build();
         }
@@ -158,8 +201,6 @@ namespace Anfeta.UI
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
             _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
 
-            ((MainWindow)_window).SizeChanged += Window_SizeChanged;
-
             HomeVM.PropertyChanged += (s, e) =>
             {
                 if (e.PropertyName == nameof(HomeViewModel.IsListening))
@@ -174,7 +215,7 @@ namespace Anfeta.UI
             try
             {
                 var auth = AppHost.Services.GetRequiredService<AuthStateService>();
-                var authApi = AppHost.Services.GetRequiredService<WeblabAuthClient>();
+                var authApi = AppHost.Services.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
 
                 // 1) Cargar token local si existe (LocalSettings)
                 await auth.InitializeAsync();
@@ -209,30 +250,13 @@ namespace Anfeta.UI
             }
         }
 
-        private void Window_SizeChanged(object sender, WindowSizeChangedEventArgs e)
-        {
-            var appWindow = AppWindow.GetFromWindowId(
-                Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
-                    WinRT.Interop.WindowNative.GetWindowHandle(_window)
-                )
-            );
-
-            if (appWindow?.Presenter is OverlappedPresenter presenter)
-            {
-                if (presenter.State == OverlappedPresenterState.Minimized)
-                    ShowFloatingButton();
-                else
-                    HideFloatingButton();
-            }
-        }
-
         private void Hotkey_HotkeyPressed(object? sender, EventArgs e)
         {
             Debug.WriteLine("[HOTKEY] Detectado -> mostrar flotante + UI thread");
-            ShowFloatingButton();
 
             UIQueue?.TryEnqueue(async () =>
             {
+                ShowFloatingButton();
                 BringMainWindowToFront();
                 await HomeVM.TriggerVoiceFromHotkeyAsync();
             });
@@ -240,10 +264,18 @@ namespace Anfeta.UI
 
         private void ShowFloatingButton()
         {
-            UIQueue?.TryEnqueue(() =>
+            lock (_floatingButtonLock)
             {
-                if (_floatingButton == null)
+                try
                 {
+                    if (_floatingButton != null)
+                    {
+                        Debug.WriteLine("[APP] Flotante ya existe -> reutilizar");
+                        _floatingButton.Activate();
+                        return;
+                    }
+
+                    Debug.WriteLine("[APP] Creando nuevo flotante...");
                     _floatingButton = new FloatingMicButton();
                     _floatingButton.OpenAppRequested += (s, e) => BringMainWindowToFront();
                     _floatingButton.ExitRequested += (s, e) => CleanupAndExit();
@@ -254,28 +286,38 @@ namespace Anfeta.UI
 
                     var appState = AppHost.Services.GetRequiredService<AppStateService>();
                     _floatingButton.UpdateHotkeyDisplay(appState.GetHotkeyDisplayString());
+
+                    _floatingButton.Activate();
+                    Debug.WriteLine("[APP] Flotante creado y activado OK");
                 }
-                _floatingButton.Activate();
-            });
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[APP] Error creando flotante: {ex.Message}");
+                    _floatingButton = null;
+                }
+            }
         }
 
         private void HideFloatingButton()
         {
-            UIQueue?.TryEnqueue(() =>
+            lock (_floatingButtonLock)
             {
                 try
                 {
                     if (_floatingButton != null)
                     {
+                        Debug.WriteLine("[APP] Cerrando flotante...");
                         _floatingButton.Close();
                         _floatingButton = null;
+                        Debug.WriteLine("[APP] Flotante cerrado OK");
                     }
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"[APP] Error ocultando flotante: {ex.Message}");
+                    _floatingButton = null;
                 }
-            });
+            }
         }
 
         private void BringMainWindowToFront()

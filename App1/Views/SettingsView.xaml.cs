@@ -1,5 +1,6 @@
 ﻿using Anfeta.UI.Models;
 using Anfeta.UI.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -10,7 +11,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Windows.Media.Capture;
 using Windows.UI;
-
 namespace Anfeta.UI.Views
 {
     public sealed partial class SettingsView : Page
@@ -35,8 +35,20 @@ namespace Anfeta.UI.Views
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
-            await RequestMicPermissionAsync();
-            await LoadDevicesAsync();
+            LoadCurrentHotkey();
+
+            _ = Task.Run(async () =>
+            {
+                await RequestMicPermissionAsync();
+                await LoadDevicesAsync();
+            });
+        }
+
+        /// <summary>Carga el hotkey actual desde AppState</summary>
+        private void LoadCurrentHotkey()
+        {
+            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+            TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -322,10 +334,21 @@ namespace Anfeta.UI.Views
             return section;
         }
 
-        private void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
+        private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
         {
-            // TODO: implementar cambio de hotkey
-            ShowStatus("Funcionalidad en desarrollo", InfoBarSeverity.Informational);
+            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(appState, _settingsService)
+            {
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+
+            if (result == ContentDialogResult.Primary)
+            {
+                TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
+                ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
+            }
         }
 
         /// <summary>Muestra mensaje con auto-cierre en 3 segundos</summary>
