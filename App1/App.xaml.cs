@@ -95,7 +95,7 @@ namespace Anfeta.UI
 
                     services.AddHttpClient("WeblabAuthed", client =>
                     {
-                        client.BaseAddress = new Uri("https://wlserver-production.up.railway.app");
+                        client.BaseAddress = new Uri("https://wlserver-production-6735.up.railway.app");
                         client.Timeout = TimeSpan.FromSeconds(30);
                     })
                     .AddHttpMessageHandler<AuthHeaderHandler>();
