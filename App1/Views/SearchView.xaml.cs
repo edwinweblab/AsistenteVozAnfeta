@@ -39,7 +39,7 @@ namespace Anfeta.UI.Views
         private bool _bmOnlyFolders = false;
         private string? _bmExtFilter = null;
         private string _bmSortKey = "name_asc";
-
+         
 
 
         // ===== Dropbox Smart Sync helpers (Windows) =====
