@@ -1,9 +1,9 @@
-﻿using System;
+﻿using Anfeta.UI.Models;
+using System;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Models;
 
 namespace Anfeta.UI.Services
 {

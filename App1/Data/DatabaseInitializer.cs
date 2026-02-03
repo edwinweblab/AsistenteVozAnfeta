@@ -110,12 +110,22 @@ namespace Anfeta.UI.Data
             -- ========================
             CREATE TABLE IF NOT EXISTS device (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                device_id VARCHAR,
+                device_id VARCHAR NOT NULL,
                 device_name VARCHAR,
                 os_version VARCHAR,
+                is_active INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME,
                 last_seen_at DATETIME
             );
+
+            -- device_id nunca se repite
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_device_device_id
+            ON device(device_id);
+
+            -- solo puede existir UN device activo
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_device_single_active
+            ON device(is_active)
+            WHERE is_active = 1;
 
             -- ========================
             -- SESIÓN DE AUTENTICACIÓN

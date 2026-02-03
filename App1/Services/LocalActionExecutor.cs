@@ -1,48 +1,37 @@
-﻿using System;
-using System.Collections.Generic;
+﻿// LocalActionExecutor.cs
+using System;
 using System.Diagnostics;
 
 namespace Anfeta.UI.Services
 {
     public sealed class LocalActionExecutor
     {
-        private static readonly Dictionary<string, string> AppMap = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["chrome"] = "chrome.exe",
-            ["calculadora"] = "calc.exe",
-            ["bloc"] = "notepad.exe",
-            ["explorador"] = "explorer.exe"
-        };
+        private readonly CapabilityRegistry _registry;
 
-        private static readonly HashSet<string> AllowedIntents = new(StringComparer.OrdinalIgnoreCase)
+        public LocalActionExecutor(CapabilityRegistry registry)
         {
-            "OpenApp", "CloseApp", "MinimizeAll", "SwitchWindow"
-        };
+            _registry = registry;
+        }
 
-        // NUEVO: consulta si una app está permitida
+        /// <summary>Verificar si app está permitida</summary>
         public bool IsAllowedApp(string? appKey)
         {
             if (string.IsNullOrWhiteSpace(appKey)) return false;
-            return AppMap.ContainsKey(appKey);
+            return _registry.IsRegistered(appKey);
         }
 
-        // NUEVO: lista permitidas (para mensajes UI)
+        /// <summary>Mensaje de apps permitidas</summary>
         public string GetAllowedAppsMessage()
         {
-            return "Solo puedo abrir: " + string.Join(", ", AppMap.Keys) + ".";
+            return _registry.GetAllowedAppsMessage();
         }
 
+        /// <summary>Ejecutar acción local</summary>
         public bool TryExecute(string intent, string scope, string? appKey, out string message)
         {
             if (!string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
             {
                 message = "Acción no es LOCAL.";
-                return false;
-            }
-
-            if (!AllowedIntents.Contains(intent))
-            {
-                message = $"Intent no permitido: {intent}";
                 return false;
             }
 
@@ -52,15 +41,17 @@ namespace Anfeta.UI.Services
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(appKey))
+            var key = NormalizeAppKey(appKey);
+            if (string.IsNullOrWhiteSpace(key))
             {
                 message = "Falta app_key para OpenApp.";
                 return false;
             }
 
-            if (!AppMap.TryGetValue(appKey, out var exe))
+            var appDef = _registry.GetApp(key);
+            if (appDef == null)
             {
-                message = $"La aplicación '{appKey}' no está disponible en la lista permitida.";
+                message = $"La aplicación '{key}' no está disponible.";
                 return false;
             }
 
@@ -68,18 +59,28 @@ namespace Anfeta.UI.Services
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = exe,
+                    FileName = appDef.ExecutableName,
                     UseShellExecute = true
                 });
-
-                message = $"Acción OK: abierto {appKey}.";
+                message = $"Acción OK: abierto {appDef.FriendlyName}.";
                 return true;
             }
             catch (Exception ex)
             {
-                message = $"Error al ejecutar {appKey}: {ex.Message}";
+                message = $"Error al ejecutar {key}: {ex.Message}";
                 return false;
             }
+        }
+
+        // Normaliza app_key a formato estándar
+        // Entrada: appKey (puede ser null)
+        // Salida: appKey en minúsculas y sin espacios, o null si era null/vacío
+        private static string? NormalizeAppKey(string? appKey)
+        {
+            if (string.IsNullOrWhiteSpace(appKey))
+                return null;
+
+            return appKey.Trim().ToLowerInvariant();
         }
     }
 }
