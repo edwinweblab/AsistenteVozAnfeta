@@ -49,31 +49,33 @@ namespace Anfeta.UI.Services
                 return (false, $"Provider no soportado: '{provider}'. Solo 'weblab' está disponible.");
 
             if (string.IsNullOrWhiteSpace(resource))
-                return (false, "Falta especificar el resource (actividades, proyectos, revisiones, etc).");
+                return (false, "Falta especificar el resource (actividades, revisiones, etc).");
 
             if (string.IsNullOrWhiteSpace(action))
-                return (false, "Falta especificar la action (list, search, get, today, etc).");
+                return (false, "Falta especificar la action (list, today, search, get, etc).");
 
+            // =========================
             // ACTIVIDADES
+            // =========================
             if (resource == "actividades")
             {
+                // ✅ TODAS MIS ACTIVIDADES (sin fecha)
+                // Usa: GET /api/actividades/assignee/:assignee
                 if (action == "list")
                 {
                     var limit = TryGetInt(paramsJson, "limit") ?? 10;
-                    var r = await _actividades.ListTitlesAsync(limit, ct);
+
+                    var assignee = await GetOrFetchAssigneeAsync(ct);
+                    if (string.IsNullOrWhiteSpace(assignee))
+                        return (false, "No pude identificar tu usuario.");
+
+                    // Este método ya lo tienes en WeblabActividadesClient
+                    var r = await _actividades.GetMyActivitiesAsync(limit, ct);
                     return (r.Ok, r.PlainText);
                 }
 
-                if (action == "search")
-                {
-                    var q = TryGetString(paramsJson, "q");
-                    if (string.IsNullOrWhiteSpace(q))
-                        return (false, "Búsqueda inválida: falta params.q.");
-                    var limit = TryGetInt(paramsJson, "limit") ?? 10;
-                    var r = await _actividades.SearchTitlesAsync(q!, limit, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
+                // ✅ MIS ACTIVIDADES DE HOY
+                // Usa: GET /api/actividades/assignee/:assignee/del-dia
                 if (action == "today")
                 {
                     var assignee = await GetOrFetchAssigneeAsync(ct);
@@ -84,6 +86,21 @@ namespace Anfeta.UI.Services
                     return (r.Ok, r.PlainText);
                 }
 
+                // ✅ BUSCAR (general, no filtra por usuario si tu API no lo hace)
+                // Usa: GET /api/actividades/buscar?q=...
+                if (action == "search")
+                {
+                    var q = TryGetString(paramsJson, "q");
+                    if (string.IsNullOrWhiteSpace(q))
+                        return (false, "Búsqueda inválida: falta params.q.");
+
+                    var limit = TryGetInt(paramsJson, "limit") ?? 10;
+                    var r = await _actividades.SearchTitlesAsync(q!, limit, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                // ✅ DETALLES POR ID
+                // Usa: GET /api/actividades/:id
                 if (action == "get")
                 {
                     var id = TryGetString(paramsJson, "id");
@@ -94,10 +111,12 @@ namespace Anfeta.UI.Services
                     return (r.Ok, r.PlainText);
                 }
 
-                return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, search, today, get.");
+                return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get.");
             }
 
+            // =========================
             // REVISIONES
+            // =========================
             if (resource == "revisiones")
             {
                 if (action == "today")
@@ -146,7 +165,10 @@ namespace Anfeta.UI.Services
                 if (el.ValueKind == JsonValueKind.String) return el.GetString();
                 return el.GetRawText();
             }
-            catch { return null; }
+            catch
+            {
+                return null;
+            }
         }
 
         private static int? TryGetInt(string? json, string prop)
@@ -163,7 +185,10 @@ namespace Anfeta.UI.Services
 
                 return null;
             }
-            catch { return null; }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

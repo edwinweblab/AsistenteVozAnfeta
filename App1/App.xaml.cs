@@ -125,7 +125,8 @@ namespace Anfeta.UI
                     services.AddSingleton<WeblabActividadesClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
-                        return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"));
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"), auth);
                     });
 
                     // WeblabRevisionesClient - Para gestión de revisiones

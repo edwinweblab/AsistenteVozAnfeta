@@ -6,16 +6,83 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Anfeta.UI.Models;
+using Anfeta.UI.Services.Auth;
 
 namespace Anfeta.UI.Services.Weblab
 {
     public sealed class WeblabActividadesClient
     {
         private readonly HttpClient _http;
+        private readonly WeblabAuthClient _auth;
 
-        public WeblabActividadesClient(HttpClient http)
+        public WeblabActividadesClient(HttpClient http, WeblabAuthClient auth)
         {
             _http = http;
+            _auth = auth;
+        }
+
+        // =========================
+        // ✅ NUEVO: Mis actividades de HOY (sin pasar assignee)
+        // Flujo: token -> /auth/me -> collaboratorId -> /actividades/assignee/{id}/del-dia
+        // =========================
+        public async Task<ApiPlainResponse> GetMyTodayActivitiesAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var (ok, assignee, _) = await _auth.GetCurrentUserAsync(ct);
+                if (!ok || string.IsNullOrWhiteSpace(assignee))
+                    return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };
+
+                return await GetTodayActivitiesAsync(assignee, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = "Operación cancelada." };
+            }
+            catch
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = "Error consultando tus actividades de hoy." };
+            }
+        }
+
+        // =========================
+        // (Opcional) ✅ NUEVO: Mis actividades (todas) por assignee
+        // =========================
+        public async Task<ApiPlainResponse> GetMyActivitiesAsync(int limit = 10, CancellationToken ct = default)
+        {
+            try
+            {
+                var (ok, assignee, name) = await _auth.GetCurrentUserAsync(ct);
+                if (!ok || string.IsNullOrWhiteSpace(assignee))
+                    return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };
+
+                var url = $"/api/actividades/assignee/{Uri.EscapeDataString(assignee)}";
+
+                using var resp = await _http.GetAsync(url, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                    return new ApiPlainResponse { Ok = false, PlainText = "No pude obtener tus actividades." };
+
+                var titles = ExtractTitles(json, limit);
+
+                if (titles.Count == 0)
+                    return new ApiPlainResponse { Ok = true, PlainText = "No tienes actividades asignadas." };
+
+                return new ApiPlainResponse
+                {
+                    Ok = true,
+                    PlainText = BuildTitlesPlainText($"Actividades de {name ?? "tu usuario"}", titles)
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = "Operación cancelada." };
+            }
+            catch
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = "Error consultando tus actividades." };
+            }
         }
 
         // GET /api/actividades -> convierte JSON a texto (solo títulos)
@@ -84,49 +151,8 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
-        private static List<string> ExtractTitles(string json, int limit)
-        {
-            var list = new List<string>();
-
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            // Esperado: { "success": true, "data": [ { "titulo": "...", ... }, ... ] }
-            if (!root.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Array)
-                return list;
-
-            foreach (var item in dataEl.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.Object) continue;
-
-                if (item.TryGetProperty("titulo", out var tituloEl) && tituloEl.ValueKind == JsonValueKind.String)
-                {
-                    var t = (tituloEl.GetString() ?? "").Trim();
-                    if (!string.IsNullOrWhiteSpace(t))
-                        list.Add(t);
-                }
-
-                if (list.Count >= limit) break;
-            }
-
-            return list;
-        }
-
-        private static string BuildTitlesPlainText(string header, List<string> titles)
-        {
-            // Texto corto para UI + TTS
-            // Ej: "Actividades: 1) ... 2) ... 3) ..."
-            var max = Math.Min(titles.Count, 10);
-
-            var parts = new List<string> { $"{header}: {max}." };
-            for (var i = 0; i < max; i++)
-                parts.Add($"{i + 1}) {titles[i]}");
-
-            return string.Join(" ", parts);
-        }
         // GET /api/actividades/assignee/:assignee/del-dia -> Actividades del día de un usuario
         // Entrada: assignee (collaboratorId del usuario)
-        // Salida: Texto formateado con actividades del día
         public async Task<ApiPlainResponse> GetTodayActivitiesAsync(string assignee, CancellationToken ct = default)
         {
             try
@@ -161,8 +187,6 @@ namespace Anfeta.UI.Services.Weblab
         }
 
         // GET /api/actividades/:id -> Detalles completos de una actividad
-        // Entrada: id (notionId de la actividad)
-        // Salida: Texto detallado con título, estado, prioridad y pendientes
         public async Task<ApiPlainResponse> GetActivityByIdAsync(string id, CancellationToken ct = default)
         {
             try
@@ -194,6 +218,33 @@ namespace Anfeta.UI.Services.Weblab
             {
                 return new ApiPlainResponse { Ok = false, PlainText = "Error consultando detalles de actividad." };
             }
+        }
+
+        private static List<string> ExtractTitles(string json, int limit)
+        {
+            var list = new List<string>();
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Array)
+                return list;
+
+            foreach (var item in dataEl.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+
+                if (item.TryGetProperty("titulo", out var tituloEl) && tituloEl.ValueKind == JsonValueKind.String)
+                {
+                    var t = (tituloEl.GetString() ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(t))
+                        list.Add(t);
+                }
+
+                if (list.Count >= limit) break;
+            }
+
+            return list;
         }
 
         private static List<(string titulo, string status)> ExtractActivitiesWithStatus(string json, int limit)
@@ -248,11 +299,11 @@ namespace Anfeta.UI.Services.Weblab
                 : "Normal";
 
             var parts = new List<string>
-    {
-        titulo,
-        $"Estado: {status}",
-        $"Prioridad: {prioridad}"
-    };
+            {
+                titulo,
+                $"Estado: {status}",
+                $"Prioridad: {prioridad}"
+            };
 
             if (data.TryGetProperty("pendientes", out var pendEl) && pendEl.ValueKind == JsonValueKind.Array)
             {
@@ -276,6 +327,17 @@ namespace Anfeta.UI.Services.Weblab
             }
 
             return string.Join(". ", parts);
+        }
+
+        private static string BuildTitlesPlainText(string header, List<string> titles)
+        {
+            var max = Math.Min(titles.Count, 10);
+
+            var parts = new List<string> { $"{header}: {max}." };
+            for (var i = 0; i < max; i++)
+                parts.Add($"{i + 1}) {titles[i]}");
+
+            return string.Join(" ", parts);
         }
 
         private static string BuildActivitiesPlainText(string header, List<(string titulo, string status)> activities)
