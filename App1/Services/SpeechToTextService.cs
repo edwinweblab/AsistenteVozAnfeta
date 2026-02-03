@@ -1,11 +1,11 @@
-﻿using System;
+﻿using NAudio.CoreAudioApi;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Globalization;
 using Windows.Media.SpeechRecognition;
-using NAudio.CoreAudioApi;
 
 namespace Anfeta.UI.Services
 {
@@ -100,7 +100,7 @@ namespace Anfeta.UI.Services
                     System.Diagnostics.Debug.WriteLine($"[STT] Cambiando a device: {target.FriendlyName}");
 
                     var policyConfig = new PolicyConfigClient();
-                    policyConfig.SetDefaultEndpoint(target.ID, 2); // 2 = Communications
+                    policyConfig.SetDefaultEndpoint(target.ID, 2);
                 }
             }
             catch (Exception ex)

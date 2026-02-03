@@ -14,45 +14,69 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Header -->
-            <StackPanel Grid.Row="0" Spacing="4">
-                <TextBlock Text="Configuración" 
-                           FontSize="28" 
-                           FontWeight="SemiBold" 
-                           Foreground="#F7FAFC"/>
-                <TextBlock Text="Personaliza audio y atajos de teclado"
-                           FontSize="13"
-                           Foreground="#94A3B8"/>
-            </StackPanel>
+            <!-- Header con botones de ayuda -->
+            <Grid Grid.Row="0">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Configuración" 
+                               FontSize="28" 
+                               FontWeight="SemiBold" 
+                               Foreground="#F7FAFC"/>
+                    <TextBlock Text="Personaliza audio y atajos de teclado"
+                               FontSize="13"
+                               Foreground="#94A3B8"/>
+                </StackPanel>
+
+                <!-- Botones arriba-derecha -->
+                <StackPanel Orientation="Horizontal" 
+                            Spacing="8" 
+                            HorizontalAlignment="Right" 
+                            VerticalAlignment="Top">
+                    
+                    <!-- Ayuda de Windows -->
+                    <Button x:Name="BtnOpenWindowsSettings"
+                            Click="BtnOpenWindowsSettings_Click"
+                            Width="40" Height="40"
+                            Background="#14FFFFFF"
+                            BorderBrush="#30FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="20"
+                            ToolTipService.ToolTip="Abrir Configuración de Windows">
+                        <FontIcon Glyph="&#xE713;" FontSize="16" Foreground="#CBD5E1"/>
+                    </Button>
+
+                    <!-- Problemas comunes -->
+                    <Button x:Name="BtnShowTroubleshoot"
+                            Click="BtnShowTroubleshoot_Click"
+                            Width="40" Height="40"
+                            Background="#14FFFFFF"
+                            BorderBrush="#30FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="20"
+                            ToolTipService.ToolTip="¿Problemas con el audio?">
+                        <FontIcon Glyph="&#xE897;" FontSize="16" Foreground="{StaticResource AnfetaWarningBrush}"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
 
             <!-- ========== SECCIÓN AUDIO ========== -->
             <StackPanel Grid.Row="1" Spacing="12">
-                <Grid>
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xE767;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                        <TextBlock Text="Audio" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
-                    </StackPanel>
-
-                    <HyperlinkButton HorizontalAlignment="Right" Click="BtnOpenWindowsSettings_Click">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="&#xE897;" FontSize="14" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                            <TextBlock Text="¿Problemas?" FontSize="12" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                        </StackPanel>
-                    </HyperlinkButton>
-                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon Glyph="&#xE767;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
+                    <TextBlock Text="Audio" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                </StackPanel>
 
                 <Border Height="2" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="1"/>
 
-                <!-- Estado actual (sin StringFormat) -->
+                <!-- Estado actual -->
                 <StackPanel Spacing="4" Margin="0,4,0,8">
                     <TextBlock x:Name="TxtCurrentInput" 
-               Text="Entrada: No configurado"
-               FontSize="12" 
-               Foreground="#94A3B8"/>
+                               Text="Entrada: No configurado"
+                               FontSize="12" 
+                               Foreground="#94A3B8"/>
                     <TextBlock x:Name="TxtCurrentOutput"
-               Text="Salida: No configurado"
-               FontSize="12" 
-               Foreground="#94A3B8"/>
+                               Text="Salida: No configurado"
+                               FontSize="12" 
+                               Foreground="#94A3B8"/>
                 </StackPanel>
 
                 <!-- Card Entrada -->
@@ -149,12 +173,10 @@
 
             <!-- ========== SECCIÓN ATAJOS ========== -->
             <StackPanel Grid.Row="2" Spacing="12">
-                <Grid>
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xE92E;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                        <TextBlock Text="Atajos de Teclado" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
-                    </StackPanel>
-                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon Glyph="&#xE92E;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
+                    <TextBlock Text="Atajos de Teclado" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                </StackPanel>
 
                 <Border Height="2" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="1"/>
 
@@ -182,7 +204,7 @@
                                 Padding="16,12"
                                 HorizontalAlignment="Left">
                             <TextBlock x:Name="TxtHotkeyDisplay"
-                                       Text="{Binding HotkeyDisplayString, FallbackValue='Ctrl + Alt + V'}"
+                                       Text="Ctrl + Alt + V"
                                        FontSize="16"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource AnfetaAccentBrush}"/>
@@ -203,18 +225,9 @@
                 </Border>
             </StackPanel>
 
-            <!-- InfoBar + Link -->
+            <!-- InfoBar -->
             <StackPanel Grid.Row="3" Spacing="12">
                 <InfoBar x:Name="InfoStatus" IsOpen="False" IsClosable="True"/>
-
-                <HyperlinkButton x:Name="BtnOpenWindowsSettings"
-                                 Click="BtnOpenWindowsSettings_Click"
-                                 HorizontalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon Glyph="&#xE713;" FontSize="14" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                        <TextBlock Text="Abrir Configuración de Windows" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                    </StackPanel>
-                </HyperlinkButton>
             </StackPanel>
 
         </Grid>

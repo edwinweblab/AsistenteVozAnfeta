@@ -1,20 +1,33 @@
-﻿using Microsoft.UI.Xaml;
+﻿using Anfeta.UI.FunctionTests;
+using Anfeta.UI.ViewModels;
+using Anfeta.UI.Views;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Diagnostics;
-
-using Anfeta.UI.Views;
-using Anfeta.UI.FunctionTests;
 
 namespace Anfeta.UI
 {
     public sealed partial class MainWindow : Window
     {
+        private readonly ShellViewModel _shell;
+
         public MainWindow()
         {
             InitializeComponent();
 
-            // Arrancar en Home
+            _shell = App.AppHost.Services.GetRequiredService<ShellViewModel>();
+
+            // WinUI 3: Window no tiene DataContext -> asigna al root visual
+            Root.DataContext = _shell;
+
+            _shell.RequestOpenLinkAccount += () =>
+            {
+                if (ContentFrame?.CurrentSourcePageType != typeof(LinkAccountView))
+                    ContentFrame?.Navigate(typeof(LinkAccountView));
+            };
+
             if (ContentFrame != null)
                 ContentFrame.Navigate(typeof(HomeView));
 
@@ -38,7 +51,7 @@ namespace Anfeta.UI
             {
                 "Home" => typeof(HomeView),
                 "Commands" => typeof(CommandsView),
-                "Search"=> typeof(SearchView),
+                "Search" => typeof(SearchView),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
                 _ => typeof(HomeView)
@@ -50,7 +63,8 @@ namespace Anfeta.UI
 
         private void MainWindow_Closed(object sender, WindowEventArgs args)
         {
-            Debug.WriteLine("MAINWINDOW: Closed (sin segundo plano)");
+            Debug.WriteLine("MAINWINDOW: Closed");
+            ((App)Application.Current).CleanupAndExit();
         }
     }
 }

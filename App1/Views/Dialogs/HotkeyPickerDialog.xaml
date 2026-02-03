@@ -6,11 +6,13 @@
     PrimaryButtonText="Guardar"
     CloseButtonText="Cancelar"
     DefaultButton="Primary">
-    <StackPanel
-        Spacing="16"
-        Padding="8"
-        KeyDown="OnKeyDown"
-        IsTabStop="True">
+	<StackPanel
+		x:Name="KeyCapturePanel"
+		Spacing="16"
+		Padding="8"
+		KeyDown="OnKeyDown"
+		IsTabStop="True"
+		AllowFocusOnInteraction="True">
         <TextBlock
             Text="Presiona la combinación de teclas que deseas usar:"
             FontSize="14"
