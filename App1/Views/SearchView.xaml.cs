@@ -46,7 +46,7 @@ namespace Anfeta.UI.Views
         private const int FILE_ATTRIBUTE_OFFLINE = 0x00001000;
         private const int FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000;
         private const int FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000;
-        private DropboxFileInfo? _selectedInfo;
+        
         private readonly DropboxNotionFilesApi _api = new(new HttpClient());
         private readonly Stack<string> _backStack = new();
         private readonly Stack<string> _forwardStack = new();
@@ -85,6 +85,47 @@ namespace Anfeta.UI.Views
 
         // colapsable
         private bool _foldersPaneVisible = true;
+
+        private async void MenuResetDropbox_Click(object sender, RoutedEventArgs e)
+        {
+            // 1) Confirmación ANTES de borrar nada
+            var dlg = new ContentDialog
+            {
+                Title = "Cambiar ruta de Dropbox",
+                Content =
+                    "Esto borrará el índice actual y te pedirá seleccionar una nueva carpeta.\n\n" +
+                    "¿Deseas continuar?",
+                PrimaryButtonText = "Continuar",
+                CloseButtonText = "Cancelar",
+                XamlRoot = this.XamlRoot
+            };
+
+            if (await dlg.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            // 2) borrar setting
+            ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
+
+            // 3) reset estado en memoria
+            DROPBOX_ROOT = "";
+            DropboxPathBox.Text = "";
+
+            // 4) resetear index cache global
+            App.LocalIndex.Clear();
+
+            // 5) mostrar selector de ruta
+            DropboxPathRow.Visibility = Visibility.Visible;
+
+            // 6) deshabilitar sync
+            BtnSync.IsEnabled = false;
+
+            // 7) limpiar UI
+            BreadcrumbText.Text = "/";
+            StatusText.Text =
+                "Estado: Ruta de Dropbox reiniciada. Selecciona una nueva carpeta.";
+        }
+
+
         private sealed class RowView : AdvancedQueryV3.IItemView
         {
             private readonly SearchResultRow _x;
@@ -249,7 +290,7 @@ namespace Anfeta.UI.Views
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
             }
         }
-        private async void SearchView_Loaded(object sender, RoutedEventArgs e)
+        private async void SearchView_Loaded(object sender, RoutedEventArgs e) 
         {
             // 1) Bookmarks (como ya lo tienes)
             try
@@ -264,40 +305,60 @@ namespace Anfeta.UI.Views
             }
 
             // ✅ Cargar DropboxRoot guardado
+            // ✅ Cargar DropboxRoot guardado
             var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-            if (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved))
+            System.Diagnostics.Debug.WriteLine($"[LOADED] saved='{saved}' key='{LS_DropboxRoot}'");
+
+            var hasValidDropboxRoot = !string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved);
+
+            if (hasValidDropboxRoot)
             {
-                DROPBOX_ROOT = saved;
+                DROPBOX_ROOT = saved!;
                 DropboxPathBox.Text = saved;
+
+                DropboxPathRow.Visibility = Visibility.Collapsed;   // ✅ ocultar
+                BtnSync.IsEnabled = true;                           // ✅ habilitar
 
                 StatusText.Text = "Estado: Ruta Dropbox cargada ✅";
             }
             else
             {
-                StatusText.Text = "Estado: Selecciona la ruta de Dropbox (Elegir...)";
+                // ✅ limpiar estado para que NO se quede “pegado”
+                DROPBOX_ROOT = "";
+                DropboxPathBox.Text = "";
+
+                DropboxPathRow.Visibility = Visibility.Visible;     // ✅ mostrar
+                BtnSync.IsEnabled = false;                          // ✅ deshabilitar
+
+                StatusText.Text = "Estado: Selecciona la ruta de Dropbox (Ruta...)";
             }
+
+
+            // ✅ Sync solo tiene sentido si hay ruta válida
+            if (BtnSync != null)
+                BtnSync.IsEnabled = hasValidDropboxRoot;
+
             // 2) Index cache (para no sincronizar al volver al módulo)
             if (App.LocalIndex.HasData)
             {
                 var count = App.LocalIndex.GetAll().Count;
-
-                // Si quieres, puedes mantener ambos estados en el texto:
                 StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Index cache ✅ ({count} items)";
 
-                // opcional: mostrar raíz al entrar (sin meter historial)
-                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+                if (!string.IsNullOrWhiteSpace(DROPBOX_ROOT) && Directory.Exists(DROPBOX_ROOT))
+                    await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
 
-                // opcional: si hay texto en SearchBox, corre búsqueda al entrar
                 var q = (SearchBox?.Text ?? "").Trim();
                 if (!string.IsNullOrWhiteSpace(q))
                     await RunLocalSearchAsync(q);
             }
+
             else
             {
                 // No hay index todavía, no sincronizamos solos (modo estable)
                 StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Sin index (pulsa Sync)";
             }
         }
+
 
         private static bool NeedsHydration(string path)
         {
@@ -1144,6 +1205,96 @@ namespace Anfeta.UI.Views
             return false;
         }
 
+        private async void MenuHelp_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Ayuda · Comandos de búsqueda",
+                CloseButtonText = "Cerrar",
+                XamlRoot = this.XamlRoot,
+                Content = BuildHelpContent()
+            };
+
+            await dialog.ShowAsync();
+        }
+
+        private UIElement BuildHelpContent()
+        {
+            var scroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+
+            var stack = new StackPanel
+            {
+                Spacing = 14
+            };
+
+            stack.Children.Add(CreateSection(
+                "Búsqueda rápida",
+                "Escribe una o más palabras para buscar archivos y carpetas.\n\n" +
+                "Ejemplos:\n" +
+                "• factura\n" +
+                "• reporte 2026\n" +
+                "• \"estado de cuenta\"  (frase exacta)"
+            ));
+
+            stack.Children.Add(CreateSection(
+                "Operadores lógicos",
+                "Combina palabras para afinar los resultados.\n\n" +
+                "Ejemplos:\n" +
+                "• factura AND 2026   → contiene ambos términos\n" +
+                "• factura OR recibo → contiene cualquiera de los dos\n" +
+                "• factura NOT borrador\n" +
+                "• factura -borrador\n" +
+                "• (factura OR recibo) AND 2026"
+            ));
+
+            stack.Children.Add(CreateSection(
+                "Filtros por tipo o ubicación",
+                "Limita la búsqueda por tipo de archivo o carpeta.\n\n" +
+                "Ejemplos:\n" +
+                "• ext:pdf contrato\n" +
+                "• ext:docx carta\n" +
+                "• ext:img logo\n" +
+                "• type:folder        (solo carpetas)\n" +
+                "• folder:finanzas contrato"
+            ));
+
+            stack.Children.Add(CreateSection(
+                "Consejos útiles",
+                "• Usa comillas para buscar frases exactas\n" +
+                "• Agrupa condiciones con paréntesis\n" +
+                "• Combina filtros con AND / OR\n" +
+                "• Si no aparecen resultados, prueba quitar filtros"
+            ));
+
+            scroll.Content = stack;
+            return scroll;
+        }
+
+
+        private UIElement CreateSection(string title, string content)
+        {
+            return new StackPanel
+            {
+                Spacing = 6,
+                Children =
+        {
+            new TextBlock
+            {
+                Text = title,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            },
+            new TextBlock
+            {
+                Text = content,
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.85
+            }
+        }
+            };
+        }
 
 
         private void BtnDetailsLink_Click(object sender, RoutedEventArgs e)
@@ -1564,23 +1715,42 @@ namespace Anfeta.UI.Views
 
         private async void BtnPickDropbox_Click(object sender, RoutedEventArgs e)
         {
-            var picker = new FolderPicker();
-            picker.FileTypeFilter.Add("*");
+            try
+            {
+                StatusText.Text = "Estado: Seleccionando carpeta de Dropbox…";
 
-            // WinUI3: hay que “amarrar” el picker a la ventana
-            var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
-            InitializeWithWindow.Initialize(picker, hwnd);
+                var picker = new FolderPicker();
+                picker.FileTypeFilter.Add("*");
 
-            var folder = await picker.PickSingleFolderAsync();
-            if (folder == null) return;
+                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                InitializeWithWindow.Initialize(picker, hwnd);
 
-            DROPBOX_ROOT = folder.Path;
-            DropboxPathBox.Text = DROPBOX_ROOT;
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder == null)
+                {
+                    StatusText.Text = "Estado: Selección cancelada.";
+                    return;
+                }
 
-            ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = DROPBOX_ROOT;
+                DROPBOX_ROOT = folder.Path;
+                DropboxPathBox.Text = DROPBOX_ROOT;
 
-            StatusText.Text = $"Estado: DropboxRoot guardado ✅ ({DROPBOX_ROOT})";
+                ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = DROPBOX_ROOT;
+
+                // ✅ Oculta UI de ruta inmediatamente
+                DropboxPathRow.Visibility = Visibility.Collapsed;
+
+                // ✅ Habilita Sync
+                BtnSync.IsEnabled = Directory.Exists(DROPBOX_ROOT);
+
+                StatusText.Text = "Estado: Dropbox configurado ✅ (pulsa Sync)";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error eligiendo ruta → {ex.Message}";
+            }
         }
+
 
         private async void BtnOpen_Click(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
 
