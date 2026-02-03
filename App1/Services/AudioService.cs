@@ -18,10 +18,21 @@ namespace Anfeta.UI.Services
             _enumerator = new MMDeviceEnumerator();
         }
 
+        // Obtiene la lista de dispositivos de entrada de audio disponibles
+        // Retorna lista de AudioDeviceInfo con index, id, nombre y si es default
         public List<Models.AudioDeviceInfo> GetInputDevices()
         {
             var devices = new List<Models.AudioDeviceInfo>();
-            var defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
+            MMDevice? defaultDevice = null;
+
+            try
+            {
+                defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
+            }
+            catch
+            {
+                // No hay dispositivo de entrada por defecto
+            }
 
             for (int i = 0; i < WaveIn.DeviceCount; i++)
             {
@@ -32,22 +43,37 @@ namespace Anfeta.UI.Services
                 string deviceId = coreDevice?.ID ?? Guid.NewGuid().ToString();
                 string uniqueId = DeviceIdManager.GetOrCreateId(deviceId, "INPUT");
 
+                bool isDefault = defaultDevice != null &&
+                                 coreDevice != null &&
+                                 coreDevice.ID == defaultDevice.ID;
+
                 devices.Add(new Models.AudioDeviceInfo(
                     i,
                     deviceId,
                     uniqueId,
                     cap.ProductName,
-                    coreDevice?.ID == defaultDevice?.ID
+                    isDefault
                 ));
             }
 
             return devices;
         }
 
+        // Obtiene la lista de dispositivos de salida de audio disponibles
+        // Retorna lista de AudioDeviceInfo con index, id, nombre y si es default
         public List<Models.AudioDeviceInfo> GetOutputDevices()
         {
             var devices = new List<Models.AudioDeviceInfo>();
-            var defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            MMDevice? defaultDevice = null;
+
+            try
+            {
+                defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            }
+            catch
+            {
+                // No hay dispositivo de salida por defecto
+            }
 
             for (int i = -1; i < WaveOut.DeviceCount; i++)
             {
@@ -63,18 +89,25 @@ namespace Anfeta.UI.Services
                 string deviceId = coreDevice?.ID ?? Guid.NewGuid().ToString();
                 string uniqueId = DeviceIdManager.GetOrCreateId(deviceId, "OUTPUT");
 
+                bool isDefault = defaultDevice != null &&
+                                 coreDevice != null &&
+                                 coreDevice.ID == defaultDevice.ID;
+
                 devices.Add(new Models.AudioDeviceInfo(
                     i,
                     deviceId,
                     uniqueId,
                     cap.ProductName,
-                    coreDevice?.ID == defaultDevice?.ID
+                    isDefault
                 ));
             }
 
             return devices;
         }
 
+        // Inicia la prueba del micrófono y envía niveles de audio al callback
+        // deviceId: índice del dispositivo WaveIn
+        // levelCallback: función que recibe el nivel de audio (0-100)
         public void StartMicTest(int deviceId, Action<float> levelCallback)
         {
             StopMicTest();
@@ -101,6 +134,7 @@ namespace Anfeta.UI.Services
             _waveIn.StartRecording();
         }
 
+        // Detiene la prueba del micrófono y libera recursos
         public void StopMicTest()
         {
             _waveIn?.StopRecording();
@@ -108,6 +142,8 @@ namespace Anfeta.UI.Services
             _waveIn = null;
         }
 
+        // Reproduce un sonido de prueba en el dispositivo especificado
+        // deviceId: índice del dispositivo WaveOut
         public async Task PlayTestSound(int deviceId)
         {
             StopTestSound();
@@ -126,6 +162,7 @@ namespace Anfeta.UI.Services
             StopTestSound();
         }
 
+        // Detiene el sonido de prueba y libera recursos
         public void StopTestSound()
         {
             _waveOut?.Stop();

@@ -216,36 +216,46 @@ namespace Anfeta.UI
             {
                 var auth = AppHost.Services.GetRequiredService<AuthStateService>();
                 var authApi = AppHost.Services.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                var tokenStore = AppHost.Services.GetRequiredService<ITokenStore>();
 
                 // 1) Cargar token local si existe (LocalSettings)
                 await auth.InitializeAsync();
 
-                // 2) Fuente real: backend por deviceId
+                // Si el usuario tiene token local, ya está autenticado
+                if (auth.IsAuthenticated)
+                {
+                    Debug.WriteLine("AUTH: token local válido -> usuario autenticado");
+                    return;
+                }
+
+                // 2) Verificar si el usuario cerró sesión manualmente
+                var wasManualLogout = await tokenStore.WasManualLogoutAsync();
+                if (wasManualLogout)
+                {
+                    Debug.WriteLine("AUTH: usuario cerró sesión manualmente -> NO auto-login");
+                    return;
+                }
+
+                // 3) Si NO hay token local y NO fue logout manual, intentar auto-login por deviceId
                 var check = await authApi.CheckDeviceAsync(deviceId);
 
                 if (check.Ok && !string.IsNullOrWhiteSpace(check.Token))
                 {
                     await auth.SetSignedInAsync(check.Token!);
-                    Debug.WriteLine("AUTH: device vinculado -> token OK");
+                    Debug.WriteLine("AUTH: device vinculado -> token OK (auto-login)");
                     return;
                 }
 
                 if (check.NeedsRegister)
                 {
-                    // Backend confirma que este device NO está registrado
-                    // -limpiar token local para evitar estado inconsistente
-                    await auth.SignOutAsync();
                     Debug.WriteLine("AUTH: device NO registrado -> needsRegister");
                     return;
                 }
 
-                // Si llegamos aquí, el backend devolvió algo inesperado o error:
-                // NO borres el token local (puede ser offline / fallo temporal)
                 Debug.WriteLine($"AUTH: check-device error/inesperado -> {check.RawError}");
             }
             catch (Exception ex)
             {
-                // NO borres el token local aquí tampoco (offline / timeout)
                 Debug.WriteLine("AUTH BOOTSTRAP ERROR: " + ex.Message);
             }
         }

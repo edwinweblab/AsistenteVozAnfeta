@@ -128,6 +128,82 @@ namespace Anfeta.UI.Services.Auth
             }
         }
 
+        // Obtiene el perfil completo del usuario autenticado desde /api/auth/me
+        // Entrada: ninguna (usa token en headers automáticamente)
+        // Salida: (success, userProfile) - userProfile es null si falla
+        public async Task<(bool success, UserProfile? profile)> GetUserProfileAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                using var resp = await _http.GetAsync("/api/auth/me", ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                    return (false, null);
+
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("ok", out var okEl) || !okEl.GetBoolean())
+                    return (false, null);
+
+                if (!root.TryGetProperty("user", out var userEl) || userEl.ValueKind != JsonValueKind.Object)
+                    return (false, null);
+
+                // Extraer campos requeridos
+                var firstName = userEl.TryGetProperty("firstName", out var fnEl) && fnEl.ValueKind == JsonValueKind.String
+                    ? fnEl.GetString()
+                    : null;
+
+                var lastName = userEl.TryGetProperty("lastName", out var lnEl) && lnEl.ValueKind == JsonValueKind.String
+                    ? lnEl.GetString()
+                    : null;
+
+                var email = userEl.TryGetProperty("email", out var emEl) && emEl.ValueKind == JsonValueKind.String
+                    ? emEl.GetString()
+                    : null;
+
+                var createdAtStr = userEl.TryGetProperty("createdAt", out var caEl) && caEl.ValueKind == JsonValueKind.String
+                    ? caEl.GetString()
+                    : null;
+
+                var updatedAtStr = userEl.TryGetProperty("updatedAt", out var uaEl) && uaEl.ValueKind == JsonValueKind.String
+                    ? uaEl.GetString()
+                    : null;
+
+                // Validar campos obligatorios
+                if (string.IsNullOrWhiteSpace(firstName) ||
+                    string.IsNullOrWhiteSpace(lastName) ||
+                    string.IsNullOrWhiteSpace(email))
+                    return (false, null);
+
+                // Parsear fechas
+                if (!DateTime.TryParse(createdAtStr, out var createdAt))
+                    createdAt = DateTime.MinValue;
+
+                if (!DateTime.TryParse(updatedAtStr, out var updatedAt))
+                    updatedAt = DateTime.MinValue;
+
+                var profile = new UserProfile(
+                    firstName!,
+                    lastName!,
+                    email!,
+                    createdAt,
+                    updatedAt
+                );
+
+                return (true, profile);
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, null);
+            }
+            catch
+            {
+                return (false, null);
+            }
+        }
+
     }
 
     public sealed record CheckDeviceResult(bool Ok, bool NeedsRegister, string? Token, string? RawError)
