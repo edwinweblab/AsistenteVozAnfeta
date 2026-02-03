@@ -12,7 +12,7 @@ namespace Anfeta.UI.Services.Search
     {
         private readonly HttpClient _http;
 
-        private const string BASE_URL = "https://wlserver-production.up.railway.app";
+        private const string BASE_URL = "https://wlserver-production-6735.up.railway.app";
         private const string ROOT = "/api/dropbox/notion-files";
 
         public DropboxNotionFilesApi(HttpClient httpClient)
