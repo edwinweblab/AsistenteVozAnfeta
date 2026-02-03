@@ -9,7 +9,6 @@ namespace Anfeta.UI.Views
     public sealed partial class LinkAccountView : Page
     {
         private readonly LinkAccountViewModel _vm;
-        private Border? ErrorBorder;
 
         public LinkAccountView()
         {
@@ -20,30 +19,62 @@ namespace Anfeta.UI.Views
             _vm.RequestNavigateHome += () => Frame?.Navigate(typeof(HomeView));
             _vm.PropertyChanged += ViewModel_PropertyChanged;
 
-            // Inicializa ErrorBorder después de que los componentes han sido cargados
-            ErrorBorder = FindName("ErrorBorder") as Border;
-            if (ErrorBorder != null)
+            // Cargar perfil si ya está autenticado
+            Loaded += OnPageLoaded;
+        }
+
+        // Carga el perfil del usuario y actualiza visibilidad de cards
+        private async void OnPageLoaded(object sender, RoutedEventArgs e)
+        {
+            UpdateCardVisibility();
+
+            if (_vm.IsAuthenticated)
             {
-                ErrorBorder.Visibility = Visibility.Collapsed;
+                await _vm.LoadProfileAsync();
             }
         }
 
+        // Actualiza qué card mostrar según estado de autenticación
+        private void UpdateCardVisibility()
+        {
+            if (_vm.IsAuthenticated)
+            {
+                // Mostrar perfil, ocultar login
+                LoginCard.Visibility = Visibility.Collapsed;
+                ProfileCard.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                // Mostrar login, ocultar perfil
+                LoginCard.Visibility = Visibility.Visible;
+                ProfileCard.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        // Actualiza visibilidad cuando cambian propiedades del ViewModel
         private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             if (e.PropertyName == nameof(LinkAccountViewModel.ErrorMessage))
             {
-                ErrorBorder.Visibility = string.IsNullOrWhiteSpace(_vm.ErrorMessage)
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
+                if (ErrorBorder != null)
+                {
+                    ErrorBorder.Visibility = string.IsNullOrWhiteSpace(_vm.ErrorMessage)
+                        ? Visibility.Collapsed
+                        : Visibility.Visible;
+                }
+            }
+
+            // Actualizar cards cuando cambia estado de autenticación
+            if (e.PropertyName == nameof(LinkAccountViewModel.IsAuthenticated))
+            {
+                UpdateCardVisibility();
             }
         }
 
-        private void OnCancelClicked(object sender, RoutedEventArgs e)
+        // Navega de regreso a HomeView
+        private void OnBackToHomeClicked(object sender, RoutedEventArgs e)
         {
-            if (Frame?.CanGoBack == true)
-                Frame.GoBack();
-            else
-                Frame?.Navigate(typeof(HomeView));
+            Frame?.Navigate(typeof(HomeView));
         }
     }
 }

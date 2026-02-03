@@ -7,5 +7,7 @@ namespace Anfeta.UI.Services.Auth
         Task<string?> GetTokenAsync();
         Task SaveTokenAsync(string token);
         Task ClearAsync();
+        Task<bool> WasManualLogoutAsync();
+        Task ClearManualLogoutFlagAsync();
     }
 }

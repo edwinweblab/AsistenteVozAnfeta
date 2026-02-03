@@ -50,12 +50,42 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
+        // Propiedades nuevas para modo perfil
+        private UserProfile? _userProfile;
+        public UserProfile? UserProfile
+        {
+            get => _userProfile;
+            private set
+            {
+                if (SetProperty(ref _userProfile, value))
+                {
+                    OnPropertyChanged(nameof(AvatarInitial));
+                }
+            }
+        }
+
+        // Primera letra del nombre para el avatar
+        public string AvatarInitial =>
+            !string.IsNullOrWhiteSpace(UserProfile?.FirstName)
+                ? UserProfile.FirstName.Substring(0, 1).ToUpper()
+                : "U";
+
+        // Indica si el usuario está autenticado (para cambiar entre login/perfil)
+        public bool IsAuthenticated => _auth.IsAuthenticated;
+
+        // Formato de fecha de registro para mostrar en UI
+        public string FormattedCreatedAt => UserProfile?.CreatedAt.ToString("dd MMM yyyy") ?? "";
+
+        // Formato de última actividad para mostrar en UI
+        public string FormattedUpdatedAt => UserProfile?.UpdatedAt.ToString("dd MMM yyyy HH:mm") ?? "";
+
         public bool CanLink =>
             !IsBusy &&
             !string.IsNullOrWhiteSpace(Email) &&
             Email.Contains("@");
 
         public IAsyncRelayCommand LinkCommand { get; }
+        public IAsyncRelayCommand SignOutCommand { get; }
 
         public event Action? RequestNavigateHome;
 
@@ -66,6 +96,75 @@ namespace Anfeta.UI.ViewModels
             _authApi = authApi;
 
             LinkCommand = new AsyncRelayCommand(LinkAsync, CanLinkExecute);
+            SignOutCommand = new AsyncRelayCommand(SignOutAsync);
+
+            // Suscribirse a cambios de autenticación
+            _auth.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(AuthStateService.IsAuthenticated))
+                {
+                    OnPropertyChanged(nameof(IsAuthenticated));
+                    // Cuando cambia el estado de autenticación, recargar perfil si está autenticado
+                    if (IsAuthenticated)
+                        _ = LoadProfileAsync();
+                }
+            };
+        }
+
+        // Carga el perfil del usuario desde el API
+        // Llamar desde View.Loaded si IsAuthenticated es true
+        public async Task LoadProfileAsync()
+        {
+            if (!IsAuthenticated)
+            {
+                UserProfile = null;
+                return;
+            }
+
+            try
+            {
+                var (success, profile) = await _authApi.GetUserProfileAsync();
+
+                if (success && profile != null)
+                {
+                    UserProfile = profile;
+                    OnPropertyChanged(nameof(FormattedCreatedAt));
+                    OnPropertyChanged(nameof(FormattedUpdatedAt));
+                    Debug.WriteLine("[PROFILE] Perfil cargado OK");
+                }
+                else
+                {
+                    Debug.WriteLine("[PROFILE] Error al cargar perfil");
+                    UserProfile = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PROFILE] Excepción: {ex.Message}");
+                UserProfile = null;
+            }
+        }
+
+        // Cierra sesión del usuario y limpia el perfil
+        // UI debe detectar cambio de IsAuthenticated para mostrar login
+        private async Task SignOutAsync()
+        {
+            try
+            {
+                UserProfile = null;
+                await _auth.SignOutAsync();
+                Debug.WriteLine("[PROFILE] Sesión cerrada");
+
+                // Notificar cambio de autenticación
+                OnPropertyChanged(nameof(IsAuthenticated));
+
+                // Navegar a home para limpiar estado
+                RequestNavigateHome?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PROFILE] Error al cerrar sesión: {ex.Message}");
+            }
         }
 
         private bool CanLinkExecute() => CanLink;
@@ -127,9 +226,12 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // 3) Guardar token local y volver a Home
+                // 3) Guardar token local y cargar perfil
                 await _auth.SetSignedInAsync(reg.Token!);
                 Debug.WriteLine("[LINK] Vinculación OK. Token guardado.");
+
+                // Cargar perfil después de login exitoso
+                await LoadProfileAsync();
 
                 RequestNavigateHome?.Invoke();
             }

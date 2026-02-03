@@ -28,6 +28,14 @@
             <Setter Property="BorderBrush" Value="#30FFFFFF"/>
             <Setter Property="CornerRadius" Value="8"/>
         </Style>
+
+        <Style x:Key="InfoCard" TargetType="Border">
+            <Setter Property="Background" Value="#18FFFFFF"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="18,16"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#10FFFFFF"/>
+        </Style>
     </Page.Resources>
 
     <Grid>
@@ -64,16 +72,17 @@
                 <ColumnDefinition Width="340"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Card principal -->
-            <Border x:Name="MainCard" Grid.Column="0" Style="{StaticResource GlassBorder}">
-                <StackPanel Spacing="24" MinWidth="440">
+            <!-- Card principal - LOGIN MODE -->
+            <Border x:Name="LoginCard" Grid.Column="0" Style="{StaticResource GlassBorder}">
+                <StackPanel Spacing="28" MinWidth="440">
                     <!-- Logo + Título -->
-                    <StackPanel Spacing="12" HorizontalAlignment="Center">
-                        <Border Width="68" Height="68" CornerRadius="34" Background="{StaticResource AnfetaAccentBrush}">
-                            <TextBlock Text="WL" FontSize="26" FontWeight="Bold" Foreground="White" 
+                    <StackPanel Spacing="14" HorizontalAlignment="Center">
+                        <Border Width="72" Height="72" CornerRadius="36" Background="{StaticResource AnfetaAccentBrush}"
+                                ToolTipService.ToolTip="Weblab Platform">
+                            <TextBlock Text="WL" FontSize="28" FontWeight="Bold" Foreground="White" 
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
-                        <TextBlock Text="Vincular cuenta" FontSize="30" FontWeight="SemiBold" 
+                        <TextBlock Text="Vincular cuenta" FontSize="32" FontWeight="SemiBold" 
                                    Foreground="#F7FAFC" HorizontalAlignment="Center"/>
                         <TextBlock Text="Introduce tu correo para acceder" FontSize="14" 
                                    Foreground="#94A3B8" HorizontalAlignment="Center" TextWrapping="Wrap"
@@ -82,8 +91,13 @@
 
                     <!-- Inputs -->
                     <StackPanel Spacing="18">
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="Correo electrónico" FontSize="13" Foreground="#CBD5E1" FontWeight="SemiBold"/>
+                        <StackPanel Spacing="10">
+                            <Grid>
+                                <TextBlock Text="Correo electrónico" FontSize="13" Foreground="#CBD5E1" FontWeight="SemiBold"/>
+                                <FontIcon Glyph="&#xE897;" FontSize="14" Foreground="#94A3B8" 
+                                          HorizontalAlignment="Right"
+                                          ToolTipService.ToolTip="Ingresa el correo corporativo registrado en Weblab"/>
+                            </Grid>
                             <TextBox Style="{StaticResource InputBox}"
                                      PlaceholderText="correo@empresa.com"
                                      Text="{Binding Email, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
@@ -95,38 +109,153 @@
                         </StackPanel>
 
                         <!-- Error message -->
-                        <Border Visibility="Collapsed" 
-                        Background="#20EF4444" BorderBrush="#EF4444" BorderThickness="1" 
-                        CornerRadius="8" Padding="12,10">
+                        <Border x:Name="ErrorBorder" Visibility="Collapsed" 
+                                Background="#20EF4444" BorderBrush="#EF4444" BorderThickness="1" 
+                                CornerRadius="8" Padding="12,10">
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <FontIcon Glyph="&#xE7BA;" FontSize="16" Foreground="#EF4444"/>
                                 <TextBlock x:Name="ErrorText" Text="{Binding ErrorMessage}" 
-                   FontSize="13" Foreground="#FECACA" TextWrapping="Wrap"/>
+                                           FontSize="13" Foreground="#FECACA" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
                     <!-- Botones -->
                     <StackPanel Spacing="12">
-                        <Button Content="Vincular cuenta"
-                                Command="{Binding LinkCommand}"
+                        <Button Command="{Binding LinkCommand}"
                                 IsEnabled="{Binding CanLink}"
                                 Style="{StaticResource PrimaryButtonStyle}"
-                                HorizontalAlignment="Stretch"/>
+                                HorizontalAlignment="Stretch"
+                                ToolTipService.ToolTip="Vincular este dispositivo con tu cuenta de Weblab">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE72E;" FontSize="16"/>
+                                <TextBlock Text="Vincular cuenta" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
 
-                        <Button Content="Cancelar"
-                                Click="OnCancelClicked"
+                        <Button Click="OnBackToHomeClicked"
                                 Style="{StaticResource SecondaryButtonStyle}"
-                                HorizontalAlignment="Stretch"/>
+                                HorizontalAlignment="Stretch"
+                                ToolTipService.ToolTip="Regresar al panel principal">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE72B;" FontSize="16"/>
+                                <TextBlock Text="Volver al inicio" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
 
                     <!-- Footer link -->
-                    <HyperlinkButton HorizontalAlignment="Center" Padding="0">
-                        <TextBlock FontSize="12" Foreground="#94A3B8">
-                            <Run Text="¿No tienes acceso? "/>
-                            <Run Text="Contacta al admin" Foreground="{StaticResource AnfetaAccentBrush}" FontWeight="SemiBold"/>
-                        </TextBlock>
+                    <HyperlinkButton HorizontalAlignment="Center" Padding="0"
+                                     ToolTipService.ToolTip="Contacta al administrador del sistema">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE897;" FontSize="12" Foreground="#94A3B8"/>
+                            <TextBlock FontSize="12" Foreground="#94A3B8">
+                                <Run Text="¿No tienes acceso? "/>
+                                <Run Text="Contacta al admin" Foreground="{StaticResource AnfetaAccentBrush}" FontWeight="SemiBold"/>
+                            </TextBlock>
+                        </StackPanel>
                     </HyperlinkButton>
+                </StackPanel>
+            </Border>
+
+            <!-- Card principal - PROFILE MODE -->
+            <Border x:Name="ProfileCard" Grid.Column="0" Style="{StaticResource GlassBorder}">
+                <StackPanel Spacing="28" MinWidth="440">
+                    <!-- Avatar + Nombre -->
+                    <StackPanel Spacing="18" HorizontalAlignment="Center">
+                        <!-- Avatar con sombra -->
+                        <Grid Width="90" Height="90">
+                            <Ellipse Fill="#40000000" Margin="0,4,0,0" Opacity="0.6"/>
+                            <Border Width="90" Height="90" CornerRadius="45" 
+                                    Background="{StaticResource AnfetaAccentBrush}"
+                                    BorderThickness="3" BorderBrush="#20FFFFFF"
+                                    ToolTipService.ToolTip="Avatar del usuario">
+                                <TextBlock Text="{Binding AvatarInitial, FallbackValue='U'}" 
+                                           FontSize="36" FontWeight="Bold" Foreground="White" 
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="{Binding UserProfile.FullName, FallbackValue='Usuario'}" 
+                                       FontSize="30" FontWeight="SemiBold" 
+                                       Foreground="#F7FAFC" HorizontalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" MaxWidth="380"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">
+                                <FontIcon Glyph="&#xE715;" FontSize="14" Foreground="#94A3B8"/>
+                                <TextBlock Text="{Binding UserProfile.Email, FallbackValue=''}" 
+                                           FontSize="14" Foreground="#94A3B8"
+                                           ToolTipService.ToolTip="Correo electrónico registrado"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Información de cuenta -->
+                    <StackPanel Spacing="12">
+                        <Border Style="{StaticResource InfoCard}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="22" 
+                                        Background="#14FF6B35" 
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="Fecha de registro">
+                                    <FontIcon Glyph="&#xE8FA;" FontSize="20" 
+                                              Foreground="{StaticResource AnfetaAccentBrush}"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Miembro desde" FontSize="12" Foreground="#94A3B8"/>
+                                    <TextBlock Text="{Binding FormattedCreatedAt, FallbackValue='--'}" 
+                                               FontSize="16" FontWeight="SemiBold" Foreground="#F7FAFC" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource InfoCard}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="22" 
+                                        Background="#143EC8A0" 
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="Última actividad registrada">
+                                    <FontIcon Glyph="&#xE916;" FontSize="20" Foreground="#34D399"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Última actividad" FontSize="12" Foreground="#94A3B8"/>
+                                    <TextBlock Text="{Binding FormattedUpdatedAt, FallbackValue='--'}" 
+                                               FontSize="16" FontWeight="SemiBold" Foreground="#F7FAFC" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Botones -->
+                    <StackPanel Spacing="12">
+                        <Button Command="{Binding SignOutCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Stretch"
+                                ToolTipService.ToolTip="Cerrar sesión y desvincular este dispositivo">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xF3B1;" FontSize="16"/>
+                                <TextBlock Text="Cerrar sesión" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Click="OnBackToHomeClicked"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                HorizontalAlignment="Stretch"
+                                ToolTipService.ToolTip="Regresar al panel principal">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE80F;" FontSize="16"/>
+                                <TextBlock Text="Volver al inicio" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
