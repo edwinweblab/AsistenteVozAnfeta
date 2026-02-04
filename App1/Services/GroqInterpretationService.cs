@@ -139,6 +139,7 @@ namespace Anfeta.UI.Services
                 "5) RECURSOS SOPORTADOS (API):\n" +
                 "   - actividades: list|today|get|search\n" +
                 "   - revisiones: today|en-curso\n" +
+                "   - reportes: list|today (SOLO revisiones-por-fecha; params permitido: date)\n" +
                 "   - presence: online (mapear como action:list si piden 'usuarios en línea')\n\n" +
 
                 "6) EJEMPLOS EXACTOS:\n" +
@@ -148,6 +149,13 @@ namespace Anfeta.UI.Services
                 "   User: 'qué tengo hoy' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:today, confidence:1.0\n" +
                 "   User: 'detalles de ABC123' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:get, params:{\"id\":\"ABC123\"}, confidence:1.0\n" +
                 "   User: 'buscar actividades de tesis' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:search, params:{\"q\":\"tesis\"}, confidence:1.0\n\n" +
+                "   User: 'dame reportes' -> intent:ApiCall, scope:API, provider:weblab, resource:reportes, action:list, confidence:1.0\n" +
+                "   User: 'qué reportes tengo' -> intent:ApiCall, scope:API, provider:weblab, resource:reportes, action:list, confidence:1.0\n" +
+                "   User: 'muéstrame mis reportes' -> intent:ApiCall, scope:API, provider:weblab, resource:reportes, action:list, confidence:1.0\n" +
+                "   User: 'dame mis reportes de hoy' -> intent:ApiCall, scope:API, provider:weblab, resource:reportes, action:today, confidence:1.0\n" +
+                "   User: 'dame mis reportes del 4 de febrero' -> intent:ApiCall, scope:API, provider:weblab, resource:reportes, action:list, params:{\"date\":\"2026-02-04\"}, confidence:1.0\n" +
+                "   User: 'qué revisiones tengo' -> intent:ApiCall, scope:API, provider:weblab, resource:reportes, action:list, confidence:0.9\n" +
+                "   User: 'qué revisiones tengo para el día 4 de febrero' -> intent:ApiCall, scope:API, provider:weblab, resource:reportes, action:list, params:{\"date\":\"2026-02-04\"}, confidence:1.0\n\n" +
 
                 "User: \"" + userMessage + "\"\n\n" +
                 "Return JSON with confidence >= 0.7 for valid commands:\n";

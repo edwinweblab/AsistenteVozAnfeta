@@ -13,15 +13,20 @@ namespace Anfeta.UI.Services
         private readonly WeblabActividadesClient _actividades;
         private readonly WeblabRevisionesClient _revisiones;
         private readonly WeblabAuthClient _auth;
+        private readonly WeblabReportesClient _reportes;
+
         private string? _cachedAssignee;
 
         public ApiActionExecutor(
             WeblabActividadesClient actividades,
             WeblabRevisionesClient revisiones,
+            WeblabReportesClient reportes,
             WeblabAuthClient auth)
+
         {
             _actividades = actividades;
             _revisiones = revisiones;
+            _reportes = reportes;
             _auth = auth;
         }
 
@@ -133,9 +138,32 @@ namespace Anfeta.UI.Services
 
                 return (false, $"Acción '{action}' no soportada para revisiones. Disponibles: today, en-curso.");
             }
+            // =========================
+            // REPORTES
+            // =========================
+            if (resource == "reportes")
+            {
+                if (action == "list")
+                {
+                    var date = TryGetString(paramsJson, "date"); // SOLO date
+                    var r = await _reportes.GetMyRevisionsReportAsync(date, ct);
+                    return (r.Ok, r.PlainText);
+                }
 
-            return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones.");
+                if (action == "today")
+                {
+                    var today = DateTime.Today.ToString("yyyy-MM-dd");
+                    var r = await _reportes.GetMyRevisionsReportAsync(today, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                return (false, $"Acción '{action}' no soportada para reportes. Disponibles: list, today.");
+            }
+
+
+            return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones, reportes.");
         }
+
 
         private async Task<string?> GetOrFetchAssigneeAsync(CancellationToken ct)
         {

@@ -113,6 +113,14 @@ namespace Anfeta.UI
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new Anfeta.UI.Services.Auth.WeblabAuthClient(factory.CreateClient("WeblabAuthed"));
                     });
+                    // WeblabReportesClient - Para reportes (revisiones-por-fecha)
+                    services.AddSingleton<WeblabReportesClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new WeblabReportesClient(factory.CreateClient("WeblabAuthed"), auth);
+                    });
+
 
                     // WeblabUsersClient - Para búsqueda de usuarios
                     services.AddSingleton<WeblabUsersClient>(sp =>
@@ -147,7 +155,9 @@ namespace Anfeta.UI
                         var actividades = sp.GetRequiredService<WeblabActividadesClient>();
                         var revisiones = sp.GetRequiredService<WeblabRevisionesClient>();
                         var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
-                        return new ApiActionExecutor(actividades, revisiones, auth);
+                        var reportes = sp.GetRequiredService<WeblabReportesClient>();
+
+                        return new ApiActionExecutor(actividades, revisiones, reportes, auth);
                     });
 
                     // =========================
