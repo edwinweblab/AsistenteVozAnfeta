@@ -47,7 +47,7 @@ namespace Anfeta.UI
                     services.AddSingleton<AppStateService>();
                     services.AddSingleton<SettingsService>();
                     services.AddSingleton<AudioService>();
-                    services.AddSingleton<ISpeechToTextService, VoskSpeechToTextService>();
+                    services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
 

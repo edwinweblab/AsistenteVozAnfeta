@@ -1,10 +1,11 @@
-﻿using System;
+﻿using Anfeta.UI.Models;
+using Anfeta.UI.Services.Auth;
+using System;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Models;
-using Anfeta.UI.Services.Auth;
 
 namespace Anfeta.UI.Services.Weblab
 {
@@ -18,7 +19,16 @@ namespace Anfeta.UI.Services.Weblab
             _http = http;
             _auth = auth;
         }
-        private static string BuildPlainText(string json, string name, string? assignee = null)
+
+        // ============================
+        // BuildPlainText (TOTALES + HORAS)
+        // - total (count)
+        // - terminadas
+        // - confirmadas
+        // - pendientes
+        // - minutos -> horas
+        // ============================
+        private static string BuildPlainText(string json, string name, string? assigneeEmail = null)
         {
             try
             {
@@ -28,42 +38,43 @@ namespace Anfeta.UI.Services.Weblab
                 if (!root.TryGetProperty("data", out var data))
                     return "No pude leer el reporte.";
 
-                var total = data.GetProperty("totalRevisiones").GetInt32();
-                var date = data.GetProperty("date").GetString();
+                var date = data.TryGetProperty("date", out var d) ? (d.GetString() ?? "").Trim() : "";
 
-                // Buscar MIS datos
-                if (!string.IsNullOrWhiteSpace(assignee) &&
-                    data.TryGetProperty("colaboradores", out var colabs))
+                if (!data.TryGetProperty("colaboradores", out var colabs) || colabs.ValueKind != JsonValueKind.Array)
+                    return "No hay colaboradores en el reporte.";
+
+                // Buscar MIS datos:
+                // En tu API el query param "assignee" es el correo (ej: eedwi@practicante.com),
+                // pero dentro del JSON el correo aparece en assignees[].name.
+                if (!string.IsNullOrWhiteSpace(assigneeEmail))
                 {
                     foreach (var c in colabs.EnumerateArray())
                     {
-                        var id = c.GetProperty("idAsignee").GetString();
+                        if (!BelongsToAssigneeEmail(c, assigneeEmail))
+                            continue;
 
-                        if (id == assignee)
-                        {
-                            var pendientes = c.GetProperty("pendientes").GetInt32();
-                            var terminadas = c.GetProperty("terminadas").GetInt32();
-                            var confirmadas = c.GetProperty("confirmadas").GetInt32();
+                        var terminadas = c.TryGetProperty("terminadas", out var t) ? t.GetInt32() : 0;
+                        var confirmadas = c.TryGetProperty("confirmadas", out var cf) ? cf.GetInt32() : 0;
+                        var pendientes = c.TryGetProperty("pendientes", out var p) ? p.GetInt32() : 0;
 
-                            // =====================
-                            // FRASES INTELIGENTES
-                            // =====================
+                        var total = c.TryGetProperty("count", out var ct)
+                            ? ct.GetInt32()
+                            : (terminadas + confirmadas + pendientes);
 
-                            if (pendientes == 0 && terminadas > 0)
-                                return $"{name}, ya terminaste todas tus revisiones del {date}.";
+                        var minutos = c.TryGetProperty("minutos", out var m) ? m.GetInt32() : 0;
+                        var horas = minutos / 60.0;
 
-                            if (terminadas == 0 && confirmadas == 0)
-                                return $"{name}, tienes {pendientes} revisiones pendientes para el {date}.";
+                        var fechaTxt = string.IsNullOrWhiteSpace(date) ? "hoy" : $"el {date}";
 
-                            if (terminadas > 0 && pendientes > 0)
-                                return $"{name}, tienes {terminadas} revisiones terminadas y {pendientes} pendientes para el {date}.";
-
-                            return $"{name}, tienes {total} revisiones para el {date}.";
-                        }
+                        // Mensaje simple como pediste
+                        return $"{name}, {fechaTxt} tienes {total} revisiones: {terminadas} terminadas, {confirmadas} confirmadas y {pendientes} pendientes. Tiempo: {horas:0.##} horas ({minutos} min).";
                     }
                 }
 
-                return $"{name}, hay {total} revisiones registradas.";
+                // Fallback: si no encontramos al usuario, damos el total del día (general)
+                var totalDia = data.TryGetProperty("totalRevisiones", out var td) ? td.GetInt32() : 0;
+                var fechaDia = string.IsNullOrWhiteSpace(date) ? "" : $" del {date}";
+                return $"{name}, hay {totalDia} revisiones registradas{fechaDia}.";
             }
             catch
             {
@@ -71,10 +82,53 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
+        // Detecta si este bloque de colaborador incluye el correo del usuario
+        // buscando en items.actividades[].(terminadas|confirmadas|pendientes)[][].assignees[].name
+        private static bool BelongsToAssigneeEmail(JsonElement colaborador, string assigneeEmail)
+        {
+            if (!colaborador.TryGetProperty("items", out var items))
+                return false;
+
+            if (!items.TryGetProperty("actividades", out var actividades) || actividades.ValueKind != JsonValueKind.Array)
+                return false;
+
+            foreach (var act in actividades.EnumerateArray())
+            {
+                foreach (var bucketName in new[] { "terminadas", "confirmadas", "pendientes" })
+                {
+                    if (!act.TryGetProperty(bucketName, out var bucket) || bucket.ValueKind != JsonValueKind.Array)
+                        continue;
+
+                    foreach (var rev in bucket.EnumerateArray())
+                    {
+                        if (!rev.TryGetProperty("assignees", out var assignees) || assignees.ValueKind != JsonValueKind.Array)
+                            continue;
+
+                        foreach (var a in assignees.EnumerateArray())
+                        {
+                            if (!a.TryGetProperty("name", out var n))
+                                continue;
+
+                            var email = (n.GetString() ?? "").Trim();
+                            if (string.IsNullOrWhiteSpace(email))
+                                continue;
+
+                            if (email.Equals(assigneeEmail, StringComparison.OrdinalIgnoreCase))
+                                return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
         public async Task<ApiPlainResponse> GetMyRevisionsReportAsync(string? date = null, CancellationToken ct = default)
         {
             try
             {
+                // Nota: en tu app esto devuelve (ok, assignee, name)
+                // y por tu uso actual "assignee" es el correo del token (ej: eedwi@practicante.com)
                 var (ok, assignee, name) = await _auth.GetCurrentUserAsync(ct);
 
                 if (!ok || string.IsNullOrWhiteSpace(assignee))
@@ -89,21 +143,20 @@ namespace Anfeta.UI.Services.Weblab
                 // =========================
                 // LOGS IMPORTANTES
                 // =========================
-                System.Diagnostics.Debug.WriteLine("====== REPORTES API ======");
-                System.Diagnostics.Debug.WriteLine($"Usuario (assignee): {assignee}");
-                System.Diagnostics.Debug.WriteLine($"Fecha enviada: {date}");
-                System.Diagnostics.Debug.WriteLine($"URL FINAL: {url}");
-                System.Diagnostics.Debug.WriteLine("==========================");
+                Debug.WriteLine("====== REPORTES API ======");
+                Debug.WriteLine($"Usuario (assignee email): {assignee}");
+                Debug.WriteLine($"Fecha enviada: {date}");
+                Debug.WriteLine($"URL FINAL: {url}");
+                Debug.WriteLine("==========================");
 
                 using var resp = await _http.GetAsync(url, ct);
-
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 // LOG RESPUESTA
-                System.Diagnostics.Debug.WriteLine("====== RESPUESTA API ======");
-                System.Diagnostics.Debug.WriteLine($"Status: {(int)resp.StatusCode}");
-                System.Diagnostics.Debug.WriteLine($"Body: {json}");
-                System.Diagnostics.Debug.WriteLine("===========================");
+                Debug.WriteLine("====== RESPUESTA API ======");
+                Debug.WriteLine($"Status: {(int)resp.StatusCode}");
+                Debug.WriteLine($"Body: {json}");
+                Debug.WriteLine("===========================");
 
                 if (!resp.IsSuccessStatusCode)
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude obtener tus reportes." };
@@ -116,7 +169,7 @@ namespace Anfeta.UI.Services.Weblab
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("ERROR REPORTES API: " + ex.Message);
+                Debug.WriteLine("ERROR REPORTES API: " + ex.Message);
                 return new ApiPlainResponse { Ok = false, PlainText = "Error consultando reportes." };
             }
         }
