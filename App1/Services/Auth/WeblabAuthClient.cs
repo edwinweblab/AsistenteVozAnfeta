@@ -94,12 +94,11 @@ namespace Anfeta.UI.Services.Auth
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                if (!root.TryGetProperty("user", out var userEl) || userEl.ValueKind != JsonValueKind.Object)
+                if (!root.TryGetProperty("ok", out var okEl) || !okEl.GetBoolean())
                     return (false, null, null);
 
-                var collaboratorId = userEl.TryGetProperty("collaboratorId", out var cEl) && cEl.ValueKind == JsonValueKind.String
-                    ? cEl.GetString()
-                    : null;
+                if (!root.TryGetProperty("user", out var userEl) || userEl.ValueKind != JsonValueKind.Object)
+                    return (false, null, null);
 
                 var firstName = userEl.TryGetProperty("firstName", out var fnEl) && fnEl.ValueKind == JsonValueKind.String
                     ? fnEl.GetString()
@@ -113,10 +112,15 @@ namespace Anfeta.UI.Services.Auth
                     ? $"{firstName} {lastName}"
                     : firstName ?? lastName ?? "Usuario";
 
-                if (string.IsNullOrWhiteSpace(collaboratorId))
+                var email = userEl.TryGetProperty("email", out var eEl) && eEl.ValueKind == JsonValueKind.String
+                    ? eEl.GetString()
+                    : null;
+
+                // IMPORTANTE: para actividades, el assignee es el EMAIL
+                if (string.IsNullOrWhiteSpace(email))
                     return (false, null, fullName);
 
-                return (true, collaboratorId, fullName);
+                return (true, email, fullName);
             }
             catch (OperationCanceledException)
             {

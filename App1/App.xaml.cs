@@ -47,7 +47,7 @@ namespace Anfeta.UI
                     services.AddSingleton<AppStateService>();
                     services.AddSingleton<SettingsService>();
                     services.AddSingleton<AudioService>();
-                    services.AddSingleton<ISpeechToTextService, VoskSpeechToTextService>();
+                    services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
 
@@ -113,6 +113,14 @@ namespace Anfeta.UI
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new Anfeta.UI.Services.Auth.WeblabAuthClient(factory.CreateClient("WeblabAuthed"));
                     });
+                    // WeblabReportesClient - Para reportes (revisiones-por-fecha)
+                    services.AddSingleton<WeblabReportesClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new WeblabReportesClient(factory.CreateClient("WeblabAuthed"), auth);
+                    });
+
 
                     // WeblabUsersClient - Para búsqueda de usuarios
                     services.AddSingleton<WeblabUsersClient>(sp =>
@@ -125,7 +133,8 @@ namespace Anfeta.UI
                     services.AddSingleton<WeblabActividadesClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
-                        return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"));
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"), auth);
                     });
 
                     // WeblabRevisionesClient - Para gestión de revisiones
@@ -146,7 +155,9 @@ namespace Anfeta.UI
                         var actividades = sp.GetRequiredService<WeblabActividadesClient>();
                         var revisiones = sp.GetRequiredService<WeblabRevisionesClient>();
                         var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
-                        return new ApiActionExecutor(actividades, revisiones, auth);
+                        var reportes = sp.GetRequiredService<WeblabReportesClient>();
+
+                        return new ApiActionExecutor(actividades, revisiones, reportes, auth);
                     });
 
                     // =========================
