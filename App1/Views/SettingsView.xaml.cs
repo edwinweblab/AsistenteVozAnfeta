@@ -1,4 +1,8 @@
-﻿using Anfeta.UI.Models;
+﻿using Windows.Storage.Pickers;
+using Windows.Storage;
+using WinRT.Interop;
+
+using Anfeta.UI.Models;
 using Anfeta.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Text;
@@ -8,6 +12,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using Windows.Media.Capture;
 using Windows.UI;
@@ -20,6 +25,11 @@ namespace Anfeta.UI.Views
         private List<AudioDeviceInfo> _inputDevices;
         private List<AudioDeviceInfo> _outputDevices;
         private DispatcherTimer _statusTimer;
+        //DropBox 
+        private const string LS_DropboxRootChanged = "DropboxRootChanged";
+        private const string LS_DropboxRoot = "DropboxRoot";          // usa el MISMO nombre que en Search
+        
+
 
         public SettingsView()
         {
@@ -36,6 +46,8 @@ namespace Anfeta.UI.Views
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             LoadCurrentHotkey();
+            // 🔥 para que no se vea en blanco al volver
+            LoadDropboxRootIntoUI();
 
             _ = Task.Run(async () =>
             {
@@ -361,5 +373,86 @@ namespace Anfeta.UI.Views
             _statusTimer.Stop();
             _statusTimer.Start();
         }
+
+
+        private async void BtnPickDropboxRoot_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var picker = new FolderPicker();
+                picker.FileTypeFilter.Add("*");
+
+                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                InitializeWithWindow.Initialize(picker, hwnd);
+
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder == null)
+                {
+                    ShowStatus("Selección cancelada.", InfoBarSeverity.Informational);
+                    return;
+                }
+
+                var path = folder.Path;
+
+                if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+                {
+                    ShowStatus("Ruta inválida.", InfoBarSeverity.Warning);
+                    return;
+                }
+
+                ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = path;
+                // 🔥 CLAVE
+                App.LocalIndex.Clear();
+                ApplicationData.Current.LocalSettings.Values[LS_DropboxRootChanged] = true;
+                ApplicationData.Current.LocalSettings.Values["DropboxIndexReady"] = false;
+
+
+                DropboxPathBox.Text = path;
+
+                ShowStatus(
+                    "Ruta guardada. Al volver al buscador se sincronizará automáticamente.",
+                    InfoBarSeverity.Success
+                );
+            }
+            catch (Exception ex)
+            {
+                ShowStatus($"Error → {ex.Message}", InfoBarSeverity.Error);
+            }
+        }
+
+        private async void BtnResetDropboxRoot_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new ContentDialog
+            {
+                Title = "Cambiar ruta de Dropbox",
+                Content = "Esto limpiará la ruta actual.\n\n¿Deseas continuar?",
+                PrimaryButtonText = "Continuar",
+                CloseButtonText = "Cancelar",
+                XamlRoot = this.XamlRoot
+            };
+
+            if (await dlg.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
+            ApplicationData.Current.LocalSettings.Values[LS_DropboxRootChanged] = true;
+
+            App.LocalIndex.Clear();
+            DropboxPathBox.Text = "";
+
+            ShowStatus("Ruta reiniciada. Configura una nueva carpeta.", InfoBarSeverity.Informational);
+        }
+        private void LoadDropboxRootIntoUI()
+        {
+            var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
+
+            if (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved))
+                DropboxPathBox.Text = saved;
+            else
+                DropboxPathBox.Text = "";
+        }
+
+
     }
+
 }

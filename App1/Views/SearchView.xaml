@@ -12,41 +12,21 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-
         <!-- HEADER -->
-        <Border Grid.Row="0" CornerRadius="12" Padding="12"
+        <Border Grid.Row="0"
+        CornerRadius="12"
+        Padding="12"
         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
             <Grid RowSpacing="10">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <!-- Ruta -->
-                    <RowDefinition Height="Auto"/>
                     <!-- Search controls -->
                     <RowDefinition Height="Auto"/>
                     <!-- Chips + sort -->
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-
-                <!-- ROW 0: Ruta Dropbox -->
-                <Grid x:Name="DropboxPathRow"  Grid.Row="0" ColumnSpacing="10" VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-
-                    <TextBox x:Name="DropboxPathBox"
-                     Grid.Column="0"
-                     MinWidth="320"
-                     IsReadOnly="True"
-                     PlaceholderText="Elige tu carpeta de Dropbox…"/>
-
-                    <Button Grid.Column="1"
-                    Content="Ruta…"
-                    Click="BtnPickDropbox_Click"/>
-                </Grid>
-
-                <!-- ROW 1: Search + controls -->
-                <Grid Grid.Row="1" ColumnSpacing="10">
+                <!-- ROW 0: Search + controls (LIMPIO) -->
+                <Grid Grid.Row="0" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <!-- Carpetas -->
@@ -57,80 +37,68 @@
                         <ColumnDefinition Width="Auto"/>
                         <!-- Notion -->
                         <ColumnDefinition Width="Auto"/>
-                        <!-- Sync -->
-                        <ColumnDefinition Width="Auto"/>
                         <!-- Detalles -->
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                         <!-- Más -->
                     </Grid.ColumnDefinitions>
 
                     <!-- Carpetas -->
                     <ToggleButton x:Name="ToggleFoldersPane"
-          Grid.Column="0"
-          Content="Carpetas"
-          IsChecked="True"
-          Click="ToggleFoldersPane_Click"
-          ToolTipService.ToolTip="Mostrar/ocultar panel de carpetas"/>
+                          Grid.Column="0"
+                          Content="Carpetas"
+                          IsChecked="True"
+                          Click="ToggleFoldersPane_Click"
+                          ToolTipService.ToolTip="Mostrar/ocultar panel de carpetas"/>
 
                     <!-- Buscador -->
                     <AutoSuggestBox x:Name="SearchBox"
-            Grid.Column="1"
-            PlaceholderText="Buscar en Dropbox… (AND / OR / NOT, ext:pdf)"
-            QueryIcon="Find"
-            TextChanged="SearchBox_TextChanged"
-            QuerySubmitted="SearchBox_QuerySubmitted"/>
+                            Grid.Column="1"
+                            PlaceholderText="Buscar en Dropbox… (AND / OR / NOT, ext:pdf)"
+                            QueryIcon="Find"
+                            TextChanged="SearchBox_TextChanged"
+                            QuerySubmitted="SearchBox_QuerySubmitted"/>
 
                     <!-- AYUDA -->
                     <Button x:Name="BtnHelp"
-            Grid.Column="2"
-            Content="?"
-            Width="34"
-            Height="34"
-            CornerRadius="8"
-            FontWeight="SemiBold"
-            ToolTipService.ToolTip="Ayuda de comandos de búsqueda"
-            Click="MenuHelp_Click"/>
+                    Grid.Column="2"
+                    Content="?"
+                    Width="34"
+                    Height="34"
+                    CornerRadius="8"
+                    FontWeight="SemiBold"
+                    ToolTipService.ToolTip="Ayuda de comandos de búsqueda"
+                    Click="MenuHelp_Click"/>
 
                     <!-- Notion -->
                     <ToggleButton x:Name="ToggleNotion"
-          Grid.Column="3"
-          Content="Notion"
-          ToolTipService.ToolTip="Incluir páginas Notion relacionadas"/>
-
-                    <!-- Sync -->
-                    <Button x:Name="BtnSync"
-      Grid.Column="4"
-      Content="Sync"
-      Click="BtnSync_Click"
-      ToolTipService.ToolTip="Sincronizar (delta)"/>
+                          Grid.Column="3"
+                          Content="Notion"
+                          ToolTipService.ToolTip="Incluir páginas Notion relacionadas"/>
 
                     <!-- Detalles -->
                     <ToggleButton x:Name="ToggleDetailsPane"
-          Grid.Column="5"
-          Content="Detalles"
-          IsChecked="False"
-          Click="ToggleDetailsPane_Click"
-          ToolTipService.ToolTip="Mostrar/ocultar panel de detalles"/>
+                          Grid.Column="4"
+                          Content="Detalles"
+                          IsChecked="False"
+                          Click="ToggleDetailsPane_Click"
+                          ToolTipService.ToolTip="Mostrar/ocultar panel de detalles"/>
 
                     <!-- Más -->
                     <Button x:Name="BtnMore"
-      Grid.Column="6"
-      Content="⋯">
+                    Grid.Column="5"
+                    Content="⋯">
                         <Button.Flyout>
                             <MenuFlyout>
                                 <MenuFlyoutItem Text="Explorar carpetas" Click="MenuExplore_Click"/>
-                                <MenuFlyoutItem Text="Reindexar (sync initial)" Click="MenuReindex_Click"/>
-                                <MenuFlyoutItem Text="Recompute metadata" Click="MenuRecompute_Click"/>
-                                <MenuFlyoutItem Text="Reiniciar ruta" Click="MenuResetDropbox_Click"/>
-
+                                <MenuFlyoutSeparator/>
                             </MenuFlyout>
                         </Button.Flyout>
                     </Button>
                 </Grid>
 
-
-                <!-- ROW 2: Chips + sort -->
-                <Grid Grid.Row="2" ColumnSpacing="10">
+                <!-- ROW 1: Chips + sort -->
+                <Grid Grid.Row="1" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
@@ -162,8 +130,6 @@
                 </Grid>
             </Grid>
         </Border>
-
-
         <!-- BODY -->
         <Grid Grid.Row="1" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
@@ -305,8 +271,8 @@
                 Click="BtnStar_Click"
                 ToolTipService.ToolTip="Agregar / quitar bookmark"/>
                                     </Grid>
-                                </DataTemplate> 
-                                
+                                </DataTemplate>
+
 
                             </ListView.ItemTemplate>
 
