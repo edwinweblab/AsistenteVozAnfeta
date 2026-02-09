@@ -1,9 +1,6 @@
-﻿using Windows.Storage.Pickers;
-using Windows.Storage;
-using WinRT.Interop;
-
-using Anfeta.UI.Models;
+﻿using Anfeta.UI.Models;
 using Anfeta.UI.Services;
+using Anfeta.UI.Services.Search;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -13,9 +10,13 @@ using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Capture;
+using Windows.Storage;
+using Windows.Storage.Pickers;
 using Windows.UI;
+using WinRT.Interop;
 namespace Anfeta.UI.Views
 {
     public sealed partial class SettingsView : Page
@@ -26,9 +27,11 @@ namespace Anfeta.UI.Views
         private List<AudioDeviceInfo> _outputDevices;
         private DispatcherTimer _statusTimer;
         //DropBox 
+        private const string LS_DropboxRoot = "DropboxRoot";
         private const string LS_DropboxRootChanged = "DropboxRootChanged";
-        private const string LS_DropboxRoot = "DropboxRoot";          // usa el MISMO nombre que en Search
-        
+        private const string LS_DropboxIndexReady = "DropboxIndexReady";
+        private CancellationTokenSource? _indexCts;
+
 
 
         public SettingsView()
@@ -374,16 +377,17 @@ namespace Anfeta.UI.Views
             _statusTimer.Start();
         }
 
-
+        //Nefta Buscador 
         private async void BtnPickDropboxRoot_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                var picker = new FolderPicker();
+                // 1) Picker
+                var picker = new Windows.Storage.Pickers.FolderPicker();
                 picker.FileTypeFilter.Add("*");
 
-                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
-                InitializeWithWindow.Initialize(picker, hwnd);
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
 
                 var folder = await picker.PickSingleFolderAsync();
                 if (folder == null)
@@ -392,33 +396,69 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                var path = folder.Path;
+                var selectedPath = folder.Path;
 
-                if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+                if (string.IsNullOrWhiteSpace(selectedPath) || !System.IO.Directory.Exists(selectedPath))
                 {
-                    ShowStatus("Ruta inválida.", InfoBarSeverity.Warning);
+                    ShowStatus("Ruta inválida. Intenta con otra carpeta.", InfoBarSeverity.Warning);
                     return;
                 }
 
-                ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = path;
-                // 🔥 CLAVE
+                // 2) Guardar ruta (config)
+                ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = selectedPath;
+
+                // 3) Cancelar indexado anterior si existe
+                _indexCts?.Cancel();
+                _indexCts = new System.Threading.CancellationTokenSource();
+                var ct = _indexCts.Token;
+
+                // 4) Limpiar índice viejo ANTES (evita resultados viejos)
                 App.LocalIndex.Clear();
-                ApplicationData.Current.LocalSettings.Values[LS_DropboxRootChanged] = true;
-                ApplicationData.Current.LocalSettings.Values["DropboxIndexReady"] = false;
 
+                // 5) Avisar estado "indexando…" (para SearchView)
+                DropboxIndexCoordinator.StartIndexing(selectedPath);
 
-                DropboxPathBox.Text = path;
+                // UI
+                DropboxPathBox.Text = selectedPath;
+                BtnPickDropboxRoot.IsEnabled = false;
+                BtnResetDropboxRoot.IsEnabled = false;
 
-                ShowStatus(
-                    "Ruta guardada. Al volver al buscador se sincronizará automáticamente.",
-                    InfoBarSeverity.Success
-                );
+                ShowStatus("Ruta nueva detectada, indexando…", InfoBarSeverity.Informational);
+
+                try
+                {
+                    // 6) ✅ Construir índice (ÚNICA lógica centralizada)
+                    var list = await LocalIndexBuilder.BuildAsync(selectedPath, ct);
+
+                    // 7) Guardar índice global
+                    App.LocalIndex.Set(list);
+
+                    // 8) Avisar "listo"
+                    DropboxIndexCoordinator.MarkReady(selectedPath);
+
+                    ShowStatus($"Índice listo ✅ ({App.LocalIndex.Count} items)", InfoBarSeverity.Success);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Si el usuario cambió de ruta rápido, no mostramos error
+                }
+                catch (Exception ex)
+                {
+                    DropboxIndexCoordinator.MarkError(selectedPath, ex.Message);
+                    ShowStatus($"Error indexando → {ex.Message}", InfoBarSeverity.Error);
+                }
             }
             catch (Exception ex)
             {
-                ShowStatus($"Error → {ex.Message}", InfoBarSeverity.Error);
+                ShowStatus($"Error eligiendo carpeta → {ex.Message}", InfoBarSeverity.Error);
+            }
+            finally
+            {
+                BtnPickDropboxRoot.IsEnabled = true;
+                BtnResetDropboxRoot.IsEnabled = true;
             }
         }
+
 
         private async void BtnResetDropboxRoot_Click(object sender, RoutedEventArgs e)
         {
@@ -434,13 +474,23 @@ namespace Anfeta.UI.Views
             if (await dlg.ShowAsync() != ContentDialogResult.Primary)
                 return;
 
+            // Cancela indexado en curso (si lo había)
+            _indexCts?.Cancel();
+            _indexCts = null;
+
+            // Borrar setting principal
             ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
-            ApplicationData.Current.LocalSettings.Values[LS_DropboxRootChanged] = true;
 
+            // Limpiar índice global para NO mostrar resultados viejos
             App.LocalIndex.Clear();
-            DropboxPathBox.Text = "";
 
+            // Avisar a SearchView que el estado cambió (sin índice)
+            DropboxIndexCoordinator.Reset();
+
+            // UI
+            DropboxPathBox.Text = "";
             ShowStatus("Ruta reiniciada. Configura una nueva carpeta.", InfoBarSeverity.Informational);
+
         }
         private void LoadDropboxRootIntoUI()
         {

@@ -43,9 +43,9 @@ namespace Anfeta.UI.Views
         private DispatcherTimer? _searchDebounceTimer;
         private CancellationTokenSource? _searchCts;
 
-        private const string LS_DropboxRootChanged = "DropboxRootChanged";
+        
 
-
+        private const string LS_DropboxRoot = "DropboxRoot";
 
         // ===== Dropbox Smart Sync helpers (Windows) =====
         private const int FILE_ATTRIBUTE_OFFLINE = 0x00001000;
@@ -70,8 +70,7 @@ namespace Anfeta.UI.Views
         private CancellationTokenSource? _cts;
         private List<DropboxNode> _raw = new();
 
-        private const string DROPBOX_PATH_KEY = "DropboxRootPath";
-        private const string LS_DropboxRoot = "DropboxRootPath";
+
         // ✅ Root dinámico (ya no const fijo)
         private string DROPBOX_ROOT = "";
 
@@ -213,13 +212,13 @@ namespace Anfeta.UI.Views
 
         private void LoadDropboxRootFromSettings()
         {
-            var v = ApplicationData.Current.LocalSettings.Values[DROPBOX_PATH_KEY] as string;
+            var v = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
             DROPBOX_ROOT = (v ?? "").Trim();
         }
 
         private void SaveDropboxRootToSettings(string path)
         {
-            ApplicationData.Current.LocalSettings.Values[DROPBOX_PATH_KEY] = path;
+            ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = path;
             DROPBOX_ROOT = path;
         }
 
@@ -256,6 +255,8 @@ namespace Anfeta.UI.Views
         public SearchView()
         {
             InitializeComponent();
+            DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
+            Unloaded += (_, __) => DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
 
             ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
@@ -287,9 +288,9 @@ namespace Anfeta.UI.Views
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
             }
         }
-        private async void SearchView_Loaded(object sender, RoutedEventArgs e) 
+        private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
-            // 1) Bookmarks (como ya lo tienes)
+            // 1) Bookmarks
             try
             {
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
@@ -301,75 +302,115 @@ namespace Anfeta.UI.Views
                 _bookmarks = new();
             }
 
-            // ✅ Cargar DropboxRoot guardado
-            // ✅ Cargar DropboxRoot guardado
+            // 2) Leer ruta guardada
             var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-            System.Diagnostics.Debug.WriteLine($"[LOADED] saved='{saved}' key='{LS_DropboxRoot}'");
-            var changed = (ApplicationData.Current.LocalSettings.Values[LS_DropboxRootChanged] as bool?) == true;
-
-
             var hasValidDropboxRoot = !string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved);
 
-            if (hasValidDropboxRoot)
+            if (!hasValidDropboxRoot)
             {
-                App.LocalIndex.Clear(); // 🔥 evita resultados fantasmas
-                DROPBOX_ROOT = saved!;
-
-                StatusText.Text = "Estado: Ruta Dropbox cargada ✅";
-            }
-            else
-            {
-                // ✅ limpiar estado para que NO se quede “pegado”
                 DROPBOX_ROOT = "";
-
-                StatusText.Text = "Estado: Selecciona la ruta de Dropbox (Ruta...)";
-            }
-
-
-            // ✅ Si la ruta cambió desde Settings: auto-sync y limpia flag
-            if (hasValidDropboxRoot && changed)
-            {
-                ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRootChanged);
-
-                // 🔥 limpiar estado viejo
-                _currentFolder = "";
-                _backStack.Clear();
-                _forwardStack.Clear();
-                Results.Clear();
-                ResultsList.ItemsSource = Results;
-                BreadcrumbText.Text = "Ruta: /";
-                EmptyResultsHint.Visibility = Visibility.Visible;
-
-                // limpiar índice anterior
-                App.LocalIndex.Clear();
-
-                await SyncNowAsync();
+                ResetSearchModuleState();
+                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Configura la ruta en Settings.";
                 return;
             }
 
+            DROPBOX_ROOT = saved!.Trim();
 
-
-            // 2) Index cache (para no sincronizar al volver al módulo)
-            if (App.LocalIndex.HasData)
+            // 3) Si está indexando o aún no hay índice, mostrar estado (sin Sync)
+            if (DropboxIndexCoordinator.IsIndexing || !App.LocalIndex.HasData)
             {
-                var count = App.LocalIndex.GetAll().Count;
-                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Index cache ✅ ({count} items)";
-
-                if (!string.IsNullOrWhiteSpace(DROPBOX_ROOT) && Directory.Exists(DROPBOX_ROOT))
-                    await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
-
-                var q = (SearchBox?.Text ?? "").Trim();
-                if (!string.IsNullOrWhiteSpace(q))
-                    await RunLocalSearchAsync(q);
+                ResetSearchModuleState();
+                StatusText.Text = DropboxIndexCoordinator.IsIndexing
+                    ? $"Estado: Ruta nueva detectada, indexando…"
+                    : $"Estado: Aún no hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
             }
 
-            else
-            {
-                // No hay index todavía, no sincronizamos solos (modo estable)
-                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Sin index Configura la ruta en Configuracion";
-            }
+            // 4) Ya hay índice: cargar árbol + root
+            LoadFoldersRoot();
+            BuildTreeRoot();
+            await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+
+            StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
         }
 
+
+        private void ResetSearchModuleState()
+        {
+            CancelPendingSearch();
+
+            _currentFolder = "";
+            _backStack.Clear();
+            _forwardStack.Clear();
+
+            Results.Clear();
+            ResultsList.ItemsSource = Results;
+
+            FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
+            EmptyTreeHint.Visibility = Visibility.Visible;
+
+            BreadcrumbText.Text = "/";
+            ModeText.Text = "Modo: Explorar (Local)";
+            CountText.Text = "0 resultados";
+            EmptyResultsHint.Visibility = Visibility.Visible;
+
+            // opcional: limpiar detalles
+            DetailsTitle.Text = "Selecciona un elemento";
+            DetailsPath.Text = "—";
+            DetailsMeta.Text = "—";
+            DetailsNotion.Text = "—";
+        }
+
+        private void OnIndexStateChanged()
+        {
+            // Siempre brinca a UI thread
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _ = ApplyIndexStateAsync();
+            });
+        }
+
+        private async Task ApplyIndexStateAsync()
+        {
+            // 1) Si está indexando => limpiar UI y mostrar mensaje
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            // 2) Si hubo error
+            if (!string.IsNullOrWhiteSpace(DropboxIndexCoordinator.LastError))
+            {
+                ResetSearchModuleState();
+                StatusText.Text = $"Estado: Error indexando → {DropboxIndexCoordinator.LastError}";
+                return;
+            }
+
+            // 3) Si está listo y hay índice
+            if (DropboxIndexCoordinator.IsReady && App.LocalIndex.HasData)
+            {
+                var root = DropboxIndexCoordinator.RootPath ?? "";
+
+                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+                {
+                    ResetSearchModuleState();
+                    StatusText.Text = "Estado: Ruta inválida. Configura de nuevo en Settings.";
+                    return;
+                }
+
+                // Actualiza root local del SearchView
+                DROPBOX_ROOT = root;
+
+                // Refresca árbol + navega a root
+                LoadFoldersRoot();
+                BuildTreeRoot();
+                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+
+                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
+            }
+        }
 
         private static bool NeedsHydration(string path)
         {
@@ -454,17 +495,7 @@ namespace Anfeta.UI.Views
             if (!Directory.Exists(DROPBOX_ROOT))
                 throw new Exception($"No existe la ruta: {DROPBOX_ROOT}");
 
-            var root = new FolderNode
-            {
-                Name = "Dropbox",
-                FullPath = DROPBOX_ROOT,
-                HasDummyChild = true
-            };
-
-            root.Children.Add(new FolderNode { Name = "Cargando…", FullPath = "" });
-
-            FolderTree.ItemsSource = new ObservableCollection<FolderNode> { root };
-            EmptyTreeHint.Visibility = Visibility.Collapsed;
+            BuildTreeRoot();
         }
 
         // ===== Colapsable =====
@@ -741,6 +772,19 @@ namespace Anfeta.UI.Views
             {
                 CancelPendingSearch();
 
+                if (DropboxIndexCoordinator.IsIndexing)
+                {
+                    StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                    return;
+                }
+
+                if (!App.LocalIndex.HasData)
+                {
+                    ResetSearchModuleState();
+                    StatusText.Text = "Estado: Aún no hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                    return;
+                }
+
                 _mode = ViewMode.Explorer;
                 ModeText.Text = "Modo: Explorar (Local)";
 
@@ -755,16 +799,24 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            if (!App.LocalIndex.HasData)
+            // si hay texto -> buscar, pero solo si hay índice
+            if (DropboxIndexCoordinator.IsIndexing)
             {
-                StatusText.Text = "Estado: No hay índice. Configura y sincroniza Dropbox.";
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
                 return;
             }
 
+            if (!App.LocalIndex.HasData)
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
 
             _searchDebounceTimer!.Stop();
             _searchDebounceTimer.Start();
         }
+
 
 
         private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
@@ -776,11 +828,12 @@ namespace Anfeta.UI.Views
 
         private async Task RunSearchAsync(string query)
         {
-            if (_localIndex.Count == 0)
+            if (!App.LocalIndex.HasData)
             {
-                StatusText.Text = "Estado: Aún no hay índice. Pulsa Sync.";
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
                 return;
             }
+
 
             LoadingRing.IsActive = true;
             LoadingRing.Visibility = Visibility.Visible;
@@ -960,7 +1013,6 @@ namespace Anfeta.UI.Views
                 StatusText.Text = "Estado: Selecciona una ruta válida de Dropbox primero.";
                 return;
             }
-
             try
             {
                 LoadingRing.IsActive = true;
@@ -969,7 +1021,6 @@ namespace Anfeta.UI.Views
                 StatusText.Text = "Estado: Indexando carpeta local de Dropbox…";
 
                 await BuildLocalIndexAsync();
-
                 LoadFoldersRoot();
                 BuildTreeRoot();
                 await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
@@ -1753,7 +1804,7 @@ namespace Anfeta.UI.Views
 
             var root = new FolderNode
             {
-                Name = "Dropbox",
+                Name = Path.GetFileName(DROPBOX_ROOT),
                 FullPath = DROPBOX_ROOT,
                 HasDummyChild = true
             };
@@ -1764,6 +1815,11 @@ namespace Anfeta.UI.Views
             _treeRoots.Add(root);
 
             FolderTree.ItemsSource = _treeRoots;
+            // ✅ si ya hay root, oculta el hint
+            EmptyTreeHint.Visibility = (_treeRoots.Count > 0)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
         }
 
         private async Task OpenSelectedAsync()
@@ -1847,24 +1903,70 @@ namespace Anfeta.UI.Views
 
         private async void BtnRefreshTree_Click(object sender, RoutedEventArgs e)
         {
+            // 1) Si está indexando, no borres todo, solo informa
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            // 2) Si no hay índice, no limpies UI a lo bestia
+            if (!App.LocalIndex.HasData)
+            {
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
+
+            // 3) Asegura root válido
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: Ruta inválida. Configura de nuevo en Settings.";
+                return;
+            }
+
             try
             {
-                LoadFoldersRoot();
-                StatusText.Text = "Estado: Árbol cargado ✅";
+                BuildTreeRoot();
+                StatusText.Text = "Estado: Árbol actualizado ✅";
 
-                // opcional: refresca la vista actual si estás navegando
-                if (_isBrowsing)
-                    await BrowseFolderAsync(_currentFolder);
+                if (_isBrowsing && !string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
+                    await BrowseFolderAsync(_currentFolder, pushHistory: false);
+                else
+                    await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
             }
             catch (Exception ex)
             {
                 StatusText.Text = $"Estado: Error → {ex.Message}";
             }
         }
+
+
         private async void BtnGoRoot_Click(object sender, RoutedEventArgs e)
         {
-            await BrowseFolderAsync(DROPBOX_ROOT);
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            if (!App.LocalIndex.HasData)
+            {
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: Ruta inválida. Configura de nuevo en Settings.";
+                return;
+            }
+
+            await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
         }
+
+
 
         private async void BtnPickDropbox_Click(object sender, RoutedEventArgs e)
         {
