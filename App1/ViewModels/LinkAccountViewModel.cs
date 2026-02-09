@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Anfeta.UI.ViewModels
@@ -16,6 +17,20 @@ namespace Anfeta.UI.ViewModels
         private readonly WeblabAuthClient _authApi;
 
         private string _email = "";
+        private string _phone = "";
+        public string Phone
+        {
+            get => _phone;
+            set
+            {
+                if (SetProperty(ref _phone, value))
+                {
+                    OnPropertyChanged(nameof(CanLink));
+                    LinkCommand.NotifyCanExecuteChanged();
+                }
+            }
+        }
+
         public string Email
         {
             get => _email;
@@ -30,6 +45,24 @@ namespace Anfeta.UI.ViewModels
         }
 
         private string _errorMessage = "";
+        private static string NormalizeMexPhone(string? phone)
+        {
+            var p = (phone ?? "").Trim();
+
+            // quitar espacios o símbolos
+            p = p.Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "");
+
+            // si ya empieza con 52 no tocar
+            if (p.StartsWith("52"))
+                return p;
+
+            // si empieza con 1 (algunos celulares internacionales)
+            if (p.StartsWith("1") && p.Length == 11)
+                p = p.Substring(1);
+
+            return "52" + p;
+        }
+
         public string ErrorMessage
         {
             get => _errorMessage;
@@ -82,7 +115,22 @@ namespace Anfeta.UI.ViewModels
         public bool CanLink =>
             !IsBusy &&
             !string.IsNullOrWhiteSpace(Email) &&
-            Email.Contains("@");
+            Email.Contains("@") &&
+            !string.IsNullOrWhiteSpace(Phone) &&
+            IsPhoneValid(Phone);
+
+        private static bool IsPhoneValid(string phone)
+        {
+            var p = (phone ?? "").Trim();
+
+            p = p.Replace(" ", "").Replace("-", "");
+
+            if (p.StartsWith("52"))
+                p = p.Substring(2);
+
+            return p.Length == 10 && p.All(char.IsDigit);
+        }
+
 
         public IAsyncRelayCommand LinkCommand { get; }
         public IAsyncRelayCommand SignOutCommand { get; }
@@ -176,6 +224,14 @@ namespace Anfeta.UI.ViewModels
 
             try
             {
+                var phone = NormalizeMexPhone(Phone);
+
+                if (!IsPhoneValid(phone))
+                {
+                    ErrorMessage = "Teléfono inválido. Usa solo dígitos (10 a 15).";
+                    return;
+                }
+
                 var email = (Email ?? "").Trim();
                 Debug.WriteLine($"[LINK] Intento vincular. Email='{email}'");
 
@@ -211,7 +267,8 @@ namespace Anfeta.UI.ViewModels
                     firstName: search.FirstName!,
                     lastName: search.LastName!,
                     collaboratorId: search.CollaboratorId!,
-                    deviceId: deviceId
+                    deviceId: deviceId,
+                    phone: phone
                 );
 
                 // 🔐 LOG DEL TOKEN (SOLO DEBUG)

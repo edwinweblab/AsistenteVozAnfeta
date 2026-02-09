@@ -178,6 +178,7 @@ namespace Anfeta.UI
 
 #if DEBUG
             TestDatabaseConnection();
+
 #endif
 
             // 2) Crear ventana ANTES del bootstrap auth (evita carreras de UI)
@@ -232,8 +233,16 @@ namespace Anfeta.UI
                 var authApi = AppHost.Services.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
                 var tokenStore = AppHost.Services.GetRequiredService<ITokenStore>();
 
+
                 // 1) Cargar token local si existe (LocalSettings)
                 await auth.InitializeAsync();
+#if DEBUG
+                var tokenLocal = await tokenStore.GetTokenAsync();
+                Debug.WriteLine("======= TOKEN LOCAL =======");
+                Debug.WriteLine(tokenLocal ?? "(NULL)");
+                Debug.WriteLine("===========================");
+#endif
+
 
                 // Si el usuario tiene token local, ya está autenticado
                 if (auth.IsAuthenticated)
@@ -479,7 +488,9 @@ namespace Anfeta.UI
             {
                 Debug.WriteLine("SQLITE ERROR: " + ex.Message);
             }
+
         }
+
 
 #if DEBUG
         private void DebugDumpDeviceRows()

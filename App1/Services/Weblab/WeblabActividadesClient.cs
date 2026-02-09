@@ -46,7 +46,9 @@ namespace Anfeta.UI.Services.Weblab
         }
 
         // =========================
-        // (Opcional) ✅ NUEVO: Mis actividades (todas) por assignee
+        // ✅ NUEVO: Mis actividades (todas) con ORDEN y DATOS IMPORTANTES
+        // Usa: /api/actividades/assignee/{assignee}
+        // Orden: dueStart asc (si no hay, al final)
         // =========================
         public async Task<ApiPlainResponse> GetMyActivitiesAsync(int limit = 10, CancellationToken ct = default)
         {
@@ -64,15 +66,27 @@ namespace Anfeta.UI.Services.Weblab
                 if (!resp.IsSuccessStatusCode)
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude obtener tus actividades." };
 
-                var titles = ExtractTitles(json, limit);
+                var items = ExtractActivitiesDetailed(json);
 
-                if (titles.Count == 0)
+                if (items.Count == 0)
                     return new ApiPlainResponse { Ok = true, PlainText = "No tienes actividades asignadas." };
 
+                // Orden: por dueStart (asc). Si no tiene, al final.
+                items.Sort((a, b) =>
+                {
+                    var da = a.DueStart ?? DateTimeOffset.MaxValue;
+                    var db = b.DueStart ?? DateTimeOffset.MaxValue;
+                    return da.CompareTo(db);
+                });
+
+                if (limit <= 0) limit = 10;
+                if (items.Count > limit) items = items.GetRange(0, limit);
+
+                var header = $"Actividades de {name ?? "tu usuario"}: {items.Count}.";
                 return new ApiPlainResponse
                 {
                     Ok = true,
-                    PlainText = BuildTitlesPlainText($"Actividades de {name ?? "tu usuario"}", titles)
+                    PlainText = BuildActivitiesDetailedPlainText(header, items)
                 };
             }
             catch (OperationCanceledException)
@@ -170,6 +184,7 @@ namespace Anfeta.UI.Services.Weblab
                 if (activities.Count == 0)
                     return new ApiPlainResponse { Ok = true, PlainText = "No tienes actividades para hoy." };
 
+                // Mantiene orden backend, pero mejora pausas al hablar
                 return new ApiPlainResponse
                 {
                     Ok = true,
@@ -220,6 +235,9 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
+        // =========================
+        // Extractores existentes
+        // =========================
         private static List<string> ExtractTitles(string json, int limit)
         {
             var list = new List<string>();
@@ -340,18 +358,155 @@ namespace Anfeta.UI.Services.Weblab
             return string.Join(" ", parts);
         }
 
+        // ✅ Pausas mejores para TTS
         private static string BuildActivitiesPlainText(string header, List<(string titulo, string status)> activities)
         {
             var max = Math.Min(activities.Count, 10);
 
-            var parts = new List<string> { header };
+            var parts = new List<string>
+            {
+                header + "."
+            };
+
             for (var i = 0; i < max; i++)
             {
                 var (titulo, status) = activities[i];
-                parts.Add($"{i + 1}) {titulo} - {status}");
+                parts.Add($"Actividad {i + 1}: {titulo}. Estado: {status}.");
             }
 
-            return string.Join(". ", parts);
+            // Doble salto de línea = pausas claras
+            return string.Join("\n\n", parts);
+        }
+
+        // =========================
+        // ✅ NUEVO: Extractor detallado + builder con pausas
+        // =========================
+
+        private sealed class ActivityInfo
+        {
+            public string Id { get; set; } = "";
+            public string Title { get; set; } = "";
+            public string Status { get; set; } = "Sin estado";
+            public string Priority { get; set; } = "Sin prioridad";
+            public string ProjectName { get; set; } = "Sin proyecto";
+            public DateTimeOffset? DueStart { get; set; }
+            public DateTimeOffset? DueEnd { get; set; }
+            public int PendingCount { get; set; }
+            public bool HasDoc { get; set; }
+            public bool HasUrl { get; set; }
+        }
+
+        private static List<ActivityInfo> ExtractActivitiesDetailed(string json)
+        {
+            var list = new List<ActivityInfo>();
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Array)
+                return list;
+
+            foreach (var item in dataEl.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+
+                string GetString(string prop, string fallback = "")
+                    => item.TryGetProperty(prop, out var el) && el.ValueKind == JsonValueKind.String
+                        ? (el.GetString() ?? fallback).Trim()
+                        : fallback;
+
+                DateTimeOffset? GetDate(string prop)
+                {
+                    if (!item.TryGetProperty(prop, out var el) || el.ValueKind != JsonValueKind.String)
+                        return null;
+
+                    var s = (el.GetString() ?? "").Trim();
+                    if (string.IsNullOrWhiteSpace(s)) return null;
+
+                    return DateTimeOffset.TryParse(s, out var dt) ? dt : null;
+                }
+
+                var title = GetString("titulo", "Sin título");
+                var status = GetString("status", "Sin estado");
+                var priority = GetString("prioridad", "Sin prioridad");
+                var id = GetString("id", "");
+
+                // project.name
+                var projectName = "Sin proyecto";
+                if (item.TryGetProperty("project", out var projEl) && projEl.ValueKind == JsonValueKind.Object)
+                {
+                    if (projEl.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                        projectName = (nameEl.GetString() ?? "Sin proyecto").Trim();
+                }
+
+                // pendientes count
+                var pendingCount = 0;
+                if (item.TryGetProperty("pendientes", out var pendEl) && pendEl.ValueKind == JsonValueKind.Array)
+                    pendingCount = pendEl.GetArrayLength();
+
+                // links existence
+                var docShared = GetString("documentoCompartido", "");
+                var url = GetString("url", "");
+                var hasDoc = !string.IsNullOrWhiteSpace(docShared);
+                var hasUrl = !string.IsNullOrWhiteSpace(url);
+
+                list.Add(new ActivityInfo
+                {
+                    Id = id,
+                    Title = title,
+                    Status = status,
+                    Priority = priority,
+                    ProjectName = string.IsNullOrWhiteSpace(projectName) ? "Sin proyecto" : projectName,
+                    DueStart = GetDate("dueStart"),
+                    DueEnd = GetDate("dueEnd"),
+                    PendingCount = pendingCount,
+                    HasDoc = hasDoc,
+                    HasUrl = hasUrl
+                });
+            }
+
+            return list;
+        }
+
+        private static string BuildActivitiesDetailedPlainText(string header, List<ActivityInfo> items)
+        {
+            static string FmtRange(DateTimeOffset? start, DateTimeOffset? end)
+            {
+                if (start == null && end == null) return "Sin horario";
+
+                var s = start?.ToLocalTime().ToString("dd/MM HH:mm");
+                var e = end?.ToLocalTime().ToString("HH:mm");
+
+                if (start != null && end != null) return $"{s} a {e}";
+                if (start != null) return $"{s}";
+                return $"Hasta {end?.ToLocalTime().ToString("dd/MM HH:mm")}";
+            }
+
+            var parts = new List<string> { header };
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                var a = items[i];
+
+                var horario = FmtRange(a.DueStart, a.DueEnd);
+                var links = new List<string>();
+                if (a.HasDoc) links.Add("Documento");
+                if (a.HasUrl) links.Add("Link");
+                var linksText = links.Count > 0 ? string.Join(" y ", links) : "Sin links";
+
+                var pendientesText = a.PendingCount > 0 ? $"{a.PendingCount} pendientes" : "Sin pendientes";
+
+                parts.Add(
+                    $"Actividad {i + 1}.\n" +
+                    $"{a.Title}.\n" +
+                    $"Proyecto: {a.ProjectName}.\n" +
+                    $"Horario: {horario}.\n" +
+                    $"Estado: {a.Status}. Prioridad: {a.Priority}.\n" +
+                    $"{pendientesText}. {linksText}."
+                );
+            }
+
+            return string.Join("\n\n", parts);
         }
     }
 }

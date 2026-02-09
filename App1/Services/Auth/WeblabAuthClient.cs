@@ -48,7 +48,8 @@ namespace Anfeta.UI.Services.Auth
             string firstName,
             string lastName,
             string collaboratorId,
-            string deviceId)
+            string deviceId,
+            string phone)
         {
             using var form = new MultipartFormDataContent();
 
@@ -59,6 +60,8 @@ namespace Anfeta.UI.Services.Auth
             form.Add(new StringContent(lastName), "lastName");
             form.Add(new StringContent(collaboratorId), "collaboratorId");
             form.Add(new StringContent(deviceId), "deviceId");
+            form.Add(new StringContent(phone), "phone");
+
 
             using var res = await _http.PostAsync("/api/auth/register", form);
             var json = await res.Content.ReadAsStringAsync();
