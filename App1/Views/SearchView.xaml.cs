@@ -2,8 +2,10 @@
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Search;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using System;
 using System.Collections.Generic;
@@ -41,8 +43,9 @@ namespace Anfeta.UI.Views
 
         private DispatcherTimer? _searchDebounceTimer;
         private CancellationTokenSource? _searchCts;
+        private bool _allowProgrammaticSearch;
 
-        
+
 
         private const string LS_DropboxRoot = "DropboxRoot";
 
@@ -58,7 +61,10 @@ namespace Anfeta.UI.Views
 
         // Navegación / Explorador
         private string _currentFolder = "";  // ✅ YA EXISTE
- 
+        //Ayuda
+        private ContentDialog? _helpDialog;
+        private ContentControl? _helpBodyHost;
+        private TeachingTip? _helpTip;
 
         public ObservableCollection<SearchResultRow> Results { get; } = new();
 
@@ -668,8 +674,9 @@ namespace Anfeta.UI.Views
         // ===== SEARCH (Everything-like) =====
         private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
         {
-            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput)
+            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput && !_allowProgrammaticSearch)
                 return;
+
 
             EnsureSearchDebounce();
 
@@ -822,8 +829,6 @@ namespace Anfeta.UI.Views
 
             FinishUi();
         }
-
-
         // ===== Results interactions (por ahora UI/Details) =====
         private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -848,8 +853,6 @@ namespace Anfeta.UI.Views
             else
                 StatusText.Text = "Estado: Seleccionado ✅";
         }
-
-
         private async void ResultsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
@@ -1261,73 +1264,88 @@ namespace Anfeta.UI.Views
 
             return false;
         }
-
-        private async void MenuHelp_Click(object sender, RoutedEventArgs e)
+        //SECCION AYUDA
+        private void MenuHelp_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new ContentDialog
+            // Toggle
+            if (HelpPopup.IsOpen)
             {
-                Title = "Ayuda · Comandos de búsqueda",
-                CloseButtonText = "Cerrar",
-                XamlRoot = this.XamlRoot,
-                Content = BuildHelpContent()
-            };
+                HelpPopup.IsOpen = false;
+                return;
+            }
 
-            await dialog.ShowAsync();
+            // Inyecta tu UI de ayuda (la que ya hiciste)
+            HelpContentHost.Content = BuildHelpContentNav();
+
+            HelpPopup.XamlRoot = this.XamlRoot; // importante en WinUI 3
+            HelpPopup.IsOpen = true;
         }
-
-        private UIElement BuildHelpContent()
+        private void HelpPopupClose_Click(object sender, RoutedEventArgs e)
         {
-            var scroll = new ScrollViewer
+            HelpPopup.IsOpen = false;
+        }
+        private UIElement BuildHelpContentNav()
+        {
+            _helpBodyHost = new ContentControl
             {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+                Content = BuildHelpExamples() // default
             };
 
-            var stack = new StackPanel
+            var nav = new StackPanel
             {
-                Spacing = 14
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                HorizontalAlignment = HorizontalAlignment.Center
             };
 
-            stack.Children.Add(CreateSection(
-                "Búsqueda rápida",
-                "Escribe una o más palabras para buscar archivos y carpetas.\n\n" +
-                "Ejemplos:\n" +
-                "• factura\n" +
-                "• reporte 2026\n" +
-                "• \"estado de cuenta\"  (frase exacta)"
-            ));
+            nav.Children.Add(MakeNavButton("Ejemplos", () => _helpBodyHost.Content = BuildHelpExamples(), isActive: true));
+            nav.Children.Add(MakeNavButton("Operadores", () => _helpBodyHost.Content = BuildHelpOperators()));
+            nav.Children.Add(MakeNavButton("Filtros", () => _helpBodyHost.Content = BuildHelpFilters()));
+            nav.Children.Add(MakeNavButton("Tips", () => _helpBodyHost.Content = BuildHelpTips()));
 
-            stack.Children.Add(CreateSection(
-                "Operadores lógicos",
-                "Combina palabras para afinar los resultados.\n\n" +
-                "Ejemplos:\n" +
-                "• factura AND 2026   → contiene ambos términos\n" +
-                "• factura OR recibo → contiene cualquiera de los dos\n" +
-                "• factura NOT borrador\n" +
-                "• factura -borrador\n" +
-                "• (factura OR recibo) AND 2026"
-            ));
+            var bodyScroll = new ScrollViewer
+            {
+                Content = _helpBodyHost,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Padding = new Thickness(12, 8, 12, 0)
+            };
 
-            stack.Children.Add(CreateSection(
-                "Filtros por tipo o ubicación",
-                "Limita la búsqueda por tipo de archivo o carpeta.\n\n" +
-                "Ejemplos:\n" +
-                "• ext:pdf contrato\n" +
-                "• ext:docx carta\n" +
-                "• ext:img logo\n" +
-                "• type:folder        (solo carpetas)\n" +
-                "• folder:finanzas contrato"
-            ));
+            return new StackPanel
+            {
+                Spacing = 12,
+                Children =
+        {
+            nav,
+            bodyScroll
+        }
+            };
+        }
+        private ToggleButton MakeNavButton(string text, Action onClick, bool isActive = false)
+        {
+            var t = new ToggleButton
+            {
+                Content = text,
+                IsChecked = isActive,
+                Padding = new Thickness(14, 6, 14, 6),
+                CornerRadius = new CornerRadius(10),
+                MinWidth = 110
+            };
 
-            stack.Children.Add(CreateSection(
-                "Consejos útiles",
-                "• Usa comillas para buscar frases exactas\n" +
-                "• Agrupa condiciones con paréntesis\n" +
-                "• Combina filtros con AND / OR\n" +
-                "• Si no aparecen resultados, prueba quitar filtros"
-            ));
+            t.Click += (_, __) =>
+            {
+                // deselecciona los demás (mismo padre)
+                if (t.Parent is Panel p)
+                {
+                    foreach (var c in p.Children)
+                        if (c is ToggleButton tb) tb.IsChecked = false;
+                }
 
-            scroll.Content = stack;
-            return scroll;
+                t.IsChecked = true;
+                onClick();
+            };
+
+            return t;
         }
         private UIElement CreateSection(string title, string content)
         {
@@ -1350,8 +1368,175 @@ namespace Anfeta.UI.Views
         }
             };
         }
+        private UIElement CreateExampleRow(string example, string? note = null, bool run = true,bool replace=true)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
 
+            var btn = new Button
+            {
+                Content = example,
+                Style = (Style)Application.Current.Resources["DefaultButtonStyle"], // si no existe, quítalo
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            btn.Click += (_, __) =>
+            {
+                    // (puedes dejar el flag o quitarlo; ya no es necesario si forzamos)
+                    if (replace || string.IsNullOrWhiteSpace(SearchBox.Text))
+                        SearchBox.Text = example;
+                    else
+                        SearchBox.Text = (SearchBox.Text?.Trim() ?? "") + " " + example;
 
+                    SearchBox.Focus(FocusState.Programmatic);
+
+                    // ✅ fuerza la búsqueda sin depender de Reason/UserInput
+                    TriggerSearchFromHelp(SearchBox.Text);
+
+                HelpPopup.IsOpen = false;
+            };
+
+            row.Children.Add(btn);
+
+            if (!string.IsNullOrWhiteSpace(note))
+            {
+                row.Children.Add(new TextBlock
+                {
+                    Text = note,
+                    Opacity = 0.75,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+
+            return row;
+        }
+        private UIElement CreateTokenChip(string token, string? note = null)
+        {
+            var btn = new Button
+            {
+                Content = token,
+                Padding = new Thickness(10, 6, 10, 6),
+                CornerRadius = new CornerRadius(999),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            btn.Click += (_, __) =>
+            {
+                var cur = (SearchBox.Text ?? "").Trim();
+
+                // Append token de forma limpia
+                if (string.IsNullOrWhiteSpace(cur))
+                    SearchBox.Text = token;
+                else
+                    SearchBox.Text = cur + " " + token;
+
+                SearchBox.Focus(FocusState.Programmatic);
+                TriggerSearchFromHelp(SearchBox.Text);
+            };
+
+            if (string.IsNullOrWhiteSpace(note))
+                return btn;
+
+            // chip + texto
+            return new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                Children =
+        {
+            btn,
+            new TextBlock
+            {
+                Text = note,
+                Opacity = 0.75,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
+            }
+        }
+            };
+        }
+        private UIElement BuildHelpExamples()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Ejemplos rápidos",
+                "Toca un ejemplo para colocarlo automáticamente en el buscador:"
+            ));
+
+            stack.Children.Add(CreateExampleRow("reporte -SEO", "Busca 'reporte' excluyendo la palabra 'SEO'"));
+            stack.Children.Add(CreateExampleRow("factura AND 2026", "Debe contener ambos términos"));
+            stack.Children.Add(CreateExampleRow("\"estado de cuenta\"", "Frase exacta entre comillas"));
+
+            return stack;
+        }
+        private UIElement BuildHelpOperators()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Operadores lógicos",
+                "Combina términos para refinar la búsqueda:"
+            ));
+
+            stack.Children.Add(CreateTokenChip("AND", "Ambos términos deben existir"));
+            stack.Children.Add(CreateTokenChip("OR", "Cualquiera de los términos"));
+            stack.Children.Add(CreateTokenChip("NOT", "Excluye un término"));
+            stack.Children.Add(CreateTokenChip("-SEO", "Forma corta para excluir (NOT SEO)"));
+            stack.Children.Add(CreateTokenChip("( A OR B )", "Agrupación con paréntesis"));
+
+            return stack;
+        }
+        private UIElement BuildHelpFilters()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Filtros",
+                "Limita los resultados por tipo o ubicación:"
+            ));
+
+            stack.Children.Add(CreateTokenChip("ext:pdf", "Archivos PDF"));
+            stack.Children.Add(CreateTokenChip("ext:docx", "Documentos Word"));
+            stack.Children.Add(CreateTokenChip("ext:xlsx", "Excel"));
+            stack.Children.Add(CreateTokenChip("type:folder", "Solo carpetas"));
+            stack.Children.Add(CreateTokenChip("folder:finanzas", "Carpetas con ese nombre"));
+
+            return stack;
+        }
+        private UIElement BuildHelpTips()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Tips",
+                "Consejos para búsquedas más efectivas:"
+            ));
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "• Usa comillas para buscar frases exactas.",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "• Usa -palabra para excluir resultados.",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "• Combina filtros y operadores para búsquedas avanzadas.",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            stack.Children.Add(CreateExampleRow(
+                "reporte AND febrero -SEO ext:pdf",
+                "Ejemplo completo combinando todo"
+            ));
+
+            return stack;
+        }
         private void BtnDetailsLink_Click(object sender, RoutedEventArgs e)
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
@@ -1388,13 +1573,10 @@ namespace Anfeta.UI.Views
 
             StatusText.Text = "Estado: No existe en local (pulsa doble tap para descargar) ❗";
         }
-
-
         private void ResultsList_RightTapped(object sender, RightTappedRoutedEventArgs e)
         {
             // El ContextFlyout ya existe en XAML, no hace falta lógica aquí por ahora
         }
-
         private async void BtnStar_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not Button btn) return;
@@ -1457,7 +1639,28 @@ namespace Anfeta.UI.Views
                 StatusText.Text = $"Estado: Error bookmark → {ex.Message}";
             }
         }
+        private void TriggerSearchFromHelp(string query)
+        {
+            EnsureSearchDebounce();
 
+            // Si está indexando o no hay índice, no dispares búsqueda
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            if (!App.LocalIndex.HasData)
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
+
+            // Fuerza el mismo comportamiento que cuando el usuario escribe
+            _searchDebounceTimer!.Stop();
+            _searchDebounceTimer.Start();
+        }
         private static string SafeFileName(string fullPath)
         {
             fullPath ??= "";

@@ -6,7 +6,10 @@
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
-    <Grid Padding="16" RowSpacing="12">
+    <Grid
+        x:Name="RootLayout"
+        Padding="16"
+        RowSpacing="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -85,17 +88,6 @@
                         IsChecked="False"
                         ToolTipService.ToolTip="Mostrar/ocultar panel de detalles" />
                     <!--  Más  -->
-                    <Button
-                        x:Name="BtnMore"
-                        Grid.Column="5"
-                        Content="⋯">
-                        <Button.Flyout>
-                            <MenuFlyout>
-                                <MenuFlyoutItem Click="MenuExplore_Click" Text="Explorar carpetas" />
-                                <MenuFlyoutSeparator />
-                            </MenuFlyout>
-                        </Button.Flyout>
-                    </Button>
                 </Grid>
                 <!--  ROW 1: Chips + sort  -->
                 <Grid Grid.Row="1" ColumnSpacing="10">
@@ -473,7 +465,6 @@
                                     <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
                                     <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
                                     <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Click="MenuRecompute_Click" Text="Recompute metadata" />
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>
@@ -509,5 +500,53 @@
                 Opacity="0.7"
                 Text="0 resultados" />
         </Grid>
+        <Popup x:Name="HelpPopup" IsLightDismissEnabled="True">
+            <Grid
+                Width="{Binding ElementName=RootLayout, Path=ActualWidth}"
+                Height="{Binding ElementName=RootLayout, Path=ActualHeight}"
+                Background="#90000000">
+
+                <Border
+                    Width="600"
+                    MaxWidth="650"
+                    MaxHeight="520"
+                    Padding="16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="black"
+                    CornerRadius="12">
+
+                    <Grid RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock
+                            Grid.Row="0"
+                            HorizontalAlignment="Center"
+                            FontSize="18"
+                            FontWeight="SemiBold"
+                            Text="Ayuda · Comandos de búsqueda" />
+
+                        <ScrollViewer
+                            Grid.Row="1"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
+                            <ContentPresenter x:Name="HelpContentHost" />
+                        </ScrollViewer>
+
+                        <Button
+                            Grid.Row="2"
+                            HorizontalAlignment="Right"
+                            Click="HelpPopupClose_Click"
+                            Content="Cerrar" />
+                    </Grid>
+
+                </Border>
+            </Grid>
+        </Popup>
+
     </Grid>
 </Page>
