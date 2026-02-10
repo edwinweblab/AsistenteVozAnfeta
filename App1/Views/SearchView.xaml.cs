@@ -30,7 +30,6 @@ namespace Anfeta.UI.Views
         private readonly ShellIconService _iconService = new ShellIconService();
         private bool _isBrowsing = false; // false=buscar, true=explorar carpeta 
         private bool _onlyBookmarks = false;
-        private LocalIndexService Index => App.LocalIndex;
 
         private enum ViewMode { Explorer, Bookmarks }
         private ViewMode _mode = ViewMode.Explorer;
@@ -52,7 +51,6 @@ namespace Anfeta.UI.Views
         private const int FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000;
         private const int FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000;
         
-        private readonly DropboxNotionFilesApi _api = new(new HttpClient());
         private readonly Stack<string> _backStack = new();
         private readonly Stack<string> _forwardStack = new();
         private ObservableCollection<FolderNode> _treeRoots = new();
@@ -68,15 +66,11 @@ namespace Anfeta.UI.Views
         private string _pendingQuery = "";
 
         private CancellationTokenSource? _cts;
-        private List<DropboxNode> _raw = new();
-
-
         // ✅ Root dinámico (ya no const fijo)
         private string DROPBOX_ROOT = "";
 
 
         // cache del “índice” local
-        private List<SearchResultRow> _localIndex = new();
         private readonly BookmarksService _bookmarksService = new();
         private List<BookmarkItem> _bookmarks = new();
 
@@ -89,40 +83,6 @@ namespace Anfeta.UI.Views
 
         // colapsable
         private bool _foldersPaneVisible = true;
-
-        private async void MenuResetDropbox_Click(object sender, RoutedEventArgs e)
-        {
-            // 1) Confirmación ANTES de borrar nada
-            var dlg = new ContentDialog
-            {
-                Title = "Cambiar ruta de Dropbox",
-                Content =
-                    "Esto borrará el índice actual y te pedirá seleccionar una nueva carpeta.\n\n" +
-                    "¿Deseas continuar?",
-                PrimaryButtonText = "Continuar",
-                CloseButtonText = "Cancelar",
-                XamlRoot = this.XamlRoot
-            };
-
-            if (await dlg.ShowAsync() != ContentDialogResult.Primary)
-                return;
-
-            // 2) borrar setting
-            ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
-
-            // 3) reset estado en memoria
-            DROPBOX_ROOT = "";
-
-
-            // 4) resetear index cache global
-            App.LocalIndex.Clear();
-
-            // 7) limpiar UI
-            BreadcrumbText.Text = "/";
-            StatusText.Text =
-                "Estado: Ruta de Dropbox reiniciada. Selecciona una nueva carpeta.";
-        }
-
 
         private sealed class RowView : AdvancedQueryV3.IItemView
         {
@@ -209,49 +169,6 @@ namespace Anfeta.UI.Views
                 return DateTime.MinValue;
             }
         }
-
-        private void LoadDropboxRootFromSettings()
-        {
-            var v = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-            DROPBOX_ROOT = (v ?? "").Trim();
-        }
-
-        private void SaveDropboxRootToSettings(string path)
-        {
-            ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = path;
-            DROPBOX_ROOT = path;
-        }
-
-        private async void BtnPickDropboxFolder_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var picker = new FolderPicker();
-                picker.FileTypeFilter.Add("*");
-
-                // ✅ importantísimo en WinUI3
-                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
-                InitializeWithWindow.Initialize(picker, hwnd);
-
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder == null) return;
-
-                SaveDropboxRootToSettings(folder.Path);
-
-                StatusText.Text = $"Estado: Ruta guardada ✅";
-                // opcional: refrescar árbol si ya estás aquí
-                if (Directory.Exists(DROPBOX_ROOT))
-                {
-                    LoadFoldersRoot();
-                    BuildTreeRoot();
-                    await BrowseFolderAsync(DROPBOX_ROOT);
-                }
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error eligiendo ruta → {ex.Message}";
-            }
-        }
         public SearchView()
         {
             InitializeComponent();
@@ -261,11 +178,6 @@ namespace Anfeta.UI.Views
             ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
             Loaded += SearchView_Loaded;
-
-
-            // HttpClient simple (luego lo mueves a DI si quieres)
-            _api = new DropboxNotionFilesApi(new HttpClient());
-
             // Debounce 300ms
             _debounceTimer.Interval = TimeSpan.FromMilliseconds(300);
             _debounceTimer.Tick += async (_, __) =>
@@ -583,8 +495,6 @@ namespace Anfeta.UI.Views
             await BrowseFolderAsync(node.FullPath);
         }
 
-
-
         private async Task BrowseFolderAsync(string folder, bool pushHistory = true)
         {
             if (!Directory.Exists(folder))
@@ -755,8 +665,6 @@ namespace Anfeta.UI.Views
             await Task.CompletedTask;
         }
 
-
-
         // ===== SEARCH (Everything-like) =====
         private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
         {
@@ -817,8 +725,6 @@ namespace Anfeta.UI.Views
             _searchDebounceTimer.Start();
         }
 
-
-
         private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
         {
             _debounceTimer.Stop();
@@ -828,13 +734,17 @@ namespace Anfeta.UI.Views
 
         private async Task RunSearchAsync(string query)
         {
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
             if (!App.LocalIndex.HasData)
             {
                 StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
                 return;
             }
-
-
             LoadingRing.IsActive = true;
             LoadingRing.Visibility = Visibility.Visible;
 
@@ -899,8 +809,6 @@ namespace Anfeta.UI.Views
             await RunLocalSearchAsync(SearchBox.Text ?? "");
             FinishUi();
         }
-
-
 
         private async void SortCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -999,46 +907,6 @@ namespace Anfeta.UI.Views
                 LoadingRing.Visibility = Visibility.Collapsed;
             }
         }
-
-        private async void BtnSync_Click(object sender, RoutedEventArgs e)
-        {
-            await SyncNowAsync();
-        }
-
-
-        private async Task SyncNowAsync()
-        {
-            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
-            {
-                StatusText.Text = "Estado: Selecciona una ruta válida de Dropbox primero.";
-                return;
-            }
-            try
-            {
-                LoadingRing.IsActive = true;
-                LoadingRing.Visibility = Visibility.Visible;
-
-                StatusText.Text = "Estado: Indexando carpeta local de Dropbox…";
-
-                await BuildLocalIndexAsync();
-                LoadFoldersRoot();
-                BuildTreeRoot();
-                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
-
-                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error → {ex.Message}";
-            }
-            finally
-            {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
-            }
-        }
-
-
         private async Task RunLocalSearchAsync(string query)
         {
             _mode = ViewMode.Explorer;
@@ -1149,7 +1017,6 @@ namespace Anfeta.UI.Views
             await Task.CompletedTask;
 
         }
-
         private async Task RunLocalSearchAsync(string query, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
@@ -1253,8 +1120,6 @@ namespace Anfeta.UI.Views
 
             await Task.CompletedTask;
         }
-
-
         private void UpdateHighlightTerms(string rawQuery, Anfeta.UI.Services.Search.ParsedQuery parsed)
         {
             rawQuery ??= "";
@@ -1284,8 +1149,6 @@ namespace Anfeta.UI.Views
                 .OrderByDescending(s => s.Length) // frases ganan a palabras
                 .ToList();
         }
-
-
         private static void CollectHighlightTerms(
             Anfeta.UI.Services.Search.QNode? node,
             List<string> outList,
@@ -1317,14 +1180,6 @@ namespace Anfeta.UI.Views
                     // FieldTerm y otros: NO se resaltan
             }
         }
-        private void NameText_Loaded(object sender, RoutedEventArgs e)
-        {
-            if (sender is not Microsoft.UI.Xaml.Controls.TextBlock tb) return;
-            if (tb.DataContext is not Anfeta.UI.Models.SearchResultRow row) return;
-
-            ApplyHighlightToTextBlock(tb, row.Name ?? "");
-        }
-
         private void ApplyHighlightToTextBlock(Microsoft.UI.Xaml.Controls.TextBlock tb, string text)
         {
             tb.Inlines.Clear();
@@ -1374,8 +1229,6 @@ namespace Anfeta.UI.Views
                 i = bestIndex + bestNeedle.Length;
             }
         }
-
-
         private static bool LooksAdvanced(string q)
         {
             if (string.IsNullOrWhiteSpace(q)) return false;
@@ -1476,8 +1329,6 @@ namespace Anfeta.UI.Views
             scroll.Content = stack;
             return scroll;
         }
-
-
         private UIElement CreateSection(string title, string content)
         {
             return new StackPanel
@@ -1749,55 +1600,6 @@ namespace Anfeta.UI.Views
 
             await ShowBookmarksAsync();
         }
-
-
-        private async Task BuildLocalIndexAsync()
-        {
-            var list = await Task.Run(() =>
-            {
-                var tmp = new List<SearchResultRow>();
-
-                if (!Directory.Exists(DROPBOX_ROOT))
-                    throw new Exception($"No existe la ruta: {DROPBOX_ROOT}");
-
-                foreach (var dir in Directory.EnumerateDirectories(DROPBOX_ROOT, "*", SearchOption.AllDirectories))
-                {
-                    tmp.Add(new SearchResultRow
-                    {
-                        Name = Path.GetFileName(dir),
-                        Target = dir,
-                        Type = "FOLDER",
-                        Source = SearchSource.Local
-                    });
-                }
-
-                foreach (var file in Directory.EnumerateFiles(DROPBOX_ROOT, "*", SearchOption.AllDirectories))
-                {
-                    var info = new FileInfo(file);
-
-                    tmp.Add(new SearchResultRow
-                    {
-                        Name = Path.GetFileName(file),
-                        Target = file,
-                        Type = "FILE",
-                        Size = info.Length,
-                        ServerModified = info.LastWriteTime.ToString("yyyy-MM-dd HH:mm"),
-                        Source = SearchSource.Local
-                    });
-                }
-
-                return tmp;
-            });
-
-            // ✅ AQUÍ se guarda GLOBAL (persistente entre módulos)
-            App.LocalIndex.Set(list);
-
-            // (opcional) si quieres seguir usando _localIndex en el mismo SearchView, lo puedes apuntar:
-            _localIndex = list;
-        }
-
-
-
         private void BuildTreeRoot()
         {
             _treeRoots.Clear();
@@ -1877,8 +1679,6 @@ namespace Anfeta.UI.Views
                 LoadingRing.Visibility = Visibility.Collapsed;
             }
         }
-
-
 
         // ===== Paging/Tree (pendiente) =====
         private async void BtnPrevPage_Click(object sender, RoutedEventArgs e)
@@ -1966,42 +1766,6 @@ namespace Anfeta.UI.Views
             await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
         }
 
-
-
-        private async void BtnPickDropbox_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                StatusText.Text = "Estado: Seleccionando carpeta de Dropbox…";
-
-                var picker = new FolderPicker();
-                picker.FileTypeFilter.Add("*");
-
-                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
-                InitializeWithWindow.Initialize(picker, hwnd);
-
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder == null)
-                {
-                    StatusText.Text = "Estado: Selección cancelada.";
-                    return;
-                }
-
-                DROPBOX_ROOT = folder.Path;
-      
-
-                ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = DROPBOX_ROOT;
-                ApplicationData.Current.LocalSettings.Values["DropboxRootChanged"] = true;
-
-                StatusText.Text = "Estado: Dropbox configurado ✅ (pulsa Sync)";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error eligiendo ruta → {ex.Message}";
-            }
-        }
-
-
         private void EnsureSearchDebounce()
         {
             if (_searchDebounceTimer != null) return;
@@ -2042,13 +1806,6 @@ namespace Anfeta.UI.Views
         }
 
         private async void BtnOpen_Click(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
-
-
-        // ===== Sync/Menu (pendiente) =====
-        private void MenuExplore_Click(object sender, RoutedEventArgs e) { }
-        private void MenuReindex_Click(object sender, RoutedEventArgs e) { }
-        private void MenuRecompute_Click(object sender, RoutedEventArgs e) { }
-
         // ===== Context actions (pendiente) =====
         private async void CtxOpen_Click(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
         private void CtxOpenWeb_Click(object sender, RoutedEventArgs e) { }
