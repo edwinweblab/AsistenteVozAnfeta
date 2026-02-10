@@ -123,8 +123,8 @@
                         <Grid>
                             <TextBlock Text="Teléfono" FontSize="13" Foreground="#CBD5E1" FontWeight="SemiBold"/>
                             <FontIcon Glyph="&#xE717;" FontSize="14" Foreground="#94A3B8"
-                  HorizontalAlignment="Right"
-                  ToolTipService.ToolTip="Ingresa tu número (solo dígitos)"/>
+                              HorizontalAlignment="Right"
+                              ToolTipService.ToolTip="Ingresa tu número (solo dígitos)"/>
                         </Grid>
 
                         <TextBox Style="{StaticResource InputBox}"

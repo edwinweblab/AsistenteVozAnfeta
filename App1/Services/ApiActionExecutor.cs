@@ -14,19 +14,21 @@ namespace Anfeta.UI.Services
         private readonly WeblabRevisionesClient _revisiones;
         private readonly WeblabAuthClient _auth;
         private readonly WeblabReportesClient _reportes;
-
+        private readonly WeblabRecordatoriosClient _recordatorios;
         private string? _cachedAssignee;
 
         public ApiActionExecutor(
             WeblabActividadesClient actividades,
             WeblabRevisionesClient revisiones,
             WeblabReportesClient reportes,
+            WeblabRecordatoriosClient recordatorios,
             WeblabAuthClient auth)
 
         {
             _actividades = actividades;
             _revisiones = revisiones;
             _reportes = reportes;
+            _recordatorios = recordatorios;
             _auth = auth;
         }
 
@@ -160,8 +162,74 @@ namespace Anfeta.UI.Services
                 return (false, $"Acción '{action}' no soportada para reportes. Disponibles: list, today.");
             }
 
+            // =========================
+            // RECORDATORIOS
+            // =========================
+            if (resource == "recordatorios")
+            {
+                // Todos los recordatorios del usuario
+                if (action == "list")
+                {
+                    var r = await _recordatorios.GetMyRecordatoriosAsync(ct);
+                    return (r.Ok, r.PlainText);
+                }
 
-            return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones, reportes.");
+                // Recordatorios pendientes (activos y no enviados)
+                if (action == "pending" || action == "pendientes")
+                {
+                    var r = await _recordatorios.GetMyPendingRecordatoriosAsync(ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                // Recordatorios de hoy
+                if (action == "today")
+                {
+                    var r = await _recordatorios.GetMyTodayRecordatoriosAsync(ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                // Recordatorios de mañana
+                if (action == "tomorrow" || action == "mañana")
+                {
+                    var r = await _recordatorios.GetMyTomorrowRecordatoriosAsync(ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                // Crear recordatorio
+                if (action == "create")
+                {
+                    var mensaje = TryGetString(paramsJson, "mensaje");
+                    var fechaHora = TryGetString(paramsJson, "fechaHora");
+
+                    if (string.IsNullOrWhiteSpace(mensaje))
+                        return (false, "Falta el mensaje del recordatorio.");
+
+                    if (string.IsNullOrWhiteSpace(fechaHora))
+                        return (false, "Falta la fecha/hora del recordatorio.");
+
+                    var duracion = TryGetInt(paramsJson, "duracionMinutos") ?? 30;
+
+                    var r = await _recordatorios.CreateRecordatorioAsync(mensaje!, fechaHora!, duracion, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                // Completar recordatorio
+                if (action == "complete")
+                {
+                    var id = TryGetString(paramsJson, "id");
+
+                    if (string.IsNullOrWhiteSpace(id))
+                        return (false, "Falta el ID del recordatorio.");
+
+                    var r = await _recordatorios.CompleteRecordatorioAsync(id!, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow.");
+            }
+
+
+            return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, complete.");
         }
 
 

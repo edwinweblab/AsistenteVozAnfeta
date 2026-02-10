@@ -144,6 +144,14 @@ namespace Anfeta.UI
                         return new WeblabRevisionesClient(factory.CreateClient("WeblabAuthed"));
                     });
 
+                    // WeblabRecordatoriosClient - Para gestión de recordatorios
+                    services.AddSingleton<WeblabRecordatoriosClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new WeblabRecordatoriosClient(factory.CreateClient("WeblabAuthed"), auth);
+                    });
+
                     // =========================
                     // Action Executors
                     // =========================
@@ -154,10 +162,11 @@ namespace Anfeta.UI
                     {
                         var actividades = sp.GetRequiredService<WeblabActividadesClient>();
                         var revisiones = sp.GetRequiredService<WeblabRevisionesClient>();
-                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
                         var reportes = sp.GetRequiredService<WeblabReportesClient>();
+                        var recordatorios = sp.GetRequiredService<WeblabRecordatoriosClient>(); // NUEVO
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
 
-                        return new ApiActionExecutor(actividades, revisiones, reportes, auth);
+                        return new ApiActionExecutor(actividades, revisiones, reportes, recordatorios, auth);
                     });
 
                     // =========================

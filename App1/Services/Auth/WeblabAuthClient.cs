@@ -210,6 +210,57 @@ namespace Anfeta.UI.Services.Auth
                 return (false, null);
             }
         }
+        // Obtiene phone del usuario autenticado
+        // Salida: (ok, phone, name)
+        public async Task<(bool ok, string? phone, string? name)> GetCurrentUserPhoneAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                using var resp = await _http.GetAsync("/api/auth/me", ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                    return (false, null, null);
+
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("ok", out var okEl) || !okEl.GetBoolean())
+                    return (false, null, null);
+
+                if (!root.TryGetProperty("user", out var userEl) || userEl.ValueKind != JsonValueKind.Object)
+                    return (false, null, null);
+
+                var firstName = userEl.TryGetProperty("firstName", out var fnEl) && fnEl.ValueKind == JsonValueKind.String
+                    ? fnEl.GetString()
+                    : null;
+
+                var lastName = userEl.TryGetProperty("lastName", out var lnEl) && lnEl.ValueKind == JsonValueKind.String
+                    ? lnEl.GetString()
+                    : null;
+
+                var fullName = !string.IsNullOrWhiteSpace(firstName) && !string.IsNullOrWhiteSpace(lastName)
+                    ? $"{firstName} {lastName}"
+                    : firstName ?? lastName ?? "Usuario";
+
+                var phone = userEl.TryGetProperty("phone", out var pEl) && pEl.ValueKind == JsonValueKind.String
+                    ? pEl.GetString()
+                    : null;
+
+                if (string.IsNullOrWhiteSpace(phone))
+                    return (false, null, fullName);
+
+                return (true, phone, fullName);
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, null, null);
+            }
+            catch
+            {
+                return (false, null, null);
+            }
+        }
 
     }
 
