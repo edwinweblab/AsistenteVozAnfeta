@@ -9,10 +9,12 @@ namespace Anfeta.UI.ViewModels
     public partial class ShellViewModel : ObservableObject
     {
         private readonly AuthStateService _auth;
+        private readonly SharedAuthStateService _sharedAuth;
 
-        public ShellViewModel(AuthStateService auth)
+        public ShellViewModel(AuthStateService auth, SharedAuthStateService sharedAuth)
         {
             _auth = auth;
+            _sharedAuth = sharedAuth;
 
             _auth.PropertyChanged += (_, e) =>
             {
@@ -26,12 +28,32 @@ namespace Anfeta.UI.ViewModels
                     OnPropertyChanged(nameof(LinkForeground));
                 }
             };
+            _sharedAuth.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(SharedAuthStateService.IsAuthenticated) ||
+                    e.PropertyName == nameof(SharedAuthStateService.IsLinked) ||
+                    e.PropertyName == nameof(SharedAuthStateService.Token))
+                {
+                    OnPropertyChanged(nameof(IsSharedLinked));
+                    OnPropertyChanged(nameof(SharedLinkText));
+                    OnPropertyChanged(nameof(SharedLinkForeground));
+                }
+            };
+
         }
 
         // UI binds
         public bool IsLinked => _auth.IsLinked;
 
         public string LinkText => _auth.IsLinked ? "Vinculado" : "No vinculado";
+        public bool IsSharedLinked => _sharedAuth.IsLinked;
+
+        public string SharedLinkText => _sharedAuth.IsLinked ? "Shared OK" : "Shared";
+
+        public Brush SharedLinkForeground =>
+            _sharedAuth.IsLinked
+                ? new SolidColorBrush(Microsoft.UI.Colors.DeepSkyBlue)
+                : new SolidColorBrush(Microsoft.UI.Colors.Gray);
 
         public Brush LinkForeground =>
             _auth.IsLinked
@@ -41,10 +63,20 @@ namespace Anfeta.UI.ViewModels
         // Evento para que la View navegue
         public event Action? RequestOpenLinkAccount;
 
+        public event Action? RequestOpenLinkSharedAccount;
+
+
         [RelayCommand]
         private void LinkIcon()
         {
             RequestOpenLinkAccount?.Invoke();
         }
+
+        [RelayCommand]
+        private void LinkSharedIcon()
+        {
+            RequestOpenLinkSharedAccount?.Invoke();
+        }
+
     }
 }

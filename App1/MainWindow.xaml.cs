@@ -27,6 +27,12 @@ namespace Anfeta.UI
                 if (ContentFrame?.CurrentSourcePageType != typeof(LinkAccountView))
                     ContentFrame?.Navigate(typeof(LinkAccountView));
             };
+            _shell.RequestOpenLinkSharedAccount += () =>
+            {
+                if (ContentFrame?.CurrentSourcePageType != typeof(LinkSharedAccountView))
+                    ContentFrame?.Navigate(typeof(LinkSharedAccountView));
+            };
+
 
             if (ContentFrame != null)
                 ContentFrame.Navigate(typeof(HomeView));
