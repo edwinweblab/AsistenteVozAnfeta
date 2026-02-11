@@ -50,27 +50,27 @@
                     <!-- Divider -->
                     <Border Width="1" Height="20" Background="#30FFFFFF" VerticalAlignment="Center"/>
 
-                    <!-- ICONO 2: Shared login (NUEVO) -->
+                    <!-- ICONO 2: Login Anfeta -->
                     <Button Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            Command="{Binding LinkSharedIconCommand}"
-                            ToolTipService.ToolTip="Sesión SHARED - Click para iniciar sesión shared">
-                                            <Button.Resources>
-                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#10FFFFFF"/>
-                                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#30FFFFFF"/>
-                                            </Button.Resources>
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <FontIcon Glyph="&#xE8FA;"
-                                      FontSize="16"
-                                      Foreground="{Binding SharedLinkForeground}" />
-                                            <TextBlock Text="{Binding SharedLinkText}"
-                                       FontSize="12"
-                                       Foreground="{Binding SharedLinkForeground}"
-                                       FontWeight="SemiBold"
-                       VerticalAlignment="Center"/>     
+                        BorderThickness="1"
+                        BorderBrush="Transparent"
+                        Padding="10,6"
+                        CornerRadius="8"
+                        Command="{Binding LinkSharedIconCommand}"
+                        ToolTipService.ToolTip="Login Anfeta - Click para iniciar sesión">
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#10FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#30FFFFFF"/>
+                        </Button.Resources>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE8FA;"
+                      FontSize="16"
+                      Foreground="{Binding SharedLinkForeground}" />
+                            <TextBlock Text="{Binding SharedLinkText}"
+                       FontSize="12"
+                       Foreground="{Binding SharedLinkForeground}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
                     <!-- Link Status (con hover effect) -->
