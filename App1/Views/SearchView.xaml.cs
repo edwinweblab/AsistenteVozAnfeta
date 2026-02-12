@@ -72,6 +72,11 @@ namespace Anfeta.UI.Views
         //Extras
         private bool _allowProgrammaticSearch = false;
         private bool _foldersPaneVisible = true;
+        //Exclusion
+        private const string LS_ExcludedFolders = "ExcludedFolders"; // rutas separadas por |
+        private readonly List<string> _excludedFolders = new(); // en memoria 
+        private readonly ObservableCollection<string> _excludedFoldersUi = new();
+        private const string LS_SavedSearches = "SavedSearches"; // JSON
         #endregion
 
         #region ===== Internal Models / Views =====
@@ -203,6 +208,9 @@ namespace Anfeta.UI.Views
 
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
+            LoadExcludedFolders();
+            RefreshExcludedFoldersUi();
+            LoadSavedSearches();
             // 1) Bookmarks
             try
             {
@@ -243,6 +251,8 @@ namespace Anfeta.UI.Views
             LoadFoldersRoot();
             BuildTreeRoot();
             await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+            SavedSearchesList.ItemsSource = _savedSearches;
+            SavedSearchesEmptyHint.Visibility = _savedSearches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
         }
@@ -376,15 +386,9 @@ namespace Anfeta.UI.Views
                 StatusText.Text = "Estado: Carpeta no existe";
                 return;
             }
-
             // ✅ Entramos a modo Explorer (browse)
             _mode = ViewMode.Explorer;
             _isBrowsing = true;
-
-            // ✅ IMPORTANTÍSIMO: al navegar carpeta, salimos del “modo búsqueda”
-            // (evita residuos visuales y highlight aplicándose donde no toca)
-
-            // ⚠️ OJO: si NO quieres resetear los chips al navegar, comenta estas 3 líneas:
             _onlyBookmarks = false;
             _onlyFolders = false;
             _extFilter = null;
@@ -404,6 +408,19 @@ namespace Anfeta.UI.Views
 
             LoadingRing.IsActive = true;
             LoadingRing.Visibility = Visibility.Visible;
+            // ✅ Si la carpeta está excluida, no la navegues
+            if (IsExcludedPath(folder))
+            {
+                Results.Clear();
+                ResultsList.ItemsSource = Results;
+
+                BreadcrumbText.Text = "Ruta: (excluida)";
+                CountText.Text = "0 resultados";
+                EmptyResultsHint.Visibility = Visibility.Visible;
+
+                StatusText.Text = "Estado: Esta carpeta está excluida";
+                return;
+            }
 
             try
             {
@@ -435,7 +452,9 @@ namespace Anfeta.UI.Views
                 foreach (var dir in dirs)
                 {
                     if (string.IsNullOrWhiteSpace(dir)) continue;
-
+                    // ✅ excluir carpetas seleccionadas por el usuario
+                    if (IsExcludedPath(dir))
+                        continue;
                     string name;
                     try
                     {
@@ -483,6 +502,8 @@ namespace Anfeta.UI.Views
                 foreach (var file in files)
                 {
                     if (string.IsNullOrWhiteSpace(file)) continue;
+                    if (IsExcludedPath(file))
+                        continue;
 
                     FileInfo fi;
                     try
@@ -845,8 +866,7 @@ namespace Anfeta.UI.Views
 
             var rawQuery = (query ?? "").Trim();
             IEnumerable<SearchResultRow> items = App.LocalIndex.GetAll();
-
-
+            items = items.Where(x => !IsExcludedPath(x.Target));
             var parsed = AdvancedQueryV3.Parse(rawQuery);
             UpdateHighlightTerms(rawQuery, parsed);
 
@@ -957,7 +977,7 @@ namespace Anfeta.UI.Views
 
             var rawQuery = (query ?? "").Trim();
             IEnumerable<SearchResultRow> items = App.LocalIndex.GetAll();
-
+            items = items.Where(x => !IsExcludedPath(x.Target));
             token.ThrowIfCancellationRequested();
 
             var parsed = AdvancedQueryV3.Parse(rawQuery);
@@ -1980,6 +2000,411 @@ namespace Anfeta.UI.Views
             return name;
         }
         #endregion
+        #region ===== Seccion De Exclusiones =====
+        private void LoadExcludedFolders()
+        {
+            _excludedFolders.Clear();
+
+            var raw = ApplicationData.Current.LocalSettings.Values[LS_ExcludedFolders] as string;
+            if (string.IsNullOrWhiteSpace(raw))
+                return;
+
+            foreach (var p in raw.Split('|', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var path = p.Trim();
+                if (!string.IsNullOrWhiteSpace(path))
+                    _excludedFolders.Add(path);
+            }
+        }
+
+        private void SaveExcludedFolders()
+        {
+            var raw = string.Join("|", _excludedFolders.Distinct(StringComparer.OrdinalIgnoreCase));
+            ApplicationData.Current.LocalSettings.Values[LS_ExcludedFolders] = raw;
+        }
+
+        private bool IsExcludedPath(string? target)
+        {
+            if (string.IsNullOrWhiteSpace(target)) return false;
+            if (_excludedFolders.Count == 0) return false;
+
+            // Normaliza target (acepta absolute/relative y / o \)
+            var t = target.Trim().Replace('/', '\\').TrimEnd('\\');
+
+            // Si es relativo y tenemos DROPBOX_ROOT, conviértelo a absoluto
+            if (!Path.IsPathRooted(t) && !string.IsNullOrWhiteSpace(DROPBOX_ROOT))
+            {
+                try { t = Path.GetFullPath(Path.Combine(DROPBOX_ROOT, t)); }
+                catch { /* ignore */ }
+            }
+            else
+            {
+                try { t = Path.GetFullPath(t); }
+                catch { /* ignore */ }
+            }
+
+            t = t.TrimEnd('\\');
+
+            foreach (var ex in _excludedFolders)
+            {
+                if (string.IsNullOrWhiteSpace(ex)) continue;
+
+                var e = ex.Trim().Replace('/', '\\').TrimEnd('\\');
+                try { e = Path.GetFullPath(e); } catch { /* ignore */ }
+                e = e.TrimEnd('\\');
+
+                // match exacto o dentro
+                if (string.Equals(t, e, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (t.StartsWith(e + "\\", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
+        private void RefreshExcludedFoldersUi()
+        {
+            _excludedFoldersUi.Clear();
+            foreach (var p in _excludedFolders)
+                _excludedFoldersUi.Add(p);
+
+            ExcludedFoldersList.ItemsSource = _excludedFoldersUi;
+            ExcludedHint.Visibility = _excludedFoldersUi.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private async void BtnAddExcludedFolder_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var picker = new Windows.Storage.Pickers.FolderPicker();
+                picker.FileTypeFilter.Add("*");
+
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder == null) return;
+
+                var path = folder.Path;
+                if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+                    return;
+                var sample = App.LocalIndex.GetAll().FirstOrDefault();
+                System.Diagnostics.Debug.WriteLine($"[EXCLUDE] sample Target='{sample?.Target}'");
+                System.Diagnostics.Debug.WriteLine($"[EXCLUDE] excluded='{path}'");
+
+                // opcional: solo permitir excluir dentro del root actual
+                if (!string.IsNullOrWhiteSpace(DROPBOX_ROOT))
+                {
+                    var rootNorm = DROPBOX_ROOT.TrimEnd('\\') + "\\";
+                    var pathNorm = path.TrimEnd('\\') + "\\";
+                    if (!pathNorm.StartsWith(rootNorm, StringComparison.OrdinalIgnoreCase))
+                    {
+                        StatusText.Text = "Estado: Solo puedes excluir carpetas dentro del root configurado.";
+                        return;
+                    }
+                }
+
+                // evitar duplicados
+                if (_excludedFolders.Any(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase)))
+                    return;
+
+                _excludedFolders.Add(path);
+                SaveExcludedFolders();
+                RefreshExcludedFoldersUi();
+
+                StatusText.Text = "Estado: Carpeta excluida ✅";
+
+                // refresca vista actual (si estás en búsqueda, re-filtra)
+                await RefreshCurrentViewAsync();
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error excluyendo → {ex.Message}";
+            }
+        }
+
+        private async void BtnRemoveExcludedFolder_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button b) return;
+            if (b.Tag is not string path) return;
+
+            _excludedFolders.RemoveAll(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase));
+            SaveExcludedFolders();
+            RefreshExcludedFoldersUi();
+
+            StatusText.Text = "Estado: Exclusión eliminada ✅";
+
+            await RefreshCurrentViewAsync();
+        }
+        private async Task RefreshCurrentViewAsync()
+        {
+            var q = (SearchBox.Text ?? "").Trim();
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                await RunSearchAsync(q);
+                return;
+            }
+
+            var folderToShow =
+                (!string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
+                    ? _currentFolder
+                    : DROPBOX_ROOT;
+
+            if (!string.IsNullOrWhiteSpace(folderToShow) && Directory.Exists(folderToShow))
+                await BrowseFolderAsync(folderToShow, pushHistory: false);
+        }
+
+        #endregion
+
+        #region ===== Seccion De Comandos Predefinidos =====
+        private sealed class SavedSearch
+        {
+            public string Id { get; set; } = Guid.NewGuid().ToString("N");
+            public string Title { get; set; } = "";
+            public string Description { get; set; } = "";
+            public string Query { get; set; } = "";
+        }
+
+        private readonly ObservableCollection<SavedSearch> _savedSearches = new();
+        private void LoadSavedSearches()
+        {
+            _savedSearches.Clear();
+
+            var raw = ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] as string;
+            if (string.IsNullOrWhiteSpace(raw))
+                return;
+
+            try
+            {
+                var list = JsonSerializer.Deserialize<List<SavedSearch>>(raw) ?? new List<SavedSearch>();
+                foreach (var it in list)
+                {
+                    if (string.IsNullOrWhiteSpace(it?.Query)) continue;
+                    if (string.IsNullOrWhiteSpace(it.Title)) it.Title = it.Query;
+                    _savedSearches.Add(it);
+                }
+            }
+            catch
+            {
+                // si se corrompe el JSON, mejor no truena la app
+                ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = "";
+            }
+        }
+        private void SaveSavedSearches()
+        {
+            var list = _savedSearches.ToList();
+            var raw = JsonSerializer.Serialize(list);
+            ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = raw;
+        }
+        private void RefreshSavedSearchesUi()
+        {
+            if (SavedSearchesList != null)
+            {
+                SavedSearchesList.ItemsSource = null;
+                SavedSearchesList.ItemsSource = _savedSearches;
+            }
+
+            if (SavedSearchesEmptyHint != null)
+                SavedSearchesEmptyHint.Visibility = _savedSearches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        private void BtnUseSavedSearch_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button b) return;
+            if (b.Tag is not SavedSearch s) return;
+
+            // pone el query y ejecuta búsqueda (como los ejemplos)
+            SearchBox.Text = s.Query ?? "";
+            TriggerSearchFromHelp(s.Query ?? "");
+        }
+
+        private void BtnDeleteSavedSearch_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button b) return;
+            if (b.Tag is not SavedSearch s) return;
+
+            var found = _savedSearches.FirstOrDefault(x => x.Id == s.Id);
+            if (found != null)
+                _savedSearches.Remove(found);
+
+            SaveSavedSearches();
+            RefreshSavedSearchesUi();
+
+            StatusText.Text = "Estado: Comando eliminado ✅";
+        }
+
+        private async void BtnSaveSearch_Click(object sender, RoutedEventArgs e)
+        {
+            var currentQuery = (SearchBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(currentQuery))
+            {
+                StatusText.Text = "Estado: Escribe una búsqueda antes de guardar.";
+                return;
+            }
+
+            var titleBox = new TextBox
+            {
+                PlaceholderText = "Título (ej: Reportes PDF)",
+                Text = currentQuery.Length > 24 ? currentQuery.Substring(0, 24) : currentQuery
+            };
+
+            var descBox = new TextBox
+            {
+                PlaceholderText = "Descripción (opcional)",
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var queryBox = new TextBox
+            {
+                Text = currentQuery
+            };
+
+            var panel = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+        {
+            new TextBlock { Text = "Guardar búsqueda como comando", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+            titleBox,
+            descBox,
+            new TextBlock { Text = "Query:" },
+            queryBox
+        }
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Nuevo comando",
+                Content = panel,
+                PrimaryButtonText = "Guardar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+                return;
+
+            var finalTitle = (titleBox.Text ?? "").Trim();
+            var finalQuery = (queryBox.Text ?? "").Trim();
+            var finalDesc = (descBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(finalTitle) || string.IsNullOrWhiteSpace(finalQuery))
+            {
+                StatusText.Text = "Estado: Título y Query son obligatorios.";
+                return;
+            }
+
+            if (_savedSearches.Any(x => string.Equals(x.Query, finalQuery, StringComparison.OrdinalIgnoreCase)))
+            {
+                StatusText.Text = "Estado: Ya existe un comando con esa búsqueda.";
+                return;
+            }
+
+            _savedSearches.Add(new SavedSearch
+            {
+                Title = finalTitle,
+                Description = finalDesc,
+                Query = finalQuery
+            });
+
+            SaveSavedSearches();
+            RefreshSavedSearchesUi();
+
+            StatusText.Text = "Estado: Comando guardado 💾";
+        }
+        private async void BtnEditSavedSearch_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button b) return;
+            if (b.Tag is not SavedSearch s) return;
+
+            // Busca el objeto real en la colección (por Id)
+            var existing = _savedSearches.FirstOrDefault(x => x.Id == s.Id);
+            if (existing == null) return;
+
+            var titleBox = new TextBox
+            {
+                PlaceholderText = "Título",
+                Text = existing.Title ?? ""
+            };
+
+            var descBox = new TextBox
+            {
+                PlaceholderText = "Descripción (opcional)",
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                Text = existing.Description ?? ""
+            };
+
+            var queryBox = new TextBox
+            {
+                Text = existing.Query ?? ""
+            };
+
+            var panel = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+        {
+            new TextBlock { Text = "Editar comando", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+            titleBox,
+            descBox,
+            new TextBlock { Text = "Query:" },
+            queryBox
+        }
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Editar comando",
+                Content = panel,
+                PrimaryButtonText = "Guardar cambios",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+                return;
+
+            var newTitle = (titleBox.Text ?? "").Trim();
+            var newDesc = (descBox.Text ?? "").Trim();
+            var newQuery = (queryBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newQuery))
+            {
+                StatusText.Text = "Estado: Título y Query son obligatorios.";
+                return;
+            }
+
+            // Evitar duplicados por query, pero permitiendo el mismo en el mismo Id
+            if (_savedSearches.Any(x => x.Id != existing.Id &&
+                                        string.Equals(x.Query, newQuery, StringComparison.OrdinalIgnoreCase)))
+            {
+                StatusText.Text = "Estado: Ya existe otro comando con esa búsqueda.";
+                return;
+            }
+
+            // Aplica cambios
+            existing.Title = newTitle;
+            existing.Description = newDesc;
+            existing.Query = newQuery;
+
+            SaveSavedSearches();
+            RefreshSavedSearchesUi();
+
+            StatusText.Text = "Estado: Comando actualizado ✍️";
+        }
+
+
+        #endregion 
+
+
         #region ===== XAML handlers pendientes (stubs) =====
 
         private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
