@@ -16,7 +16,6 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
-
 namespace Anfeta.UI
 {
     public partial class App : Application
@@ -41,6 +40,7 @@ namespace Anfeta.UI
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
+
                     // =========================
                     // Core app services
                     // =========================
@@ -84,7 +84,7 @@ namespace Anfeta.UI
                     });
 
                     // =========================
-                    // Auth / Weblab
+                    // Auth / Weblab (LOCAL)
                     // =========================
                     services.AddSingleton<ITokenStore, LocalTokenStore>();
                     services.AddSingleton<AuthStateService>();
@@ -92,9 +92,17 @@ namespace Anfeta.UI
                     services.AddSingleton<LinkAccountViewModel>();
 
                     // =========================
-                    // HttpClientFactory + Auth header
+                    // Shared Auth (sesión compartida)
                     // =========================
-                    services.AddSingleton<AuthHeaderHandler>();
+                    services.AddSingleton<SharedTokenStore>();
+                    services.AddSingleton<SharedAuthStateService>();
+                    services.AddSingleton<LinkSharedAccountViewModel>();
+
+                    // =========================
+                    // HttpClientFactory + Auth headers (IMPORTANTE: handlers NO singleton)
+                    // =========================
+                    services.AddTransient<AuthHeaderHandler>();
+                    services.AddTransient<SharedAuthHeaderHandler>();
 
                     services.AddHttpClient("WeblabAuthed", client =>
                     {
@@ -103,16 +111,31 @@ namespace Anfeta.UI
                     })
                     .AddHttpMessageHandler<AuthHeaderHandler>();
 
+                    services.AddHttpClient("WeblabSharedAuthed", client =>
+                    {
+                        client.BaseAddress = new Uri("https://wlserver-production-6735.up.railway.app");
+                        client.Timeout = TimeSpan.FromSeconds(100);
+                    })
+                    .AddHttpMessageHandler<SharedAuthHeaderHandler>();
+
                     // =========================
                     // Weblab API Clients
                     // =========================
 
-                    // WeblabAuthClient - Para operaciones de autenticación
+                    // WeblabAuthClient - Para operaciones de autenticación (LOCAL)
                     services.AddSingleton<Anfeta.UI.Services.Auth.WeblabAuthClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new Anfeta.UI.Services.Auth.WeblabAuthClient(factory.CreateClient("WeblabAuthed"));
                     });
+
+                    // WeblabSharedAuthClient - Para autenticación Shared (usa WeblabSharedAuthed)
+                    services.AddSingleton<WeblabSharedAuthClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new WeblabSharedAuthClient(factory.CreateClient("WeblabSharedAuthed"));
+                    });
+
                     // WeblabReportesClient - Para reportes (revisiones-por-fecha)
                     services.AddSingleton<WeblabReportesClient>(sp =>
                     {
@@ -120,7 +143,6 @@ namespace Anfeta.UI
                         var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
                         return new WeblabReportesClient(factory.CreateClient("WeblabAuthed"), auth);
                     });
-
 
                     // WeblabUsersClient - Para búsqueda de usuarios
                     services.AddSingleton<WeblabUsersClient>(sp =>
@@ -144,6 +166,14 @@ namespace Anfeta.UI
                         return new WeblabRevisionesClient(factory.CreateClient("WeblabAuthed"));
                     });
 
+                    // WeblabRecordatoriosClient - Para gestión de recordatorios
+                    services.AddSingleton<WeblabRecordatoriosClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new WeblabRecordatoriosClient(factory.CreateClient("WeblabAuthed"), auth);
+                    });
+
                     // =========================
                     // Action Executors
                     // =========================
@@ -154,17 +184,17 @@ namespace Anfeta.UI
                     {
                         var actividades = sp.GetRequiredService<WeblabActividadesClient>();
                         var revisiones = sp.GetRequiredService<WeblabRevisionesClient>();
-                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
                         var reportes = sp.GetRequiredService<WeblabReportesClient>();
+                        var recordatorios = sp.GetRequiredService<WeblabRecordatoriosClient>();
+                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
 
-                        return new ApiActionExecutor(actividades, revisiones, reportes, auth);
+                        return new ApiActionExecutor(actividades, revisiones, reportes, recordatorios, auth);
                     });
 
                     // =========================
                     // ViewModels
                     // =========================
                     services.AddSingleton<HomeViewModel>();
-
                 })
                 .Build();
         }
@@ -227,13 +257,36 @@ namespace Anfeta.UI
         private async Task BootstrapAuthAsync(string deviceId)
         {
             try
-            {
+            {// =========================
+             // BOOTSTRAP SHARED (cargar tokens guardados)
+             // =========================
+                var sharedState = AppHost.Services.GetRequiredService<SharedAuthStateService>();
+                await sharedState.InitializeAsync();
+
+#if DEBUG
+                var sharedStore = AppHost.Services.GetRequiredService<SharedTokenStore>();
+                var sharedAccess = await sharedStore.GetTokenAsync();
+                var sharedRefresh = await sharedStore.GetRefreshTokenAsync();
+
+                Debug.WriteLine("======= TOKEN SHARED (LocalSettings) =======");
+                Debug.WriteLine($"ACCESS:  {sharedAccess ?? "(NULL)"}");
+                Debug.WriteLine($"REFRESH: {sharedRefresh ?? "(NULL)"}");
+                Debug.WriteLine("===========================================");
+#endif
+
                 var auth = AppHost.Services.GetRequiredService<AuthStateService>();
                 var authApi = AppHost.Services.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
                 var tokenStore = AppHost.Services.GetRequiredService<ITokenStore>();
 
                 // 1) Cargar token local si existe (LocalSettings)
                 await auth.InitializeAsync();
+
+#if DEBUG
+                var tokenLocal = await tokenStore.GetTokenAsync();
+                Debug.WriteLine("======= TOKEN LOCAL =======");
+                Debug.WriteLine(tokenLocal ?? "(NULL)");
+                Debug.WriteLine("===========================");
+#endif
 
                 // Si el usuario tiene token local, ya está autenticado
                 if (auth.IsAuthenticated)

@@ -1,0 +1,305 @@
+﻿<Page
+    x:Class="Anfeta.UI.Views.LinkSharedAccountView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{StaticResource BgGradient}">
+
+    <Page.Resources>
+        <Style x:Key="GlassBorder" TargetType="Border">
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="40,36"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#25FFFFFF"/>
+            <Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#22000000" Offset="0.0"/>
+                        <GradientStop Color="#14000000" Offset="1.0"/>
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="InputBox" TargetType="TextBox">
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="#F7FAFC"/>
+            <Setter Property="Background" Value="#12FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#28FFFFFF"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="14,0"/>
+        </Style>
+
+        <Style x:Key="PassBoxStyle" TargetType="PasswordBox">
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="#F7FAFC"/>
+            <Setter Property="Background" Value="#12FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#28FFFFFF"/>
+            <Setter Property="CornerRadius" Value="10"/>
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#94A3B8"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+
+        <Style x:Key="Divider" TargetType="Border">
+            <Setter Property="Height" Value="1"/>
+            <Setter Property="Background" Value="#14FFFFFF"/>
+            <Setter Property="Margin" Value="0,4"/>
+        </Style>
+    </Page.Resources>
+
+    <Grid>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup>
+                <VisualState x:Name="Narrow">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0"/>
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="InfoPanel.Visibility" Value="Collapsed"/>
+                        <Setter Target="RootGrid.ColumnDefinitions[1].Width" Value="0"/>
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="Wide">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="960"/>
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="InfoPanel.Visibility" Value="Visible"/>
+                        <Setter Target="RootGrid.ColumnDefinitions[1].Width" Value="300"/>
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <Grid x:Name="RootGrid" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="840">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="300"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ══════════════ LOGIN CARD ══════════════ -->
+            <Border Grid.Column="0" Style="{StaticResource GlassBorder}" MinWidth="420">
+                <StackPanel Spacing="28">
+
+                    <!-- Encabezado -->
+                    <StackPanel Spacing="12" HorizontalAlignment="Center">
+                        <Border Width="68" Height="68" CornerRadius="34"
+                                Background="{StaticResource AnfetaAccentBrush}"
+                                HorizontalAlignment="Center"
+                                ToolTipService.ToolTip="Sesión Anfeta compartida">
+                            <FontIcon Glyph="&#xE720;" FontSize="28" Foreground="White"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Spacing="4" HorizontalAlignment="Center">
+                            <TextBlock Text="Login Anfeta" FontSize="28" FontWeight="SemiBold"
+                                       Foreground="#F7FAFC" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Accede con las credenciales compartidas del equipo"
+                                       FontSize="13" Foreground="#64748B" HorizontalAlignment="Center"
+                                       TextWrapping="Wrap" MaxWidth="340" TextAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Style="{StaticResource Divider}"/>
+
+                    <!-- Campos -->
+                    <StackPanel Spacing="16">
+
+                        <!-- Usuario -->
+                        <StackPanel Spacing="0">
+                            <Grid Margin="0,0,0,6">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="USUARIO"
+                                           VerticalAlignment="Center"/>
+                                <FontIcon Glyph="&#xE77B;" FontSize="13" Foreground="#4A5568"
+                                          HorizontalAlignment="Right" VerticalAlignment="Center"
+                                          ToolTipService.ToolTip="Usuario de la sesión compartida Anfeta"/>
+                            </Grid>
+                            <TextBox Style="{StaticResource InputBox}"
+                                     PlaceholderText="Ingresa el usuario"
+                                     Text="{Binding User, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                <TextBox.Resources>
+                                    <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#F7FAFC"/>
+                                    <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#F7FAFC"/>
+                                </TextBox.Resources>
+                            </TextBox>
+                        </StackPanel>
+
+                        <!-- Contraseña -->
+                        <StackPanel Spacing="0">
+                            <Grid Margin="0,0,0,6">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="CONTRASEÑA"
+                                           VerticalAlignment="Center"/>
+                                <FontIcon Glyph="&#xE72E;" FontSize="13" Foreground="#4A5568"
+                                          HorizontalAlignment="Right" VerticalAlignment="Center"
+                                          ToolTipService.ToolTip="Contraseña de la sesión compartida"/>
+                            </Grid>
+
+                            <!-- Contenedor custom con ojo manual -->
+                            <Grid>
+                                <!-- PasswordBox (modo oculto) -->
+                                <PasswordBox x:Name="PassBox"
+                                             Style="{StaticResource PassBoxStyle}"
+                                             PlaceholderText="Ingresa la contraseña"
+                                             FlowDirection="LeftToRight"
+                                             Padding="14,0,48,0"
+                                             PasswordChanged="PassBox_PasswordChanged">
+                                    <PasswordBox.Resources>
+                                        <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#F7FAFC"/>
+                                        <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#F7FAFC"/>
+                                    </PasswordBox.Resources>
+                                </PasswordBox>
+
+                                <!-- TextBox (modo visible) -->
+                                <TextBox x:Name="PassTextBox"
+                                         Style="{StaticResource InputBox}"
+                                         PlaceholderText="Ingresa la contraseña"
+                                         Padding="14,0,48,0"
+                                         Visibility="Collapsed"
+                                         Text="{Binding Pass, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                    <TextBox.Resources>
+                                        <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#F7FAFC"/>
+                                        <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#F7FAFC"/>
+                                    </TextBox.Resources>
+                                </TextBox>
+
+                                <!-- Botón ojo posicionado manualmente a la derecha -->
+                                <Button x:Name="TogglePassBtn"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Width="40"
+                                        Height="40"
+                                        Margin="0,0,4,0"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="0"
+                                        Click="TogglePasswordVisibility_Click"
+                                        ToolTipService.ToolTip="Mostrar/ocultar contraseña">
+                                    <FontIcon x:Name="EyeIcon"
+                                              Glyph="&#xE7B3;"
+                                              FontSize="16"
+                                              Foreground="#64748B"/>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Estado (éxito / error) -->
+                        <Border x:Name="StatusBorder" Visibility="Collapsed"
+                                Background="#14FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                CornerRadius="10" Padding="14,10">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon x:Name="StatusIcon" Glyph="&#xE946;" FontSize="15"
+                                          Foreground="#94A3B8" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding StatusMessage}"
+                                           FontSize="13" Foreground="#CBD5E1" TextWrapping="Wrap"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+
+                    <!-- Acciones -->
+                    <StackPanel Spacing="10">
+                        <Button Command="{Binding LoginSharedCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                HorizontalAlignment="Stretch"
+                                Height="48"
+                                ToolTipService.ToolTip="Iniciar sesión con las credenciales compartidas de Anfeta">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE8EC;" FontSize="16"/>
+                                <TextBlock Text="Iniciar sesión" FontSize="14" FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Command="{Binding LogoutSharedCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Stretch"
+                                Height="44"
+                                ToolTipService.ToolTip="Cerrar la sesión compartida activa">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xF3B1;" FontSize="15"/>
+                                <TextBlock Text="Cerrar sesión" FontSize="13" FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                </StackPanel>
+            </Border>
+
+            <!-- ══════════════ PANEL INFO LATERAL ══════════════ -->
+            <StackPanel x:Name="InfoPanel" Grid.Column="1" Spacing="14"
+                        VerticalAlignment="Center" Margin="28,0,0,0">
+
+                <Border Background="#14FF6B35" CornerRadius="14" Padding="20,18">
+                    <StackPanel Spacing="10">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE8C3;" FontSize="18"
+                                      Foreground="{StaticResource AnfetaAccentBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Text="Sesión compartida" FontSize="15" FontWeight="SemiBold"
+                                       Foreground="#F7FAFC" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="Estas credenciales son compartidas entre el equipo. No uses contraseñas personales."
+                                   FontSize="12" Foreground="#CBD5E1" TextWrapping="Wrap" LineHeight="18"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#143EC8A0" CornerRadius="14" Padding="20,18">
+                    <StackPanel Spacing="10">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE73E;" FontSize="16" Foreground="#34D399" VerticalAlignment="Center"/>
+                            <TextBlock Text="Acceso al sistema" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="#F7FAFC" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="Permite a ANFETA ejecutar comandos en nombre del equipo sobre los módulos de Weblab."
+                                   FontSize="12" Foreground="#A7F3D0" TextWrapping="Wrap" LineHeight="18"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#1430A0FF" CornerRadius="14" Padding="20,18"
+                        BorderThickness="1" BorderBrush="#14FFFFFF">
+                    <StackPanel Spacing="10">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE8D7;" FontSize="16" Foreground="#60A5FA" VerticalAlignment="Center"/>
+                            <TextBlock Text="Token seguro" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="#F7FAFC" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="El token se almacena localmente de forma cifrada y no se expone externamente."
+                                   FontSize="12" Foreground="#BFDBFE" TextWrapping="Wrap" LineHeight="18"/>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </Grid>
+
+        <!-- Botón "Volver al inicio" — Esquina inferior izquierda -->
+        <Button Click="OnBackToHomeClicked"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Margin="20,0,0,20"
+                Background="Transparent"
+                BorderThickness="1"
+                BorderBrush="#25FFFFFF"
+                CornerRadius="10"
+                Padding="14,10"
+                ToolTipService.ToolTip="Regresar al panel principal">
+            <Button.Resources>
+                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#12FFFFFF"/>
+                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#35FFFFFF"/>
+            </Button.Resources>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <FontIcon Glyph="&#xE72B;" FontSize="14" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                <TextBlock Text="Volver al inicio" FontSize="13" Foreground="#94A3B8" VerticalAlignment="Center"/>
+            </StackPanel>
+        </Button>
+
+    </Grid>
+</Page>

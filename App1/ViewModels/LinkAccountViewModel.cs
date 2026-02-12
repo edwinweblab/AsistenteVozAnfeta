@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Anfeta.UI.ViewModels
@@ -16,6 +17,11 @@ namespace Anfeta.UI.ViewModels
         private readonly WeblabAuthClient _authApi;
 
         private string _email = "";
+        private string _phone = "";
+        private string _errorMessage = "";
+        private bool _isBusy;
+        private UserProfile? _userProfile;
+
         public string Email
         {
             get => _email;
@@ -29,14 +35,25 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        private string _errorMessage = "";
+        public string Phone
+        {
+            get => _phone;
+            set
+            {
+                if (SetProperty(ref _phone, value))
+                {
+                    OnPropertyChanged(nameof(CanLink));
+                    LinkCommand.NotifyCanExecuteChanged();
+                }
+            }
+        }
+
         public string ErrorMessage
         {
             get => _errorMessage;
             set => SetProperty(ref _errorMessage, value);
         }
 
-        private bool _isBusy;
         public bool IsBusy
         {
             get => _isBusy;
@@ -50,17 +67,13 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // Propiedades nuevas para modo perfil
-        private UserProfile? _userProfile;
         public UserProfile? UserProfile
         {
             get => _userProfile;
             private set
             {
                 if (SetProperty(ref _userProfile, value))
-                {
                     OnPropertyChanged(nameof(AvatarInitial));
-                }
             }
         }
 
@@ -70,23 +83,21 @@ namespace Anfeta.UI.ViewModels
                 ? UserProfile.FirstName.Substring(0, 1).ToUpper()
                 : "U";
 
-        // Indica si el usuario está autenticado (para cambiar entre login/perfil)
         public bool IsAuthenticated => _auth.IsAuthenticated;
-
-        // Formato de fecha de registro para mostrar en UI
         public string FormattedCreatedAt => UserProfile?.CreatedAt.ToString("dd MMM yyyy") ?? "";
-
-        // Formato de última actividad para mostrar en UI
         public string FormattedUpdatedAt => UserProfile?.UpdatedAt.ToString("dd MMM yyyy HH:mm") ?? "";
 
         public bool CanLink =>
             !IsBusy &&
             !string.IsNullOrWhiteSpace(Email) &&
-            Email.Contains("@");
+            Email.Contains("@") &&
+            !string.IsNullOrWhiteSpace(Phone) &&
+            IsPhoneValid(Phone);
 
         public IAsyncRelayCommand LinkCommand { get; }
         public IAsyncRelayCommand SignOutCommand { get; }
 
+        // Solo se invoca al vincular exitosamente, NO al cerrar sesión
         public event Action? RequestNavigateHome;
 
         public LinkAccountViewModel(AuthStateService auth, WeblabUsersClient users, WeblabAuthClient authApi)
@@ -98,21 +109,21 @@ namespace Anfeta.UI.ViewModels
             LinkCommand = new AsyncRelayCommand(LinkAsync, CanLinkExecute);
             SignOutCommand = new AsyncRelayCommand(SignOutAsync);
 
-            // Suscribirse a cambios de autenticación
             _auth.PropertyChanged += (_, e) =>
             {
                 if (e.PropertyName == nameof(AuthStateService.IsAuthenticated))
                 {
                     OnPropertyChanged(nameof(IsAuthenticated));
-                    // Cuando cambia el estado de autenticación, recargar perfil si está autenticado
                     if (IsAuthenticated)
                         _ = LoadProfileAsync();
                 }
             };
         }
 
-        // Carga el perfil del usuario desde el API
-        // Llamar desde View.Loaded si IsAuthenticated es true
+        /// <summary>
+        /// Carga el perfil del usuario desde el API.
+        /// Llamar desde View.Loaded si IsAuthenticated es true.
+        /// </summary>
         public async Task LoadProfileAsync()
         {
             if (!IsAuthenticated)
@@ -145,21 +156,19 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // Cierra sesión del usuario y limpia el perfil
-        // UI debe detectar cambio de IsAuthenticated para mostrar login
+        /// <summary>
+        /// Cierra sesión y limpia el perfil.
+        /// La vista permanece abierta, no navega al home.
+        /// </summary>
         private async Task SignOutAsync()
         {
             try
             {
                 UserProfile = null;
                 await _auth.SignOutAsync();
-                Debug.WriteLine("[PROFILE] Sesión cerrada");
 
-                // Notificar cambio de autenticación
                 OnPropertyChanged(nameof(IsAuthenticated));
-
-                // Navegar a home para limpiar estado
-                RequestNavigateHome?.Invoke();
+                Debug.WriteLine("[PROFILE] Sesión cerrada. Permanece en la página.");
             }
             catch (Exception ex)
             {
@@ -169,6 +178,10 @@ namespace Anfeta.UI.ViewModels
 
         private bool CanLinkExecute() => CanLink;
 
+        /// <summary>
+        /// Vincula el dispositivo con la cuenta Weblab.
+        /// Navega al home solo si la vinculación fue exitosa.
+        /// </summary>
         private async Task LinkAsync()
         {
             ErrorMessage = "";
@@ -176,6 +189,14 @@ namespace Anfeta.UI.ViewModels
 
             try
             {
+                var phone = NormalizeMexPhone(Phone);
+
+                if (!IsPhoneValid(phone))
+                {
+                    ErrorMessage = "Teléfono inválido. Usa solo dígitos (10 a 15).";
+                    return;
+                }
+
                 var email = (Email ?? "").Trim();
                 Debug.WriteLine($"[LINK] Intento vincular. Email='{email}'");
 
@@ -189,32 +210,27 @@ namespace Anfeta.UI.ViewModels
                 var deviceId = DeviceRepository.EnsureActiveDevice();
                 Debug.WriteLine($"[LINK] deviceId='{deviceId}'");
 
-                // 1) Buscar colaborador por correo
                 var search = await _users.SearchByEmailAsync(email);
-
-                Debug.WriteLine(
-                    $"[LINK] search.Ok={search.Ok} fn='{search.FirstName}' ln='{search.LastName}' collabId='{search.CollaboratorId}' err='{search.RawError}'"
-                );
+                Debug.WriteLine($"[LINK] search.Ok={search.Ok} fn='{search.FirstName}' ln='{search.LastName}' collabId='{search.CollaboratorId}' err='{search.RawError}'");
 
                 if (!search.Ok ||
                     string.IsNullOrWhiteSpace(search.FirstName) ||
                     string.IsNullOrWhiteSpace(search.LastName) ||
                     string.IsNullOrWhiteSpace(search.CollaboratorId))
                 {
-                    ErrorMessage = "No se encontró el colaborador o faltan datos (firstName/lastName/collaboratorId).";
+                    ErrorMessage = "No se encontró el colaborador o faltan datos.";
                     return;
                 }
 
-                // 2) Registrar device en backend (CON LOS CAMPOS REALES)
                 var reg = await _authApi.RegisterAsync(
                     email: email,
                     firstName: search.FirstName!,
                     lastName: search.LastName!,
                     collaboratorId: search.CollaboratorId!,
-                    deviceId: deviceId
+                    deviceId: deviceId,
+                    phone: phone
                 );
 
-                // 🔐 LOG DEL TOKEN (SOLO DEBUG)
                 Debug.WriteLine("====================================");
                 Debug.WriteLine("[AUTH] TOKEN JWT RECIBIDO:");
                 Debug.WriteLine(reg.Token);
@@ -226,13 +242,12 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // 3) Guardar token local y cargar perfil
                 await _auth.SetSignedInAsync(reg.Token!);
                 Debug.WriteLine("[LINK] Vinculación OK. Token guardado.");
 
-                // Cargar perfil después de login exitoso
                 await LoadProfileAsync();
 
+                // Navega al home solo tras vinculación exitosa
                 RequestNavigateHome?.Invoke();
             }
             catch (Exception ex)
@@ -244,6 +259,28 @@ namespace Anfeta.UI.ViewModels
             {
                 IsBusy = false;
             }
+        }
+
+        private static string NormalizeMexPhone(string? phone)
+        {
+            var p = (phone ?? "").Trim()
+                .Replace(" ", "").Replace("-", "")
+                .Replace("(", "").Replace(")", "");
+
+            if (p.StartsWith("52")) return p;
+            if (p.StartsWith("1") && p.Length == 11) p = p.Substring(1);
+
+            return "52" + p;
+        }
+
+        private static bool IsPhoneValid(string phone)
+        {
+            var p = (phone ?? "").Trim()
+                .Replace(" ", "").Replace("-", "");
+
+            if (p.StartsWith("52")) p = p.Substring(2);
+
+            return p.Length == 10 && p.All(char.IsDigit);
         }
     }
 }
