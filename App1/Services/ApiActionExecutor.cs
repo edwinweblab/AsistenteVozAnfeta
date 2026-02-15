@@ -1,10 +1,11 @@
 ﻿// Services/ApiActionExecutor.cs
+using Anfeta.UI.Models;
+using Anfeta.UI.Services.Auth;
+using Anfeta.UI.Services.Weblab;
 using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Services.Weblab;
-using Anfeta.UI.Services.Auth;
 
 namespace Anfeta.UI.Services
 {
@@ -115,6 +116,28 @@ namespace Anfeta.UI.Services
                         return (false, "Falta el ID de la actividad.");
 
                     var r = await _actividades.GetActivityByIdAsync(id!, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                // ✅ CREAR ACTIVIDAD
+                // Usa: POST /api/actividades
+                if (action == "create")
+                {
+                    // paramsJson es un STRING JSON, hay que deserializarlo
+                    CreateActividadRequest? request = null;
+                    try
+                    {
+                        request = JsonSerializer.Deserialize<CreateActividadRequest>(paramsJson);
+                    }
+                    catch (Exception ex)
+                    {
+                        return (false, $"Error parseando datos de actividad: {ex.Message}");
+                    }
+
+                    if (request == null || string.IsNullOrWhiteSpace(request.Titulo))
+                        return (false, "Falta el título de la actividad.");
+
+                    var r = await _actividades.CreateActivityAsync(request, ct);
                     return (r.Ok, r.PlainText);
                 }
 
@@ -238,7 +261,7 @@ namespace Anfeta.UI.Services
             if (!string.IsNullOrWhiteSpace(_cachedAssignee))
                 return _cachedAssignee;
 
-            var (ok, assignee, _) = await _auth.GetCurrentUserAsync(ct);
+            var (ok, assignee, _, _) = await _auth.GetCurrentUserAsync(ct);
             if (ok && !string.IsNullOrWhiteSpace(assignee))
             {
                 _cachedAssignee = assignee;

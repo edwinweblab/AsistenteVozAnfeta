@@ -1,24 +1,169 @@
 ﻿// Services/Weblab/WeblabActividadesClient.cs
+using Anfeta.UI.Models;
+using Anfeta.UI.Services.Auth;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Models;
-using Anfeta.UI.Services.Auth;
 
 namespace Anfeta.UI.Services.Weblab
 {
     public sealed class WeblabActividadesClient
     {
-        private readonly HttpClient _http;
+        private readonly HttpClient _http;           // Para crear actividades (SHARED)
+        private readonly HttpClient _httpLocal;      // Para obtener email (LOCAL)
         private readonly WeblabAuthClient _auth;
 
-        public WeblabActividadesClient(HttpClient http, WeblabAuthClient auth)
+        public WeblabActividadesClient(HttpClient http, HttpClient httpLocal, WeblabAuthClient auth)
         {
             _http = http;
+            _httpLocal = httpLocal;
             _auth = auth;
+        }
+
+        /// <summary>
+        /// Crea una actividad y luego asigna al usuario actual
+        /// Entrada: CreateActividadRequest
+        /// Salida: ApiPlainResponse
+        /// </summary>
+        public async Task<ApiPlainResponse> CreateActivityAsync(Anfeta.UI.Models.CreateActividadRequest req, CancellationToken ct = default)
+        {
+            try
+            {
+                if (req == null || string.IsNullOrWhiteSpace(req.Titulo))
+                    return new ApiPlainResponse { Ok = false, PlainText = "Falta el título para crear la actividad." };
+
+                // 1) Obtener collaboratorId del usuario actual
+                var (okUser, email, _, collaboratorId) = await _auth.GetCurrentUserAsync(ct);
+                if (!okUser || string.IsNullOrWhiteSpace(collaboratorId))
+                    return new ApiPlainResponse { Ok = false, PlainText = "No pude obtener tu usuario." };
+
+                using var form = new MultipartFormDataContent();
+
+                void AddString(string name, string? value)
+                {
+                    var v = (value ?? "").Trim();
+                    if (string.IsNullOrWhiteSpace(v) || v.Equals("null", StringComparison.OrdinalIgnoreCase))
+                        return;
+                    form.Add(new StringContent(v, Encoding.UTF8), name);
+                }
+
+                AddString("titulo", req.Titulo);
+                AddString("status", req.Status);
+                AddString("prioridad", req.Prioridad);
+                AddString("tipo", req.Tipo);
+                AddString("proyectoId", req.ProyectoId);
+                AddString("anotaciones", req.Anotaciones);
+                AddString("pasosYLinks", req.PasosYLinks);
+                AddString("dueStart", req.DueStart);
+                AddString("dueEnd", req.DueEnd);
+
+                if (req.Pendientes != null && req.Pendientes.Count > 0)
+                {
+                    var pendientesJson = JsonSerializer.Serialize(req.Pendientes);
+                    form.Add(new StringContent(pendientesJson, Encoding.UTF8, "application/json"), "pendientes");
+                }
+
+                if (req.ArchivosPaths != null)
+                {
+                    foreach (var path in req.ArchivosPaths)
+                    {
+                        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+                        var bytes = await File.ReadAllBytesAsync(path, ct);
+                        var content = new ByteArrayContent(bytes);
+                        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                        form.Add(content, "archivos", Path.GetFileName(path));
+                    }
+                }
+
+                if (req.PendienteImagesPaths != null)
+                {
+                    foreach (var path in req.PendienteImagesPaths)
+                    {
+                        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+                        var bytes = await File.ReadAllBytesAsync(path, ct);
+                        var content = new ByteArrayContent(bytes);
+                        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                        form.Add(content, "pendienteImages", Path.GetFileName(path));
+                    }
+                }
+
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine("===== CREATE ACTIVITY DEBUG =====");
+                System.Diagnostics.Debug.WriteLine($"POST {_http.BaseAddress}api/actividades");
+                System.Diagnostics.Debug.WriteLine($"Titulo: {req.Titulo}");
+                System.Diagnostics.Debug.WriteLine($"Prioridad: {req.Prioridad}");
+                System.Diagnostics.Debug.WriteLine("=================================");
+#endif
+
+                // 2) Crear actividad (POST)
+                using var resp = await _http.PostAsync("/api/actividades", form, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                    return new ApiPlainResponse
+                    {
+                        Ok = false,
+                        PlainText = $"No pude crear la actividad. HTTP {(int)resp.StatusCode}: {json}"
+                    };
+
+                // 3) Extraer ID de la respuesta
+                string? activityId = null;
+                using (var doc = JsonDocument.Parse(json))
+                {
+                    if (doc.RootElement.TryGetProperty("data", out var data) &&
+                        data.TryGetProperty("id", out var idEl))
+                    {
+                        activityId = idEl.GetString();
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(activityId))
+                    return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada: {req.Titulo}." };
+
+                // 4) Asignar usuario (PUT)
+                var assignBody = JsonSerializer.Serialize(new { assignees = new[] { collaboratorId } });
+                var assignContent = new StringContent(assignBody, Encoding.UTF8, "application/json");
+
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine("===== ASSIGN ACTIVITY DEBUG =====");
+                System.Diagnostics.Debug.WriteLine($"PUT {_http.BaseAddress}api/actividades/{activityId}");
+                System.Diagnostics.Debug.WriteLine($"Body: {assignBody}");
+                System.Diagnostics.Debug.WriteLine("=================================");
+#endif
+
+                using var assignResp = await _http.PutAsync($"/api/actividades/{activityId}", assignContent, ct);
+                var assignJson = await assignResp.Content.ReadAsStringAsync(ct);
+
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine("===== ASSIGN RESPONSE =====");
+                System.Diagnostics.Debug.WriteLine($"Status: {assignResp.StatusCode}");
+                System.Diagnostics.Debug.WriteLine($"Body: {assignJson}");
+                System.Diagnostics.Debug.WriteLine("===========================");
+#endif
+
+                if (!assignResp.IsSuccessStatusCode)
+                    return new ApiPlainResponse
+                    {
+                        Ok = true,
+                        PlainText = $"Actividad creada pero no pude asignártela: {req.Titulo}."
+                    };
+
+                return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada y asignada: {req.Titulo}." };
+            }
+            catch (OperationCanceledException)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = "Operación cancelada." };
+            }
+            catch (Exception ex)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = $"Error: {ex.Message}" };
+            }
         }
 
         // =========================
@@ -29,7 +174,7 @@ namespace Anfeta.UI.Services.Weblab
         {
             try
             {
-                var (ok, assignee, _) = await _auth.GetCurrentUserAsync(ct);
+                var (ok, assignee, _, _) = await _auth.GetCurrentUserAsync(ct);
                 if (!ok || string.IsNullOrWhiteSpace(assignee))
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };
 
@@ -54,13 +199,13 @@ namespace Anfeta.UI.Services.Weblab
         {
             try
             {
-                var (ok, assignee, name) = await _auth.GetCurrentUserAsync(ct);
+                var (ok, assignee, name, _) = await _auth.GetCurrentUserAsync(ct);
                 if (!ok || string.IsNullOrWhiteSpace(assignee))
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };
 
                 var url = $"/api/actividades/assignee/{Uri.EscapeDataString(assignee)}";
 
-                using var resp = await _http.GetAsync(url, ct);
+                using var resp = await _httpLocal.GetAsync("/api/actividades", ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -104,7 +249,7 @@ namespace Anfeta.UI.Services.Weblab
         {
             try
             {
-                using var resp = await _http.GetAsync("/api/actividades", ct);
+                using var resp = await _httpLocal.GetAsync("/api/actividades", ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -138,7 +283,7 @@ namespace Anfeta.UI.Services.Weblab
             {
                 var url = $"/api/actividades/buscar?q={Uri.EscapeDataString(q)}";
 
-                using var resp = await _http.GetAsync(url, ct);
+                using var resp = await _httpLocal.GetAsync("/api/actividades", ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -173,7 +318,7 @@ namespace Anfeta.UI.Services.Weblab
             {
                 var url = $"/api/actividades/assignee/{Uri.EscapeDataString(assignee)}/del-dia";
 
-                using var resp = await _http.GetAsync(url, ct);
+                using var resp = await _httpLocal.GetAsync("/api/actividades", ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -208,7 +353,7 @@ namespace Anfeta.UI.Services.Weblab
             {
                 var url = $"/api/actividades/{Uri.EscapeDataString(id)}";
 
-                using var resp = await _http.GetAsync(url, ct);
+                using var resp = await _httpLocal.GetAsync("/api/actividades", ct); 
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)

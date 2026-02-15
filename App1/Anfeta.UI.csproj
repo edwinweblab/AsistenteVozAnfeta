@@ -63,7 +63,6 @@
 	<ItemGroup>
 		<Folder Include="Assets\vosk-model-es\" />
 		<Folder Include="Helpers\" />
-		<Folder Include="Models\NewFolder\" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Page Update="Views\LinkSharedAccountView.xaml">

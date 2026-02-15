@@ -129,7 +129,7 @@ namespace Anfeta.UI.Services.Weblab
             {
                 // Nota: en tu app esto devuelve (ok, assignee, name)
                 // y por tu uso actual "assignee" es el correo del token (ej: eedwi@practicante.com)
-                var (ok, assignee, name) = await _auth.GetCurrentUserAsync(ct);
+                var (ok, assignee, name, _) = await _auth.GetCurrentUserAsync(ct);
 
                 if (!ok || string.IsNullOrWhiteSpace(assignee))
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };

@@ -81,57 +81,42 @@ namespace Anfeta.UI.Services.Auth
             return AuthTokenResult.FromOk(token!);
         }
 
-        // GET /api/auth/me -> Obtiene usuario actual autenticado
-        // Entrada: ninguna (usa token en headers automáticamente)
-        // Salida: (ok, assignee, name) - assignee es el collaboratorId
-        public async Task<(bool ok, string? assignee, string? name)> GetCurrentUserAsync(CancellationToken ct = default)
+        /// <summary>
+        /// Obtiene info del usuario actual desde /api/auth/me
+        /// Devuelve: (Ok, Email, Name, CollaboratorId)
+        /// </summary>
+        public async Task<(bool Ok, string? Email, string? Name, string? CollaboratorId)> GetCurrentUserAsync(CancellationToken ct = default)
         {
             try
             {
                 using var resp = await _http.GetAsync("/api/auth/me", ct);
-                var json = await resp.Content.ReadAsStringAsync(ct);
-
                 if (!resp.IsSuccessStatusCode)
-                    return (false, null, null);
+                    return (false, null, null, null);
 
+                var json = await resp.Content.ReadAsStringAsync(ct);
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                if (!root.TryGetProperty("ok", out var okEl) || !okEl.GetBoolean())
-                    return (false, null, null);
+                if (!root.TryGetProperty("user", out var user))
+                    return (false, null, null, null);
 
-                if (!root.TryGetProperty("user", out var userEl) || userEl.ValueKind != JsonValueKind.Object)
-                    return (false, null, null);
-
-                var firstName = userEl.TryGetProperty("firstName", out var fnEl) && fnEl.ValueKind == JsonValueKind.String
-                    ? fnEl.GetString()
+                var email = user.TryGetProperty("email", out var e) && e.ValueKind == JsonValueKind.String
+                    ? e.GetString()
                     : null;
 
-                var lastName = userEl.TryGetProperty("lastName", out var lnEl) && lnEl.ValueKind == JsonValueKind.String
-                    ? lnEl.GetString()
+                var name = user.TryGetProperty("firstName", out var fn) && fn.ValueKind == JsonValueKind.String
+                    ? fn.GetString()
                     : null;
 
-                var fullName = !string.IsNullOrWhiteSpace(firstName) && !string.IsNullOrWhiteSpace(lastName)
-                    ? $"{firstName} {lastName}"
-                    : firstName ?? lastName ?? "Usuario";
-
-                var email = userEl.TryGetProperty("email", out var eEl) && eEl.ValueKind == JsonValueKind.String
-                    ? eEl.GetString()
+                var collaboratorId = user.TryGetProperty("collaboratorId", out var cid) && cid.ValueKind == JsonValueKind.String
+                    ? cid.GetString()
                     : null;
 
-                // IMPORTANTE: para actividades, el assignee es el EMAIL
-                if (string.IsNullOrWhiteSpace(email))
-                    return (false, null, fullName);
-
-                return (true, email, fullName);
-            }
-            catch (OperationCanceledException)
-            {
-                return (false, null, null);
+                return (true, email, name, collaboratorId);
             }
             catch
             {
-                return (false, null, null);
+                return (false, null, null, null);
             }
         }
 
