@@ -7,12 +7,16 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Markup;
+using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
@@ -31,14 +35,12 @@ namespace Anfeta.UI.Views
         // enums
         private enum ViewMode { Explorer, Bookmarks }
         private ViewMode _mode = ViewMode.Explorer;
-
         // settings keys
         private const string LS_DropboxRoot = "DropboxRoot";
         // Win32 file attributes (Dropbox / OneDrive placeholders)
         private const int FILE_ATTRIBUTE_OFFLINE = 0x00001000;
         private const int FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000;
         private const int FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000;
-
         // state
         private string DROPBOX_ROOT = "";
         private string _currentFolder = "";
@@ -47,12 +49,10 @@ namespace Anfeta.UI.Views
         private bool _onlyFolders = false;
         private string? _extFilter = null;
         private string _sortKey = "name_asc";
-
         // debounce / tokens
         private DispatcherTimer? _searchDebounceTimer;
         private CancellationTokenSource? _searchCts;
         private CancellationTokenSource? _cts;
-
         // UI / help popup
         private ContentControl? _helpBodyHost;
 
@@ -77,6 +77,10 @@ namespace Anfeta.UI.Views
         private readonly List<string> _excludedFolders = new(); // en memoria 
         private readonly ObservableCollection<string> _excludedFoldersUi = new();
         private const string LS_SavedSearches = "SavedSearches"; // JSON
+        //Contraibles
+        private const string LS_CommandsExpanded = "CommandsExpanded";
+        private const string LS_ExcludedExpanded = "ExcludedExpanded";
+
         #endregion
 
         #region ===== Internal Models / Views =====
@@ -211,6 +215,11 @@ namespace Anfeta.UI.Views
             LoadExcludedFolders();
             RefreshExcludedFoldersUi();
             LoadSavedSearches();
+            CommandsSidebarList.ItemsSource = _savedSearches;
+            RefreshCommandsSidebarUi();
+            LoadSidebarExpandedStates();
+
+
             // 1) Bookmarks
             try
             {
@@ -251,8 +260,9 @@ namespace Anfeta.UI.Views
             LoadFoldersRoot();
             BuildTreeRoot();
             await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
-            SavedSearchesList.ItemsSource = _savedSearches;
-            SavedSearchesEmptyHint.Visibility = _savedSearches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            CommandsSidebarList.ItemsSource = _savedSearches;
+            RefreshCommandsSidebarUi();
+
 
             StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
         }
@@ -2000,7 +2010,103 @@ namespace Anfeta.UI.Views
             return name;
         }
         #endregion
-        #region ===== Seccion De Exclusiones =====
+        #region ===== Seccion De Exclusiones ===== 
+        private sealed class FolderPickItem
+        {
+            public string Path { get; set; } = "";
+            public string Name { get; set; } = "";
+            public bool IsChecked { get; set; }
+        }
+        public sealed class ExcludeNode : INotifyPropertyChanged
+        {
+            public string Name { get; set; } = "";
+            public string Path { get; set; } = "";
+
+            // ✅ Para compatibilidad con lo que ya tenías (aunque ahora uses TreeViewNode.Children)
+            public ObservableCollection<ExcludeNode> Children { get; } = new();
+
+            private bool _hasDummyChild;
+            public bool HasDummyChild
+            {
+                get => _hasDummyChild;
+                set { if (_hasDummyChild != value) { _hasDummyChild = value; OnPropertyChanged(); } }
+            }
+
+            private bool _isChecked;
+            public bool IsChecked
+            {
+                get => _isChecked;
+                set { if (_isChecked != value) { _isChecked = value; OnPropertyChanged(); } }
+            }
+
+            private bool _isEnabled = true;
+            public bool IsEnabled
+            {
+                get => _isEnabled;
+                set { if (_isEnabled != value) { _isEnabled = value; OnPropertyChanged(); } }
+            }
+
+            private bool _isLoaded;
+            public bool IsLoaded
+            {
+                get => _isLoaded;
+                set { if (_isLoaded != value) { _isLoaded = value; OnPropertyChanged(); } }
+            }
+
+            public event PropertyChangedEventHandler? PropertyChanged;
+            private void OnPropertyChanged([CallerMemberName] string? name = null)
+                => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+        private static TreeViewNode? FindNodeByData(IList<TreeViewNode> nodes, ExcludeNode target)
+        {
+            foreach (var n in nodes)
+            {
+                if (ReferenceEquals(n.Content, target))
+                    return n;
+
+                var found = FindNodeByData(n.Children, target);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        //Exclusion en carpetas pero vista
+        
+        private Microsoft.UI.Xaml.Controls.TreeViewNode MakeExcludeNode(string dirPath)
+        {
+            var data = new ExcludeNode
+            {
+                Name = System.IO.Path.GetFileName(dirPath),
+                Path = dirPath,
+                IsChecked = false,
+                IsLoaded = false
+            };
+
+            var node = new Microsoft.UI.Xaml.Controls.TreeViewNode
+            {
+                Content = data
+            };
+
+            // ✅ Solo ponemos dummy si realmente hay subcarpetas
+            if (HasSubfolders(dirPath))
+            {
+                node.Children.Add(new Microsoft.UI.Xaml.Controls.TreeViewNode
+                {
+                    Content = new ExcludeNode { Name = "Cargando...", Path = "__dummy__" }
+                });
+            }
+            else
+            {
+                data.IsLoaded = true; // no hay nada que cargar
+            }
+
+            return node;
+        }
+
+
+        
+
+
         private void LoadExcludedFolders()
         {
             _excludedFolders.Clear();
@@ -2077,45 +2183,193 @@ namespace Anfeta.UI.Views
         {
             try
             {
-                var picker = new Windows.Storage.Pickers.FolderPicker();
-                picker.FileTypeFilter.Add("*");
-
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder == null) return;
-
-                var path = folder.Path;
-                if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-                    return;
-                var sample = App.LocalIndex.GetAll().FirstOrDefault();
-                System.Diagnostics.Debug.WriteLine($"[EXCLUDE] sample Target='{sample?.Target}'");
-                System.Diagnostics.Debug.WriteLine($"[EXCLUDE] excluded='{path}'");
-
-                // opcional: solo permitir excluir dentro del root actual
-                if (!string.IsNullOrWhiteSpace(DROPBOX_ROOT))
+                if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
                 {
-                    var rootNorm = DROPBOX_ROOT.TrimEnd('\\') + "\\";
-                    var pathNorm = path.TrimEnd('\\') + "\\";
-                    if (!pathNorm.StartsWith(rootNorm, StringComparison.OrdinalIgnoreCase))
-                    {
-                        StatusText.Text = "Estado: Solo puedes excluir carpetas dentro del root configurado.";
-                        return;
-                    }
+                    StatusText.Text = "Estado: Configura un root válido antes de excluir.";
+                    return;
                 }
 
-                // evitar duplicados
-                if (_excludedFolders.Any(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase)))
-                    return;
+                // TreeView
+                var tv = new Microsoft.UI.Xaml.Controls.TreeView
+                {
+                    SelectionMode = Microsoft.UI.Xaml.Controls.TreeViewSelectionMode.Single,
+                    MaxHeight = 320
+                };
+                tv.Padding = new Thickness(0);
+                tv.Margin = new Thickness(0);
+                tv.Resources["TreeViewItemIndentation"] = 18.0;
 
-                _excludedFolders.Add(path);
+
+                // Expand/Collapse con doble click (más fácil que la flechita)
+                tv.DoubleTapped += (s, e2) =>
+                {
+                    if (tv.SelectedNode is TreeViewNode node)
+                        node.IsExpanded = !node.IsExpanded;
+                };
+
+                // Lazy-load al expandir
+                tv.Expanding += (s, e2) =>
+                {
+                    if (e2.Node?.Content is not ExcludeNode data) return;
+
+                    if (data.IsLoaded) return;
+
+                    // Si no hay dummy, no hay nada que cargar
+                    if (e2.Node.Children.Count == 0)
+                    {
+                        data.IsLoaded = true;
+                        return;
+                    }
+
+                    // Quitar dummy
+                    if (e2.Node.Children.Count == 1 &&
+                        e2.Node.Children[0].Content is ExcludeNode d &&
+                        d.Path == "__dummy__")
+                    {
+                        e2.Node.Children.Clear();
+                    }
+
+                    try
+                    {
+                        foreach (var childDir in Directory.EnumerateDirectories(data.Path))
+                        {
+                            if (IsExcludedPath(childDir)) continue;
+
+                            var childNode = MakeExcludeNode(childDir);
+
+                            // heredar check del padre
+                            if (childNode.Content is ExcludeNode childData && data.IsChecked)
+                            {
+                                childData.IsChecked = true;
+                                childData.IsEnabled = false;
+                            }
+
+                            e2.Node.Children.Add(childNode);
+                        }
+                    }
+                    catch { }
+
+                    data.IsLoaded = true;
+                };
+
+                // Estilo compacto
+                tv.ItemContainerStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load(@"
+                <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+                       xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+                       TargetType='TreeViewItem'>
+                    <Setter Property='MinHeight' Value='28'/>
+                    <Setter Property='Padding' Value='0'/>
+                    <Setter Property='Margin' Value='0'/>
+                    <Setter Property='HorizontalContentAlignment' Value='Stretch'/>
+                </Style>");
+
+                // Template: checkbox + texto
+                tv.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(@"
+                <DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>
+                  <Grid MinHeight='28' Margin='0'>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width='Auto'/>
+                      <ColumnDefinition Width='Auto'/>
+                      <ColumnDefinition Width='*'/>
+                    </Grid.ColumnDefinitions>
+
+                    <CheckBox Grid.Column='0'
+                              IsChecked='{Binding Content.IsChecked, Mode=TwoWay}'
+                              IsEnabled='{Binding Content.IsEnabled}'
+                              VerticalAlignment='Center'
+                              Margin='0,0,8,0'/>
+
+                    <TextBlock Grid.Column='1'
+                               VerticalAlignment='Center'
+                               FontSize='13'
+                               Text='{Binding Content.Name}'
+                               TextTrimming='CharacterEllipsis'
+                               Opacity='0.9'/>
+                  </Grid>
+                </DataTemplate>");
+
+
+                // Marcar padre => marca/deshabilita hijos (robusto)
+                tv.AddHandler(UIElement.TappedEvent, new TappedEventHandler((s, e2) =>
+                {
+                    var cb = FindAncestor<CheckBox>(e2.OriginalSource as DependencyObject);
+                    if (cb == null) return;
+
+                    _ = DispatcherQueue.TryEnqueue(() =>
+                    {
+                        TreeViewNode? node = null;
+                        ExcludeNode? data = null;
+
+                        if (cb.DataContext is TreeViewNode tvn)
+                        {
+                            node = tvn;
+                            data = tvn.Content as ExcludeNode;
+                        }
+                        else if (cb.DataContext is ExcludeNode dn)
+                        {
+                            data = dn;
+                            node = FindNodeByData(tv.RootNodes, dn);
+                        }
+
+                        if (node == null || data == null) return;
+                        if (data.Path == "__dummy__") return;
+
+                        var isChecked = cb.IsChecked == true;
+
+                        // ✅ AQUÍ va lo de data.IsChecked (para que el modelo quede consistente)
+                        data.IsChecked = isChecked;
+                        data.IsEnabled = true; // el padre siempre se queda habilitado
+
+                        ApplyToChildren(node, isChecked);
+                    });
+                }), true);
+
+
+
+                // Roots (solo nivel 1)
+                foreach (var dir in Directory.EnumerateDirectories(DROPBOX_ROOT))
+                {
+                    if (IsExcludedPath(dir)) continue;
+                    tv.RootNodes.Add(MakeExcludeNode(dir));
+                }
+
+                var dialog = new ContentDialog
+                {
+                    Title = "Excluir varias carpetas",
+                    Content = tv,
+                    PrimaryButtonText = "Agregar seleccionadas",
+                    CloseButtonText = "Cancelar",
+                    DefaultButton = ContentDialogButton.Primary,
+                    XamlRoot = this.XamlRoot
+                };
+
+                var result = await dialog.ShowAsync();
+                if (result != ContentDialogResult.Primary) return;
+
+                // Recolectar seleccionadas desde el TreeView
+                var selected = new List<string>();
+                foreach (var n in tv.RootNodes)
+                    CollectChecked(n, selected);
+
+                if (selected.Count == 0)
+                {
+                    StatusText.Text = "Estado: No seleccionaste nada.";
+                    return;
+                }
+
+                // Aplicar a la lista real de exclusiones (sin duplicados)
+                foreach (var p in selected)
+                {
+                    if (_excludedFolders.Any(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+
+                    _excludedFolders.Add(p);
+                }
+
                 SaveExcludedFolders();
                 RefreshExcludedFoldersUi();
 
-                StatusText.Text = "Estado: Carpeta excluida ✅";
-
-                // refresca vista actual (si estás en búsqueda, re-filtra)
+                StatusText.Text = $"Estado: Excluidas {selected.Count} carpetas ✅";
                 await RefreshCurrentViewAsync();
             }
             catch (Exception ex)
@@ -2123,6 +2377,55 @@ namespace Anfeta.UI.Views
                 StatusText.Text = $"Estado: Error excluyendo → {ex.Message}";
             }
         }
+        private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+        {
+            while (current != null)
+            {
+                if (current is T wanted) return wanted;
+                current = VisualTreeHelper.GetParent(current);
+            }
+            return null;
+        }
+
+        private static void CollectChecked(TreeViewNode node, List<string> acc)
+        {
+            if (node?.Content is ExcludeNode data)
+            {
+                if (data.IsChecked && !string.IsNullOrWhiteSpace(data.Path) && data.Path != "__dummy__")
+                    acc.Add(data.Path);
+            }
+
+            foreach (var child in node.Children)
+                CollectChecked(child, acc);
+        }
+        private static bool HasSubfolders(string path)
+        {
+            try
+            {
+                return Directory.EnumerateDirectories(path).Any();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        private void ApplyToChildren(TreeViewNode parentNode, bool isChecked)
+        {
+            foreach (var child in parentNode.Children)
+            {
+                if (child.Content is ExcludeNode cd)
+                {
+                    if (cd.Path == "__dummy__") continue;
+
+                    cd.IsChecked = isChecked;
+                    cd.IsEnabled = !isChecked;
+                }
+
+                ApplyToChildren(child, isChecked);
+            }
+        }
+        
+
 
         private async void BtnRemoveExcludedFolder_Click(object sender, RoutedEventArgs e)
         {
@@ -2168,7 +2471,37 @@ namespace Anfeta.UI.Views
         }
 
         private readonly ObservableCollection<SavedSearch> _savedSearches = new();
-        private void LoadSavedSearches()
+        private void RefreshCommandsSidebarUi()
+        {
+            if (CommandsSidebarEmptyHint != null)
+                CommandsSidebarEmptyHint.Visibility = _savedSearches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        private async void CommandsSidebarList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (CommandsSidebarList.SelectedItem is SavedSearch cmd)
+            {
+                SearchBox.Text = cmd.Query;
+                await RunSearchAsync(cmd.Query);
+                CommandsSidebarList.SelectedItem = null;
+            }
+        }
+        private void BtnQuickSaveCommand_Click(object sender, RoutedEventArgs e)
+        {
+            // Reutiliza tu dialog pro de guardar comando
+            BtnSaveSearch_Click(sender, e);
+        }
+        private async void CommandsSidebarList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+        if (e.ClickedItem is SavedSearch cmd)
+        {
+            SearchBox.Text = cmd.Query;
+            await RunSearchAsync(cmd.Query);
+
+            // opcional: para que no quede “seleccionado”
+            CommandsSidebarList.SelectedItem = null;
+        }
+        }
+    private void LoadSavedSearches()
         {
             _savedSearches.Clear();
 
@@ -2200,40 +2533,116 @@ namespace Anfeta.UI.Views
         }
         private void RefreshSavedSearchesUi()
         {
-            if (SavedSearchesList != null)
+            // ahora los comandos viven en el sidebar
+            if (CommandsSidebarList != null)
             {
-                SavedSearchesList.ItemsSource = null;
-                SavedSearchesList.ItemsSource = _savedSearches;
+                CommandsSidebarList.ItemsSource = null;
+                CommandsSidebarList.ItemsSource = _savedSearches;
             }
 
-            if (SavedSearchesEmptyHint != null)
-                SavedSearchesEmptyHint.Visibility = _savedSearches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            RefreshCommandsSidebarUi();
         }
-        private void BtnUseSavedSearch_Click(object sender, RoutedEventArgs e)
+        private void BtnDeleteSidebarCommand_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button b) return;
-            if (b.Tag is not SavedSearch s) return;
+            if (sender is not Button btn) return;
+            if (btn.Tag is not SavedSearch cmd) return;
 
-            // pone el query y ejecuta búsqueda (como los ejemplos)
-            SearchBox.Text = s.Query ?? "";
-            TriggerSearchFromHelp(s.Query ?? "");
+            // 1) quitar de la colección
+            _savedSearches.Remove(cmd);
+
+            // 2) persistir
+            SaveSavedSearches();
+
+            // 3) quitar selección (evita bugs visuales)
+            if (CommandsSidebarList != null)
+                CommandsSidebarList.SelectedItem = null;
+
+            // 4) refrescar UI (sidebar + hints)
+            RefreshSavedSearchesUi(); // ← este es el importante
         }
-
-        private void BtnDeleteSavedSearch_Click(object sender, RoutedEventArgs e)
+        private async void BtnEditSidebarCommand_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button b) return;
-            if (b.Tag is not SavedSearch s) return;
+            if (sender is not Button btn) return;
+            if (btn.Tag is not SavedSearch cmd) return;
 
-            var found = _savedSearches.FirstOrDefault(x => x.Id == s.Id);
-            if (found != null)
-                _savedSearches.Remove(found);
+            // Busca referencia real en la colección (por Id)
+            var existing = _savedSearches.FirstOrDefault(x => x.Id == cmd.Id);
+            if (existing == null) return;
+
+            // Reutiliza el mismo dialog pro (igual al de guardar, pero precargado)
+            var titleBox = new TextBox
+            {
+                PlaceholderText = "Título",
+                Text = existing.Title ?? ""
+            };
+
+            var descBox = new TextBox
+            {
+                PlaceholderText = "Descripción (opcional)",
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                Text = existing.Description ?? ""
+            };
+
+            var queryBox = new TextBox
+            {
+                Text = existing.Query ?? ""
+            };
+
+            var panel = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+        {
+            new TextBlock { Text = "Editar comando", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+            titleBox,
+            descBox,
+            new TextBlock { Text = "Query:" },
+            queryBox
+        }
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Editar comando",
+                Content = panel,
+                PrimaryButtonText = "Guardar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary) return;
+
+            var newTitle = (titleBox.Text ?? "").Trim();
+            var newDesc = (descBox.Text ?? "").Trim();
+            var newQuery = (queryBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newQuery))
+            {
+                StatusText.Text = "Estado: Título y Query son obligatorios.";
+                return;
+            }
+
+            // evitar duplicado de query en otro comando
+            if (_savedSearches.Any(x => x.Id != existing.Id &&
+                                        string.Equals(x.Query, newQuery, StringComparison.OrdinalIgnoreCase)))
+            {
+                StatusText.Text = "Estado: Ya existe otro comando con esa búsqueda.";
+                return;
+            }
+
+            existing.Title = newTitle;
+            existing.Description = newDesc;
+            existing.Query = newQuery;
 
             SaveSavedSearches();
             RefreshSavedSearchesUi();
 
-            StatusText.Text = "Estado: Comando eliminado ✅";
+            StatusText.Text = "Estado: Comando actualizado ✅";
         }
-
+        
         private async void BtnSaveSearch_Click(object sender, RoutedEventArgs e)
         {
             var currentQuery = (SearchBox.Text ?? "").Trim();
@@ -2317,94 +2726,32 @@ namespace Anfeta.UI.Views
 
             StatusText.Text = "Estado: Comando guardado 💾";
         }
-        private async void BtnEditSavedSearch_Click(object sender, RoutedEventArgs e)
+        
+        private void LoadSidebarExpandedStates()
         {
-            if (sender is not Button b) return;
-            if (b.Tag is not SavedSearch s) return;
+            var ls = ApplicationData.Current.LocalSettings.Values;
 
-            // Busca el objeto real en la colección (por Id)
-            var existing = _savedSearches.FirstOrDefault(x => x.Id == s.Id);
-            if (existing == null) return;
+            if (ls.TryGetValue(LS_CommandsExpanded, out var c) && c is bool cb)
+                CommandsExpander.IsExpanded = cb;
 
-            var titleBox = new TextBox
-            {
-                PlaceholderText = "Título",
-                Text = existing.Title ?? ""
-            };
+            if (ls.TryGetValue(LS_ExcludedExpanded, out var e) && e is bool eb)
+                ExcludedExpander.IsExpanded = eb;
 
-            var descBox = new TextBox
-            {
-                PlaceholderText = "Descripción (opcional)",
-                AcceptsReturn = true,
-                TextWrapping = TextWrapping.Wrap,
-                Text = existing.Description ?? ""
-            };
-
-            var queryBox = new TextBox
-            {
-                Text = existing.Query ?? ""
-            };
-
-            var panel = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-        {
-            new TextBlock { Text = "Editar comando", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
-            titleBox,
-            descBox,
-            new TextBlock { Text = "Query:" },
-            queryBox
-        }
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "Editar comando",
-                Content = panel,
-                PrimaryButtonText = "Guardar cambios",
-                CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = this.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary)
-                return;
-
-            var newTitle = (titleBox.Text ?? "").Trim();
-            var newDesc = (descBox.Text ?? "").Trim();
-            var newQuery = (queryBox.Text ?? "").Trim();
-
-            if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newQuery))
-            {
-                StatusText.Text = "Estado: Título y Query son obligatorios.";
-                return;
-            }
-
-            // Evitar duplicados por query, pero permitiendo el mismo en el mismo Id
-            if (_savedSearches.Any(x => x.Id != existing.Id &&
-                                        string.Equals(x.Query, newQuery, StringComparison.OrdinalIgnoreCase)))
-            {
-                StatusText.Text = "Estado: Ya existe otro comando con esa búsqueda.";
-                return;
-            }
-
-            // Aplica cambios
-            existing.Title = newTitle;
-            existing.Description = newDesc;
-            existing.Query = newQuery;
-
-            SaveSavedSearches();
-            RefreshSavedSearchesUi();
-
-            StatusText.Text = "Estado: Comando actualizado ✍️";
+            // guardar cuando cambie
+            CommandsExpander.Expanding += (_, __) => SaveSidebarExpandedStates();
+            CommandsExpander.Collapsed += (_, __) => SaveSidebarExpandedStates();
+            CommandsExpander.Expanding += (_, __) => SaveSidebarExpandedStates();
+            ExcludedExpander.Collapsed += (_, __) => SaveSidebarExpandedStates();
         }
 
+        private void SaveSidebarExpandedStates()
+        {
+            var ls = ApplicationData.Current.LocalSettings.Values;
+            ls[LS_CommandsExpanded] = CommandsExpander.IsExpanded;
+            ls[LS_ExcludedExpanded] = ExcludedExpander.IsExpanded;
+        }
 
         #endregion 
-
-
         #region ===== XAML handlers pendientes (stubs) =====
 
         private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }

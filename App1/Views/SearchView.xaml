@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:models="using:Anfeta.UI.Models"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
@@ -29,7 +30,7 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!--  ROW 0: Search + controls (LIMPIO)  -->
+                <!--  ROW 0: Search + controls  -->
                 <Grid Grid.Row="0" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -37,14 +38,11 @@
                         <ColumnDefinition Width="*" />
                         <!--  Search  -->
                         <ColumnDefinition Width="Auto" />
-                        <!--  Comandos  -->
-                        <ColumnDefinition Width="Auto" />
                         <!--  Ayuda  -->
                         <ColumnDefinition Width="Auto" />
                         <!--  Notion  -->
                         <ColumnDefinition Width="Auto" />
                         <!--  Detalles  -->
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <!--  Más  -->
                     </Grid.ColumnDefinitions>
@@ -64,99 +62,10 @@
                         QueryIcon="Find"
                         QuerySubmitted="SearchBox_QuerySubmitted"
                         TextChanged="SearchBox_TextChanged" />
-                    <!--  Guardar búsqueda  -->
-                    <Button
-                        x:Name="BtnSaveSearch"
-                        Grid.Column="2"
-                        Width="38"
-                        Height="34"
-                        Click="BtnSaveSearch_Click"
-                        Content="📥"
-                        CornerRadius="8"
-                        ToolTipService.ToolTip="Guardar esta búsqueda" />
-
-                    <!--  Comandos guardados  -->
-                    <Button
-                        x:Name="BtnSavedSearches"
-                        Grid.Column="3"
-                        Width="38"
-                        Height="34"
-                        Content="📌"
-                        CornerRadius="8"
-                        ToolTipService.ToolTip="Comandos guardados">
-                        <Button.Flyout>
-                            <Flyout Placement="Bottom">
-                                <StackPanel MinWidth="320" Spacing="8">
-                                    <TextBlock
-                                        Margin="0,0,0,4"
-                                        FontWeight="SemiBold"
-                                        Text="Comandos guardados" />
-
-                                    <ListView
-                                        x:Name="SavedSearchesList"
-                                        MaxHeight="260"
-                                        SelectionMode="None">
-                                        <ListView.ItemTemplate>
-                                            <DataTemplate>
-                                                <Grid ColumnSpacing="10">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-
-                                                    <StackPanel Spacing="2">
-                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
-                                                        <TextBlock
-                                                            Opacity="0.7"
-                                                            Text="{Binding Description}"
-                                                            TextWrapping="WrapWholeWords" />
-                                                        <TextBlock
-                                                            FontSize="12"
-                                                            Opacity="0.6"
-                                                            Text="{Binding Query}"
-                                                            TextTrimming="CharacterEllipsis" />
-                                                    </StackPanel>
-
-                                                    <StackPanel
-                                                        Grid.Column="1"
-                                                        Orientation="Horizontal"
-                                                        Spacing="6">
-                                                        <Button
-                                                            Click="BtnUseSavedSearch_Click"
-                                                            Content="Usar"
-                                                            Tag="{Binding}" />
-
-                                                        <Button
-                                                            Click="BtnEditSavedSearch_Click"
-                                                            Content="Editar"
-                                                            Tag="{Binding}"
-                                                            ToolTipService.ToolTip="Editar comando" />
-
-                                                        <Button
-                                                            Click="BtnDeleteSavedSearch_Click"
-                                                            Content="✕"
-                                                            Tag="{Binding}"
-                                                            ToolTipService.ToolTip="Eliminar" />
-                                                    </StackPanel>
-
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ListView.ItemTemplate>
-                                    </ListView>
-
-                                    <TextBlock
-                                        x:Name="SavedSearchesEmptyHint"
-                                        Opacity="0.6"
-                                        Text="Aún no hay comandos guardados" />
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                    </Button>
-
                     <!--  AYUDA  -->
                     <Button
                         x:Name="BtnHelp"
-                        Grid.Column="4"
+                        Grid.Column="2"
                         Width="34"
                         Height="34"
                         Click="MenuHelp_Click"
@@ -167,13 +76,13 @@
                     <!--  Notion  -->
                     <ToggleButton
                         x:Name="ToggleNotion"
-                        Grid.Column="5"
+                        Grid.Column="3"
                         Content="Notion"
                         ToolTipService.ToolTip="Incluir páginas Notion relacionadas" />
                     <!--  Detalles  -->
                     <ToggleButton
                         x:Name="ToggleDetailsPane"
-                        Grid.Column="6"
+                        Grid.Column="4"
                         Click="ToggleDetailsPane_Click"
                         Content="Detalles"
                         IsChecked="False"
@@ -261,6 +170,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <!--  Título  -->
@@ -298,56 +208,278 @@
                         </StackPanel>
                     </Grid>
 
-                    <!--  Zona inferior (botones + exclusiones)  -->
-                    <StackPanel Grid.Row="2" Spacing="6">
+                    <!--  ===== Row 2: Comandos (colapsable) =====  -->
+                    <Border
+                        Grid.Row="2"
+                        Padding="0"
+                        Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
+                        CornerRadius="10">
 
-                        <!--  Botones  -->
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Click="BtnRefreshTree_Click" Content="Actualizar" />
-                            <Button Click="BtnGoRoot_Click" Content="Inicio (/)" />
-                            <Button Click="BtnAddExcludedFolder_Click" Content="Excluir carpeta…" />
-                        </StackPanel>
+                        <muxc:Expander x:Name="CommandsExpander" IsExpanded="True">
 
-                        <!--  Lista exclusiones  -->
-                        <ListView
-                            x:Name="ExcludedFoldersList"
-                            MaxHeight="100"
-                            SelectionMode="None">
+                            <muxc:Expander.Header>
+                                <Grid
+                                    Margin="2,4,2,4"
+                                    VerticalAlignment="Center"
+                                    ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
 
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid ColumnSpacing="6">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
+                                    <!--  Título  -->
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        VerticalAlignment="Center"
+                                        FontWeight="SemiBold"
+                                        Text="Comandos Guardados" />
 
-                                        <TextBlock
-                                            VerticalAlignment="Center"
-                                            Opacity="0.85"
-                                            Text="{Binding}"
-                                            TextTrimming="CharacterEllipsis" />
+                                    <!--  Botón agregar (separado del título)  -->
+                                    <Button
+                                        Grid.Column="1"
+                                        Width="36"
+                                        Height="32"
+                                        Margin="0,0,6,0"
+                                        Padding="0"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center"
+                                        Background="Transparent"
+                                        Click="BtnQuickSaveCommand_Click"
+                                        ToolTipService.ToolTip="Guardar la búsqueda actual como comando">
 
-                                        <Button
-                                            Grid.Column="1"
-                                            Width="26"
-                                            Height="26"
-                                            Click="BtnRemoveExcludedFolder_Click"
-                                            Content="✕"
-                                            Tag="{Binding}"
-                                            ToolTipService.ToolTip="Quitar exclusión" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
+                                        <Viewbox
+                                            Width="16"
+                                            Height="16"
+                                            Stretch="Uniform">
+                                            <SymbolIcon Symbol="Add" />
+                                        </Viewbox>
+                                    </Button>
 
-                        </ListView>
+                                    <!--
+                                        Flecha del Expander: NO la ponemos manual, WinUI la dibuja solo.
+                                        Esta columna extra es solo para que el botón no invada el área de la flecha.
+                                    -->
+                                    <Grid Grid.Column="2" Width="1" />
+                                </Grid>
+                            </muxc:Expander.Header>
 
-                        <!--  Hint  -->
-                        <TextBlock
-                            x:Name="ExcludedHint"
-                            Opacity="0.6"
-                            Text="No hay carpetas excluidas" />
-                    </StackPanel>
+
+
+                            <StackPanel Padding="8" Spacing="6">
+
+                                <ListView
+                                    x:Name="CommandsSidebarList"
+                                    MaxHeight="160"
+                                    Padding="2"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    IsItemClickEnabled="True"
+                                    ItemClick="CommandsSidebarList_ItemClick"
+                                    SelectionChanged="CommandsSidebarList_SelectionChanged"
+                                    SelectionMode="Single">
+
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <!--  Texto  -->
+                                                <StackPanel Grid.Column="0" Spacing="2">
+                                                    <TextBlock
+                                                        FontWeight="SemiBold"
+                                                        Text="{Binding Title}"
+                                                        TextTrimming="CharacterEllipsis" />
+
+                                                    <TextBlock
+                                                        FontSize="12"
+                                                        Opacity="0.65"
+                                                        Text="{Binding Query}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+
+                                                <!--  Acciones  -->
+                                                <StackPanel
+                                                    Grid.Column="1"
+                                                    Orientation="Horizontal"
+                                                    Spacing="7">
+
+                                                    <Button
+                                                        Width="38"
+                                                        Height="32"
+                                                        Padding="0"
+                                                        HorizontalContentAlignment="Center"
+                                                        VerticalContentAlignment="Center"
+                                                        Click="BtnEditSidebarCommand_Click"
+                                                        Tag="{Binding}"
+                                                        ToolTipService.ToolTip="Editar">
+
+                                                        <Viewbox
+                                                            Width="16"
+                                                            Height="16"
+                                                            Stretch="Uniform">
+                                                            <SymbolIcon Symbol="Edit" />
+                                                        </Viewbox>
+                                                    </Button>
+
+
+                                                    <Button
+                                                        Width="38"
+                                                        Height="32"
+                                                        Padding="0"
+                                                        HorizontalContentAlignment="Center"
+                                                        VerticalContentAlignment="Center"
+                                                        Click="BtnDeleteSidebarCommand_Click"
+                                                        Tag="{Binding}"
+                                                        ToolTipService.ToolTip="Eliminar">
+
+                                                        <Viewbox
+                                                            Width="16"
+                                                            Height="16"
+                                                            Stretch="Uniform">
+                                                            <SymbolIcon Symbol="Delete" />
+                                                        </Viewbox>
+                                                    </Button>
+
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+
+                                <TextBlock
+                                    x:Name="CommandsSidebarEmptyHint"
+                                    Opacity="0.6"
+                                    Text="Aún no hay comandos" />
+                            </StackPanel>
+                        </muxc:Expander>
+                    </Border>
+
+                    <!--  ===== Zona inferior: Carpetas excluidas (colapsable) =====  -->
+                    <Border
+                        Grid.Row="3"
+                        Padding="0"
+                        HorizontalAlignment="Stretch"
+                        Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
+                        CornerRadius="10">
+
+                        <muxc:Expander
+                            x:Name="ExcludedExpander"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            IsExpanded="True">
+
+                            <muxc:Expander.Header>
+                                <Grid Margin="2,4,2,4">
+                                    <TextBlock FontWeight="SemiBold" Text="Carpetas excluidas" />
+                                </Grid>
+                            </muxc:Expander.Header>
+
+
+                            <StackPanel
+                                Padding="8"
+                                HorizontalAlignment="Stretch"
+                                Spacing="6">
+
+                                <!--  Botones  -->
+                                <Grid
+                                    HorizontalAlignment="Stretch"
+                                    ColumnSpacing="8"
+                                    RowSpacing="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1*" />
+                                        <ColumnDefinition Width="1*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <!--  Fila 0  -->
+                                    <Button
+                                        Grid.Row="0"
+                                        Grid.Column="0"
+                                        Height="36"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Click="BtnRefreshTree_Click"
+                                        Content="Actualizar" />
+
+                                    <Button
+                                        Grid.Row="0"
+                                        Grid.Column="1"
+                                        Height="36"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Click="BtnGoRoot_Click"
+                                        Content="Inicio (/)" />
+
+                                    <!--  Fila 1  -->
+                                    <Button
+                                        Grid.Row="1"
+                                        Grid.Column="0"
+                                        Grid.ColumnSpan="2"
+                                        Height="36"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center"
+                                        Click="BtnAddExcludedFolder_Click"
+                                        Content="Excluir carpeta..." />
+
+                                </Grid>
+
+
+
+                                <!--  Lista exclusiones  -->
+                                <ListView
+                                    x:Name="ExcludedFoldersList"
+                                    MaxHeight="100"
+                                    SelectionMode="None">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid ColumnSpacing="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    Opacity="0.85"
+                                                    Text="{Binding}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <Button
+                                                    Grid.Column="1"
+                                                    Width="26"
+                                                    Height="26"
+                                                    Padding="0"
+                                                    HorizontalContentAlignment="Center"
+                                                    VerticalContentAlignment="Center"
+                                                    Click="BtnRemoveExcludedFolder_Click"
+                                                    Tag="{Binding}"
+                                                    ToolTipService.ToolTip="Quitar exclusión">
+
+                                                    <Viewbox
+                                                        Width="12"
+                                                        Height="12"
+                                                        Stretch="Uniform">
+                                                        <SymbolIcon Symbol="Cancel" />
+                                                    </Viewbox>
+                                                </Button>
+
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <!--  Hint  -->
+                                <TextBlock
+                                    x:Name="ExcludedHint"
+                                    Opacity="0.6"
+                                    Text="No hay carpetas excluidas" />
+                            </StackPanel>
+                        </muxc:Expander>
+                    </Border>
 
                 </Grid>
             </Border>
