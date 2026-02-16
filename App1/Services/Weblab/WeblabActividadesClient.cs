@@ -166,10 +166,9 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
-        // =========================
-        // ✅ NUEVO: Mis actividades de HOY (sin pasar assignee)
-        // Flujo: token -> /auth/me -> collaboratorId -> /actividades/assignee/{id}/del-dia
-        // =========================
+        /// <summary>
+        /// Mis actividades de HOY (sin pasar assignee)
+        /// </summary>
         public async Task<ApiPlainResponse> GetMyTodayActivitiesAsync(CancellationToken ct = default)
         {
             try
@@ -190,11 +189,10 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
-        // =========================
-        // ✅ NUEVO: Mis actividades (todas) con ORDEN y DATOS IMPORTANTES
-        // Usa: /api/actividades/assignee/{assignee}
-        // Orden: dueStart asc (si no hay, al final)
-        // =========================
+        /// <summary>
+        /// Mis actividades (todas) con orden por dueStart
+        /// GET /api/actividades/assignee/{assignee}
+        /// </summary>
         public async Task<ApiPlainResponse> GetMyActivitiesAsync(int limit = 10, CancellationToken ct = default)
         {
             try
@@ -203,9 +201,10 @@ namespace Anfeta.UI.Services.Weblab
                 if (!ok || string.IsNullOrWhiteSpace(assignee))
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };
 
+                // ✅ CORREGIDO: Usar la URL correcta
                 var url = $"/api/actividades/assignee/{Uri.EscapeDataString(assignee)}";
 
-                using var resp = await _httpLocal.GetAsync("/api/actividades", ct);
+                using var resp = await _httpLocal.GetAsync(url, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -244,7 +243,9 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
-        // GET /api/actividades -> convierte JSON a texto (solo títulos)
+        /// <summary>
+        /// GET /api/actividades - Listar títulos
+        /// </summary>
         public async Task<ApiPlainResponse> ListTitlesAsync(int limit, CancellationToken ct = default)
         {
             try
@@ -276,14 +277,17 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
-        // GET /api/actividades/buscar?q=texto -> convierte JSON a texto (solo títulos)
+        /// <summary>
+        /// GET /api/actividades/buscar?q=texto
+        /// </summary>
         public async Task<ApiPlainResponse> SearchTitlesAsync(string q, int limit, CancellationToken ct = default)
         {
             try
             {
+                // ✅ CORREGIDO: Usar la URL correcta
                 var url = $"/api/actividades/buscar?q={Uri.EscapeDataString(q)}";
 
-                using var resp = await _httpLocal.GetAsync("/api/actividades", ct);
+                using var resp = await _httpLocal.GetAsync(url, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -310,15 +314,17 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
-        // GET /api/actividades/assignee/:assignee/del-dia -> Actividades del día de un usuario
-        // Entrada: assignee (collaboratorId del usuario)
+        /// <summary>
+        /// GET /api/actividades/assignee/:assignee/del-dia
+        /// </summary>
         public async Task<ApiPlainResponse> GetTodayActivitiesAsync(string assignee, CancellationToken ct = default)
         {
             try
             {
+                // ✅ CORREGIDO: Usar la URL correcta
                 var url = $"/api/actividades/assignee/{Uri.EscapeDataString(assignee)}/del-dia";
 
-                using var resp = await _httpLocal.GetAsync("/api/actividades", ct);
+                using var resp = await _httpLocal.GetAsync(url, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -346,14 +352,17 @@ namespace Anfeta.UI.Services.Weblab
             }
         }
 
-        // GET /api/actividades/:id -> Detalles completos de una actividad
+        /// <summary>
+        /// GET /api/actividades/:id - Detalles completos
+        /// </summary>
         public async Task<ApiPlainResponse> GetActivityByIdAsync(string id, CancellationToken ct = default)
         {
             try
             {
+                // ✅ CORREGIDO: Usar la URL correcta
                 var url = $"/api/actividades/{Uri.EscapeDataString(id)}";
 
-                using var resp = await _httpLocal.GetAsync("/api/actividades", ct); 
+                using var resp = await _httpLocal.GetAsync(url, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
                 if (!resp.IsSuccessStatusCode)
@@ -381,8 +390,9 @@ namespace Anfeta.UI.Services.Weblab
         }
 
         // =========================
-        // Extractores existentes
+        // Extractores
         // =========================
+
         private static List<string> ExtractTitles(string json, int limit)
         {
             var list = new List<string>();
@@ -503,7 +513,6 @@ namespace Anfeta.UI.Services.Weblab
             return string.Join(" ", parts);
         }
 
-        // ✅ Pausas mejores para TTS
         private static string BuildActivitiesPlainText(string header, List<(string titulo, string status)> activities)
         {
             var max = Math.Min(activities.Count, 10);
@@ -519,13 +528,8 @@ namespace Anfeta.UI.Services.Weblab
                 parts.Add($"Actividad {i + 1}: {titulo}. Estado: {status}.");
             }
 
-            // Doble salto de línea = pausas claras
             return string.Join("\n\n", parts);
         }
-
-        // =========================
-        // ✅ NUEVO: Extractor detallado + builder con pausas
-        // =========================
 
         private sealed class ActivityInfo
         {

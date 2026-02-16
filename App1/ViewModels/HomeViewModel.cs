@@ -735,12 +735,18 @@ namespace Anfeta.UI.ViewModels
                 {
                     Debug.WriteLine($"[FAST] Clasificado sin IA: {fastResult.Intent} → {fastResult.AppKey}");
 
-                    var fastValidation = _validator.Validate(fastResult, text);
-
-                    if (!fastValidation.IsValid)
+                    // ✅ NUEVO: Manejo especial para CreateActivity
+                    if (fastResult.Intent == "CreateActivity" && fastResult.Scope == "API")
                     {
-                        var fastMsg = fastValidation.Message ?? "Comando no válido";
-                        await ResetAfterActionAsync(fastMsg, "Validación rechazada", speak: fastMsg);
+                        Debug.WriteLine("[ACTIVITY_FLOW] Iniciando flujo de creación (desde FastClassifier)");
+                        _isInActivityCreation = true;
+
+                        var startMessage = _activityFlow!.Start(text);
+
+                        IsListening = false;
+                        ListenOnceCommand.NotifyCanExecuteChanged();
+                        UpdateUiSafe(startMessage, "Creando actividad...");
+                        await SpeakSafeAsync(startMessage);
                         return;
                     }
 

@@ -7,14 +7,14 @@ using Anfeta.UI.Models;
 namespace Anfeta.UI.Services.Activity
 {
     /// <summary>
-    /// Gestiona el flujo de creación de actividad (SIMPLIFICADO)
-    /// Solo pregunta: Título, Prioridad, Fecha inicio (opcional)
+    /// Gestiona el flujo de creación de actividad con clarificación AM/PM y preguntas variadas
     /// </summary>
     public sealed class ActivityCreationFlow
     {
         private readonly ActivityFieldExtractor _extractor;
         private readonly ActivityFieldValidator _validator;
         private readonly CorrectionCommandDetector _correctionDetector;
+        private readonly Random _random;
 
         private ActivityCreationState _state;
         private List<string> _missingFields;
@@ -27,67 +27,66 @@ namespace Anfeta.UI.Services.Activity
             _extractor = extractor;
             _validator = validator;
             _correctionDetector = correctionDetector;
+            _random = new Random();
             _state = new ActivityCreationState();
             _missingFields = new List<string>();
         }
 
         /// <summary>
-        /// Inicia el flujo con el comando inicial del usuario
-        /// Entrada: initialCommand - "crear actividad enviar reporte..."
-        /// Salida: Siguiente pregunta o confirmación
+        /// Inicia el flujo extrayendo campos del comando inicial
         /// </summary>
         public string Start(string initialCommand)
         {
-            // Reset estado
             _state = new ActivityCreationState();
             _missingFields = new List<string>();
 
-            // Extraer campos del comando inicial
             _state = _extractor.ExtractFields(initialCommand);
 
-            // Determinar qué campos faltan (SOLO ESENCIALES)
+            // Verificar si hay hora ambigua
+            if (_state.AmbiguousHour.HasValue && _state.AmbiguousBaseDate.HasValue)
+            {
+                _state.Phase = FlowPhase.ClarifyingTime;
+                return GetTimeClarificationQuestion(_state.AmbiguousHour.Value);
+            }
+
             DetermineMissingFields();
 
-            // Si no hay campos faltantes, ir a confirmación
             if (_missingFields.Count == 0)
             {
                 _state.Phase = FlowPhase.Confirming;
                 return GenerateConfirmation();
             }
 
-            // Preguntar primer campo faltante
             _state.Phase = FlowPhase.Gathering;
             _state.CurrentStep = 0;
             return GetNextQuestion();
         }
 
         /// <summary>
-        /// Procesa la respuesta del usuario
-        /// Entrada: userResponse - respuesta del usuario
-        /// Salida: (continuar, siguiente mensaje, datos para crear si está listo)
+        /// Procesa la respuesta del usuario según la fase actual
         /// </summary>
         public (bool shouldContinue, string message, ActivityCreationState? readyData) ProcessResponse(string userResponse)
         {
             if (string.IsNullOrWhiteSpace(userResponse))
                 return (true, "No escuché tu respuesta. ¿Puedes repetir?", null);
 
-            // Detectar cancelación (MEJORADO)
             if (_correctionDetector.IsCancellation(userResponse))
             {
                 _state.Reset();
                 return (false, "Creación de actividad cancelada.", null);
             }
 
-            // Detectar reinicio
             if (_correctionDetector.IsRestart(userResponse))
             {
                 _state.Reset();
                 return (false, "Flujo reiniciado. Usa 'crear actividad' para empezar de nuevo.", null);
             }
 
-            // Según la fase actual
             switch (_state.Phase)
             {
+                case FlowPhase.ClarifyingTime:
+                    return ProcessTimeClarificationResponse(userResponse);
+
                 case FlowPhase.Gathering:
                     return ProcessGatheringResponse(userResponse);
 
@@ -100,6 +99,74 @@ namespace Anfeta.UI.Services.Activity
                 default:
                     return (false, "Error interno del flujo.", null);
             }
+        }
+
+        /// <summary>
+        /// Procesa respuesta de clarificación AM/PM
+        /// </summary>
+        private (bool, string, ActivityCreationState?) ProcessTimeClarificationResponse(string response)
+        {
+            if (!_state.AmbiguousHour.HasValue || !_state.AmbiguousBaseDate.HasValue)
+                return (false, "Error interno: falta hora ambigua.", null);
+
+            // ✅ NORMALIZAR: unificar todas las variaciones
+            var normalized = response.Trim().ToLowerInvariant()
+                .Replace(" ", "")
+                .Replace("despuésdemediodia", "pm")
+                .Replace("despuesdemiodía", "pm")
+                .Replace("despuesdemediodia", "pm")
+                .Replace("despuésdelmediodía", "pm")
+                .Replace("despuesdelmediodia", "pm")
+                .Replace("antesdemediodia", "am")
+                .Replace("antesdelmediodia", "am")
+                .Replace("antesdemediodía", "am")
+                .Replace("antesdelmediodía", "am");
+
+            int finalHour;
+
+            // Detectar AM
+            if (normalized.Contains("mañana") || normalized.Contains("am"))
+            {
+                finalHour = _state.AmbiguousHour.Value;
+                if (finalHour == 12) finalHour = 0;
+            }
+            // Detectar PM
+            else if (normalized.Contains("tarde") || normalized.Contains("pm"))
+            {
+                finalHour = _state.AmbiguousHour.Value;
+                if (finalHour != 12) finalHour += 12;
+            }
+            else
+            {
+                return (true, GetTimeClarificationQuestion(_state.AmbiguousHour.Value), null);
+            }
+
+            _state.DueStart = _state.AmbiguousBaseDate.Value.AddHours(finalHour);
+            _state.DueEnd = _state.DueStart.Value.AddHours(1);
+
+            _state.AmbiguousHour = null;
+            _state.AmbiguousBaseDate = null;
+
+            var fechaResult = _validator.ValidateFecha(_state.DueStart.Value);
+            if (!fechaResult.Valid)
+            {
+                _state.DueStart = null;
+                _state.DueEnd = null;
+                _state.Phase = FlowPhase.Gathering;
+                return (true, fechaResult.Message ?? "Fecha inválida. Por favor dame otra fecha.", null);
+            }
+
+            DetermineMissingFields();
+
+            if (_missingFields.Count == 0)
+            {
+                _state.Phase = FlowPhase.Confirming;
+                return (true, GenerateConfirmation(), null);
+            }
+
+            _state.Phase = FlowPhase.Gathering;
+            _state.CurrentStep = 0;
+            return (true, GetNextQuestion(), null);
         }
 
         /// <summary>
@@ -116,12 +183,18 @@ namespace Anfeta.UI.Services.Activity
             var field = _missingFields[_state.CurrentStep];
             var (valid, message) = SetField(field, response);
 
+            // Detectar si activó clarificación de hora
+            if (_state.AmbiguousHour.HasValue && _state.AmbiguousBaseDate.HasValue)
+            {
+                _state.Phase = FlowPhase.ClarifyingTime;
+                return (true, message, null);
+            }
+
             if (!valid)
             {
                 return (true, message, null);
             }
 
-            // Campo válido, avanzar
             _state.CurrentStep++;
 
             if (_state.CurrentStep >= _missingFields.Count)
@@ -180,7 +253,7 @@ namespace Anfeta.UI.Services.Activity
         }
 
         /// <summary>
-        /// Determina qué campos faltan (SOLO ESENCIALES)
+        /// Determina campos faltantes
         /// </summary>
         private void DetermineMissingFields()
         {
@@ -192,7 +265,7 @@ namespace Anfeta.UI.Services.Activity
         }
 
         /// <summary>
-        /// Obtiene la siguiente pregunta
+        /// Obtiene siguiente pregunta
         /// </summary>
         private string GetNextQuestion()
         {
@@ -204,36 +277,103 @@ namespace Anfeta.UI.Services.Activity
         }
 
         /// <summary>
-        /// Genera pregunta para un campo específico
+        /// Genera pregunta variada para un campo
         /// </summary>
         private string GetQuestionForField(string field)
         {
             return field switch
             {
-                "titulo" => "¿Cuál es el título de la actividad?",
-                "prioridad" => "¿Qué prioridad tendrá? Opciones: Alta, Media, Baja",
-                "dueStart" => "¿Cuándo debe iniciar? Puedes decir fecha y hora, o 'sin fecha'",
+                "titulo" => GetRandomQuestion(new[]
+                {
+                    "¿Cuál es el título de la actividad?",
+                    "¿Qué título tendrá?",
+                    "¿Cómo se llamará la actividad?"
+                }),
+
+                "prioridad" => GetRandomQuestion(new[]
+                {
+                    "¿Qué prioridad tendrá? Opciones: Alta, Media, Baja",
+                    "¿Cuál es la prioridad? Puedes decir: Alta, Media o Baja",
+                    "¿Es urgente, normal o puede esperar? Dime: Alta, Media o Baja"
+                }),
+
+                "dueStart" => GetRandomQuestion(new[]
+                {
+                    "¿Cuándo debe iniciar? Puedes decir fecha y hora, o 'sin fecha'",
+                    "¿Para cuándo es? Dame fecha y hora, o di 'sin fecha'",
+                    "¿Cuándo empieza? Puedes decir 'hoy', 'mañana' con hora, o 'sin fecha'"
+                }),
+
                 _ => "Campo desconocido"
             };
         }
 
         /// <summary>
-        /// Genera pregunta de corrección
+        /// Genera pregunta variada de clarificación AM/PM
+        /// </summary>
+        private string GetTimeClarificationQuestion(int hour)
+        {
+            return GetRandomQuestion(new[]
+            {
+                $"¿{hour} de la mañana o {hour} de la tarde?",
+                $"¿Te refieres a {hour} AM o {hour} PM?",
+                $"¿{hour} antes del mediodía o después del mediodía?"
+            });
+        }
+
+        /// <summary>
+        /// Genera pregunta variada de corrección
         /// </summary>
         private string GetCorrectionQuestion(string field)
         {
             return field switch
             {
-                "titulo" => "¿Cuál es el nuevo título?",
-                "prioridad" => "¿Cuál es la nueva prioridad? Opciones: Alta, Media, Baja",
-                "dueStart" => "¿Cuál es la nueva fecha de inicio?",
-                "dueEnd" => "¿Cuál es la nueva fecha de fin?",
+                "titulo" => GetRandomQuestion(new[]
+                {
+                    "¿Cuál es el nuevo título?",
+                    "¿Qué título quieres?",
+                    "Dame el título correcto"
+                }),
+
+                "prioridad" => GetRandomQuestion(new[]
+                {
+                    "¿Cuál es la nueva prioridad? Opciones: Alta, Media, Baja",
+                    "¿Qué prioridad será? Alta, Media o Baja",
+                    "Dime la prioridad: Alta, Media o Baja"
+                }),
+
+                "dueStart" => GetRandomQuestion(new[]
+                {
+                    "¿Cuál es la nueva fecha de inicio?",
+                    "¿Para cuándo será?",
+                    "Dame la fecha y hora correcta"
+                }),
+
+                "dueEnd" => GetRandomQuestion(new[]
+                {
+                    "¿Cuál es la nueva fecha de fin?",
+                    "¿Cuándo terminará?",
+                    "Dame la fecha de finalización"
+                }),
+
                 _ => $"¿Cuál es el nuevo valor para {field}?"
             };
         }
 
         /// <summary>
-        /// Establece un campo con validación
+        /// Selecciona pregunta aleatoria de un array
+        /// </summary>
+        private string GetRandomQuestion(string[] options)
+        {
+            if (options == null || options.Length == 0)
+                return "Error: sin opciones de pregunta";
+
+            var index = _random.Next(options.Length);
+            return options[index];
+        }
+
+        /// <summary>
+        /// Establece campo con validación
         /// </summary>
         private (bool valid, string message) SetField(string field, string value)
         {
@@ -259,7 +399,6 @@ namespace Anfeta.UI.Services.Activity
                     return (true, $"Prioridad: {prioridadResult.Normalized}");
 
                 case "dueStart":
-                    // Permitir "sin fecha"
                     if (value.ToLowerInvariant().Contains("sin fecha") ||
                         value.ToLowerInvariant().Contains("no"))
                     {
@@ -269,6 +408,14 @@ namespace Anfeta.UI.Services.Activity
                     }
 
                     var extractedState = _extractor.ExtractFields(value);
+
+                    if (extractedState.AmbiguousHour.HasValue && extractedState.AmbiguousBaseDate.HasValue)
+                    {
+                        _state.AmbiguousHour = extractedState.AmbiguousHour;
+                        _state.AmbiguousBaseDate = extractedState.AmbiguousBaseDate;
+                        return (false, GetTimeClarificationQuestion(extractedState.AmbiguousHour.Value));
+                    }
+
                     if (extractedState.DueStart.HasValue)
                     {
                         var fechaResult = _validator.ValidateFecha(extractedState.DueStart.Value);

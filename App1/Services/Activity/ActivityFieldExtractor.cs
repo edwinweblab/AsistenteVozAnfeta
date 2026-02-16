@@ -29,9 +29,13 @@ namespace Anfeta.UI.Services.Activity
             state.Titulo = ExtractTitulo(lower);
             state.Prioridad = ExtractPrioridad(lower);
 
-            var (start, end) = ExtractFechaHora(lower);
+            // ✅ ACTUALIZADO: Manejar 4 elementos de la tupla
+            var (start, end, ambiguousHour, ambiguousBaseDate) = ExtractFechaHora(lower);
+
             state.DueStart = start;
             state.DueEnd = end;
+            state.AmbiguousHour = ambiguousHour;
+            state.AmbiguousBaseDate = ambiguousBaseDate;
 
             return state;
         }
@@ -95,14 +99,14 @@ namespace Anfeta.UI.Services.Activity
         /// <summary>
         /// Extrae fecha y hora del comando
         /// Entrada: command - comando en minúsculas
-        /// Salida: (inicio, fin) o (null, null)
+        /// Salida: (inicio, fin, hora ambigua, fecha base)
         /// </summary>
-        private (DateTimeOffset? start, DateTimeOffset? end) ExtractFechaHora(string command)
+        private (DateTimeOffset? start, DateTimeOffset? end, int? ambiguousHour, DateTimeOffset? ambiguousBaseDate) ExtractFechaHora(string command)
         {
             var now = DateTimeOffset.Now;
             DateTimeOffset? baseDate = null;
 
-            // Detectar día
+            // Detectar día (igual que antes)
             if (command.Contains("hoy"))
             {
                 baseDate = now.Date;
@@ -129,7 +133,6 @@ namespace Anfeta.UI.Services.Activity
                         if (month > 0)
                         {
                             var year = now.Year;
-                            // Si la fecha ya pasó este año, usar el siguiente
                             if (month < now.Month || (month == now.Month && day < now.Day))
                                 year++;
 
@@ -148,94 +151,235 @@ namespace Anfeta.UI.Services.Activity
 
             // Si no hay fecha base, retornar null
             if (!baseDate.HasValue)
-                return (null, null);
+                return (null, null, null, null);
 
-            // Extraer hora
-            var hour = ExtractHora(command);
+            // ✅ Extraer hora con detección de ambigüedad
+            var (hour, needsClarification) = ExtractHora(command);
 
+            // ✅ Si la hora es ambigua, devolver datos para preguntar
+            if (needsClarification && hour.HasValue)
+            {
+                return (null, null, hour.Value, baseDate.Value);
+            }
+
+            // Si hay hora clara, construir fecha completa
             if (hour.HasValue)
             {
                 var start = baseDate.Value.AddHours(hour.Value);
-                var end = start.AddHours(1); // Default: 1 hora de duración
-                return (start, end);
+                var end = start.AddHours(1);
+                return (start, end, null, null);
             }
 
-            // Si no hay hora específica, usar 9 AM por default
-            return (baseDate.Value.AddHours(9), baseDate.Value.AddHours(10));
+            // Sin hora específica, usar 9 AM por default
+            return (baseDate.Value.AddHours(9), baseDate.Value.AddHours(10), null, null);
         }
 
         /// <summary>
-        /// Extrae la hora del comando
-        /// Entrada: command - comando en minúsculas
-        /// Salida: hora en formato 24h o null
+        /// Extrae hora y detecta si necesita clarificación AM/PM
+        /// Soporta: "3 pm", "3:00 pm", "5 y media", "5:30", "después de mediodía"
         /// </summary>
-        private int? ExtractHora(string command)
+        private (int? hora, bool needsClarification) ExtractHora(string command)
         {
-            // "a las 5", "5 pm", "17:00", "5:30 de la tarde"
+            int? horaBase = null;
+            int minutos = 0;
+            bool hasExplicitAMPM = false;
+            bool isPM = false;
 
-            // Patrón 1: "a las X" o "X pm/am"
-            var match1 = Regex.Match(command, @"(?:a las|las)\s+(\d{1,2})(?::(\d{2}))?\s*(pm|am|de la tarde|de la mañana)?");
+            // ========================================
+            // NORMALIZAR: Unificar variaciones de "mediodía"
+            // ========================================
+            command = command.Replace("después de mediodía", "despuesmediodia")
+                             .Replace("despues de mediodia", "despuesmediodia")
+                             .Replace("después del mediodía", "despuesmediodia")
+                             .Replace("despues del mediodia", "despuesmediodia")
+                             .Replace("antes de mediodía", "antesmediodia")
+                             .Replace("antes de mediodia", "antesmediodia")
+                             .Replace("antes del mediodía", "antesmediodia")
+                             .Replace("antes del mediodia", "antesmediodia");
+
+            // ========================================
+            // CASO 1A: Hora con minutos + PM/AM: "3:00 pm", "5:30 despuesmediodia"
+            // ========================================
+            var match1 = Regex.Match(command, @"(\d{1,2}):(\d{2})\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)");
             if (match1.Success)
             {
-                if (int.TryParse(match1.Groups[1].Value, out var hora))
+                horaBase = int.Parse(match1.Groups[1].Value);
+                minutos = int.Parse(match1.Groups[2].Value);
+                hasExplicitAMPM = true;
+
+                var indicator = match1.Groups[3].Value;
+                isPM = indicator.Contains("pm") || indicator.Contains("tarde") || indicator.Contains("despues");
+            }
+
+            // ========================================
+            // CASO 1B: Hora con minutos SIN PM/AM: "3:30", "5:45"
+            // ========================================
+            if (!hasExplicitAMPM)
+            {
+                var match2 = Regex.Match(command, @"(\d{1,2}):(\d{2})(?!\s*(pm|am|tarde|mañana))");
+                if (match2.Success)
                 {
-                    var esPM = match1.Groups[3].Value.Contains("pm") ||
-                               match1.Groups[3].Value.Contains("tarde");
-                    var esAM = match1.Groups[3].Value.Contains("am") ||
-                               match1.Groups[3].Value.Contains("mañana");
+                    horaBase = int.Parse(match2.Groups[1].Value);
+                    minutos = int.Parse(match2.Groups[2].Value);
 
-                    if (esPM && hora < 12)
-                        hora += 12;
-                    else if (esAM && hora == 12)
-                        hora = 0;
+                    // Formato 24h (14:00, 17:30)
+                    if (horaBase >= 13 && horaBase <= 23)
+                    {
+                        return (horaBase.Value, false);
+                    }
 
-                    return hora;
+                    // Hora ambigua con minutos (3:30, 11:45)
+                    if (horaBase >= 1 && horaBase <= 12)
+                    {
+                        return (horaBase.Value, true);
+                    }
                 }
             }
 
-            // Patrón 2: solo número seguido de pm/am
-            var match2 = Regex.Match(command, @"(\d{1,2})\s*(pm|am|de la tarde|de la mañana)");
-            if (match2.Success)
+            // ========================================
+            // CASO 2: Hora con PM/AM SIN minutos: "3 pm", "5 despuesmediodia"
+            // ========================================
+            if (!hasExplicitAMPM)
             {
-                if (int.TryParse(match2.Groups[1].Value, out var hora))
+                var match3 = Regex.Match(command, @"(\d{1,2})\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)");
+                if (match3.Success)
                 {
-                    var esPM = match2.Groups[2].Value.Contains("pm") ||
-                               match2.Groups[2].Value.Contains("tarde");
+                    horaBase = int.Parse(match3.Groups[1].Value);
+                    minutos = 0;
+                    hasExplicitAMPM = true;
 
-                    if (esPM && hora < 12)
-                        hora += 12;
-
-                    return hora;
+                    var indicator = match3.Groups[2].Value;
+                    isPM = indicator.Contains("pm") || indicator.Contains("tarde") || indicator.Contains("despues");
                 }
             }
 
-            // Patrón 3: formato 24h "17:00"
-            var match3 = Regex.Match(command, @"(\d{1,2}):(\d{2})");
-            if (match3.Success)
+            // ========================================
+            // CASO 3: "y media" = :30
+            // ========================================
+            if (!hasExplicitAMPM && horaBase == null)
             {
-                if (int.TryParse(match3.Groups[1].Value, out var hora))
-                    return hora;
-            }
-
-            // ⬇️ AGREGAR ESTA LÓGICA NUEVA ⬇️
-
-            // Patrón 4: Solo número sin AM/PM (asumir PM si es 1-11, AM si es 12)
-            var match4 = Regex.Match(command, @"(?:a las|las)\s+(\d{1,2})(?!\s*(pm|am|tarde|mañana))");
-            if (match4.Success)
-            {
-                if (int.TryParse(match4.Groups[1].Value, out var hora))
+                var matchMedia = Regex.Match(command, @"(\d{1,2})\s*y\s*media\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)?");
+                if (matchMedia.Success)
                 {
-                    // Si es 1-11 sin especificar → asumir PM (tarde/noche)
-                    if (hora >= 1 && hora <= 11)
-                        return hora + 12;
+                    horaBase = int.Parse(matchMedia.Groups[1].Value);
+                    minutos = 30;
 
-                    // Si es 12 sin especificar → asumir mediodía (12 PM)
-                    if (hora == 12)
-                        return 12;
+                    if (matchMedia.Groups[2].Success && !string.IsNullOrWhiteSpace(matchMedia.Groups[2].Value))
+                    {
+                        hasExplicitAMPM = true;
+                        var indicator = matchMedia.Groups[2].Value;
+                        isPM = indicator.Contains("pm") || indicator.Contains("tarde") || indicator.Contains("despues");
+                    }
                 }
             }
 
-            return null;
+            // ========================================
+            // CASO 4: "y cuarto" = :15
+            // ========================================
+            if (!hasExplicitAMPM && horaBase == null)
+            {
+                var matchCuarto = Regex.Match(command, @"(\d{1,2})\s*y\s*cuarto\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)?");
+                if (matchCuarto.Success)
+                {
+                    horaBase = int.Parse(matchCuarto.Groups[1].Value);
+                    minutos = 15;
+
+                    if (matchCuarto.Groups[2].Success && !string.IsNullOrWhiteSpace(matchCuarto.Groups[2].Value))
+                    {
+                        hasExplicitAMPM = true;
+                        var indicator = matchCuarto.Groups[2].Value;
+                        isPM = indicator.Contains("pm") || indicator.Contains("tarde") || indicator.Contains("despues");
+                    }
+                }
+            }
+
+            // ========================================
+            // CASO 5: "menos cuarto" = :45
+            // ========================================
+            if (!hasExplicitAMPM && horaBase == null)
+            {
+                var matchMenosCuarto = Regex.Match(command, @"(\d{1,2})\s*menos\s*cuarto\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)?");
+                if (matchMenosCuarto.Success)
+                {
+                    horaBase = int.Parse(matchMenosCuarto.Groups[1].Value) - 1;
+                    if (horaBase < 1) horaBase = 12;
+                    minutos = 45;
+
+                    if (matchMenosCuarto.Groups[2].Success && !string.IsNullOrWhiteSpace(matchMenosCuarto.Groups[2].Value))
+                    {
+                        hasExplicitAMPM = true;
+                        var indicator = matchMenosCuarto.Groups[2].Value;
+                        isPM = indicator.Contains("pm") || indicator.Contains("tarde") || indicator.Contains("despues");
+                    }
+                }
+            }
+
+            // ========================================
+            // CASO 6: Solo "despuesmediodia" sin hora
+            // ========================================
+            if (horaBase == null && command.Contains("despuesmediodia"))
+            {
+                return (14, false); // Default 2 PM
+            }
+
+            // ========================================
+            // CASO 7: Solo "antesmediodia" sin hora
+            // ========================================
+            if (horaBase == null && command.Contains("antesmediodia"))
+            {
+                return (10, false); // Default 10 AM
+            }
+
+            // ========================================
+            // CASO 8: Hora simple sin indicador: "a las 3"
+            // ========================================
+            if (horaBase == null)
+            {
+                var matchSimple = Regex.Match(command, @"(?:a las|las)\s+(\d{1,2})(?!\s*(pm|am|tarde|mañana|:))");
+                if (matchSimple.Success)
+                {
+                    horaBase = int.Parse(matchSimple.Groups[1].Value);
+                    minutos = 0;
+                }
+            }
+
+            // ========================================
+            // CALCULAR HORA FINAL
+            // ========================================
+
+            if (horaBase == null)
+                return (null, false);
+
+            // Si tiene AM/PM explícito
+            if (hasExplicitAMPM)
+            {
+                int horaFinal;
+
+                if (isPM)
+                {
+                    horaFinal = (horaBase == 12) ? 12 : horaBase.Value + 12;
+                }
+                else // AM
+                {
+                    horaFinal = (horaBase == 12) ? 0 : horaBase.Value;
+                }
+
+                return (horaFinal, false);
+            }
+
+            // Hora ambigua (1-12 sin AM/PM)
+            if (horaBase >= 1 && horaBase <= 12)
+            {
+                return (horaBase.Value, true);
+            }
+
+            // Formato 24h
+            if (horaBase >= 0 && horaBase <= 23)
+            {
+                return (horaBase.Value, false);
+            }
+
+            return (null, false);
         }
 
         /// <summary>
