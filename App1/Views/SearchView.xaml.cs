@@ -2,15 +2,21 @@
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Search;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Markup;
+using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
@@ -19,72 +25,65 @@ using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 
-
 namespace Anfeta.UI.Views
 {
 
     public sealed partial class SearchView : Page 
 
     {
-        private List<string> _highlightTerms = new();
-        private readonly ShellIconService _iconService = new ShellIconService();
-        private bool _isBrowsing = false; // false=buscar, true=explorar carpeta 
-        private bool _onlyBookmarks = false;
-        private LocalIndexService Index => App.LocalIndex;
-
+        #region ===== Fields / Const / Enums =====
+        // enums
         private enum ViewMode { Explorer, Bookmarks }
         private ViewMode _mode = ViewMode.Explorer;
-
-        // filtros exclusivos de bookmarks (separados)
-        private bool _bmOnlyFolders = false;
-        private string? _bmExtFilter = null;
-        private string _bmSortKey = "name_asc";
-
-
-
-        // ===== Dropbox Smart Sync helpers (Windows) =====
+        // settings keys
+        private const string LS_DropboxRoot = "DropboxRoot";
+        // Win32 file attributes (Dropbox / OneDrive placeholders)
         private const int FILE_ATTRIBUTE_OFFLINE = 0x00001000;
         private const int FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000;
         private const int FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000;
-        private DropboxFileInfo? _selectedInfo;
-        private readonly DropboxNotionFilesApi _api = new(new HttpClient());
-        private readonly Stack<string> _backStack = new();
-        private readonly Stack<string> _forwardStack = new();
-        private ObservableCollection<FolderNode> _treeRoots = new();
-
-
-        // Navegación / Explorador
-        private string _currentFolder = "";  // ✅ YA EXISTE
- 
-
-        public ObservableCollection<SearchResultRow> Results { get; } = new();
-
-        private readonly DispatcherTimer _debounceTimer = new();
-        private string _pendingQuery = "";
-
-        private CancellationTokenSource? _cts;
-        private List<DropboxNode> _raw = new();
-
-        private const string DROPBOX_PATH_KEY = "DropboxRootPath";
-        private const string LS_DropboxRoot = "DropboxRootPath";
-        // ✅ Root dinámico (ya no const fijo)
+        // state
         private string DROPBOX_ROOT = "";
+        private string _currentFolder = "";
+        private bool _isBrowsing = false;
+        private bool _onlyBookmarks = false;
+        private bool _onlyFolders = false;
+        private string? _extFilter = null;
+        private string _sortKey = "name_asc";
+        // debounce / tokens
+        private DispatcherTimer? _searchDebounceTimer;
+        private CancellationTokenSource? _searchCts;
+        private CancellationTokenSource? _cts;
+        // UI / help popup
+        private ContentControl? _helpBodyHost;
 
-
-        // cache del “índice” local
-        private List<SearchResultRow> _localIndex = new();
+        // icons/bookmarks
+        private readonly ShellIconService _iconService = new();
         private readonly BookmarksService _bookmarksService = new();
         private List<BookmarkItem> _bookmarks = new();
 
+        // collections
+        public ObservableCollection<SearchResultRow> Results { get; } = new();
+        private ObservableCollection<FolderNode> _treeRoots = new();
+        private readonly Stack<string> _backStack = new();
+        private readonly Stack<string> _forwardStack = new();
 
-
-        // filtros (cliente)
-        private bool _onlyFolders = false;
-        private string? _extFilter = null; // "pdf","docx","xlsx","img"...
-        private string _sortKey = "name_asc";
-
-        // colapsable
+        // highlight
+        private List<string> _highlightTerms = new();
+        //Extras
+        private bool _allowProgrammaticSearch = false;
         private bool _foldersPaneVisible = true;
+        //Exclusion
+        private const string LS_ExcludedFolders = "ExcludedFolders"; // rutas separadas por |
+        private readonly List<string> _excludedFolders = new(); // en memoria 
+        private readonly ObservableCollection<string> _excludedFoldersUi = new();
+        private const string LS_SavedSearches = "SavedSearches"; // JSON
+        //Contraibles
+        private const string LS_CommandsExpanded = "CommandsExpanded";
+        private const string LS_ExcludedExpanded = "ExcludedExpanded";
+
+        #endregion
+
+        #region ===== Internal Models / Views =====
         private sealed class RowView : AdvancedQueryV3.IItemView
         {
             private readonly SearchResultRow _x;
@@ -170,70 +169,31 @@ namespace Anfeta.UI.Views
                 return DateTime.MinValue;
             }
         }
-
-        private void LoadDropboxRootFromSettings()
+        private sealed class FolderNode
         {
-            var v = ApplicationData.Current.LocalSettings.Values[DROPBOX_PATH_KEY] as string;
-            DROPBOX_ROOT = (v ?? "").Trim();
-            DropboxPathBox.Text = DROPBOX_ROOT;
+            public string Name { get; set; } = "";
+            public string FullPath { get; set; } = "";
+
+            // MUY IMPORTANTE: ObservableCollection sin setter
+            public ObservableCollection<FolderNode> Children { get; } = new();
+
+            // Para lazy load real
+            public bool HasDummyChild { get; set; } = false;
+            public bool IsLoaded { get; set; } = false;
         }
-
-        private void SaveDropboxRootToSettings(string path)
-        {
-            ApplicationData.Current.LocalSettings.Values[DROPBOX_PATH_KEY] = path;
-            DROPBOX_ROOT = path;
-            DropboxPathBox.Text = DROPBOX_ROOT;
-        }
-
-        private async void BtnPickDropboxFolder_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var picker = new FolderPicker();
-                picker.FileTypeFilter.Add("*");
-
-                // ✅ importantísimo en WinUI3
-                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
-                InitializeWithWindow.Initialize(picker, hwnd);
-
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder == null) return;
-
-                SaveDropboxRootToSettings(folder.Path);
-
-                StatusText.Text = $"Estado: Ruta guardada ✅";
-                // opcional: refrescar árbol si ya estás aquí
-                if (Directory.Exists(DROPBOX_ROOT))
-                {
-                    LoadFoldersRoot();
-                    BuildTreeRoot();
-                    await BrowseFolderAsync(DROPBOX_ROOT);
-                }
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error eligiendo ruta → {ex.Message}";
-            }
-        }
+        #endregion
+        #region ===== Constructor / Lifecycle =====
         public SearchView()
         {
             InitializeComponent();
+            DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
+            Unloaded += (_, __) => DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
 
             ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
             Loaded += SearchView_Loaded;
-
-
-            // HttpClient simple (luego lo mueves a DI si quieres)
-            _api = new DropboxNotionFilesApi(new HttpClient());
-
-            // Debounce 300ms
-            _debounceTimer.Interval = TimeSpan.FromMilliseconds(300);
-            _debounceTimer.Tick += async (_, __) =>
-            {
-                _debounceTimer.Stop();
-                await RunSearchAsync(_pendingQuery);
-            };
+            
+            
 
             StatusText.Text = "Estado: Dropbox (API)";
             ModeText.Text = "Modo: Buscar";
@@ -249,9 +209,18 @@ namespace Anfeta.UI.Views
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
             }
         }
+
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
-            // 1) Bookmarks (como ya lo tienes)
+            LoadExcludedFolders();
+            RefreshExcludedFoldersUi();
+            LoadSavedSearches();
+            CommandsSidebarList.ItemsSource = _savedSearches;
+            RefreshCommandsSidebarUi();
+            LoadSidebarExpandedStates();
+
+
+            // 1) Bookmarks
             try
             {
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
@@ -263,217 +232,161 @@ namespace Anfeta.UI.Views
                 _bookmarks = new();
             }
 
-            // ✅ Cargar DropboxRoot guardado
+            // 2) Leer ruta guardada
             var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-            if (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved))
-            {
-                DROPBOX_ROOT = saved;
-                DropboxPathBox.Text = saved;
+            var hasValidDropboxRoot = !string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved);
 
-                StatusText.Text = "Estado: Ruta Dropbox cargada ✅";
-            }
-            else
+            if (!hasValidDropboxRoot)
             {
-                StatusText.Text = "Estado: Selecciona la ruta de Dropbox (Elegir...)";
+                DROPBOX_ROOT = "";
+                ResetSearchModuleState();
+                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Configura la ruta en Settings.";
+                return;
             }
-            // 2) Index cache (para no sincronizar al volver al módulo)
-            if (App.LocalIndex.HasData)
+
+            DROPBOX_ROOT = saved!.Trim();
+
+            // 3) Si está indexando o aún no hay índice, mostrar estado (sin Sync)
+            if (DropboxIndexCoordinator.IsIndexing || !App.LocalIndex.HasData)
             {
-                var count = App.LocalIndex.GetAll().Count;
-
-                // Si quieres, puedes mantener ambos estados en el texto:
-                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Index cache ✅ ({count} items)";
-
-                // opcional: mostrar raíz al entrar (sin meter historial)
-                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
-
-                // opcional: si hay texto en SearchBox, corre búsqueda al entrar
-                var q = (SearchBox?.Text ?? "").Trim();
-                if (!string.IsNullOrWhiteSpace(q))
-                    await RunLocalSearchAsync(q);
+                ResetSearchModuleState();
+                StatusText.Text = DropboxIndexCoordinator.IsIndexing
+                    ? $"Estado: Ruta nueva detectada, indexando…"
+                    : $"Estado: Aún no hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
             }
-            else
+
+            // 4) Ya hay índice: cargar árbol + root
+            LoadFoldersRoot();
+            BuildTreeRoot();
+            await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+            CommandsSidebarList.ItemsSource = _savedSearches;
+            RefreshCommandsSidebarUi();
+
+
+            StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
+        }
+        #endregion
+
+        #region ===== Index Coordinator (Auto-index) =====
+        private void OnIndexStateChanged()
+        {
+            // Siempre brinca a UI thread
+            DispatcherQueue.TryEnqueue(() =>
             {
-                // No hay index todavía, no sincronizamos solos (modo estable)
-                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Sin index (pulsa Sync)";
-            }
+                _ = ApplyIndexStateAsync();
+            });
         }
 
-        private static bool NeedsHydration(string path)
+        private async Task ApplyIndexStateAsync()
         {
-            try
+            // 1) Si está indexando => limpiar UI y mostrar mensaje
+            if (DropboxIndexCoordinator.IsIndexing)
             {
-                var attrs = File.GetAttributes(path);
-                // OFFLINE / RECALL_* suelen indicar “online-only” o pendiente
-                var flags = (int)attrs;
-                return (flags & FILE_ATTRIBUTE_OFFLINE) != 0
-                    || (flags & FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0
-                    || (flags & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-            }
-            catch
-            {
-                // Si falla leer atributos, tratamos como “no hidratado”
-                return true;
-            }
-        }
-       
-
-        private async Task<bool> EnsureHydratedAsync(string path, CancellationToken ct)
-        {
-            // Si ya es local, listo
-            if (!NeedsHydration(path))
-                return true;
-
-            // 1) “Touch”: leer 1 byte para disparar la descarga (Dropbox Smart Sync)
-            try
-            {
-                // Importante: FileShare.ReadWrite para no pelear con Dropbox
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                var buffer = new byte[1];
-                _ = await fs.ReadAsync(buffer, 0, 1, ct);
-            }
-            catch
-            {
-                // Puede fallar al inicio mientras “baja”, no importa, seguimos a esperar
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
             }
 
-            // 2) Esperar hasta que deje de ser placeholder
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            const int timeoutMs = 120_000; // 2 min (ajústalo)
-            const int pollMs = 600;
-
-            while (sw.ElapsedMilliseconds < timeoutMs)
+            // 2) Si hubo error
+            if (!string.IsNullOrWhiteSpace(DropboxIndexCoordinator.LastError))
             {
-                ct.ThrowIfCancellationRequested();
+                ResetSearchModuleState();
+                StatusText.Text = $"Estado: Error indexando → {DropboxIndexCoordinator.LastError}";
+                return;
+            }
 
-                // si ya no necesita hidratación y existe tamaño “real” (extra safety)
-                if (!NeedsHydration(path))
+            // 3) Si está listo y hay índice
+            if (DropboxIndexCoordinator.IsReady && App.LocalIndex.HasData)
+            {
+                var root = DropboxIndexCoordinator.RootPath ?? "";
+
+                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
                 {
-                    try
-                    {
-                        var fi = new FileInfo(path);
-                        if (fi.Exists)
-                            return true;
-                    }
-                    catch { /* ignore */ }
+                    ResetSearchModuleState();
+                    StatusText.Text = "Estado: Ruta inválida. Configura de nuevo en Settings.";
+                    return;
                 }
 
-                await Task.Delay(pollMs, ct);
+                // Actualiza root local del SearchView
+                DROPBOX_ROOT = root;
+
+                // Refresca árbol + navega a root
+                LoadFoldersRoot();
+                BuildTreeRoot();
+                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+
+                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
             }
-
-            return false; // timeout
         }
+        #endregion
 
-        private sealed class FolderNode
+        #region ===== UI Reset / State =====
+        private void ResetSearchModuleState()
         {
-            public string Name { get; set; } = "";
-            public string FullPath { get; set; } = "";
+            CancelPendingSearch();
 
-            // MUY IMPORTANTE: ObservableCollection sin setter
-            public ObservableCollection<FolderNode> Children { get; } = new();
+            _currentFolder = "";
+            _backStack.Clear();
+            _forwardStack.Clear();
 
-            // Para lazy load real
-            public bool HasDummyChild { get; set; } = false;
-            public bool IsLoaded { get; set; } = false;
+            Results.Clear();
+            ResultsList.ItemsSource = Results;
+
+            FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
+            EmptyTreeHint.Visibility = Visibility.Visible;
+
+            BreadcrumbText.Text = "/";
+            ModeText.Text = "Modo: Explorar (Local)";
+            CountText.Text = "0 resultados";
+            EmptyResultsHint.Visibility = Visibility.Visible;
+
+            // opcional: limpiar detalles
+            DetailsTitle.Text = "Selecciona un elemento";
+            DetailsPath.Text = "—";
+            DetailsMeta.Text = "—";
+            DetailsNotion.Text = "—";
         }
+        private void FinishUi()
+        {
+            LoadingRing.IsActive = false;
+            LoadingRing.Visibility = Visibility.Collapsed;
 
+            EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            CountText.Text = $"{Results.Count} resultados";
+        }
+        #endregion
+
+        #region ===== Explorer / Tree / Navigation =====
         private void LoadFoldersRoot()
         {
             if (!Directory.Exists(DROPBOX_ROOT))
                 throw new Exception($"No existe la ruta: {DROPBOX_ROOT}");
 
+            BuildTreeRoot();
+        }
+        private void BuildTreeRoot()
+        {
+            _treeRoots.Clear();
+
             var root = new FolderNode
             {
-                Name = "Dropbox",
-                FullPath = DROPBOX_ROOT
+                Name = Path.GetFileName(DROPBOX_ROOT),
+                FullPath = DROPBOX_ROOT,
+                HasDummyChild = true
             };
 
-            // Agregamos un “placeholder” para que muestre flechita
-            root.Children.Add(new FolderNode { Name = "Cargando…", FullPath = "" });
+            // dummy para que aparezca la flechita de expand
+            root.Children.Add(new FolderNode { Name = "Cargando...", FullPath = "" });
 
-            FolderTree.ItemsSource = new ObservableCollection<FolderNode> { root };
+            _treeRoots.Add(root);
 
-            // Oculta hint
-            EmptyTreeHint.Visibility = Visibility.Collapsed;
-        }
-        // ===== Colapsable =====
-        private void ToggleFoldersPane_Click(object sender, RoutedEventArgs e)
-        {
-            _foldersPaneVisible = ToggleFoldersPane.IsChecked == true;
+            FolderTree.ItemsSource = _treeRoots;
+            // ✅ si ya hay root, oculta el hint
+            EmptyTreeHint.Visibility = (_treeRoots.Count > 0)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
 
-            if (_foldersPaneVisible)
-            {
-                FoldersPane.Visibility = Visibility.Visible;
-                FoldersPaneCol.Width = new GridLength(320);
-            }
-            else
-            {
-                FoldersPane.Visibility = Visibility.Collapsed;
-                FoldersPaneCol.Width = new GridLength(0);
-            }
-        }
-        private void ToggleDetailsPane_Click(object sender, RoutedEventArgs e)
-        {
-            var show = ToggleDetailsPane.IsChecked == true;
-
-            if (show)
-            {
-                DetailsPane.Visibility = Visibility.Visible;
-                DetailsCol.Width = new GridLength(340);
-            }
-            else
-            {
-                DetailsPane.Visibility = Visibility.Collapsed;
-                DetailsCol.Width = new GridLength(0);
-            }
-        }
-        private async void FolderTree_Expanding(TreeView sender, TreeViewExpandingEventArgs args)
-        {
-            if (args.Item is not FolderNode node) return;
-
-            // ya cargado
-            if (!node.HasDummyChild) return;
-
-            node.Children.Clear();
-            node.HasDummyChild = false;
-
-            await Task.Run(() =>
-            {
-                try
-                {
-                    foreach (var dir in Directory.EnumerateDirectories(node.FullPath))
-                    {
-                        var child = new FolderNode
-                        {
-                            Name = Path.GetFileName(dir),
-                            FullPath = dir
-                        };
-
-                        // si tiene subcarpetas -> dummy para mostrar flecha
-                        try
-                        {
-                            if (Directory.EnumerateDirectories(dir).Any())
-                            {
-                                child.HasDummyChild = true;
-                                child.Children.Add(new FolderNode { Name = "Cargando...", FullPath = "" });
-                            }
-                        }
-                        catch { }
-
-                        // UI thread
-                        DispatcherQueue.TryEnqueue(() => node.Children.Add(child));
-                    }
-                }
-                catch { }
-            });
-        }
-
-        private async void FolderTree_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
-        {
-            if (args.InvokedItem is not FolderNode node) return;
-            if (string.IsNullOrWhiteSpace(node.FullPath)) return;
-
-            await BrowseFolderAsync(node.FullPath);
         }
 
         private async Task BrowseFolderAsync(string folder, bool pushHistory = true)
@@ -483,15 +396,9 @@ namespace Anfeta.UI.Views
                 StatusText.Text = "Estado: Carpeta no existe";
                 return;
             }
-
             // ✅ Entramos a modo Explorer (browse)
             _mode = ViewMode.Explorer;
             _isBrowsing = true;
-
-            // ✅ IMPORTANTÍSIMO: al navegar carpeta, salimos del “modo búsqueda”
-            // (evita residuos visuales y highlight aplicándose donde no toca)
-
-            // ⚠️ OJO: si NO quieres resetear los chips al navegar, comenta estas 3 líneas:
             _onlyBookmarks = false;
             _onlyFolders = false;
             _extFilter = null;
@@ -511,6 +418,19 @@ namespace Anfeta.UI.Views
 
             LoadingRing.IsActive = true;
             LoadingRing.Visibility = Visibility.Visible;
+            // ✅ Si la carpeta está excluida, no la navegues
+            if (IsExcludedPath(folder))
+            {
+                Results.Clear();
+                ResultsList.ItemsSource = Results;
+
+                BreadcrumbText.Text = "Ruta: (excluida)";
+                CountText.Text = "0 resultados";
+                EmptyResultsHint.Visibility = Visibility.Visible;
+
+                StatusText.Text = "Estado: Esta carpeta está excluida";
+                return;
+            }
 
             try
             {
@@ -542,7 +462,9 @@ namespace Anfeta.UI.Views
                 foreach (var dir in dirs)
                 {
                     if (string.IsNullOrWhiteSpace(dir)) continue;
-
+                    // ✅ excluir carpetas seleccionadas por el usuario
+                    if (IsExcludedPath(dir))
+                        continue;
                     string name;
                     try
                     {
@@ -590,6 +512,8 @@ namespace Anfeta.UI.Views
                 foreach (var file in files)
                 {
                     if (string.IsNullOrWhiteSpace(file)) continue;
+                    if (IsExcludedPath(file))
+                        continue;
 
                     FileInfo fi;
                     try
@@ -646,38 +570,289 @@ namespace Anfeta.UI.Views
             await Task.CompletedTask;
         }
 
-
-
-        // ===== SEARCH (Everything-like) =====
-        private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+        private async void FolderTree_Expanding(TreeView sender, TreeViewExpandingEventArgs args)
         {
-            // Solo cuando el usuario escribe
-            if (args.Reason != Microsoft.UI.Xaml.Controls.AutoSuggestionBoxTextChangeReason.UserInput)
-                return;
+            if (args.Item is not FolderNode node) return;
 
+            if (node.IsLoaded) return;
+            if (!node.HasDummyChild) return;
 
-            _pendingQuery = sender.Text ?? "";
+            node.Children.Clear();
+            node.HasDummyChild = false;
 
-            // reinicia debounce
-            _debounceTimer.Stop();
-            _debounceTimer.Start();
-        }
-
-        private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
-        {
-            _debounceTimer.Stop();
-            _pendingQuery = sender.Text ?? "";
-            await RunSearchAsync(_pendingQuery);
-        }
-
-        private async Task RunSearchAsync(string query)
-        {
-            if (_localIndex.Count == 0)
+            await Task.Run(() =>
             {
-                StatusText.Text = "Estado: Aún no hay índice. Pulsa Sync.";
+                try
+                {
+                    foreach (var dir in Directory.EnumerateDirectories(node.FullPath))
+                    {
+                        var child = new FolderNode
+                        {
+                            Name = Path.GetFileName(dir),
+                            FullPath = dir
+                        };
+
+                        try
+                        {
+                            if (Directory.EnumerateDirectories(dir).Any())
+                            {
+                                child.HasDummyChild = true;
+                                child.Children.Add(new FolderNode { Name = "Cargando...", FullPath = "" });
+                            }
+                        }
+                        catch { }
+
+                        DispatcherQueue.TryEnqueue(() => node.Children.Add(child));
+                    }
+
+                    DispatcherQueue.TryEnqueue(() => node.IsLoaded = true);
+                }
+                catch { }
+            });
+        }
+
+        private async void FolderTree_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
+        {
+            if (args.InvokedItem is not FolderNode node) return;
+            if (string.IsNullOrWhiteSpace(node.FullPath)) return;
+
+            CancelPendingSearch();
+
+            if (!string.IsNullOrWhiteSpace(SearchBox.Text))
+                SearchBox.Text = "";
+
+            await BrowseFolderAsync(node.FullPath);
+        }
+
+        private async void BtnPrevPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_backStack.Count == 0) return;
+
+            var prev = _backStack.Pop();
+            _forwardStack.Push(_currentFolder);
+            await BrowseFolderAsync(prev, pushHistory: false);
+        }
+
+        private async void BtnNextPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_forwardStack.Count == 0) return;
+
+            var next = _forwardStack.Pop();
+            _backStack.Push(_currentFolder);
+            await BrowseFolderAsync(next, pushHistory: false);
+        }
+        private async void BtnRefreshTree_Click(object sender, RoutedEventArgs e)
+        {
+            // 1) Si está indexando, no borres todo, solo informa
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
                 return;
             }
 
+            // 2) Si no hay índice, no limpies UI a lo bestia
+            if (!App.LocalIndex.HasData)
+            {
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
+
+            // 3) Asegura root válido
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: Ruta inválida. Configura de nuevo en Settings.";
+                return;
+            }
+
+            try
+            {
+                BuildTreeRoot();
+                StatusText.Text = "Estado: Árbol actualizado ✅";
+
+                if (_isBrowsing && !string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
+                    await BrowseFolderAsync(_currentFolder, pushHistory: false);
+                else
+                    await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error → {ex.Message}";
+            }
+        }
+
+
+        private async void BtnGoRoot_Click(object sender, RoutedEventArgs e)
+        {
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            if (!App.LocalIndex.HasData)
+            {
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: Ruta inválida. Configura de nuevo en Settings.";
+                return;
+            }
+
+            await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+        }
+        private void ToggleFoldersPane_Click(object sender, RoutedEventArgs e)
+        {
+            _foldersPaneVisible = ToggleFoldersPane.IsChecked == true;
+
+            if (_foldersPaneVisible)
+            {
+                FoldersPane.Visibility = Visibility.Visible;
+                FoldersPaneCol.Width = new GridLength(320);
+            }
+            else
+            {
+                FoldersPane.Visibility = Visibility.Collapsed;
+                FoldersPaneCol.Width = new GridLength(0);
+            }
+        }
+        private void ToggleDetailsPane_Click(object sender, RoutedEventArgs e)
+        {
+            var show = ToggleDetailsPane.IsChecked == true;
+
+            if (show)
+            {
+                DetailsPane.Visibility = Visibility.Visible;
+                DetailsCol.Width = new GridLength(340);
+            }
+            else
+            {
+                DetailsPane.Visibility = Visibility.Collapsed;
+                DetailsCol.Width = new GridLength(0);
+            }
+        }
+        #endregion
+
+        #region ===== Search (Everything-like) =====
+        private void EnsureSearchDebounce()
+        {
+            if (_searchDebounceTimer != null) return;
+
+            _searchDebounceTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+
+            _searchDebounceTimer.Tick += async (_, __) =>
+            {
+                _searchDebounceTimer.Stop();
+
+                var q = (SearchBox?.Text ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(q)) return;
+                if (!App.LocalIndex.HasData) return;
+
+                _searchCts?.Cancel();
+                _searchCts = new CancellationTokenSource();
+                var token = _searchCts.Token;
+
+                try
+                {
+                    await RunLocalSearchAsync(q, token);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: Error buscando → {ex.Message}";
+                }
+            };
+        }
+        private void CancelPendingSearch()
+        {
+            _searchDebounceTimer?.Stop();
+            _searchCts?.Cancel();
+        }
+
+        private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+        {
+            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput && !_allowProgrammaticSearch)
+                return;
+
+
+            EnsureSearchDebounce();
+
+            var q = (sender.Text ?? "").Trim();
+
+            // vacío -> volver a explorer
+            if (string.IsNullOrWhiteSpace(q))
+            {
+                CancelPendingSearch();
+
+                if (DropboxIndexCoordinator.IsIndexing)
+                {
+                    StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                    return;
+                }
+
+                if (!App.LocalIndex.HasData)
+                {
+                    ResetSearchModuleState();
+                    StatusText.Text = "Estado: Aún no hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                    return;
+                }
+
+                _mode = ViewMode.Explorer;
+                ModeText.Text = "Modo: Explorar (Local)";
+
+                var folderToShow =
+                    (!string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
+                        ? _currentFolder
+                        : DROPBOX_ROOT;
+
+                if (!string.IsNullOrWhiteSpace(folderToShow) && Directory.Exists(folderToShow))
+                    _ = BrowseFolderAsync(folderToShow, pushHistory: false);
+
+                return;
+            }
+
+            // si hay texto -> buscar, pero solo si hay índice
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            if (!App.LocalIndex.HasData)
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
+
+            _searchDebounceTimer!.Stop();
+            _searchDebounceTimer.Start();
+        }
+        private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+        {
+            await RunSearchAsync(sender.Text ?? "");
+
+        }
+        private async Task RunSearchAsync(string query)
+        {
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            if (!App.LocalIndex.HasData)
+            {
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
             LoadingRing.IsActive = true;
             LoadingRing.Visibility = Visibility.Visible;
 
@@ -694,191 +869,6 @@ namespace Anfeta.UI.Views
                 LoadingRing.Visibility = Visibility.Collapsed;
             }
         }
-
-        private void FinishUi()
-        {
-            LoadingRing.IsActive = false;
-            LoadingRing.Visibility = Visibility.Collapsed;
-
-            EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            CountText.Text = $"{Results.Count} resultados";
-        }
-
-        // ===== Filters =====
-        private async void ChipFilter_Click(object sender, RoutedEventArgs e)
-        {
-            // --- 1) Flags ---
-            if (sender == ChipBookmarks)
-                _onlyBookmarks = ChipBookmarks.IsChecked == true;
-
-            if (sender == ChipFolders)
-                _onlyFolders = ChipFolders.IsChecked == true;
-
-            // --- 2) Extensión (solo una a la vez) ---
-            if (sender == ChipPdf) _extFilter = ChipPdf.IsChecked == true ? "pdf" : null;
-            else if (sender == ChipDocx) _extFilter = ChipDocx.IsChecked == true ? "docx" : null;
-            else if (sender == ChipXlsx) _extFilter = ChipXlsx.IsChecked == true ? "xlsx" : null;
-            else if (sender == ChipImg) _extFilter = ChipImg.IsChecked == true ? "img" : null;
-            else if (sender == ChipUrl) _extFilter = ChipUrl.IsChecked == true ? "url" : null; // ✅ NUEVO
-
-            // Apagar SOLO los otros chips de extensión (NO tocar Bookmarks/Folders)
-            if (_extFilter != null)
-            {
-                if (sender != ChipPdf) ChipPdf.IsChecked = false;
-                if (sender != ChipDocx) ChipDocx.IsChecked = false;
-                if (sender != ChipXlsx) ChipXlsx.IsChecked = false;
-                if (sender != ChipImg) ChipImg.IsChecked = false;
-                if (sender != ChipUrl) ChipUrl.IsChecked = false; // ✅ NUEVO
-            }
-
-            // --- 3) Decide qué pintar según modo ---
-            if (_onlyBookmarks)
-            {
-                await ShowBookmarksAsync();
-                FinishUi();
-                return;
-            }
-
-            await RunLocalSearchAsync(SearchBox.Text ?? "");
-            FinishUi();
-        }
-
-
-
-        private async void SortCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (SortCombo.SelectedItem is ComboBoxItem cbi && cbi.Tag is string tag)
-                _sortKey = tag;
-
-            if (_onlyBookmarks)
-                await ShowBookmarksAsync();
-            else
-                await RunLocalSearchAsync(SearchBox.Text ?? "");
-
-            FinishUi();
-        }
-
-
-        // ===== Results interactions (por ahora UI/Details) =====
-        private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (ResultsList.SelectedItem is not SearchResultRow row)
-                return;
-
-            DetailsTitle.Text = row.Name;
-            DetailsPath.Text = row.Target;
-            var online = File.Exists(row.Target) && NeedsHydration(row.Target);
-
-
-            DetailsMeta.Text =
-                $"Tipo: {row.Type}\n" +
-                $"Estado: {(online ? "Online-only (se descarga al abrir)" : "Disponible local")}\n" +
-                $"Tamaño: {(row.Size > 0 ? $"{row.Size / 1024:N0} KB" : "—")}\n" +
-                $"Modificado: {(!string.IsNullOrWhiteSpace(row.ServerModified) ? row.ServerModified : "—")}";
-            // Notion relacionado (si no tienes aún, déjalo en —)
-            DetailsNotion.Text = "—";
-
-            if ((row.Type ?? "").Equals("folder", StringComparison.OrdinalIgnoreCase))
-                StatusText.Text = "Estado: Es carpeta (usa acciones de navegación) 📁";
-            else
-                StatusText.Text = "Estado: Seleccionado ✅";
-        }
-
-
-        private async void ResultsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-        {
-            if (ResultsList.SelectedItem is not SearchResultRow row) return;
-            if (string.IsNullOrWhiteSpace(row.Target)) return;
-
-            // carpeta -> abrir explorador
-            // carpeta -> navegar internamente
-            if ((row.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase))
-            {
-                await BrowseFolderAsync(row.Target);
-                StatusText.Text = "Estado: Carpeta abierta 📁";
-                return;
-            }
-
-
-            _cts?.Cancel();
-            _cts = new CancellationTokenSource();
-
-            try
-            {
-                LoadingRing.IsActive = true;
-                LoadingRing.Visibility = Visibility.Visible;
-
-                // 1) si es online-only → descargar bajo demanda
-                if (NeedsHydration(row.Target))
-                {
-                    StatusText.Text = "Estado: Descargando desde Dropbox… ⬇️";
-                    var ok = await EnsureHydratedAsync(row.Target, _cts.Token);
-
-                    if (!ok)
-                    {
-                        StatusText.Text = "Estado: No se pudo descargar (timeout). Revisa tu conexión/Dropbox.";
-                        return;
-                    }
-                }
-
-                // 2) abrir archivo
-                StatusText.Text = "Estado: Abriendo…";
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = row.Target,
-                    UseShellExecute = true
-                });
-
-                StatusText.Text = "Estado: Archivo abierto ✅";
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error → {ex.Message}";
-            }
-            finally
-            {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
-            }
-        }
-
-        private async void BtnSync_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
-                {
-                    StatusText.Text = "Estado: Selecciona una ruta válida de Dropbox primero.";
-                    return;
-                }
-                LoadingRing.IsActive = true;
-                LoadingRing.Visibility = Visibility.Visible;
-                StatusText.Text = "Estado: Indexando carpeta local de Dropbox…";
-
-                await BuildLocalIndexAsync();
-
-                LoadFoldersRoot();
-                BuildTreeRoot();
-                await BrowseFolderAsync(DROPBOX_ROOT);
-
-
-                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
-                await RunLocalSearchAsync(SearchBox.Text ?? "");
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error → {ex.Message}";
-            }
-            finally
-            {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
-            }
-        }
-
-
-
         private async Task RunLocalSearchAsync(string query)
         {
             _mode = ViewMode.Explorer;
@@ -886,8 +876,7 @@ namespace Anfeta.UI.Views
 
             var rawQuery = (query ?? "").Trim();
             IEnumerable<SearchResultRow> items = App.LocalIndex.GetAll();
-
-
+            items = items.Where(x => !IsExcludedPath(x.Target));
             var parsed = AdvancedQueryV3.Parse(rawQuery);
             UpdateHighlightTerms(rawQuery, parsed);
 
@@ -989,287 +978,164 @@ namespace Anfeta.UI.Views
             await Task.CompletedTask;
 
         }
-
-        private void UpdateHighlightTerms(string rawQuery, Anfeta.UI.Services.Search.ParsedQuery parsed)
+        private async Task RunLocalSearchAsync(string query, CancellationToken token)
         {
-            rawQuery ??= "";
-            rawQuery = rawQuery.Trim();
+            token.ThrowIfCancellationRequested();
 
-            if (string.IsNullOrWhiteSpace(rawQuery))
+            _mode = ViewMode.Explorer;
+            Results.Clear();
+
+            var rawQuery = (query ?? "").Trim();
+            IEnumerable<SearchResultRow> items = App.LocalIndex.GetAll();
+            items = items.Where(x => !IsExcludedPath(x.Target));
+            token.ThrowIfCancellationRequested();
+
+            var parsed = AdvancedQueryV3.Parse(rawQuery);
+            UpdateHighlightTerms(rawQuery, parsed);
+
+            if (!string.IsNullOrWhiteSpace(rawQuery))
             {
-                _highlightTerms = new List<string>();
-                return;
-            }
+                if (rawQuery == "-")
+                    return;
 
-            // Si no es avanzado: resalta la cadena completa
-            if (!LooksAdvanced(rawQuery))
-            {
-                _highlightTerms = new List<string> { rawQuery };
-                return;
-            }
-
-            // Avanzado: extrae TextTerm del AST, ignorando lo negado (NOT)
-            var list = new List<string>();
-            CollectHighlightTerms(parsed.Expr, list, insideNot: false);
-
-            _highlightTerms = list
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(s => s.Length) // frases ganan a palabras
-                .ToList();
-        }
-
-
-        private static void CollectHighlightTerms(
-            Anfeta.UI.Services.Search.QNode? node,
-            List<string> outList,
-            bool insideNot)
-        {
-            if (node is null) return;
-
-            switch (node)
-            {
-                case Anfeta.UI.Services.Search.TextTerm t:
-                    if (!insideNot)
-                        outList.Add(t.Pattern);
-                    break;
-
-                case Anfeta.UI.Services.Search.Not n:
-                    CollectHighlightTerms(n.X, outList, insideNot: true); // NO resaltar lo negado
-                    break;
-
-                case Anfeta.UI.Services.Search.And a:
-                    CollectHighlightTerms(a.L, outList, insideNot);
-                    CollectHighlightTerms(a.R, outList, insideNot);
-                    break;
-
-                case Anfeta.UI.Services.Search.Or o:
-                    CollectHighlightTerms(o.L, outList, insideNot);
-                    CollectHighlightTerms(o.R, outList, insideNot);
-                    break;
-
-                    // FieldTerm y otros: NO se resaltan
-            }
-        }
-        private void NameText_Loaded(object sender, RoutedEventArgs e)
-        {
-            if (sender is not Microsoft.UI.Xaml.Controls.TextBlock tb) return;
-            if (tb.DataContext is not Anfeta.UI.Models.SearchResultRow row) return;
-
-            ApplyHighlightToTextBlock(tb, row.Name ?? "");
-        }
-
-        private void ApplyHighlightToTextBlock(Microsoft.UI.Xaml.Controls.TextBlock tb, string text)
-        {
-            tb.Inlines.Clear();
-            text ??= "";
-
-            if (_highlightTerms == null || _highlightTerms.Count == 0 || text.Length == 0)
-            {
-                tb.Text = text;
-                return;
-            }
-
-            int i = 0;
-            while (i < text.Length)
-            {
-                int bestIndex = -1;
-                string? bestNeedle = null;
-
-                foreach (var n in _highlightTerms)
+                if (!LooksAdvanced(rawQuery))
                 {
-                    var idx = text.IndexOf(n, i, StringComparison.OrdinalIgnoreCase);
-                    if (idx < 0) continue;
-
-                    if (bestIndex < 0 || idx < bestIndex)
-                    {
-                        bestIndex = idx;
-                        bestNeedle = n;
-                        if (bestIndex == i) break;
-                    }
-                }
-
-                if (bestIndex < 0 || bestNeedle is null)
-                {
-                    tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = text.Substring(i) });
-                    break;
-                }
-
-                if (bestIndex > i)
-                    tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = text.Substring(i, bestIndex - i) });
-
-                tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run
-                {
-                    Text = text.Substring(bestIndex, bestNeedle.Length),
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["SystemControlHighlightAccentBrush"]
-                });
-
-                i = bestIndex + bestNeedle.Length;
-            }
-        }
-
-
-        private static bool LooksAdvanced(string q)
-        {
-            if (string.IsNullOrWhiteSpace(q)) return false;
-
-            // Frases, OR con |, paréntesis, NOT con - (lo que ya tenías)
-            if (q.Contains('"')) return true;
-            if (q.Contains('|')) return true;
-            if (q.Contains('(') || q.Contains(')')) return true;
-
-            // Operadores de palabra
-            var up = q.ToUpperInvariant();
-            if (up.Contains(" AND ") || up.Contains(" OR ") || up.Contains(" NOT ")) return true;
-
-            // Exclude
-            if (q.StartsWith("-", StringComparison.Ordinal)) return true;
-            if (q.Contains(" -", StringComparison.Ordinal)) return true;
-
-            // ✅ NUEVO: comandos con :
-            // (no usamos solo q.Contains(':') porque podría activar por rutas tipo C:\)
-            string[] cmd = {
-        "ext:", "type:", "folder:", "sort:", "limit:", "page:",
-        "size:", "date:", "dm:", "year:", "month:", "name:", "path:", "content:", "id:", "status:", "meta:", "author:", "creator:", "access:", "shared:"
-    };
-
-            for (int i = 0; i < cmd.Length; i++)
-            {
-                if (up.Contains(cmd[i].ToUpperInvariant(), StringComparison.Ordinal))
-                    return true;
-            }
-
-            return false;
-        }
-
-
-
-        private void BtnDetailsLink_Click(object sender, RoutedEventArgs e)
-        {
-            if (ResultsList.SelectedItem is not SearchResultRow row) return;
-            if (string.IsNullOrWhiteSpace(row.Target)) return;
-
-            var path = row.Target;
-
-            // Si es archivo: abrir explorer seleccionando el archivo
-            if (File.Exists(path))
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"/select,\"{path}\"",
-                    UseShellExecute = true
-                });
-
-                StatusText.Text = "Estado: Mostrando archivo en carpeta 📁";
-                return;
-            }
-
-            // Si es carpeta: abrir carpeta
-            if (Directory.Exists(path))
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = path,
-                    UseShellExecute = true
-                });
-
-                StatusText.Text = "Estado: Carpeta abierta 📁";
-                return;
-            }
-
-            StatusText.Text = "Estado: No existe en local (pulsa doble tap para descargar) ❗";
-        }
-
-
-        private void ResultsList_RightTapped(object sender, RightTappedRoutedEventArgs e)
-        {
-            // El ContextFlyout ya existe en XAML, no hace falta lógica aquí por ahora
-        }
-
-        private async void BtnStar_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is not Button btn) return;
-
-            // Usamos Tag="{x:Bind}" en el XAML
-            if (btn.Tag is not SearchResultRow row) return;
-
-            // La ÚNICA llave real del bookmark (modo local)
-            var path = (row.Target ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(path)) return;
-
-            try
-            {
-                var ct = CancellationToken.None;
-
-                // 1) Verificar existencia SIEMPRE con LocalPath
-                var exists = _bookmarksService.Exists(_bookmarks, path);
-
-                if (exists)
-                {
-                    // 2) Quitar bookmark
-                    _bookmarksService.RemoveByPath(_bookmarks, path);
-
-                    // 3) Guardar (SaveAsync deduplica)
-                    await _bookmarksService.SaveAsync(_bookmarks, ct);
-
-                    // 4) UI inmediata
-                    row.IsBookmarked = false;
-                    StatusText.Text = "Estado: Bookmark eliminado ⭐❌";
+                    var q = rawQuery.ToLowerInvariant();
+                    items = items.Where(x => (x.Name ?? "").ToLowerInvariant().Contains(q));
                 }
                 else
                 {
-                    // 2) Agregar bookmark
-                    _bookmarks.Add(new BookmarkItem
+                    items = items.Where(x => AdvancedQueryV3.Evaluate(parsed.Expr, new RowView(x)));
+
+                    if (!string.IsNullOrWhiteSpace(parsed.Plan.FolderContains))
                     {
-                        Title = row.Name ?? "",
-                        LocalPath = path,              // 🔥 CLAVE ÚNICA
-                        Source = row.Source,
-                        Type = row.Type ?? "",
-                        Size = row.Size,
-                        Modified = row.ServerModified ?? "",
-                        Folder = "General",
-                        CreatedAt = DateTimeOffset.Now
-                    });
+                        var f = parsed.Plan.FolderContains.ToLowerInvariant();
+                        items = items.Where(x => (x.Target ?? "").ToLowerInvariant().Contains(f));
+                    }
 
-                    // 3) Guardar (evita duplicados)
-                    await _bookmarksService.SaveAsync(_bookmarks, ct);
+                    if (parsed.Plan.OnlyFolders.HasValue)
+                    {
+                        var wantFolder = parsed.Plan.OnlyFolders.Value;
+                        items = items.Where(x =>
+                            wantFolder
+                                ? (x.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase)
+                                : (x.Type ?? "").Equals("FILE", StringComparison.OrdinalIgnoreCase));
+                    }
 
-                    // 4) UI inmediata
-                    row.IsBookmarked = true;
-                    StatusText.Text = "Estado: Bookmark guardado ⭐✅";
+                    if (!string.IsNullOrWhiteSpace(parsed.Plan.Ext))
+                    {
+                        var e = parsed.Plan.Ext;
+                        items = items.Where(x =>
+                        {
+                            var ext = Path.GetExtension(x.Target ?? x.Name ?? "")
+                                .TrimStart('.')
+                                .ToLowerInvariant();
+
+                            if (e == "img")
+                                return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
+
+                            return ext == e;
+                        });
+                    }
                 }
-
-                // 5) Si estás en vista Bookmarks, repinta la lista
-                if (_mode == ViewMode.Bookmarks)
-                    await ShowBookmarksAsync();
             }
-            catch (Exception ex)
+
+            if (_onlyFolders)
+                items = items.Where(x => (x.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(_extFilter))
             {
-                StatusText.Text = $"Estado: Error bookmark → {ex.Message}";
+                items = items.Where(x =>
+                {
+                    var ext = Path.GetExtension(x.Target ?? x.Name ?? "")
+                        .TrimStart('.')
+                        .ToLowerInvariant();
+
+                    if (_extFilter == "img")
+                        return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
+
+                    return ext == _extFilter;
+                });
             }
-        }
 
-        private static string SafeFileName(string fullPath)
+            items = _sortKey switch
+            {
+                "name_desc" => items.OrderByDescending(x => x.Name),
+                _ => items.OrderBy(x => x.Name)
+            };
+
+            foreach (var it in items.Take(500))
+            {
+                token.ThrowIfCancellationRequested();
+
+                it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
+                it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
+                Results.Add(it);
+            }
+
+            ResultsList.ItemsSource = null;
+            ResultsList.ItemsSource = Results;
+
+            CountText.Text = $"{Results.Count} resultados";
+            EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            await Task.CompletedTask;
+        }
+        #endregion
+
+        #region ===== Filters / Sort =====
+        private async void ChipFilter_Click(object sender, RoutedEventArgs e)
         {
-            fullPath ??= "";
+            // --- 1) Flags ---
+            if (sender == ChipBookmarks)
+                _onlyBookmarks = ChipBookmarks.IsChecked == true;
 
-            // Normaliza separadores y quita slash final
-            fullPath = fullPath.Trim().TrimEnd('\\', '/');
+            if (sender == ChipFolders)
+                _onlyFolders = ChipFolders.IsChecked == true;
 
-            // nombre “normal”
-            var name = System.IO.Path.GetFileName(fullPath);
+            // --- 2) Extensión (solo una a la vez) ---
+            if (sender == ChipPdf) _extFilter = ChipPdf.IsChecked == true ? "pdf" : null;
+            else if (sender == ChipDocx) _extFilter = ChipDocx.IsChecked == true ? "docx" : null;
+            else if (sender == ChipXlsx) _extFilter = ChipXlsx.IsChecked == true ? "xlsx" : null;
+            else if (sender == ChipImg) _extFilter = ChipImg.IsChecked == true ? "img" : null;
+            else if (sender == ChipUrl) _extFilter = ChipUrl.IsChecked == true ? "url" : null; // ✅ NUEVO
 
-            // fallback: si quedó vacío, usa el path mismo o algo visible
-            if (string.IsNullOrWhiteSpace(name))
-                name = fullPath;
+            // Apagar SOLO los otros chips de extensión (NO tocar Bookmarks/Folders)
+            if (_extFilter != null)
+            {
+                if (sender != ChipPdf) ChipPdf.IsChecked = false;
+                if (sender != ChipDocx) ChipDocx.IsChecked = false;
+                if (sender != ChipXlsx) ChipXlsx.IsChecked = false;
+                if (sender != ChipImg) ChipImg.IsChecked = false;
+                if (sender != ChipUrl) ChipUrl.IsChecked = false; // ✅ NUEVO
+            }
 
-            return name;
+            // --- 3) Decide qué pintar según modo ---
+            if (_onlyBookmarks)
+            {
+                await ShowBookmarksAsync();
+                FinishUi();
+                return;
+            }
+
+            await RunLocalSearchAsync(SearchBox.Text ?? "");
+            FinishUi();
         }
 
+        private async void SortCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (SortCombo.SelectedItem is ComboBoxItem cbi && cbi.Tag is string tag)
+                _sortKey = tag;
 
+            if (_onlyBookmarks)
+                await ShowBookmarksAsync();
+            else
+                await RunLocalSearchAsync(SearchBox.Text ?? "");
+
+            FinishUi();
+        }
+        #endregion
+        #region ===== Bookmarks =====
         private async Task ShowBookmarksAsync()
         {
             _mode = ViewMode.Bookmarks;
@@ -1362,106 +1228,150 @@ namespace Anfeta.UI.Views
             await Task.CompletedTask;
         }
 
-        private void NameText_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
+        private async void BtnStar_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is not TextBlock tb) return;
+            if (sender is not Button btn) return;
 
-            // args.NewValue es el item real
-            if (args.NewValue is SearchResultRow row)
+            // Usamos Tag="{x:Bind}" en el XAML
+            if (btn.Tag is not SearchResultRow row) return;
+
+            // La ÚNICA llave real del bookmark (modo local)
+            var path = (row.Target ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(path)) return;
+
+            try
             {
-                ApplyHighlightToTextBlock(tb, row.Name ?? "");
+                var ct = CancellationToken.None;
+
+                // 1) Verificar existencia SIEMPRE con LocalPath
+                var exists = _bookmarksService.Exists(_bookmarks, path);
+
+                if (exists)
+                {
+                    // 2) Quitar bookmark
+                    _bookmarksService.RemoveByPath(_bookmarks, path);
+
+                    // 3) Guardar (SaveAsync deduplica)
+                    await _bookmarksService.SaveAsync(_bookmarks, ct);
+
+                    // 4) UI inmediata
+                    row.IsBookmarked = false;
+                    StatusText.Text = "Estado: Bookmark eliminado ⭐❌";
+                }
+                else
+                {
+                    // 2) Agregar bookmark
+                    _bookmarks.Add(new BookmarkItem
+                    {
+                        Title = row.Name ?? "",
+                        LocalPath = path,              // 🔥 CLAVE ÚNICA
+                        Source = row.Source,
+                        Type = row.Type ?? "",
+                        Size = row.Size,
+                        Modified = row.ServerModified ?? "",
+                        Folder = "General",
+                        CreatedAt = DateTimeOffset.Now
+                    });
+
+                    // 3) Guardar (evita duplicados)
+                    await _bookmarksService.SaveAsync(_bookmarks, ct);
+
+                    // 4) UI inmediata
+                    row.IsBookmarked = true;
+                    StatusText.Text = "Estado: Bookmark guardado ⭐✅";
+                }
+
+                // 5) Si estás en vista Bookmarks, repinta la lista
+                if (_mode == ViewMode.Bookmarks)
+                    await ShowBookmarksAsync();
             }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error bookmark → {ex.Message}";
+            }
+        }
+        #endregion
+        #region ===== Results / Details / Open =====
+        private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ResultsList.SelectedItem is not SearchResultRow row)
+                return;
+
+            DetailsTitle.Text = row.Name;
+            DetailsPath.Text = row.Target;
+            var online = File.Exists(row.Target) && NeedsHydration(row.Target);
+
+
+            DetailsMeta.Text =
+                $"Tipo: {row.Type}\n" +
+                $"Estado: {(online ? "Online-only (se descarga al abrir)" : "Disponible local")}\n" +
+                $"Tamaño: {(row.Size > 0 ? $"{row.Size / 1024:N0} KB" : "—")}\n" +
+                $"Modificado: {(!string.IsNullOrWhiteSpace(row.ServerModified) ? row.ServerModified : "—")}";
+            // Notion relacionado (si no tienes aún, déjalo en —)
+            DetailsNotion.Text = "—";
+
+            if ((row.Type ?? "").Equals("folder", StringComparison.OrdinalIgnoreCase))
+                StatusText.Text = "Estado: Es carpeta (usa acciones de navegación) 📁";
             else
+                StatusText.Text = "Estado: Seleccionado ✅";
+        }
+        private async void ResultsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+        {
+            if (ResultsList.SelectedItem is not SearchResultRow row) return;
+            if (string.IsNullOrWhiteSpace(row.Target)) return;
+
+            // carpeta -> abrir explorador
+            // carpeta -> navegar internamente
+            if ((row.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase))
             {
-                // fallback por seguridad (nunca dejes vacío)
-                tb.Text = "";
+                await BrowseFolderAsync(row.Target);
+                StatusText.Text = "Estado: Carpeta abierta 📁";
+                return;
+            }
+
+
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+
+            try
+            {
+                LoadingRing.IsActive = true;
+                LoadingRing.Visibility = Visibility.Visible;
+
+                // 1) si es online-only → descargar bajo demanda
+                if (NeedsHydration(row.Target))
+                {
+                    StatusText.Text = "Estado: Descargando desde Dropbox… ⬇️";
+                    var ok = await EnsureHydratedAsync(row.Target, _cts.Token);
+
+                    if (!ok)
+                    {
+                        StatusText.Text = "Estado: No se pudo descargar (timeout). Revisa tu conexión/Dropbox.";
+                        return;
+                    }
+                }
+
+                // 2) abrir archivo
+                StatusText.Text = "Estado: Abriendo…";
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = row.Target,
+                    UseShellExecute = true
+                });
+
+                StatusText.Text = "Estado: Archivo abierto ✅";
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error → {ex.Message}";
+            }
+            finally
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
             }
         }
-
-        private async Task EnterBookmarksModeAsync()
-        {
-            // reset visual de chips para no confundir
-            _bmExtFilter = null;
-            _bmOnlyFolders = false;
-            _bmSortKey = "name_asc";
-
-            ChipPdf.IsChecked = false;
-            ChipDocx.IsChecked = false;
-            ChipXlsx.IsChecked = false;
-            ChipImg.IsChecked = false;
-            ChipRecent.IsChecked = false;
-            ChipFolders.IsChecked = false;
-
-            await ShowBookmarksAsync();
-        }
-
-
-        private async Task BuildLocalIndexAsync()
-        {
-            var list = await Task.Run(() =>
-            {
-                var tmp = new List<SearchResultRow>();
-
-                if (!Directory.Exists(DROPBOX_ROOT))
-                    throw new Exception($"No existe la ruta: {DROPBOX_ROOT}");
-
-                foreach (var dir in Directory.EnumerateDirectories(DROPBOX_ROOT, "*", SearchOption.AllDirectories))
-                {
-                    tmp.Add(new SearchResultRow
-                    {
-                        Name = Path.GetFileName(dir),
-                        Target = dir,
-                        Type = "FOLDER",
-                        Source = SearchSource.Local
-                    });
-                }
-
-                foreach (var file in Directory.EnumerateFiles(DROPBOX_ROOT, "*", SearchOption.AllDirectories))
-                {
-                    var info = new FileInfo(file);
-
-                    tmp.Add(new SearchResultRow
-                    {
-                        Name = Path.GetFileName(file),
-                        Target = file,
-                        Type = "FILE",
-                        Size = info.Length,
-                        ServerModified = info.LastWriteTime.ToString("yyyy-MM-dd HH:mm"),
-                        Source = SearchSource.Local
-                    });
-                }
-
-                return tmp;
-            });
-
-            // ✅ AQUÍ se guarda GLOBAL (persistente entre módulos)
-            App.LocalIndex.Set(list);
-
-            // (opcional) si quieres seguir usando _localIndex en el mismo SearchView, lo puedes apuntar:
-            _localIndex = list;
-        }
-
-
-
-        private void BuildTreeRoot()
-        {
-            _treeRoots.Clear();
-
-            var root = new FolderNode
-            {
-                Name = "Dropbox",
-                FullPath = DROPBOX_ROOT,
-                HasDummyChild = true
-            };
-
-            // dummy para que aparezca la flechita de expand
-            root.Children.Add(new FolderNode { Name = "Cargando...", FullPath = "" });
-
-            _treeRoots.Add(root);
-
-            FolderTree.ItemsSource = _treeRoots;
-        }
-
         private async Task OpenSelectedAsync()
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
@@ -1517,79 +1427,1335 @@ namespace Anfeta.UI.Views
                 LoadingRing.Visibility = Visibility.Collapsed;
             }
         }
-
-
-
-        // ===== Paging/Tree (pendiente) =====
-        private async void BtnPrevPage_Click(object sender, RoutedEventArgs e)
+        private void BtnDetailsLink_Click(object sender, RoutedEventArgs e)
         {
-            if (_backStack.Count == 0) return;
+            if (ResultsList.SelectedItem is not SearchResultRow row) return;
+            if (string.IsNullOrWhiteSpace(row.Target)) return;
 
-            var prev = _backStack.Pop();
-            _forwardStack.Push(_currentFolder);
-            await BrowseFolderAsync(prev, pushHistory: false);
+            var path = row.Target;
+
+            // Si es archivo: abrir explorer seleccionando el archivo
+            if (File.Exists(path))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{path}\"",
+                    UseShellExecute = true
+                });
+
+                StatusText.Text = "Estado: Mostrando archivo en carpeta 📁";
+                return;
+            }
+
+            // Si es carpeta: abrir carpeta
+            if (Directory.Exists(path))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true
+                });
+
+                StatusText.Text = "Estado: Carpeta abierta 📁";
+                return;
+            }
+
+            StatusText.Text = "Estado: No existe en local (pulsa doble tap para descargar) ❗";
+        }
+        private void ResultsList_RightTapped(object sender, RightTappedRoutedEventArgs e)
+        {
+            // El ContextFlyout ya existe en XAML, no hace falta lógica aquí por ahora
+        }
+        #endregion
+
+        #region ===== Help (Popup) =====
+        private void MenuHelp_Click(object sender, RoutedEventArgs e)
+        {
+            // Toggle
+            if (HelpPopup.IsOpen)
+            {
+                HelpPopup.IsOpen = false;
+                return;
+            }
+
+            // Inyecta tu UI de ayuda (la que ya hiciste)
+            HelpContentHost.Content = BuildHelpContentNav();
+
+            HelpPopup.XamlRoot = this.XamlRoot; // importante en WinUI 3
+            HelpPopup.IsOpen = true;
+        }
+        private void HelpPopupClose_Click(object sender, RoutedEventArgs e)
+        {
+            HelpPopup.IsOpen = false;
         }
 
-        private async void BtnNextPage_Click(object sender, RoutedEventArgs e)
+        private UIElement BuildHelpContentNav()
         {
-            if (_forwardStack.Count == 0) return;
+            _helpBodyHost = new ContentControl
+            {
+                Content = BuildHelpExamples() // default
+            };
 
-            var next = _forwardStack.Pop();
-            _backStack.Push(_currentFolder);
-            await BrowseFolderAsync(next, pushHistory: false);
+            var nav = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            nav.Children.Add(MakeNavButton("Ejemplos", () => _helpBodyHost.Content = BuildHelpExamples(), isActive: true));
+            nav.Children.Add(MakeNavButton("Operadores", () => _helpBodyHost.Content = BuildHelpOperators()));
+            nav.Children.Add(MakeNavButton("Filtros", () => _helpBodyHost.Content = BuildHelpFilters()));
+            nav.Children.Add(MakeNavButton("Tips", () => _helpBodyHost.Content = BuildHelpTips()));
+
+            var bodyScroll = new ScrollViewer
+            {
+                Content = _helpBodyHost,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Padding = new Thickness(12, 8, 12, 0)
+            };
+
+            return new StackPanel
+            {
+                Spacing = 12,
+                Children =
+  {
+      nav,
+      bodyScroll
+  }
+            };
+        }
+        private ToggleButton MakeNavButton(string text, Action onClick, bool isActive = false)
+        {
+            var t = new ToggleButton
+            {
+                Content = text,
+                IsChecked = isActive,
+                Padding = new Thickness(14, 6, 14, 6),
+                CornerRadius = new CornerRadius(10),
+                MinWidth = 110
+            };
+
+            t.Click += (_, __) =>
+            {
+                // deselecciona los demás (mismo padre)
+                if (t.Parent is Panel p)
+                {
+                    foreach (var c in p.Children)
+                        if (c is ToggleButton tb) tb.IsChecked = false;
+                }
+
+                t.IsChecked = true;
+                onClick();
+            };
+
+            return t;
         }
 
-        private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
+        private UIElement CreateSection(string title, string content)
+        {
+            return new StackPanel
+            {
+                Spacing = 6,
+                Children =
+ {
+     new TextBlock
+     {
+         Text = title,
+         FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+     },
+     new TextBlock
+     {
+         Text = content,
+         TextWrapping = TextWrapping.Wrap,
+         Opacity = 0.85
+     }
+ }
+            };
+        }
+        private UIElement CreateExampleRow(string example, string? note = null, bool run = true, bool replace = true)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
 
-        private async void BtnRefreshTree_Click(object sender, RoutedEventArgs e)
+            var btn = new Button
+            {
+                Content = example,
+                Style = (Style)Application.Current.Resources["DefaultButtonStyle"], // si no existe, quítalo
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            btn.Click += (_, __) =>
+            {
+                // (puedes dejar el flag o quitarlo; ya no es necesario si forzamos)
+                if (replace || string.IsNullOrWhiteSpace(SearchBox.Text))
+                    SearchBox.Text = example;
+                else
+                    SearchBox.Text = (SearchBox.Text?.Trim() ?? "") + " " + example;
+
+                SearchBox.Focus(FocusState.Programmatic);
+
+                // ✅ fuerza la búsqueda sin depender de Reason/UserInput
+                TriggerSearchFromHelp(SearchBox.Text);
+
+                HelpPopup.IsOpen = false;
+            };
+
+            row.Children.Add(btn);
+
+            if (!string.IsNullOrWhiteSpace(note))
+            {
+                row.Children.Add(new TextBlock
+                {
+                    Text = note,
+                    Opacity = 0.75,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+
+            return row;
+        }
+        private UIElement CreateTokenChip(string token, string? note = null)
+        {
+            var btn = new Button
+            {
+                Content = token,
+                Padding = new Thickness(10, 6, 10, 6),
+                CornerRadius = new CornerRadius(999),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            btn.Click += (_, __) =>
+            {
+                var cur = (SearchBox.Text ?? "").Trim();
+
+                // Append token de forma limpia
+                if (string.IsNullOrWhiteSpace(cur))
+                    SearchBox.Text = token;
+                else
+                    SearchBox.Text = cur + " " + token;
+
+                SearchBox.Focus(FocusState.Programmatic);
+                TriggerSearchFromHelp(SearchBox.Text);
+            };
+
+            if (string.IsNullOrWhiteSpace(note))
+                return btn;
+
+            // chip + texto
+            return new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                Children =
+ {
+     btn,
+     new TextBlock
+     {
+         Text = note,
+         Opacity = 0.75,
+         VerticalAlignment = VerticalAlignment.Center,
+         TextWrapping = TextWrapping.Wrap
+     }
+ }
+            };
+        }
+
+        private UIElement BuildHelpExamples()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Ejemplos rápidos",
+                "Toca un ejemplo para colocarlo automáticamente en el buscador:"
+            ));
+
+            stack.Children.Add(CreateExampleRow("reporte -SEO", "Busca 'reporte' excluyendo la palabra 'SEO'"));
+            stack.Children.Add(CreateExampleRow("factura AND 2026", "Debe contener ambos términos"));
+            stack.Children.Add(CreateExampleRow("\"estado de cuenta\"", "Frase exacta entre comillas"));
+
+            return stack;
+        }
+        private UIElement BuildHelpOperators()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Operadores lógicos",
+                "Combina términos para refinar la búsqueda:"
+            ));
+
+            stack.Children.Add(CreateTokenChip("AND", "Ambos términos deben existir"));
+            stack.Children.Add(CreateTokenChip("OR", "Cualquiera de los términos"));
+            stack.Children.Add(CreateTokenChip("NOT", "Excluye un término"));
+            stack.Children.Add(CreateTokenChip("-SEO", "Forma corta para excluir (NOT SEO)"));
+            stack.Children.Add(CreateTokenChip("( A OR B )", "Agrupación con paréntesis"));
+
+            return stack;
+        }
+        private UIElement BuildHelpFilters()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Filtros",
+                "Limita los resultados por tipo o ubicación:"
+            ));
+
+            stack.Children.Add(CreateTokenChip("ext:pdf", "Archivos PDF"));
+            stack.Children.Add(CreateTokenChip("ext:docx", "Documentos Word"));
+            stack.Children.Add(CreateTokenChip("ext:xlsx", "Excel"));
+            stack.Children.Add(CreateTokenChip("type:folder", "Solo carpetas"));
+            stack.Children.Add(CreateTokenChip("folder:finanzas", "Carpetas con ese nombre"));
+
+            return stack;
+        }
+        private UIElement BuildHelpTips()
+        {
+            var stack = new StackPanel { Spacing = 12 };
+
+            stack.Children.Add(CreateSection(
+                "Tips",
+                "Consejos para búsquedas más efectivas:"
+            ));
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "• Usa comillas para buscar frases exactas.",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "• Usa -palabra para excluir resultados.",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "• Combina filtros y operadores para búsquedas avanzadas.",
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            stack.Children.Add(CreateExampleRow(
+                "reporte AND febrero -SEO ext:pdf",
+                "Ejemplo completo combinando todo"
+            ));
+
+            return stack;
+        }
+
+        private void TriggerSearchFromHelp(string query)
+        {
+            EnsureSearchDebounce();
+
+            // Si está indexando o no hay índice, no dispares búsqueda
+            if (DropboxIndexCoordinator.IsIndexing)
+            {
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                return;
+            }
+
+            if (!App.LocalIndex.HasData)
+            {
+                ResetSearchModuleState();
+                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                return;
+            }
+
+            // Fuerza el mismo comportamiento que cuando el usuario escribe
+            _searchDebounceTimer!.Stop();
+            _searchDebounceTimer.Start();
+        }
+        #endregion
+
+        #region ===== Utils (Highlight / Query / Hydration) =====
+        private static bool LooksAdvanced(string q)
+        {
+            if (string.IsNullOrWhiteSpace(q)) return false;
+
+            // Frases, OR con |, paréntesis, NOT con - (lo que ya tenías)
+            if (q.Contains('"')) return true;
+            if (q.Contains('|')) return true;
+            if (q.Contains('(') || q.Contains(')')) return true;
+
+            // Operadores de palabra
+            var up = q.ToUpperInvariant();
+            if (up.Contains(" AND ") || up.Contains(" OR ") || up.Contains(" NOT ")) return true;
+
+            // Exclude
+            if (q.StartsWith("-", StringComparison.Ordinal)) return true;
+            if (q.Contains(" -", StringComparison.Ordinal)) return true;
+
+            // ✅ NUEVO: comandos con :
+            // (no usamos solo q.Contains(':') porque podría activar por rutas tipo C:\)
+            string[] cmd = {
+    "ext:", "type:", "folder:", "sort:", "limit:", "page:",
+    "size:", "date:", "dm:", "year:", "month:", "name:", "path:", "content:", "id:", "status:", "meta:", "author:", "creator:", "access:", "shared:"
+};
+
+            for (int i = 0; i < cmd.Length; i++)
+            {
+                if (up.Contains(cmd[i].ToUpperInvariant(), StringComparison.Ordinal))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void UpdateHighlightTerms(string rawQuery, Anfeta.UI.Services.Search.ParsedQuery parsed)
+        {
+            rawQuery ??= "";
+            rawQuery = rawQuery.Trim();
+
+            if (string.IsNullOrWhiteSpace(rawQuery))
+            {
+                _highlightTerms = new List<string>();
+                return;
+            }
+
+            // Si no es avanzado: resalta la cadena completa
+            if (!LooksAdvanced(rawQuery))
+            {
+                _highlightTerms = new List<string> { rawQuery };
+                return;
+            }
+
+            // Avanzado: extrae TextTerm del AST, ignorando lo negado (NOT)
+            var list = new List<string>();
+            CollectHighlightTerms(parsed.Expr, list, insideNot: false);
+
+            _highlightTerms = list
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(s => s.Length) // frases ganan a palabras
+                .ToList();
+        }
+
+        private static void CollectHighlightTerms(
+            Anfeta.UI.Services.Search.QNode? node,
+            List<string> outList,
+            bool insideNot)
+        {
+            if (node is null) return;
+
+            switch (node)
+            {
+                case Anfeta.UI.Services.Search.TextTerm t:
+                    if (!insideNot)
+                        outList.Add(t.Pattern);
+                    break;
+
+                case Anfeta.UI.Services.Search.Not n:
+                    CollectHighlightTerms(n.X, outList, insideNot: true); // NO resaltar lo negado
+                    break;
+
+                case Anfeta.UI.Services.Search.And a:
+                    CollectHighlightTerms(a.L, outList, insideNot);
+                    CollectHighlightTerms(a.R, outList, insideNot);
+                    break;
+
+                case Anfeta.UI.Services.Search.Or o:
+                    CollectHighlightTerms(o.L, outList, insideNot);
+                    CollectHighlightTerms(o.R, outList, insideNot);
+                    break;
+
+                    // FieldTerm y otros: NO se resaltan
+            }
+        }
+        private void ApplyHighlightToTextBlock(Microsoft.UI.Xaml.Controls.TextBlock tb, string text)
+        {
+            tb.Inlines.Clear();
+            text ??= "";
+
+            if (_highlightTerms == null || _highlightTerms.Count == 0 || text.Length == 0)
+            {
+                tb.Text = text;
+                return;
+            }
+
+            int i = 0;
+            while (i < text.Length)
+            {
+                int bestIndex = -1;
+                string? bestNeedle = null;
+
+                foreach (var n in _highlightTerms)
+                {
+                    var idx = text.IndexOf(n, i, StringComparison.OrdinalIgnoreCase);
+                    if (idx < 0) continue;
+
+                    if (bestIndex < 0 || idx < bestIndex)
+                    {
+                        bestIndex = idx;
+                        bestNeedle = n;
+                        if (bestIndex == i) break;
+                    }
+                }
+
+                if (bestIndex < 0 || bestNeedle is null)
+                {
+                    tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = text.Substring(i) });
+                    break;
+                }
+
+                if (bestIndex > i)
+                    tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = text.Substring(i, bestIndex - i) });
+
+                tb.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run
+                {
+                    Text = text.Substring(bestIndex, bestNeedle.Length),
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["SystemControlHighlightAccentBrush"]
+                });
+
+                i = bestIndex + bestNeedle.Length;
+            }
+        }
+
+        private void NameText_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
+        {
+            if (sender is not TextBlock tb) return;
+
+            // args.NewValue es el item real
+            if (args.NewValue is SearchResultRow row)
+            {
+                ApplyHighlightToTextBlock(tb, row.Name ?? "");
+            }
+            else
+            {
+                // fallback por seguridad (nunca dejes vacío)
+                tb.Text = "";
+            }
+        }
+
+        private static bool NeedsHydration(string path)
         {
             try
             {
-                LoadFoldersRoot();
-                StatusText.Text = "Estado: Árbol cargado ✅";
+                var attrs = File.GetAttributes(path);
+                // OFFLINE / RECALL_* suelen indicar “online-only” o pendiente
+                var flags = (int)attrs;
+                return (flags & FILE_ATTRIBUTE_OFFLINE) != 0
+                    || (flags & FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0
+                    || (flags & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+            }
+            catch
+            {
+                // Si falla leer atributos, tratamos como “no hidratado”
+                return true;
+            }
+        }
+        private async Task<bool> EnsureHydratedAsync(string path, CancellationToken ct)
+        {
+            // Si ya es local, listo
+            if (!NeedsHydration(path))
+                return true;
 
-                // opcional: refresca la vista actual si estás navegando
-                if (_isBrowsing)
-                    await BrowseFolderAsync(_currentFolder);
+            // 1) “Touch”: leer 1 byte para disparar la descarga (Dropbox Smart Sync)
+            try
+            {
+                // Importante: FileShare.ReadWrite para no pelear con Dropbox
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var buffer = new byte[1];
+                _ = await fs.ReadAsync(buffer, 0, 1, ct);
+            }
+            catch
+            {
+                // Puede fallar al inicio mientras “baja”, no importa, seguimos a esperar
+            }
+
+            // 2) Esperar hasta que deje de ser placeholder
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            const int timeoutMs = 120_000; // 2 min (ajústalo)
+            const int pollMs = 600;
+
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                // si ya no necesita hidratación y existe tamaño “real” (extra safety)
+                if (!NeedsHydration(path))
+                {
+                    try
+                    {
+                        var fi = new FileInfo(path);
+                        if (fi.Exists)
+                            return true;
+                    }
+                    catch { /* ignore */ }
+                }
+
+                await Task.Delay(pollMs, ct);
+            }
+
+            return false; // timeout
+        }
+        private static string SafeFileName(string fullPath)
+        {
+            fullPath ??= "";
+
+            // Normaliza separadores y quita slash final
+            fullPath = fullPath.Trim().TrimEnd('\\', '/');
+
+            // nombre “normal”
+            var name = System.IO.Path.GetFileName(fullPath);
+
+            // fallback: si quedó vacío, usa el path mismo o algo visible
+            if (string.IsNullOrWhiteSpace(name))
+                name = fullPath;
+
+            return name;
+        }
+        #endregion
+        #region ===== Seccion De Exclusiones ===== 
+        private sealed class FolderPickItem
+        {
+            public string Path { get; set; } = "";
+            public string Name { get; set; } = "";
+            public bool IsChecked { get; set; }
+        }
+        public sealed class ExcludeNode : INotifyPropertyChanged
+        {
+            public string Name { get; set; } = "";
+            public string Path { get; set; } = "";
+
+            // ✅ Para compatibilidad con lo que ya tenías (aunque ahora uses TreeViewNode.Children)
+            public ObservableCollection<ExcludeNode> Children { get; } = new();
+
+            private bool _hasDummyChild;
+            public bool HasDummyChild
+            {
+                get => _hasDummyChild;
+                set { if (_hasDummyChild != value) { _hasDummyChild = value; OnPropertyChanged(); } }
+            }
+
+            private bool _isChecked;
+            public bool IsChecked
+            {
+                get => _isChecked;
+                set { if (_isChecked != value) { _isChecked = value; OnPropertyChanged(); } }
+            }
+
+            private bool _isEnabled = true;
+            public bool IsEnabled
+            {
+                get => _isEnabled;
+                set { if (_isEnabled != value) { _isEnabled = value; OnPropertyChanged(); } }
+            }
+
+            private bool _isLoaded;
+            public bool IsLoaded
+            {
+                get => _isLoaded;
+                set { if (_isLoaded != value) { _isLoaded = value; OnPropertyChanged(); } }
+            }
+
+            public event PropertyChangedEventHandler? PropertyChanged;
+            private void OnPropertyChanged([CallerMemberName] string? name = null)
+                => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+        private static TreeViewNode? FindNodeByData(IList<TreeViewNode> nodes, ExcludeNode target)
+        {
+            foreach (var n in nodes)
+            {
+                if (ReferenceEquals(n.Content, target))
+                    return n;
+
+                var found = FindNodeByData(n.Children, target);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        //Exclusion en carpetas pero vista
+        
+        private Microsoft.UI.Xaml.Controls.TreeViewNode MakeExcludeNode(string dirPath)
+        {
+            var data = new ExcludeNode
+            {
+                Name = System.IO.Path.GetFileName(dirPath),
+                Path = dirPath,
+                IsChecked = false,
+                IsLoaded = false
+            };
+
+            var node = new Microsoft.UI.Xaml.Controls.TreeViewNode
+            {
+                Content = data
+            };
+
+            // ✅ Solo ponemos dummy si realmente hay subcarpetas
+            if (HasSubfolders(dirPath))
+            {
+                node.Children.Add(new Microsoft.UI.Xaml.Controls.TreeViewNode
+                {
+                    Content = new ExcludeNode { Name = "Cargando...", Path = "__dummy__" }
+                });
+            }
+            else
+            {
+                data.IsLoaded = true; // no hay nada que cargar
+            }
+
+            return node;
+        }
+
+
+        
+
+
+        private void LoadExcludedFolders()
+        {
+            _excludedFolders.Clear();
+
+            var raw = ApplicationData.Current.LocalSettings.Values[LS_ExcludedFolders] as string;
+            if (string.IsNullOrWhiteSpace(raw))
+                return;
+
+            foreach (var p in raw.Split('|', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var path = p.Trim();
+                if (!string.IsNullOrWhiteSpace(path))
+                    _excludedFolders.Add(path);
+            }
+        }
+
+        private void SaveExcludedFolders()
+        {
+            var raw = string.Join("|", _excludedFolders.Distinct(StringComparer.OrdinalIgnoreCase));
+            ApplicationData.Current.LocalSettings.Values[LS_ExcludedFolders] = raw;
+        }
+
+        private bool IsExcludedPath(string? target)
+        {
+            if (string.IsNullOrWhiteSpace(target)) return false;
+            if (_excludedFolders.Count == 0) return false;
+
+            // Normaliza target (acepta absolute/relative y / o \)
+            var t = target.Trim().Replace('/', '\\').TrimEnd('\\');
+
+            // Si es relativo y tenemos DROPBOX_ROOT, conviértelo a absoluto
+            if (!Path.IsPathRooted(t) && !string.IsNullOrWhiteSpace(DROPBOX_ROOT))
+            {
+                try { t = Path.GetFullPath(Path.Combine(DROPBOX_ROOT, t)); }
+                catch { /* ignore */ }
+            }
+            else
+            {
+                try { t = Path.GetFullPath(t); }
+                catch { /* ignore */ }
+            }
+
+            t = t.TrimEnd('\\');
+
+            foreach (var ex in _excludedFolders)
+            {
+                if (string.IsNullOrWhiteSpace(ex)) continue;
+
+                var e = ex.Trim().Replace('/', '\\').TrimEnd('\\');
+                try { e = Path.GetFullPath(e); } catch { /* ignore */ }
+                e = e.TrimEnd('\\');
+
+                // match exacto o dentro
+                if (string.Equals(t, e, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (t.StartsWith(e + "\\", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
+        private void RefreshExcludedFoldersUi()
+        {
+            _excludedFoldersUi.Clear();
+            foreach (var p in _excludedFolders)
+                _excludedFoldersUi.Add(p);
+
+            ExcludedFoldersList.ItemsSource = _excludedFoldersUi;
+            ExcludedHint.Visibility = _excludedFoldersUi.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private async void BtnAddExcludedFolder_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+                {
+                    StatusText.Text = "Estado: Configura un root válido antes de excluir.";
+                    return;
+                }
+
+                // TreeView
+                var tv = new Microsoft.UI.Xaml.Controls.TreeView
+                {
+                    SelectionMode = Microsoft.UI.Xaml.Controls.TreeViewSelectionMode.Single,
+                    MaxHeight = 320
+                };
+                tv.Padding = new Thickness(0);
+                tv.Margin = new Thickness(0);
+                tv.Resources["TreeViewItemIndentation"] = 18.0;
+
+
+                // Expand/Collapse con doble click (más fácil que la flechita)
+                tv.DoubleTapped += (s, e2) =>
+                {
+                    if (tv.SelectedNode is TreeViewNode node)
+                        node.IsExpanded = !node.IsExpanded;
+                };
+
+                // Lazy-load al expandir
+                tv.Expanding += (s, e2) =>
+                {
+                    if (e2.Node?.Content is not ExcludeNode data) return;
+
+                    if (data.IsLoaded) return;
+
+                    // Si no hay dummy, no hay nada que cargar
+                    if (e2.Node.Children.Count == 0)
+                    {
+                        data.IsLoaded = true;
+                        return;
+                    }
+
+                    // Quitar dummy
+                    if (e2.Node.Children.Count == 1 &&
+                        e2.Node.Children[0].Content is ExcludeNode d &&
+                        d.Path == "__dummy__")
+                    {
+                        e2.Node.Children.Clear();
+                    }
+
+                    try
+                    {
+                        foreach (var childDir in Directory.EnumerateDirectories(data.Path))
+                        {
+                            if (IsExcludedPath(childDir)) continue;
+
+                            var childNode = MakeExcludeNode(childDir);
+
+                            // heredar check del padre
+                            if (childNode.Content is ExcludeNode childData && data.IsChecked)
+                            {
+                                childData.IsChecked = true;
+                                childData.IsEnabled = false;
+                            }
+
+                            e2.Node.Children.Add(childNode);
+                        }
+                    }
+                    catch { }
+
+                    data.IsLoaded = true;
+                };
+
+                // Estilo compacto
+                tv.ItemContainerStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load(@"
+                <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+                       xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+                       TargetType='TreeViewItem'>
+                    <Setter Property='MinHeight' Value='28'/>
+                    <Setter Property='Padding' Value='0'/>
+                    <Setter Property='Margin' Value='0'/>
+                    <Setter Property='HorizontalContentAlignment' Value='Stretch'/>
+                </Style>");
+
+                // Template: checkbox + texto
+                tv.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(@"
+                <DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'>
+                  <Grid MinHeight='28' Margin='0'>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width='Auto'/>
+                      <ColumnDefinition Width='Auto'/>
+                      <ColumnDefinition Width='*'/>
+                    </Grid.ColumnDefinitions>
+
+                    <CheckBox Grid.Column='0'
+                              IsChecked='{Binding Content.IsChecked, Mode=TwoWay}'
+                              IsEnabled='{Binding Content.IsEnabled}'
+                              VerticalAlignment='Center'
+                              Margin='0,0,8,0'/>
+
+                    <TextBlock Grid.Column='1'
+                               VerticalAlignment='Center'
+                               FontSize='13'
+                               Text='{Binding Content.Name}'
+                               TextTrimming='CharacterEllipsis'
+                               Opacity='0.9'/>
+                  </Grid>
+                </DataTemplate>");
+
+
+                // Marcar padre => marca/deshabilita hijos (robusto)
+                tv.AddHandler(UIElement.TappedEvent, new TappedEventHandler((s, e2) =>
+                {
+                    var cb = FindAncestor<CheckBox>(e2.OriginalSource as DependencyObject);
+                    if (cb == null) return;
+
+                    _ = DispatcherQueue.TryEnqueue(() =>
+                    {
+                        TreeViewNode? node = null;
+                        ExcludeNode? data = null;
+
+                        if (cb.DataContext is TreeViewNode tvn)
+                        {
+                            node = tvn;
+                            data = tvn.Content as ExcludeNode;
+                        }
+                        else if (cb.DataContext is ExcludeNode dn)
+                        {
+                            data = dn;
+                            node = FindNodeByData(tv.RootNodes, dn);
+                        }
+
+                        if (node == null || data == null) return;
+                        if (data.Path == "__dummy__") return;
+
+                        var isChecked = cb.IsChecked == true;
+
+                        // ✅ AQUÍ va lo de data.IsChecked (para que el modelo quede consistente)
+                        data.IsChecked = isChecked;
+                        data.IsEnabled = true; // el padre siempre se queda habilitado
+
+                        ApplyToChildren(node, isChecked);
+                    });
+                }), true);
+
+
+
+                // Roots (solo nivel 1)
+                foreach (var dir in Directory.EnumerateDirectories(DROPBOX_ROOT))
+                {
+                    if (IsExcludedPath(dir)) continue;
+                    tv.RootNodes.Add(MakeExcludeNode(dir));
+                }
+
+                var dialog = new ContentDialog
+                {
+                    Title = "Excluir varias carpetas",
+                    Content = tv,
+                    PrimaryButtonText = "Agregar seleccionadas",
+                    CloseButtonText = "Cancelar",
+                    DefaultButton = ContentDialogButton.Primary,
+                    XamlRoot = this.XamlRoot
+                };
+
+                var result = await dialog.ShowAsync();
+                if (result != ContentDialogResult.Primary) return;
+
+                // Recolectar seleccionadas desde el TreeView
+                var selected = new List<string>();
+                foreach (var n in tv.RootNodes)
+                    CollectChecked(n, selected);
+
+                if (selected.Count == 0)
+                {
+                    StatusText.Text = "Estado: No seleccionaste nada.";
+                    return;
+                }
+
+                // Aplicar a la lista real de exclusiones (sin duplicados)
+                foreach (var p in selected)
+                {
+                    if (_excludedFolders.Any(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+
+                    _excludedFolders.Add(p);
+                }
+
+                SaveExcludedFolders();
+                RefreshExcludedFoldersUi();
+
+                StatusText.Text = $"Estado: Excluidas {selected.Count} carpetas ✅";
+                await RefreshCurrentViewAsync();
             }
             catch (Exception ex)
             {
-                StatusText.Text = $"Estado: Error → {ex.Message}";
+                StatusText.Text = $"Estado: Error excluyendo → {ex.Message}";
             }
         }
-        private async void BtnGoRoot_Click(object sender, RoutedEventArgs e)
+        private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
         {
-            await BrowseFolderAsync(DROPBOX_ROOT);
+            while (current != null)
+            {
+                if (current is T wanted) return wanted;
+                current = VisualTreeHelper.GetParent(current);
+            }
+            return null;
         }
 
-        private async void BtnPickDropbox_Click(object sender, RoutedEventArgs e)
+        private static void CollectChecked(TreeViewNode node, List<string> acc)
         {
-            var picker = new FolderPicker();
-            picker.FileTypeFilter.Add("*");
+            if (node?.Content is ExcludeNode data)
+            {
+                if (data.IsChecked && !string.IsNullOrWhiteSpace(data.Path) && data.Path != "__dummy__")
+                    acc.Add(data.Path);
+            }
 
-            // WinUI3: hay que “amarrar” el picker a la ventana
-            var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
-            InitializeWithWindow.Initialize(picker, hwnd);
+            foreach (var child in node.Children)
+                CollectChecked(child, acc);
+        }
+        private static bool HasSubfolders(string path)
+        {
+            try
+            {
+                return Directory.EnumerateDirectories(path).Any();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        private void ApplyToChildren(TreeViewNode parentNode, bool isChecked)
+        {
+            foreach (var child in parentNode.Children)
+            {
+                if (child.Content is ExcludeNode cd)
+                {
+                    if (cd.Path == "__dummy__") continue;
 
-            var folder = await picker.PickSingleFolderAsync();
-            if (folder == null) return;
+                    cd.IsChecked = isChecked;
+                    cd.IsEnabled = !isChecked;
+                }
 
-            DROPBOX_ROOT = folder.Path;
-            DropboxPathBox.Text = DROPBOX_ROOT;
+                ApplyToChildren(child, isChecked);
+            }
+        }
+        
 
-            ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = DROPBOX_ROOT;
 
-            StatusText.Text = $"Estado: DropboxRoot guardado ✅ ({DROPBOX_ROOT})";
+        private async void BtnRemoveExcludedFolder_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button b) return;
+            if (b.Tag is not string path) return;
+
+            _excludedFolders.RemoveAll(x => string.Equals(x, path, StringComparison.OrdinalIgnoreCase));
+            SaveExcludedFolders();
+            RefreshExcludedFoldersUi();
+
+            StatusText.Text = "Estado: Exclusión eliminada ✅";
+
+            await RefreshCurrentViewAsync();
+        }
+        private async Task RefreshCurrentViewAsync()
+        {
+            var q = (SearchBox.Text ?? "").Trim();
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                await RunSearchAsync(q);
+                return;
+            }
+
+            var folderToShow =
+                (!string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
+                    ? _currentFolder
+                    : DROPBOX_ROOT;
+
+            if (!string.IsNullOrWhiteSpace(folderToShow) && Directory.Exists(folderToShow))
+                await BrowseFolderAsync(folderToShow, pushHistory: false);
         }
 
-        private async void BtnOpen_Click(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
+        #endregion
 
-        // ===== Sync/Menu (pendiente) =====
-        private void MenuExplore_Click(object sender, RoutedEventArgs e) { }
-        private void MenuReindex_Click(object sender, RoutedEventArgs e) { }
-        private void MenuRecompute_Click(object sender, RoutedEventArgs e) { }
+        #region ===== Seccion De Comandos Predefinidos =====
+        private sealed class SavedSearch
+        {
+            public string Id { get; set; } = Guid.NewGuid().ToString("N");
+            public string Title { get; set; } = "";
+            public string Description { get; set; } = "";
+            public string Query { get; set; } = "";
+        }
 
-        // ===== Context actions (pendiente) =====
+        private readonly ObservableCollection<SavedSearch> _savedSearches = new();
+        private void RefreshCommandsSidebarUi()
+        {
+            if (CommandsSidebarEmptyHint != null)
+                CommandsSidebarEmptyHint.Visibility = _savedSearches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        private async void CommandsSidebarList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (CommandsSidebarList.SelectedItem is SavedSearch cmd)
+            {
+                SearchBox.Text = cmd.Query;
+                await RunSearchAsync(cmd.Query);
+                CommandsSidebarList.SelectedItem = null;
+            }
+        }
+        private void BtnQuickSaveCommand_Click(object sender, RoutedEventArgs e)
+        {
+            // Reutiliza tu dialog pro de guardar comando
+            BtnSaveSearch_Click(sender, e);
+        }
+        private async void CommandsSidebarList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+        if (e.ClickedItem is SavedSearch cmd)
+        {
+            SearchBox.Text = cmd.Query;
+            await RunSearchAsync(cmd.Query);
+
+            // opcional: para que no quede “seleccionado”
+            CommandsSidebarList.SelectedItem = null;
+        }
+        }
+    private void LoadSavedSearches()
+        {
+            _savedSearches.Clear();
+
+            var raw = ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] as string;
+            if (string.IsNullOrWhiteSpace(raw))
+                return;
+
+            try
+            {
+                var list = JsonSerializer.Deserialize<List<SavedSearch>>(raw) ?? new List<SavedSearch>();
+                foreach (var it in list)
+                {
+                    if (string.IsNullOrWhiteSpace(it?.Query)) continue;
+                    if (string.IsNullOrWhiteSpace(it.Title)) it.Title = it.Query;
+                    _savedSearches.Add(it);
+                }
+            }
+            catch
+            {
+                // si se corrompe el JSON, mejor no truena la app
+                ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = "";
+            }
+        }
+        private void SaveSavedSearches()
+        {
+            var list = _savedSearches.ToList();
+            var raw = JsonSerializer.Serialize(list);
+            ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = raw;
+        }
+        private void RefreshSavedSearchesUi()
+        {
+            // ahora los comandos viven en el sidebar
+            if (CommandsSidebarList != null)
+            {
+                CommandsSidebarList.ItemsSource = null;
+                CommandsSidebarList.ItemsSource = _savedSearches;
+            }
+
+            RefreshCommandsSidebarUi();
+        }
+        private void BtnDeleteSidebarCommand_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn) return;
+            if (btn.Tag is not SavedSearch cmd) return;
+
+            // 1) quitar de la colección
+            _savedSearches.Remove(cmd);
+
+            // 2) persistir
+            SaveSavedSearches();
+
+            // 3) quitar selección (evita bugs visuales)
+            if (CommandsSidebarList != null)
+                CommandsSidebarList.SelectedItem = null;
+
+            // 4) refrescar UI (sidebar + hints)
+            RefreshSavedSearchesUi(); // ← este es el importante
+        }
+        private async void BtnEditSidebarCommand_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn) return;
+            if (btn.Tag is not SavedSearch cmd) return;
+
+            // Busca referencia real en la colección (por Id)
+            var existing = _savedSearches.FirstOrDefault(x => x.Id == cmd.Id);
+            if (existing == null) return;
+
+            // Reutiliza el mismo dialog pro (igual al de guardar, pero precargado)
+            var titleBox = new TextBox
+            {
+                PlaceholderText = "Título",
+                Text = existing.Title ?? ""
+            };
+
+            var descBox = new TextBox
+            {
+                PlaceholderText = "Descripción (opcional)",
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                Text = existing.Description ?? ""
+            };
+
+            var queryBox = new TextBox
+            {
+                Text = existing.Query ?? ""
+            };
+
+            var panel = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+        {
+            new TextBlock { Text = "Editar comando", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+            titleBox,
+            descBox,
+            new TextBlock { Text = "Query:" },
+            queryBox
+        }
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Editar comando",
+                Content = panel,
+                PrimaryButtonText = "Guardar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary) return;
+
+            var newTitle = (titleBox.Text ?? "").Trim();
+            var newDesc = (descBox.Text ?? "").Trim();
+            var newQuery = (queryBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newQuery))
+            {
+                StatusText.Text = "Estado: Título y Query son obligatorios.";
+                return;
+            }
+
+            // evitar duplicado de query en otro comando
+            if (_savedSearches.Any(x => x.Id != existing.Id &&
+                                        string.Equals(x.Query, newQuery, StringComparison.OrdinalIgnoreCase)))
+            {
+                StatusText.Text = "Estado: Ya existe otro comando con esa búsqueda.";
+                return;
+            }
+
+            existing.Title = newTitle;
+            existing.Description = newDesc;
+            existing.Query = newQuery;
+
+            SaveSavedSearches();
+            RefreshSavedSearchesUi();
+
+            StatusText.Text = "Estado: Comando actualizado ✅";
+        }
+        
+        private async void BtnSaveSearch_Click(object sender, RoutedEventArgs e)
+        {
+            var currentQuery = (SearchBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(currentQuery))
+            {
+                StatusText.Text = "Estado: Escribe una búsqueda antes de guardar.";
+                return;
+            }
+
+            var titleBox = new TextBox
+            {
+                PlaceholderText = "Título (ej: Reportes PDF)",
+                Text = currentQuery.Length > 24 ? currentQuery.Substring(0, 24) : currentQuery
+            };
+
+            var descBox = new TextBox
+            {
+                PlaceholderText = "Descripción (opcional)",
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var queryBox = new TextBox
+            {
+                Text = currentQuery
+            };
+
+            var panel = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+        {
+            new TextBlock { Text = "Guardar búsqueda como comando", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+            titleBox,
+            descBox,
+            new TextBlock { Text = "Query:" },
+            queryBox
+        }
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Nuevo comando",
+                Content = panel,
+                PrimaryButtonText = "Guardar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+                return;
+
+            var finalTitle = (titleBox.Text ?? "").Trim();
+            var finalQuery = (queryBox.Text ?? "").Trim();
+            var finalDesc = (descBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(finalTitle) || string.IsNullOrWhiteSpace(finalQuery))
+            {
+                StatusText.Text = "Estado: Título y Query son obligatorios.";
+                return;
+            }
+
+            if (_savedSearches.Any(x => string.Equals(x.Query, finalQuery, StringComparison.OrdinalIgnoreCase)))
+            {
+                StatusText.Text = "Estado: Ya existe un comando con esa búsqueda.";
+                return;
+            }
+
+            _savedSearches.Add(new SavedSearch
+            {
+                Title = finalTitle,
+                Description = finalDesc,
+                Query = finalQuery
+            });
+
+            SaveSavedSearches();
+            RefreshSavedSearchesUi();
+
+            StatusText.Text = "Estado: Comando guardado 💾";
+        }
+        
+        private void LoadSidebarExpandedStates()
+        {
+            var ls = ApplicationData.Current.LocalSettings.Values;
+
+            if (ls.TryGetValue(LS_CommandsExpanded, out var c) && c is bool cb)
+                CommandsExpander.IsExpanded = cb;
+
+            if (ls.TryGetValue(LS_ExcludedExpanded, out var e) && e is bool eb)
+                ExcludedExpander.IsExpanded = eb;
+
+            // guardar cuando cambie
+            CommandsExpander.Expanding += (_, __) => SaveSidebarExpandedStates();
+            CommandsExpander.Collapsed += (_, __) => SaveSidebarExpandedStates();
+            CommandsExpander.Expanding += (_, __) => SaveSidebarExpandedStates();
+            ExcludedExpander.Collapsed += (_, __) => SaveSidebarExpandedStates();
+        }
+
+        private void SaveSidebarExpandedStates()
+        {
+            var ls = ApplicationData.Current.LocalSettings.Values;
+            ls[LS_CommandsExpanded] = CommandsExpander.IsExpanded;
+            ls[LS_ExcludedExpanded] = ExcludedExpander.IsExpanded;
+        }
+
+        #endregion 
+        #region ===== XAML handlers pendientes (stubs) =====
+
+        private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
+
         private async void CtxOpen_Click(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
         private void CtxOpenWeb_Click(object sender, RoutedEventArgs e) { }
         private void CtxCopyPath_Click(object sender, RoutedEventArgs e) { }
@@ -1597,8 +2763,7 @@ namespace Anfeta.UI.Views
         private void CtxRename_Click(object sender, RoutedEventArgs e) { }
         private void CtxDelete_Click(object sender, RoutedEventArgs e) { }
         private void CtxBookmark_Click(object sender, RoutedEventArgs e) { }
-
-        // ===== Details actions (pendiente) =====
         private void BtnDetailsInfo_Click(object sender, RoutedEventArgs e) { }
+        #endregion
     }
 }
