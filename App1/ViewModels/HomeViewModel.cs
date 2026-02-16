@@ -1,6 +1,7 @@
 ﻿// ViewModels/HomeViewModel.cs
 using Anfeta.UI.Models;
 using Anfeta.UI.Services;
+using Anfeta.UI.Services.Activity;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
@@ -9,6 +10,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Anfeta.UI.Services.Activity;
 
 namespace Anfeta.UI.ViewModels
 {
@@ -45,6 +47,13 @@ namespace Anfeta.UI.ViewModels
         private string? _pendingAction;
         private string? _pendingParamsJson;
         private string _pendingRawJson = "";
+
+        // ===== FLUJO DE CREACIÓN DE ACTIVIDADES =====
+        private readonly ActivityFieldExtractor _activityExtractor;
+        private readonly ActivityFieldValidator _activityValidator;
+        private readonly CorrectionCommandDetector _correctionDetector;
+        private ActivityCreationFlow? _activityFlow;
+        private bool _isInActivityCreation;
 
         // Gate "modelo listo"
         private bool _isModelReady;
@@ -116,7 +125,10 @@ namespace Anfeta.UI.ViewModels
             ContextManager contextManager,
             IntentValidator validator,
             FastCommandClassifier fastClassifier,
-            InterpretationCache interpretationCache)
+            InterpretationCache interpretationCache,
+            ActivityFieldExtractor activityExtractor,
+            ActivityFieldValidator activityValidator,
+            CorrectionCommandDetector correctionDetector)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -127,6 +139,16 @@ namespace Anfeta.UI.ViewModels
             _validator = validator;
             _fastClassifier = fastClassifier;
             _interpretationCache = interpretationCache;
+            _activityExtractor = activityExtractor;
+            _activityValidator = activityValidator;
+            _correctionDetector = correctionDetector;
+
+            // Inicializar flujo de actividades
+            _activityFlow = new ActivityCreationFlow(
+                _activityExtractor,
+                _activityValidator,
+                _correctionDetector);
+            _isInActivityCreation = false;
 
             InitializeSpeechCommand = new AsyncRelayCommand(InitializeSpeechAsync);
             ListenOnceCommand = new AsyncRelayCommand(ListenOnceAsync, CanListenOnce);
@@ -228,6 +250,17 @@ namespace Anfeta.UI.ViewModels
         {
             var t = (text ?? "").Trim().ToLowerInvariant();
             return t == "no" || t == "cancelar" || t == "cancela" || t == "negativo";
+        }
+
+        /// <summary>Verificar si es inicio de creación de actividad</summary>
+        private static bool IsCreateActivityCommand(string text)
+        {
+            var t = (text ?? "").Trim().ToLowerInvariant();
+            return t.Contains("crear actividad") ||
+                   t.Contains("crea actividad") ||
+                   t.Contains("nueva actividad") ||
+                   t == "crear tarea" ||
+                   t == "nueva tarea";
         }
 
         /// <summary>Warmup del modelo IA</summary>
@@ -601,6 +634,72 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
+                // ===== MANEJO DE FLUJO DE CREACIÓN DE ACTIVIDADES =====
+                if (_isInActivityCreation && _activityFlow != null)
+                {
+                    Debug.WriteLine("[ACTIVITY_FLOW] Procesando respuesta en flujo de creación");
+
+                    var (shouldContinue, message, readyData) = _activityFlow.ProcessResponse(text);
+
+                    if (!shouldContinue)
+                    {
+                        // Flujo terminado (cancelado o listo para crear)
+                        _isInActivityCreation = false;
+
+                        if (readyData != null)
+                        {
+                            // Construir request para backend
+                            var request = new CreateActividadRequest
+                            {
+                                Titulo = readyData.Titulo ?? "Sin título",
+                                Prioridad = readyData.Prioridad,
+                                // NO enviamos Status ni Tipo - el backend usa sus defaults
+                                DueStart = readyData.DueStart?.ToString("o"),
+                                DueEnd = readyData.DueEnd?.ToString("o")
+                            };
+
+                            // Ejecutar creación
+                            var (ok, apiMsg) = await _apiExecutor.ExecuteAsync(
+                                "weblab",
+                                "actividades",
+                                "create",
+                                JsonSerializer.Serialize(request),
+                                ct);
+
+                            await ResetAfterActionAsync(apiMsg, ok ? "Actividad creada" : "Error", speak: apiMsg);
+                            return;
+                        }
+
+                        // Flujo cancelado
+                        await ResetAfterActionAsync(message, "Flujo cancelado", speak: message);
+                        return;
+                    }
+
+                    // Flujo continúa - mostrar siguiente pregunta
+                    IsListening = false;
+                    ListenOnceCommand.NotifyCanExecuteChanged();
+                    UpdateUiSafe(message, "Creando actividad...");
+                    await SpeakSafeAsync(message);
+                    return;
+                }
+
+                // Detectar inicio de creación de actividad
+                if (IsCreateActivityCommand(text))
+                {
+                    Debug.WriteLine("[ACTIVITY_FLOW] Iniciando flujo de creación");
+                    _isInActivityCreation = true;
+
+                    var startMessage = _activityFlow!.Start(text);
+
+                    IsListening = false;
+                    ListenOnceCommand.NotifyCanExecuteChanged();
+                    UpdateUiSafe(startMessage, "Creando actividad...");
+                    await SpeakSafeAsync(startMessage);
+                    return;
+                }
+
+                // ===== FLUJO NORMAL (código existente continúa igual) =====
+
                 // pending confirmación
                 if (HasPending())
                 {
@@ -636,12 +735,18 @@ namespace Anfeta.UI.ViewModels
                 {
                     Debug.WriteLine($"[FAST] Clasificado sin IA: {fastResult.Intent} → {fastResult.AppKey}");
 
-                    var fastValidation = _validator.Validate(fastResult, text);
-
-                    if (!fastValidation.IsValid)
+                    // ✅ NUEVO: Manejo especial para CreateActivity
+                    if (fastResult.Intent == "CreateActivity" && fastResult.Scope == "API")
                     {
-                        var fastMsg = fastValidation.Message ?? "Comando no válido";
-                        await ResetAfterActionAsync(fastMsg, "Validación rechazada", speak: fastMsg);
+                        Debug.WriteLine("[ACTIVITY_FLOW] Iniciando flujo de creación (desde FastClassifier)");
+                        _isInActivityCreation = true;
+
+                        var startMessage = _activityFlow!.Start(text);
+
+                        IsListening = false;
+                        ListenOnceCommand.NotifyCanExecuteChanged();
+                        UpdateUiSafe(startMessage, "Creando actividad...");
+                        await SpeakSafeAsync(startMessage);
                         return;
                     }
 

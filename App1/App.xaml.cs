@@ -1,5 +1,6 @@
 ﻿using Anfeta.UI.Data;
 using Anfeta.UI.Services;
+using Anfeta.UI.Services.Activity;
 using Anfeta.UI.Services.Auth;
 using Anfeta.UI.Services.Weblab;
 using Anfeta.UI.ViewModels;
@@ -60,6 +61,13 @@ namespace Anfeta.UI
                     services.AddSingleton<IntentValidator>();
 
                     // =========================
+                    // Activity Creation Flow
+                    // =========================
+                    services.AddSingleton<ActivityFieldExtractor>();
+                    services.AddSingleton<ActivityFieldValidator>();
+                    services.AddSingleton<CorrectionCommandDetector>();
+
+                    // =========================
                     // GROQ (sustituye Ollama)
                     // =========================
                     services.AddSingleton(sp =>
@@ -116,7 +124,8 @@ namespace Anfeta.UI
                         client.BaseAddress = new Uri("https://wlserver-production-6735.up.railway.app");
                         client.Timeout = TimeSpan.FromSeconds(100);
                     })
-                    .AddHttpMessageHandler<SharedAuthHeaderHandler>();
+                    .AddHttpMessageHandler<SharedAuthHeaderHandler>()
+                    .AddHttpMessageHandler<AuthHeaderHandler>();  // ⬅️ AGREGAR ESTA LÍNEA
 
                     // =========================
                     // Weblab API Clients
@@ -156,7 +165,11 @@ namespace Anfeta.UI
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
-                        return new WeblabActividadesClient(factory.CreateClient("WeblabAuthed"), auth);
+                        return new WeblabActividadesClient(
+                            factory.CreateClient("WeblabSharedAuthed"),  // ✅ Usa SHARED (con ambos handlers)
+                            factory.CreateClient("WeblabAuthed"),        // ✅ Para GET /auth/me
+                            auth
+                        );
                     });
 
                     // WeblabRevisionesClient - Para gestión de revisiones

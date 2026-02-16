@@ -1,11 +1,15 @@
-﻿using Anfeta.UI.Models;
+﻿// Services/FastCommandClassifier.cs
+using Anfeta.UI.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Anfeta.UI.Services
 {
-    // Elimina la clase anidada redundante para evitar CS0542
+    /// <summary>
+    /// Clasificación rápida de comandos sin IA
+    /// </summary>
     public sealed class FastCommandClassifier
     {
         private readonly CapabilityRegistry _registry;
@@ -15,23 +19,36 @@ namespace Anfeta.UI.Services
             _registry = registry;
         }
 
-        /// <summary>Clasificación rápida sin IA (regex)</summary>
-        /// <summary>Clasificación rápida sin IA (regex + patrones)</summary>
+        /// <summary>
+        /// Clasificación rápida sin IA (regex + patrones)
+        /// </summary>
         public (bool handled, InterpretationResult? result) TryFastClassify(string speech)
         {
             var lower = speech.Trim().ToLowerInvariant();
 
-            // OpenApp obvio: "abre chrome", "abre calculadora"
+            // ✅ NUEVO: CreateActivity (PRIORIDAD ALTA)
+            if (IsCreateActivityCommand(lower))
+            {
+                return (true, new InterpretationResult
+                {
+                    Intent = "CreateActivity",
+                    Scope = "API",
+                    Provider = "weblab",
+                    Resource = "actividades",
+                    Action = "create",
+                    Confidence = 0.95,
+                    NeedsConfirmation = false,
+                });
+            }
+
+            // OpenApp: "abre chrome", "abre calculadora"
             if (lower.StartsWith("abre ") || lower.StartsWith("abrir "))
             {
                 var appName = lower.Replace("abre ", "").Replace("abrir ", "").Trim();
-
-                // Remover artículos (el, la, los, las)
                 appName = appName.Replace("el ", "").Replace("la ", "")
                                  .Replace("los ", "").Replace("las ", "").Trim();
 
                 var appKey = MapSynonymToAppKey(appName);
-
                 if (appKey != null)
                 {
                     return (true, new InterpretationResult
@@ -45,7 +62,7 @@ namespace Anfeta.UI.Services
                 }
             }
 
-            // CloseApp: "cierra", "cerrar", "ciérralo"
+            // CloseApp: "cierra", "cerrar"
             if (lower == "cierra" || lower == "cerrar" ||
                 lower == "ciérralo" || lower == "cierra esto" ||
                 lower.StartsWith("cierra ") || lower.StartsWith("cerrar "))
@@ -59,11 +76,10 @@ namespace Anfeta.UI.Services
                 });
             }
 
-            // WebSearch obvio: "busca python", "buscar react"
+            // WebSearch: "busca python", "buscar react"
             if (lower.StartsWith("busca ") || lower.StartsWith("buscar "))
             {
                 var query = lower.Replace("busca ", "").Replace("buscar ", "").Trim();
-
                 if (!string.IsNullOrWhiteSpace(query))
                 {
                     return (true, new InterpretationResult
@@ -77,7 +93,7 @@ namespace Anfeta.UI.Services
                 }
             }
 
-            // MinimizeAll: "minimiza todo", "minimizar todo"
+            // MinimizeAll: "minimiza todo"
             if (lower.Contains("minimiza todo") || lower.Contains("minimizar todo"))
             {
                 return (true, new InterpretationResult
@@ -89,9 +105,50 @@ namespace Anfeta.UI.Services
                 });
             }
 
-            // Comandos ambiguos → IA
             return (false, null);
         }
+
+        /// <summary>
+        /// Detecta comando de crear actividad
+        /// </summary>
+        private bool IsCreateActivityCommand(string lower)
+        {
+            // Patrones directos
+            var patterns = new[]
+            {
+                @"^crear actividad",
+                @"^crea actividad",
+                @"^nueva actividad",
+                @"^registrar actividad",
+                @"^agregar actividad",
+                @"^añadir actividad",
+                @"^crear tarea",
+                @"^nueva tarea",
+                @"^agendar actividad",
+                @"^agrega actividad"
+            };
+
+            foreach (var pattern in patterns)
+            {
+                if (Regex.IsMatch(lower, pattern))
+                    return true;
+            }
+
+            // Variaciones con artículos
+            if (lower.StartsWith("crea una actividad") ||
+                lower.StartsWith("crear una actividad") ||
+                lower.StartsWith("crea la actividad") ||
+                lower.StartsWith("crear la actividad"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Mapea sinónimo a appKey
+        /// </summary>
         private string? MapSynonymToAppKey(string synonym)
         {
             var allApps = _registry.GetAllApps();
@@ -103,6 +160,7 @@ namespace Anfeta.UI.Services
                 if (app.Synonyms.Any(s => s.Equals(synonym, StringComparison.OrdinalIgnoreCase)))
                     return app.AppKey;
             }
+
             return null;
         }
     }

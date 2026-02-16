@@ -1,10 +1,11 @@
 ﻿// Services/ApiActionExecutor.cs
+using Anfeta.UI.Models;
+using Anfeta.UI.Services.Auth;
+using Anfeta.UI.Services.Weblab;
 using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Services.Weblab;
-using Anfeta.UI.Services.Auth;
 
 namespace Anfeta.UI.Services
 {
@@ -32,7 +33,9 @@ namespace Anfeta.UI.Services
             _auth = auth;
         }
 
-        // Ejecuta llamada API basada en provider/resource/action
+        /// <summary>
+        /// Ejecuta llamada API basada en provider/resource/action
+        /// </summary>
         public Task<(bool ok, string message)> ExecuteAsync(
             string? provider,
             string? resource,
@@ -66,23 +69,15 @@ namespace Anfeta.UI.Services
             // =========================
             if (resource == "actividades")
             {
-                // ✅ TODAS MIS ACTIVIDADES (sin fecha)
-                // Usa: GET /api/actividades/assignee/:assignee
+                // ✅ TODAS MIS ACTIVIDADES
                 if (action == "list")
                 {
                     var limit = TryGetInt(paramsJson, "limit") ?? 10;
-
-                    var assignee = await GetOrFetchAssigneeAsync(ct);
-                    if (string.IsNullOrWhiteSpace(assignee))
-                        return (false, "No pude identificar tu usuario.");
-
-                    // Este método ya lo tienes en WeblabActividadesClient
                     var r = await _actividades.GetMyActivitiesAsync(limit, ct);
                     return (r.Ok, r.PlainText);
                 }
 
                 // ✅ MIS ACTIVIDADES DE HOY
-                // Usa: GET /api/actividades/assignee/:assignee/del-dia
                 if (action == "today")
                 {
                     var assignee = await GetOrFetchAssigneeAsync(ct);
@@ -93,8 +88,7 @@ namespace Anfeta.UI.Services
                     return (r.Ok, r.PlainText);
                 }
 
-                // ✅ BUSCAR (general, no filtra por usuario si tu API no lo hace)
-                // Usa: GET /api/actividades/buscar?q=...
+                // ✅ BUSCAR
                 if (action == "search")
                 {
                     var q = TryGetString(paramsJson, "q");
@@ -107,7 +101,6 @@ namespace Anfeta.UI.Services
                 }
 
                 // ✅ DETALLES POR ID
-                // Usa: GET /api/actividades/:id
                 if (action == "get")
                 {
                     var id = TryGetString(paramsJson, "id");
@@ -118,7 +111,27 @@ namespace Anfeta.UI.Services
                     return (r.Ok, r.PlainText);
                 }
 
-                return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get.");
+                // ✅ CREAR ACTIVIDAD
+                if (action == "create")
+                {
+                    CreateActividadRequest? request = null;
+                    try
+                    {
+                        request = JsonSerializer.Deserialize<CreateActividadRequest>(paramsJson);
+                    }
+                    catch (Exception ex)
+                    {
+                        return (false, $"Error parseando datos de actividad: {ex.Message}");
+                    }
+
+                    if (request == null || string.IsNullOrWhiteSpace(request.Titulo))
+                        return (false, "Falta el título de la actividad.");
+
+                    var r = await _actividades.CreateActivityAsync(request, ct);
+                    return (r.Ok, r.PlainText);
+                }
+
+                return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get, create.");
             }
 
             // =========================
@@ -140,6 +153,7 @@ namespace Anfeta.UI.Services
 
                 return (false, $"Acción '{action}' no soportada para revisiones. Disponibles: today, en-curso.");
             }
+
             // =========================
             // REPORTES
             // =========================
@@ -147,7 +161,7 @@ namespace Anfeta.UI.Services
             {
                 if (action == "list")
                 {
-                    var date = TryGetString(paramsJson, "date"); // SOLO date
+                    var date = TryGetString(paramsJson, "date");
                     var r = await _reportes.GetMyRevisionsReportAsync(date, ct);
                     return (r.Ok, r.PlainText);
                 }
@@ -225,20 +239,18 @@ namespace Anfeta.UI.Services
                     return (r.Ok, r.PlainText);
                 }
 
-                return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow.");
+                return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, complete.");
             }
 
-
-            return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, complete.");
+            return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones, reportes, recordatorios.");
         }
-
 
         private async Task<string?> GetOrFetchAssigneeAsync(CancellationToken ct)
         {
             if (!string.IsNullOrWhiteSpace(_cachedAssignee))
                 return _cachedAssignee;
 
-            var (ok, assignee, _) = await _auth.GetCurrentUserAsync(ct);
+            var (ok, assignee, _, _) = await _auth.GetCurrentUserAsync(ct);
             if (ok && !string.IsNullOrWhiteSpace(assignee))
             {
                 _cachedAssignee = assignee;
