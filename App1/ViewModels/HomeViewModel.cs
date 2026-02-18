@@ -655,15 +655,33 @@ namespace Anfeta.UI.ViewModels
 
                         if (readyData != null)
                         {
-                            // Construir request para backend
+                            System.Diagnostics.Debug.WriteLine("===== ACTIVITY DATA =====");
+                            System.Diagnostics.Debug.WriteLine($"Titulo: {readyData.Titulo}");
+                            System.Diagnostics.Debug.WriteLine($"Prioridad: {readyData.Prioridad}");
+                            System.Diagnostics.Debug.WriteLine($"DueStart: {readyData.DueStart}");
+                            System.Diagnostics.Debug.WriteLine($"DueEnd: {readyData.DueEnd}");
+                            System.Diagnostics.Debug.WriteLine($"Assignees: {readyData.Assignees?.Count ?? 0}");
+                            if (readyData.Assignees != null)
+                            {
+                                foreach (var a in readyData.Assignees)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"  - {a.Name} ({a.CollaboratorId})");
+                                }
+                            }
+                            System.Diagnostics.Debug.WriteLine("=========================");
+
                             var request = new CreateActividadRequest
                             {
                                 Titulo = readyData.Titulo ?? "Sin título",
                                 Prioridad = readyData.Prioridad,
-                                // NO enviamos Status ni Tipo - el backend usa sus defaults
                                 DueStart = readyData.DueStart?.ToString("o"),
-                                DueEnd = readyData.DueEnd?.ToString("o")
+                                DueEnd = readyData.DueEnd?.ToString("o"),
+                                Assignees = readyData.Assignees
                             };
+
+                            System.Diagnostics.Debug.WriteLine("===== REQUEST JSON =====");
+                            System.Diagnostics.Debug.WriteLine(JsonSerializer.Serialize(request));
+                            System.Diagnostics.Debug.WriteLine("========================");
 
                             // Ejecutar creación
                             var (ok, apiMsg) = await _apiExecutor.ExecuteAsync(
