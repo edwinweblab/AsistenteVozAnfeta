@@ -20,25 +20,64 @@ namespace Anfeta.UI.Services.Activity
 
             var lower = text.Trim().ToLowerInvariant();
 
-            // Patrones de corrección
+            // Verificar si hay intención de corregir
             if (!lower.Contains("corregir") &&
                 !lower.Contains("cambiar") &&
                 !lower.Contains("editar") &&
-                !lower.Contains("modificar"))
+                !lower.Contains("modificar") &&
+                !lower.Contains("actualizar") &&
+                !lower.Contains("arreglar"))
                 return (false, null);
 
-            // Mapear a campos
-            if (lower.Contains("titulo") || lower.Contains("título"))
+            // TÍTULO
+            if (lower.Contains("titulo") ||
+                lower.Contains("título") ||
+                lower.Contains("el titulo") ||
+                lower.Contains("el título") ||
+                lower.Contains("nombre") ||
+                lower.Contains("el nombre"))
                 return (true, "titulo");
 
-            if (lower.Contains("prioridad"))
+            // PRIORIDAD
+            if (lower.Contains("prioridad") ||
+                lower.Contains("la prioridad"))
                 return (true, "prioridad");
 
-            if (lower.Contains("fecha") || lower.Contains("inicio"))
+            // FECHA DE INICIO
+            if (lower.Contains("fecha de inicio") ||
+                lower.Contains("fecha inicio") ||
+                lower.Contains("inicio") ||
+                lower.Contains("el inicio") ||
+                lower.Contains("fecha") ||
+                lower.Contains("la fecha") ||
+                lower.Contains("cuando empieza") ||
+                lower.Contains("cuándo empieza") ||
+                lower.Contains("hora de inicio") ||
+                lower.Contains("hora inicio"))
                 return (true, "dueStart");
 
-            if (lower.Contains("fin") || lower.Contains("final"))
+            // FECHA DE FIN
+            if (lower.Contains("fecha de fin") ||
+                lower.Contains("fecha fin") ||
+                lower.Contains("fin") ||
+                lower.Contains("el fin") ||
+                lower.Contains("final") ||
+                lower.Contains("cuando termina") ||
+                lower.Contains("cuándo termina") ||
+                lower.Contains("hora de fin") ||
+                lower.Contains("hora fin") ||
+                lower.Contains("duración") ||
+                lower.Contains("duracion"))
                 return (true, "dueEnd");
+
+            // ASSIGNEE
+            if (lower.Contains("asignado") ||
+                lower.Contains("responsable") ||
+                lower.Contains("quien") ||
+                lower.Contains("quién") ||
+                lower.Contains("persona") ||
+                lower.Contains("assignee"))
+                return (true, "assignee");
 
             // Usuario dijo "corregir" pero no especificó campo
             return (true, null);
@@ -133,5 +172,7 @@ namespace Anfeta.UI.Services.Activity
                    lower.Contains("reset") ||
                    lower.Contains("volver a empezar");
         }
+
+
     }
 }

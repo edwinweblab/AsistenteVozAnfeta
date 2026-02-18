@@ -1,8 +1,9 @@
 ﻿// Services/Activity/ActivityFieldExtractor.cs
+using Anfeta.UI.Models;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
-using Anfeta.UI.Models;
 
 namespace Anfeta.UI.Services.Activity
 {
@@ -106,7 +107,6 @@ namespace Anfeta.UI.Services.Activity
             var now = DateTimeOffset.Now;
             DateTimeOffset? baseDate = null;
 
-            // Detectar día (igual que antes)
             if (command.Contains("hoy"))
             {
                 baseDate = now.Date;
@@ -121,7 +121,6 @@ namespace Anfeta.UI.Services.Activity
             }
             else
             {
-                // Intentar extraer "el 15 de febrero"
                 var dateMatch = Regex.Match(command, @"el\s+(\d{1,2})\s+de\s+(\w+)");
                 if (dateMatch.Success)
                 {
@@ -142,36 +141,46 @@ namespace Anfeta.UI.Services.Activity
                             }
                             catch
                             {
-                                // Fecha inválida, ignorar
                             }
                         }
                     }
                 }
             }
 
-            // Si no hay fecha base, retornar null
             if (!baseDate.HasValue)
                 return (null, null, null, null);
 
-            // ✅ Extraer hora con detección de ambigüedad
+            var duracion = ExtractDuracion(command);
+
             var (hour, needsClarification) = ExtractHora(command);
 
-            // ✅ Si la hora es ambigua, devolver datos para preguntar
             if (needsClarification && hour.HasValue)
             {
                 return (null, null, hour.Value, baseDate.Value);
             }
 
-            // Si hay hora clara, construir fecha completa
             if (hour.HasValue)
             {
                 var start = baseDate.Value.AddHours(hour.Value);
-                var end = start.AddHours(1);
-                return (start, end, null, null);
+
+                if (duracion.HasValue)
+                {
+                    var end = start.AddHours(duracion.Value);
+                    return (start, end, null, null);
+                }
+
+                return (start, null, null, null);
             }
 
-            // Sin hora específica, usar 9 AM por default
-            return (baseDate.Value.AddHours(9), baseDate.Value.AddHours(10), null, null);
+            var defaultStart = baseDate.Value.AddHours(9);
+
+            if (duracion.HasValue)
+            {
+                var defaultEnd = defaultStart.AddHours(duracion.Value);
+                return (defaultStart, defaultEnd, null, null);
+            }
+
+            return (defaultStart, null, null, null);
         }
 
         /// <summary>
@@ -382,6 +391,48 @@ namespace Anfeta.UI.Services.Activity
             return (null, false);
         }
 
+        private int? ExtractDuracion(string command)
+        {
+            // "durante 2 horas", "por 3 horas"
+            var match1 = Regex.Match(command, @"(?:durante|por)\s+(\d+)\s+horas?");
+            if (match1.Success && int.TryParse(match1.Groups[1].Value, out var horas1))
+                return horas1;
+
+            // "de 3 a 5" (rango de horas)
+            var match2 = Regex.Match(command, @"de\s+(\d{1,2})\s+a\s+(\d{1,2})");
+            if (match2.Success)
+            {
+                if (int.TryParse(match2.Groups[1].Value, out var inicio) &&
+                    int.TryParse(match2.Groups[2].Value, out var fin))
+                {
+                    if (fin > inicio)
+                        return fin - inicio;
+                    if (fin < inicio)
+                        return (fin + 12) - inicio;
+                }
+            }
+
+            // "2 horas", "tres horas"
+            var match3 = Regex.Match(command, @"(\d+|una|dos|tres|cuatro|cinco)\s+horas?");
+            if (match3.Success)
+            {
+                var num = match3.Groups[1].Value.ToLowerInvariant();
+                var duracion = num switch
+                {
+                    "una" => 1,
+                    "dos" => 2,
+                    "tres" => 3,
+                    "cuatro" => 4,
+                    "cinco" => 5,
+                    _ => int.TryParse(num, out var n) ? n : (int?)null
+                };
+                if (duracion.HasValue)
+                    return duracion.Value;
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// Convierte nombre de mes a número
         /// </summary>
@@ -403,6 +454,56 @@ namespace Anfeta.UI.Services.Activity
                 "diciembre" => 12,
                 _ => 0
             };
+        }
+
+        public List<string> ExtractAssigneeNames(string command)
+        {
+            var names = new List<string>();
+            var lower = command.Trim().ToLowerInvariant();
+
+            // SOLO detectar cuando dice explícitamente "asignar"/"asígnale"
+            var patterns = new[]
+            {
+                @"(?:asignar|asígnala|asignala|asígnale|asignale)\s+a\s+(.+?)(?:\s+prioridad|\s+mañana|\s+hoy|\s+el\s+\d+|$)",
+            };
+
+            foreach (var pattern in patterns)
+            {
+                var matches = System.Text.RegularExpressions.Regex.Matches(lower, pattern);
+                foreach (System.Text.RegularExpressions.Match match in matches)
+                {
+                    if (match.Groups.Count > 1)
+                    {
+                        var rawNames = match.Groups[1].Value.Trim();
+
+                        rawNames = System.Text.RegularExpressions.Regex.Replace(
+                            rawNames,
+                            @"\s+(prioridad|mañana|hoy|pasado|con|alta|media|baja).*",
+                            "",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                        );
+
+                        if (!string.IsNullOrWhiteSpace(rawNames))
+                        {
+                            var splits = rawNames.Split(new[] { " y ", ", ", "," }, StringSplitOptions.RemoveEmptyEntries);
+
+                            foreach (var name in splits)
+                            {
+                                var cleaned = name.Trim();
+                                if (!string.IsNullOrWhiteSpace(cleaned) && cleaned.Length > 1)
+                                {
+                                    cleaned = char.ToUpper(cleaned[0]) + cleaned.Substring(1);
+
+                                    if (!names.Contains(cleaned))
+                                        names.Add(cleaned);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return names;
         }
     }
 }

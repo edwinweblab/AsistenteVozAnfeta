@@ -1,8 +1,10 @@
 ﻿// Services/Activity/ActivityCreationFlow.cs
+using Anfeta.UI.Models;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
-using Anfeta.UI.Models;
+using System.Threading.Tasks;
 
 namespace Anfeta.UI.Services.Activity
 {
@@ -14,6 +16,7 @@ namespace Anfeta.UI.Services.Activity
         private readonly ActivityFieldExtractor _extractor;
         private readonly ActivityFieldValidator _validator;
         private readonly CorrectionCommandDetector _correctionDetector;
+        private readonly WeblabUsersClient _usersClient;
         private readonly Random _random;
 
         private ActivityCreationState _state;
@@ -22,11 +25,13 @@ namespace Anfeta.UI.Services.Activity
         public ActivityCreationFlow(
             ActivityFieldExtractor extractor,
             ActivityFieldValidator validator,
-            CorrectionCommandDetector correctionDetector)
+            CorrectionCommandDetector correctionDetector,
+            WeblabUsersClient usersClient)
         {
             _extractor = extractor;
             _validator = validator;
             _correctionDetector = correctionDetector;
+            _usersClient = usersClient;
             _random = new Random();
             _state = new ActivityCreationState();
             _missingFields = new List<string>();
@@ -42,7 +47,6 @@ namespace Anfeta.UI.Services.Activity
 
             _state = _extractor.ExtractFields(initialCommand);
 
-            // Verificar si hay hora ambigua
             if (_state.AmbiguousHour.HasValue && _state.AmbiguousBaseDate.HasValue)
             {
                 _state.Phase = FlowPhase.ClarifyingTime;
@@ -51,15 +55,24 @@ namespace Anfeta.UI.Services.Activity
 
             DetermineMissingFields();
 
-            if (_missingFields.Count == 0)
+            if (_missingFields.Count > 0)
             {
-                _state.Phase = FlowPhase.Confirming;
-                return GenerateConfirmation();
+                _state.Phase = FlowPhase.Gathering;
+                _state.CurrentStep = 0;
+                return GetNextQuestion();
             }
 
-            _state.Phase = FlowPhase.Gathering;
-            _state.CurrentStep = 0;
-            return GetNextQuestion();
+            // Todos los campos básicos completos
+            // Verificar si necesita hora fin
+            if (_state.DueStart.HasValue && !_state.DueEnd.HasValue)
+            {
+                _state.Phase = FlowPhase.AskingDueEnd;
+                return GetDueEndQuestion();
+            }
+
+            // Todo completo, ir a assignee
+            _state.Phase = FlowPhase.AskingAssignee;
+            return GetAssigneeQuestion();
         }
 
         /// <summary>
@@ -81,7 +94,7 @@ namespace Anfeta.UI.Services.Activity
                 _state.Reset();
                 return (false, "Flujo reiniciado. Usa 'crear actividad' para empezar de nuevo.", null);
             }
-
+            
             switch (_state.Phase)
             {
                 case FlowPhase.ClarifyingTime:
@@ -89,6 +102,21 @@ namespace Anfeta.UI.Services.Activity
 
                 case FlowPhase.Gathering:
                     return ProcessGatheringResponse(userResponse);
+
+                case FlowPhase.AskingDueEnd:  
+                    return ProcessAskingDueEndResponse(userResponse);
+
+                case FlowPhase.AskingAssignee:
+                    return ProcessAskingAssigneeResponse(userResponse);
+
+                case FlowPhase.SearchingAssignee:
+                    return ProcessSearchingAssigneePhase();
+
+                case FlowPhase.ConfirmingAssignee:
+                    return ProcessConfirmingAssigneeResponse(userResponse);
+
+                case FlowPhase.SelectingFromMultiple:
+                    return ProcessSelectingFromMultipleResponse(userResponse);
 
                 case FlowPhase.Confirming:
                     return ProcessConfirmationResponse(userResponse);
@@ -99,6 +127,7 @@ namespace Anfeta.UI.Services.Activity
                 default:
                     return (false, "Error interno del flujo.", null);
             }
+
         }
 
         /// <summary>
@@ -109,32 +138,43 @@ namespace Anfeta.UI.Services.Activity
             if (!_state.AmbiguousHour.HasValue || !_state.AmbiguousBaseDate.HasValue)
                 return (false, "Error interno: falta hora ambigua.", null);
 
-            // ✅ NORMALIZAR: unificar todas las variaciones
             var normalized = response.Trim().ToLowerInvariant()
                 .Replace(" ", "")
                 .Replace("despuésdemediodia", "pm")
-                .Replace("despuesdemiodía", "pm")
+                .Replace("despuésdemiodía", "pm")
                 .Replace("despuesdemediodia", "pm")
                 .Replace("despuésdelmediodía", "pm")
                 .Replace("despuesdelmediodia", "pm")
                 .Replace("antesdemediodia", "am")
                 .Replace("antesdelmediodia", "am")
                 .Replace("antesdemediodía", "am")
-                .Replace("antesdelmediodía", "am");
+                .Replace("antesdelmediodía", "am")
+                .Replace("delatarde", "pm")
+                .Replace("delamañana", "am")
+                .Replace("porlatarde", "pm")
+                .Replace("porlamañana", "am");
 
             int finalHour;
 
-            // Detectar AM
-            if (normalized.Contains("mañana") || normalized.Contains("am"))
+            if (normalized.Contains("mañana") ||
+                normalized.Contains("am") ||
+                normalized.Contains("antesmediodia") ||
+                normalized.Contains("madrugada"))
             {
                 finalHour = _state.AmbiguousHour.Value;
                 if (finalHour == 12) finalHour = 0;
             }
-            // Detectar PM
-            else if (normalized.Contains("tarde") || normalized.Contains("pm"))
+            else if (normalized.Contains("tarde") ||
+                     normalized.Contains("pm") ||
+                     normalized.Contains("despuesmediodia") ||
+                     normalized.Contains("noche"))
             {
                 finalHour = _state.AmbiguousHour.Value;
                 if (finalHour != 12) finalHour += 12;
+            }
+            else if (normalized.Contains("mediodia") && _state.AmbiguousHour.Value == 12)
+            {
+                finalHour = 12;
             }
             else
             {
@@ -142,8 +182,7 @@ namespace Anfeta.UI.Services.Activity
             }
 
             _state.DueStart = _state.AmbiguousBaseDate.Value.AddHours(finalHour);
-            _state.DueEnd = _state.DueStart.Value.AddHours(1);
-
+            _state.DueEnd = null;
             _state.AmbiguousHour = null;
             _state.AmbiguousBaseDate = null;
 
@@ -158,15 +197,22 @@ namespace Anfeta.UI.Services.Activity
 
             DetermineMissingFields();
 
-            if (_missingFields.Count == 0)
+            if (_missingFields.Count > 0)
             {
-                _state.Phase = FlowPhase.Confirming;
-                return (true, GenerateConfirmation(), null);
+                _state.Phase = FlowPhase.Gathering;
+                _state.CurrentStep = 0;
+                return (true, GetNextQuestion(), null);
             }
 
-            _state.Phase = FlowPhase.Gathering;
-            _state.CurrentStep = 0;
-            return (true, GetNextQuestion(), null);
+            // Verificar dueEnd
+            if (_state.DueStart.HasValue && !_state.DueEnd.HasValue)
+            {
+                _state.Phase = FlowPhase.AskingDueEnd;
+                return (true, GetDueEndQuestion(), null);
+            }
+
+            _state.Phase = FlowPhase.AskingAssignee;
+            return (true, GetAssigneeQuestion(), null);
         }
 
         /// <summary>
@@ -176,14 +222,13 @@ namespace Anfeta.UI.Services.Activity
         {
             if (_state.CurrentStep >= _missingFields.Count)
             {
-                _state.Phase = FlowPhase.Confirming;
-                return (true, GenerateConfirmation(), null);
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, GetAssigneeQuestion(), null);
             }
 
             var field = _missingFields[_state.CurrentStep];
             var (valid, message) = SetField(field, response);
 
-            // Detectar si activó clarificación de hora
             if (_state.AmbiguousHour.HasValue && _state.AmbiguousBaseDate.HasValue)
             {
                 _state.Phase = FlowPhase.ClarifyingTime;
@@ -199,8 +244,16 @@ namespace Anfeta.UI.Services.Activity
 
             if (_state.CurrentStep >= _missingFields.Count)
             {
-                _state.Phase = FlowPhase.Confirming;
-                return (true, GenerateConfirmation(), null);
+                // Si tiene dueStart pero NO tiene dueEnd
+                if (_state.DueStart.HasValue && !_state.DueEnd.HasValue)
+                {
+                    _state.Phase = FlowPhase.AskingDueEnd;
+                    return (true, GetDueEndQuestion(), null);
+                }
+
+                // Si ya tiene todo, ir a assignee
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, GetAssigneeQuestion(), null);
             }
 
             return (true, GetNextQuestion(), null);
@@ -346,14 +399,21 @@ namespace Anfeta.UI.Services.Activity
                 {
                     "¿Cuál es la nueva fecha de inicio?",
                     "¿Para cuándo será?",
-                    "Dame la fecha y hora correcta"
+                    "Dame la fecha y hora de inicio correcta"
                 }),
 
                 "dueEnd" => GetRandomQuestion(new[]
                 {
                     "¿Cuál es la nueva fecha de fin?",
                     "¿Cuándo terminará?",
-                    "Dame la fecha de finalización"
+                    "Dame la hora de fin o duración correcta"
+                }),
+
+                "assignee" => GetRandomQuestion(new[]
+                {
+                    "¿Para quién será? Di 'para mí', nombre de persona, o 'omitir'",
+                    "¿Quién será responsable?",
+                    "¿A quién se la asignamos?"
                 }),
 
                 _ => $"¿Cuál es el nuevo valor para {field}?"
@@ -423,7 +483,18 @@ namespace Anfeta.UI.Services.Activity
                             return (false, fechaResult.Message ?? "Fecha inválida");
 
                         _state.DueStart = extractedState.DueStart;
-                        _state.DueEnd = extractedState.DueEnd ?? extractedState.DueStart.Value.AddHours(1);
+
+                        // Si estamos CORRIGIENDO y ya había un dueEnd, mantener la duración
+                        if (_state.Phase == FlowPhase.Correcting && _state.DueEnd.HasValue)
+                        {
+                            var oldDuration = (_state.DueEnd.Value - _state.DueStart.Value).TotalHours;
+                            _state.DueEnd = _state.DueStart.Value.AddHours(oldDuration);
+                        }
+                        else
+                        {
+                            // Primera vez: dejar null para que se pregunte después
+                            _state.DueEnd = null;
+                        }
 
                         var formatted = _state.DueStart.Value.ToString("dd/MM/yyyy HH:mm");
                         var warning = fechaResult.Message ?? "";
@@ -453,6 +524,11 @@ namespace Anfeta.UI.Services.Activity
 
                     return (false, "No pude entender la fecha de fin.");
 
+                case "assignee":
+                    // Redirigir a la lógica de assignee
+                    _state.Phase = FlowPhase.AskingAssignee;
+                    return (true, GetAssigneeQuestion());
+
                 default:
                     return (false, "Campo desconocido.");
             }
@@ -470,13 +546,27 @@ namespace Anfeta.UI.Services.Activity
 
             if (_state.DueStart.HasValue)
             {
-                sb.AppendLine($"• Inicio: {_state.DueStart.Value:dd/MM/yyyy HH:mm}");
+                sb.AppendLine($"• Inicio: {FormatDateTime(_state.DueStart.Value)}");
                 if (_state.DueEnd.HasValue)
-                    sb.AppendLine($"• Fin: {_state.DueEnd.Value:dd/MM/yyyy HH:mm}");
+                    sb.AppendLine($"• Fin: {FormatDateTime(_state.DueEnd.Value)}");
             }
             else
             {
                 sb.AppendLine("• Sin fecha");
+            }
+
+            if (_state.Assignees == null)
+            {
+                sb.AppendLine("• Asignado a: Ti mismo");
+            }
+            else if (_state.Assignees.Count == 0)
+            {
+                sb.AppendLine("• Sin asignar");
+            }
+            else
+            {
+                sb.Append("• Asignado a: ");
+                sb.AppendLine(string.Join(", ", _state.Assignees.Select(a => a.Name)));
             }
 
             sb.AppendLine();
@@ -485,7 +575,420 @@ namespace Anfeta.UI.Services.Activity
             return sb.ToString();
         }
 
+        private string FormatDateTime(DateTimeOffset date)
+        {
+            var hour = date.Hour;
+            var minute = date.Minute;
+            string period;
+
+            if (hour == 0)
+            {
+                hour = 12;
+                period = "AM";
+            }
+            else if (hour < 12)
+            {
+                period = "AM";
+            }
+            else if (hour == 12)
+            {
+                period = "PM";
+            }
+            else
+            {
+                hour -= 12;
+                period = "PM";
+            }
+
+            var minuteStr = minute > 0 ? $":{minute:00}" : "";
+            return $"{date:dd/MM/yyyy} {hour}{minuteStr} {period}";
+        }
+
+        // Procesa respuesta de pregunta de assignee
+        private (bool, string, ActivityCreationState?) ProcessAskingAssigneeResponse(string response)
+        {
+            var lower = response.Trim().ToLowerInvariant();
+
+            // Opción 1: Para mí / yo
+            if (lower.Contains("para mí") ||
+                lower.Contains("para mi") ||
+                lower.Contains("a mí") ||
+                lower.Contains("a mi") ||
+                lower.Contains("para ti") ||
+                lower == "yo" ||
+                lower == "mi" ||
+                lower == "mí")
+            {
+                _state.Assignees = null;
+                _state.Phase = FlowPhase.Confirming;
+                return (true, GenerateConfirmation(), null);
+            }
+
+            // Opción 2: Omitir / sin asignar
+            if (lower.Contains("omitir") ||
+                lower.Contains("sin asignar") ||
+                lower.Contains("ninguno") ||
+                lower.Contains("nadie") ||
+                lower.Contains("continuar") ||
+                lower == "no")
+            {
+                _state.Assignees = new List<AssigneeInfo>();
+                _state.Phase = FlowPhase.Confirming;
+                return (true, GenerateConfirmation(), null);
+            }
+
+            // Opción 3: Para [nombre] - extraer el nombre
+            if (lower.StartsWith("para "))
+            {
+                var name = response.Substring(5).Trim();
+
+                // Limpiar palabras clave
+                name = System.Text.RegularExpressions.Regex.Replace(
+                    name,
+                    @"\s+(prioridad|mañana|hoy|alta|media|baja).*",
+                    "",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                ).Trim();
+
+                if (!string.IsNullOrWhiteSpace(name) && name.Length > 1)
+                {
+                    name = char.ToUpper(name[0]) + name.Substring(1);
+
+                    _state.PendingAssigneeNames = new List<string> { name };
+                    _state.CurrentAssigneeIndex = 0;
+                    _state.Assignees = new List<AssigneeInfo>();
+
+                    return StartSearchingAssignee(name);
+                }
+            }
+
+            // Opción 4: Solo el nombre directo (sin "para")
+            // Limpiar y buscar
+            var cleanedResponse = response.Trim();
+            cleanedResponse = System.Text.RegularExpressions.Regex.Replace(
+                cleanedResponse,
+                @"\s+(prioridad|mañana|hoy|alta|media|baja).*",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            ).Trim();
+
+            if (!string.IsNullOrWhiteSpace(cleanedResponse) && cleanedResponse.Length > 1)
+            {
+                // Detectar "y" para múltiples
+                if (cleanedResponse.ToLowerInvariant().Contains(" y "))
+                {
+                    var names = cleanedResponse.Split(new[] { " y ", ", ", "," }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(n => n.Trim())
+                        .Where(n => !string.IsNullOrWhiteSpace(n) && n.Length > 1)
+                        .Select(n => char.ToUpper(n[0]) + n.Substring(1))
+                        .ToList();
+
+                    if (names.Count > 0)
+                    {
+                        _state.PendingAssigneeNames = names;
+                        _state.CurrentAssigneeIndex = 0;
+                        _state.Assignees = new List<AssigneeInfo>();
+
+                        return StartSearchingAssignee(names[0]);
+                    }
+                }
+                else
+                {
+                    var name = char.ToUpper(cleanedResponse[0]) + cleanedResponse.Substring(1);
+
+                    _state.PendingAssigneeNames = new List<string> { name };
+                    _state.CurrentAssigneeIndex = 0;
+                    _state.Assignees = new List<AssigneeInfo>();
+
+                    return StartSearchingAssignee(name);
+                }
+            }
+
+            return (true, GetAssigneeQuestion(), null);
+        }
+
+        private (bool, string, ActivityCreationState?) ProcessAskingDueEndResponse(string response)
+        {
+            var lower = response.Trim().ToLowerInvariant();
+
+            // Opción 1: Default / una hora / omitir / continuar
+            if (lower.Contains("una hora") ||
+                lower.Contains("1 hora") ||
+                lower == "default" ||
+                lower == "omitir" ||
+                lower == "continuar" ||
+                lower == "automático" ||
+                lower == "automatico")
+            {
+                if (_state.DueStart.HasValue)
+                {
+                    _state.DueEnd = _state.DueStart.Value.AddHours(1);
+                    _state.Phase = FlowPhase.AskingAssignee;
+                    return (true, GetAssigneeQuestion(), null);
+                }
+                return (false, "Error: no hay fecha de inicio.", null);
+            }
+
+            // Opción 2: Sin fecha fin / no / ninguna
+            if (lower.Contains("sin fecha") ||
+                lower.Contains("no tiene") ||
+                lower == "no" ||
+                lower == "ninguna")
+            {
+                _state.DueEnd = null;
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, GetAssigneeQuestion(), null);
+            }
+
+            // Opción 3: Duración en horas "2 horas", "tres horas"
+            var duracionMatch = System.Text.RegularExpressions.Regex.Match(lower, @"(\d+|una|dos|tres|cuatro|cinco)\s+horas?");
+            if (duracionMatch.Success)
+            {
+                var num = duracionMatch.Groups[1].Value;
+                var horas = num switch
+                {
+                    "una" => 1,
+                    "dos" => 2,
+                    "tres" => 3,
+                    "cuatro" => 4,
+                    "cinco" => 5,
+                    _ => int.TryParse(num, out var n) ? n : (int?)null
+                };
+
+                if (horas.HasValue && _state.DueStart.HasValue)
+                {
+                    _state.DueEnd = _state.DueStart.Value.AddHours(horas.Value);
+                    _state.Phase = FlowPhase.AskingAssignee;
+                    return (true, GetAssigneeQuestion(), null);
+                }
+            }
+
+            // Opción 4: Hora específica "hasta las 5", "termina a las 6"
+            var horaMatch = System.Text.RegularExpressions.Regex.Match(lower, @"(?:hasta|termina|a)\s+las?\s+(\d{1,2})");
+            if (horaMatch.Success && int.TryParse(horaMatch.Groups[1].Value, out var hora))
+            {
+                if (_state.DueStart.HasValue)
+                {
+                    var baseDate = _state.DueStart.Value.Date;
+
+                    // Detectar AM/PM
+                    bool isPM = lower.Contains("tarde") || lower.Contains("pm") || lower.Contains("noche");
+
+                    if (hora >= 1 && hora <= 12)
+                    {
+                        if (!isPM && !lower.Contains("am") && !lower.Contains("mañana"))
+                        {
+                            // Hora ambigua, asumir PM si es menor que hora de inicio
+                            var horaInicio = _state.DueStart.Value.Hour;
+                            if (hora <= horaInicio && hora != 12)
+                                hora += 12;
+                        }
+                        else if (isPM && hora != 12)
+                        {
+                            hora += 12;
+                        }
+                        else if (hora == 12 && lower.Contains("am"))
+                        {
+                            hora = 0;
+                        }
+                    }
+
+                    _state.DueEnd = baseDate.AddHours(hora);
+
+                    // Si fin es antes que inicio, asumir día siguiente
+                    if (_state.DueEnd.Value < _state.DueStart.Value)
+                        _state.DueEnd = _state.DueEnd.Value.AddDays(1);
+
+                    _state.Phase = FlowPhase.AskingAssignee;
+                    return (true, GetAssigneeQuestion(), null);
+                }
+            }
+
+            // No entendió, volver a preguntar
+            return (true, GetDueEndQuestion(), null);
+        }
+
+        // Inicia búsqueda de assignee
+        private (bool, string, ActivityCreationState?) StartSearchingAssignee(string name)
+        {
+            _state.PendingAssigneeName = name;
+            _state.Phase = FlowPhase.SearchingAssignee;
+
+            System.Diagnostics.Debug.WriteLine($"[FLOW] Iniciando búsqueda de '{name}'");
+
+            // Ejecutar búsqueda en Task.Run para evitar deadlock
+            _state.PendingSearchTask = Task.Run(async () => await _usersClient.SearchUsersAsync(name));
+
+            return ProcessSearchingAssigneePhase();
+        }
+
+        // Ejecuta búsqueda y procesa resultados
+        private (bool, string, ActivityCreationState?) ProcessSearchingAssigneePhase()
+        {
+            if (_state.PendingSearchTask == null)
+            {
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, "Error en búsqueda. ¿A quién quieres asignar?", null);
+            }
+
+            System.Diagnostics.Debug.WriteLine("[FLOW] Obteniendo resultado de búsqueda...");
+
+            UserSearchResponse results;
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("[FLOW] Antes de GetResult");
+
+                // Usar GetAwaiter().GetResult()
+                results = _state.PendingSearchTask.GetAwaiter().GetResult();
+                _state.PendingSearchTask = null;
+
+                System.Diagnostics.Debug.WriteLine($"[FLOW] Después de GetResult. Items: {results?.Items?.Count ?? -1}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FLOW] Error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[FLOW] Stack: {ex.StackTrace}");
+                _state.PendingSearchTask = null;
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, $"Error en búsqueda: {ex.Message}. ¿Intentar de nuevo?", null);
+            }
+
+            if (!results.Success)
+            {
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, $"Error: {results.Error}. ¿Quieres intentar con otro nombre?", null);
+            }
+
+            if (results.Items.Count == 0)
+            {
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, $"No encontré a {_state.PendingAssigneeName}. ¿Otro nombre o email?", null);
+            }
+
+            if (results.Items.Count == 1)
+            {
+                _state.PendingSearchResults = results.Items;
+                _state.Phase = FlowPhase.ConfirmingAssignee;
+                var user = results.Items[0];
+                return (true, $"Encontré a {user.FirstName} {user.LastName} ({user.Email}). ¿Es correcto?", null);
+            }
+
+            _state.PendingSearchResults = results.Items;
+            _state.Phase = FlowPhase.SelectingFromMultiple;
+            return (true, GenerateMultipleOptionsMessage(results.Items), null);
+        }
+
+        // Procesa confirmación de assignee (1 resultado)
+        private (bool, string, ActivityCreationState?) ProcessConfirmingAssigneeResponse(string response)
+        {
+            var lower = response.Trim().ToLowerInvariant();
+
+            if (lower.Contains("sí") || lower.Contains("si") || lower.Contains("correcto") || lower.Contains("confirmar"))
+            {
+                var user = _state.PendingSearchResults![0];
+                _state.Assignees!.Add(new AssigneeInfo
+                {
+                    Name = $"{user.FirstName} {user.LastName}",
+                    Email = user.Email,
+                    CollaboratorId = user.CollaboratorId
+                });
+
+                _state.PendingSearchResults = null;
+
+                if (_state.CurrentAssigneeIndex < _state.PendingAssigneeNames!.Count - 1)
+                {
+                    _state.CurrentAssigneeIndex++;
+                    var nextName = _state.PendingAssigneeNames[_state.CurrentAssigneeIndex];
+                    return StartSearchingAssignee(nextName);
+                }
+
+                _state.Phase = FlowPhase.Confirming;
+                return (true, GenerateConfirmation(), null);
+            }
+
+            if (lower.Contains("no") || lower.Contains("cancelar"))
+            {
+                _state.PendingSearchResults = null;
+                return (true, "¿Cómo se llama la persona? Dame otro nombre o email.", null);
+            }
+
+            return (true, "No entendí. ¿Es correcto? Di 'sí' o 'no'.", null);
+        }
+
+        // Procesa selección entre múltiples resultados
+        private (bool, string, ActivityCreationState?) ProcessSelectingFromMultipleResponse(string response)
+        {
+            var lower = response.Trim();
+
+            if (int.TryParse(lower, out var selection) &&
+                selection >= 1 &&
+                selection <= _state.PendingSearchResults!.Count)
+            {
+                var user = _state.PendingSearchResults[selection - 1];
+                _state.Assignees!.Add(new AssigneeInfo
+                {
+                    Name = $"{user.FirstName} {user.LastName}",
+                    Email = user.Email,
+                    CollaboratorId = user.CollaboratorId
+                });
+
+                _state.PendingSearchResults = null;
+
+                if (_state.CurrentAssigneeIndex < _state.PendingAssigneeNames!.Count - 1)
+                {
+                    _state.CurrentAssigneeIndex++;
+                    var nextName = _state.PendingAssigneeNames[_state.CurrentAssigneeIndex];
+                    return StartSearchingAssignee(nextName);
+                }
+
+                _state.Phase = FlowPhase.Confirming;
+                return (true, GenerateConfirmation(), null);
+            }
+
+            return (true, "Opción no válida. Di el número (1, 2, 3, etc.)", null);
+        }
+
+        // Genera pregunta de asignación
+        private string GetAssigneeQuestion()
+        {
+            return GetRandomQuestion(new[]
+            {
+                "¿Esta actividad es para ti o quieres asignársela a otra persona? Di: 'para mí', nombre de persona, o 'omitir'",
+                "¿Quién será responsable? Puedes decir: 'para mí', el nombre de alguien, o 'omitir'",
+                "¿Es para ti o para otra persona? Responde: 'para mí', nombre, o 'omitir'"
+            });
+        }
+
+        private string GetDueEndQuestion()
+        {
+            return GetRandomQuestion(new[]
+            {
+                "¿Hora de fin? Di la hora, 'una hora' para default, u 'omitir'",
+                "¿Hasta qué hora? Puedes decir hora o 'continuar'",
+                "¿Cuánto durará? Di las horas o 'omitir'"
+            });
+        }
+
         public ActivityCreationState GetCurrentState() => _state;
         public bool IsActive() => _state.Phase != FlowPhase.Gathering || _state.HasTitulo;
+        
+        
+        // Genera mensaje con opciones múltiples
+        private string GenerateMultipleOptionsMessage(List<UserSearchItem> results)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"Encontré {results.Count} personas:");
+
+            for (int i = 0; i < Math.Min(results.Count, 5); i++)
+            {
+                var u = results[i];
+                sb.AppendLine($"{i + 1}) {u.FirstName} {u.LastName} - {u.Email}");
+            }
+
+            sb.AppendLine("¿A cuál te refieres? Di el número.");
+            return sb.ToString();
+        }
+
+
     }
 }

@@ -1,34 +1,37 @@
 ﻿// Models/ActivityCreationState.cs
+using Anfeta.UI.Services;
 using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Anfeta.UI.Models
 {
-    /// <summary>
-    /// Estado del flujo de creación de actividad
-    /// </summary>
     public sealed class ActivityCreationState
     {
-        // Datos de la actividad (SOLO LO ESENCIAL)
         public string? Titulo { get; set; }
         public string? Prioridad { get; set; }
         public DateTimeOffset? DueStart { get; set; }
         public DateTimeOffset? DueEnd { get; set; }
 
-        // ✅ NUEVO: Estado de clarificación de hora
-        public int? AmbiguousHour { get; set; }  // Hora extraída pero ambigua (1-12)
-        public DateTimeOffset? AmbiguousBaseDate { get; set; }  // Fecha base para la hora ambigua
+        public int? AmbiguousHour { get; set; }
+        public DateTimeOffset? AmbiguousBaseDate { get; set; }
+        public int? DuracionHoras { get; set; }
 
-        // Control del flujo
+        public List<AssigneeInfo>? Assignees { get; set; }
+        public string? PendingAssigneeName { get; set; }
+        public List<string>? PendingAssigneeNames { get; set; }
+        public int CurrentAssigneeIndex { get; set; }
+        public List<UserSearchItem>? PendingSearchResults { get; set; }
+        public Task<UserSearchResponse>? PendingSearchTask { get; set; }
+
         public FlowPhase Phase { get; set; } = FlowPhase.Gathering;
         public int CurrentStep { get; set; } = 0;
         public string? FieldBeingCorrected { get; set; }
 
-        // Validación (SOLO campos que preguntamos)
         public bool HasTitulo => !string.IsNullOrWhiteSpace(Titulo);
         public bool HasPrioridad => !string.IsNullOrWhiteSpace(Prioridad);
         public bool HasDueStart => DueStart.HasValue;
-
-        // Helper
+        public bool HasAssignees => Assignees != null && Assignees.Count > 0;
         public bool IsReadyForConfirmation => HasTitulo && HasPrioridad;
 
         public void Reset()
@@ -39,20 +42,44 @@ namespace Anfeta.UI.Models
             DueEnd = null;
             AmbiguousHour = null;
             AmbiguousBaseDate = null;
+            DuracionHoras = null;
+            Assignees = null;
+            PendingAssigneeName = null;
+            PendingAssigneeNames = null;
+            CurrentAssigneeIndex = 0;
+            PendingSearchResults = null;
+            PendingSearchTask = null;
             Phase = FlowPhase.Gathering;
             CurrentStep = 0;
             FieldBeingCorrected = null;
         }
     }
 
-    /// <summary>
-    /// Fase actual del flujo de creación
-    /// </summary>
     public enum FlowPhase
     {
-        Gathering,      // Recopilando datos paso a paso
-        ClarifyingTime, // ✅ NUEVO: Preguntando AM o PM
-        Confirming,     // Mostrando resumen para confirmación
-        Correcting      // Editando un campo específico
+        Gathering,
+        ClarifyingTime,
+        AskingDueEnd,            
+        AskingAssignee,
+        SearchingAssignee,
+        ConfirmingAssignee,
+        SelectingFromMultiple,
+        Confirming,
+        Correcting
+    }
+
+    public sealed class AssigneeInfo
+    {
+        public string Name { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string CollaboratorId { get; set; } = "";
+    }
+
+    public sealed class UserSearchItem
+    {
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string CollaboratorId { get; set; } = "";
     }
 }

@@ -29,6 +29,7 @@ namespace Anfeta.UI.ViewModels
         private readonly IntentValidator _validator;
         private readonly FastCommandClassifier _fastClassifier;
         private readonly InterpretationCache _interpretationCache;
+       
 
         private CancellationTokenSource? _currentRecognitionCts;
 
@@ -52,6 +53,7 @@ namespace Anfeta.UI.ViewModels
         private readonly ActivityFieldExtractor _activityExtractor;
         private readonly ActivityFieldValidator _activityValidator;
         private readonly CorrectionCommandDetector _correctionDetector;
+        private readonly WeblabUsersClient _usersClient;
         private ActivityCreationFlow? _activityFlow;
         private bool _isInActivityCreation;
 
@@ -128,7 +130,8 @@ namespace Anfeta.UI.ViewModels
             InterpretationCache interpretationCache,
             ActivityFieldExtractor activityExtractor,
             ActivityFieldValidator activityValidator,
-            CorrectionCommandDetector correctionDetector)
+            CorrectionCommandDetector correctionDetector,
+            WeblabUsersClient usersClient)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -142,12 +145,14 @@ namespace Anfeta.UI.ViewModels
             _activityExtractor = activityExtractor;
             _activityValidator = activityValidator;
             _correctionDetector = correctionDetector;
+            _usersClient = usersClient;
 
             // Inicializar flujo de actividades
             _activityFlow = new ActivityCreationFlow(
                 _activityExtractor,
                 _activityValidator,
-                _correctionDetector);
+                _correctionDetector,
+                _usersClient);
             _isInActivityCreation = false;
 
             InitializeSpeechCommand = new AsyncRelayCommand(InitializeSpeechAsync);
@@ -160,6 +165,7 @@ namespace Anfeta.UI.ViewModels
 
             Debug.WriteLine("[VM] HomeViewModel creado. Iniciando warmup IA en background...");
             _ = WarmupModelAsync();
+            _usersClient = usersClient;
         }
 
         private bool CanListenOnce() => !IsListening && IsModelReady;
@@ -602,8 +608,9 @@ namespace Anfeta.UI.ViewModels
             {
                 Debug.WriteLine("[STT] RecognizeOnceAsync...");
                 var text = await _speechService.RecognizeOnceAsync(ct);
-
-                Debug.WriteLine("[STT] RecognizeOnceAsync result: " + (text ?? "<null>"));
+                Debug.WriteLine("------------------------------------");
+                Debug.WriteLine("[STT] TEXTO: " + (text ?? "<null>"));
+                Debug.WriteLine("------------------------------------");
 
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
