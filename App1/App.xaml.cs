@@ -248,8 +248,7 @@ namespace Anfeta.UI
             catch (Exception ex)
             {
                 Debug.WriteLine($"DEVICE ERROR: {ex.Message}");
-                Debug.WriteLine("Si el error menciona 'is_active', tu asistente.db es viejo. " +
-                                "Borra la BD (carpeta LocalFolder) para regenerarla con el esquema nuevo.");
+
             }
 
             // 5) Hotkey
@@ -396,10 +395,8 @@ namespace Anfeta.UI
                 {
                     if (_floatingButton != null)
                     {
-                        Debug.WriteLine("[APP] Cerrando flotante...");
                         _floatingButton.Close();
                         _floatingButton = null;
-                        Debug.WriteLine("[APP] Flotante cerrado OK");
                     }
                 }
                 catch (Exception ex)

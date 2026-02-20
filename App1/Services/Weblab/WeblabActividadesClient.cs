@@ -4,6 +4,7 @@ using Anfeta.UI.Services.Auth;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -37,11 +38,6 @@ namespace Anfeta.UI.Services.Weblab
             {
                 if (req == null || string.IsNullOrWhiteSpace(req.Titulo))
                     return new ApiPlainResponse { Ok = false, PlainText = "Falta el título para crear la actividad." };
-
-                // 1) Obtener collaboratorId del usuario actual
-                var (okUser, email, _, collaboratorId) = await _auth.GetCurrentUserAsync(ct);
-                if (!okUser || string.IsNullOrWhiteSpace(collaboratorId))
-                    return new ApiPlainResponse { Ok = false, PlainText = "No pude obtener tu usuario." };
 
                 using var form = new MultipartFormDataContent();
 
@@ -101,7 +97,6 @@ namespace Anfeta.UI.Services.Weblab
                 System.Diagnostics.Debug.WriteLine("=================================");
 #endif
 
-                // 2) Crear actividad (POST)
                 using var resp = await _http.PostAsync("/api/actividades", form, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
 
@@ -112,7 +107,6 @@ namespace Anfeta.UI.Services.Weblab
                         PlainText = $"No pude crear la actividad. HTTP {(int)resp.StatusCode}: {json}"
                     };
 
-                // 3) Extraer ID de la respuesta
                 string? activityId = null;
                 using (var doc = JsonDocument.Parse(json))
                 {
@@ -126,8 +120,22 @@ namespace Anfeta.UI.Services.Weblab
                 if (string.IsNullOrWhiteSpace(activityId))
                     return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada: {req.Titulo}." };
 
-                // 4) Asignar usuario (PUT)
-                var assignBody = JsonSerializer.Serialize(new { assignees = new[] { collaboratorId } });
+                List<string> assigneeIds;
+
+                if (req.Assignees != null && req.Assignees.Count > 0)
+                {
+                    assigneeIds = req.Assignees.Select(a => a.CollaboratorId).ToList();
+                }
+                else
+                {
+                    var (okUser, email, _, collaboratorId) = await _auth.GetCurrentUserAsync(ct);
+                    if (!okUser || string.IsNullOrWhiteSpace(collaboratorId))
+                        return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada: {req.Titulo}. Sin asignar (no se pudo obtener tu usuario)." };
+
+                    assigneeIds = new List<string> { collaboratorId };
+                }
+
+                var assignBody = JsonSerializer.Serialize(new { assignees = assigneeIds });
                 var assignContent = new StringContent(assignBody, Encoding.UTF8, "application/json");
 
 #if DEBUG
@@ -148,13 +156,36 @@ namespace Anfeta.UI.Services.Weblab
 #endif
 
                 if (!assignResp.IsSuccessStatusCode)
+                {
+                    if (req.Assignees != null && req.Assignees.Count > 0)
+                    {
+                        var names = string.Join(", ", req.Assignees.Select(a => a.Name));
+                        return new ApiPlainResponse
+                        {
+                            Ok = true,
+                            PlainText = $"Actividad creada pero no pude asignarla a: {names}."
+                        };
+                    }
                     return new ApiPlainResponse
                     {
                         Ok = true,
                         PlainText = $"Actividad creada pero no pude asignártela: {req.Titulo}."
                     };
+                }
 
-                return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada y asignada: {req.Titulo}." };
+                if (req.Assignees == null || req.Assignees.Count == 0)
+                {
+                    return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada y asignada a ti" };
+                }
+                else if (req.Assignees.Count == 1)
+                {
+                    return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada y asignada a {req.Assignees[0].Name}: {req.Titulo}." };
+                }
+                else
+                {
+                    var names = string.Join(", ", req.Assignees.Select(a => a.Name));
+                    return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada y asignada a: {names}." };
+                }
             }
             catch (OperationCanceledException)
             {

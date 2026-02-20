@@ -21,23 +21,24 @@ namespace Anfeta.UI.Services.Activity
             if (string.IsNullOrWhiteSpace(input))
                 return new ValidationResult { Valid = false };
 
-            var lower = input.Trim().ToLowerInvariant();
+            var lower = input.Trim().ToLowerInvariant()
+                .Replace("prioridad", "")
+                .Replace("es", "")
+                .Replace("la", "")
+                .Replace("sí", "")
+                .Replace("si", "")
+                .Replace(",", "")
+                .Trim();
 
-            // Exacto
-            if (ValidPrioridad.Contains(lower))
-                return new ValidationResult { Valid = true, Normalized = CapitalizeFirst(lower) };
-
-            // Fuzzy matching con auto-corrección
-            if (lower.Contains("urgent") || lower.Contains("import") || lower.Contains("critic"))
+            if (lower.Contains("alt") || lower.Contains("urgent") || lower.Contains("import") || lower.Contains("critic"))
                 return new ValidationResult { Valid = true, Normalized = "Alta" };
 
-            if (lower.Contains("normal") || lower.Contains("regul"))
+            if (lower.Contains("medi") || lower.Contains("normal") || lower.Contains("regul"))
                 return new ValidationResult { Valid = true, Normalized = "Media" };
 
-            if (lower.Contains("baj") || lower.Contains("poca") || lower.Contains("ninguna"))
+            if (lower.Contains("baj") || lower.Contains("poca") || lower.Contains("ninguna") || lower.Contains("puede esperar"))
                 return new ValidationResult { Valid = true, Normalized = "Baja" };
 
-            // Si no match, sugerir
             return new ValidationResult { Valid = false, Suggestion = "Media" };
         }
 
@@ -50,21 +51,35 @@ namespace Anfeta.UI.Services.Activity
         {
             var now = DateTimeOffset.Now;
 
-            // No permitir pasado (con margen de 5 min para errores de reloj)
-            if (fecha < now.AddMinutes(-5))
+            // Si es pasado (con margen de 5 min en lugar de 10)
+            if (fecha < now.AddMinutes(-5))  // ✅ CAMBIAR DE -10 A -5
+            {
+                // Si es HOY pero pasado
+                if (fecha.Date == now.Date)
+                {
+                    return new DateValidationResult
+                    {
+                        Valid = false,
+                        Message = $"Son las {now:HH:mm} y dijiste {fecha:HH:mm}. Esa hora ya pasó. ¿Otra hora?"
+                    };
+                }
+
                 return new DateValidationResult
                 {
                     Valid = false,
                     Message = "No puedo crear actividades en el pasado. ¿Otra fecha?"
                 };
+            }
 
             // Advertir si es muy lejana (>1 año)
             if (fecha > now.AddYears(1))
+            {
                 return new DateValidationResult
                 {
                     Valid = true,
                     Message = "⚠️ Fecha muy lejana. ¿Estás seguro?"
                 };
+            }
 
             return new DateValidationResult { Valid = true };
         }

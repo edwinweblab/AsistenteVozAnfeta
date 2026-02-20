@@ -27,6 +27,7 @@ namespace Anfeta.UI.Models
         // Archivos (opcional)
         public List<string>? ArchivosPaths { get; set; }
         public List<string>? PendienteImagesPaths { get; set; }
+        public List<AssigneeInfo>? Assignees { get; set; }
     }
 
     public sealed class PendienteItem
