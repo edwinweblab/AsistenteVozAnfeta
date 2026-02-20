@@ -6,11 +6,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
 using System.Diagnostics;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Services.Activity;
 
 namespace Anfeta.UI.ViewModels
 {
@@ -18,7 +16,7 @@ namespace Anfeta.UI.ViewModels
     /// ViewModel principal para la vista Home.
     /// Maneja reconocimiento de voz, interpretación de comandos y ejecución de acciones LOCAL y API.
     /// </summary>
-    public class HomeViewModel : ObservableObject
+    public class HomeViewModel : ObservableObject, IDisposable
     {
         private readonly ISpeechToTextService _speechService;
         private readonly ICommandInterpretationService _interpreter;
@@ -29,7 +27,8 @@ namespace Anfeta.UI.ViewModels
         private readonly IntentValidator _validator;
         private readonly FastCommandClassifier _fastClassifier;
         private readonly InterpretationCache _interpretationCache;
-       
+        private readonly ApiKeyService _apiKeyService;
+        private readonly SemaphoreSlim _warmupLock = new(1, 1);
 
         private CancellationTokenSource? _currentRecognitionCts;
 
@@ -131,7 +130,8 @@ namespace Anfeta.UI.ViewModels
             ActivityFieldExtractor activityExtractor,
             ActivityFieldValidator activityValidator,
             CorrectionCommandDetector correctionDetector,
-            WeblabUsersClient usersClient)
+            WeblabUsersClient usersClient,
+            ApiKeyService apiKeyService)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -142,10 +142,16 @@ namespace Anfeta.UI.ViewModels
             _validator = validator;
             _fastClassifier = fastClassifier;
             _interpretationCache = interpretationCache;
+
             _activityExtractor = activityExtractor;
             _activityValidator = activityValidator;
             _correctionDetector = correctionDetector;
             _usersClient = usersClient;
+
+            _apiKeyService = apiKeyService;
+
+            // Suscripción segura (para poder desuscribir en Dispose)
+            _apiKeyService.KeysChanged += OnKeysChanged;
 
             // Inicializar flujo de actividades
             _activityFlow = new ActivityCreationFlow(
@@ -165,10 +171,23 @@ namespace Anfeta.UI.ViewModels
 
             Debug.WriteLine("[VM] HomeViewModel creado. Iniciando warmup IA en background...");
             _ = WarmupModelAsync();
-            _usersClient = usersClient;
+        }
+
+        public void Dispose()
+        {
+            _apiKeyService.KeysChanged -= OnKeysChanged;
+            try { _currentRecognitionCts?.Cancel(); } catch { }
+            try { _currentRecognitionCts?.Dispose(); } catch { }
+            _currentRecognitionCts = null;
         }
 
         private bool CanListenOnce() => !IsListening && IsModelReady;
+
+        /// <summary>Handler del evento KeysChanged</summary>
+        private async void OnKeysChanged(object? sender, EventArgs e)
+        {
+            await RecheckModelAsync();
+        }
 
         /// <summary>Entrypoint para segundo plano (hotkey)</summary>
         public async Task TriggerVoiceFromHotkeyAsync()
@@ -239,7 +258,6 @@ namespace Anfeta.UI.ViewModels
         {
             ResetAfterAction(infoMessage, statusText);
 
-            // TTS SIEMPRE para respuestas (no solo background)
             if (!string.IsNullOrWhiteSpace(speak))
                 await SpeakSafeAsync(speak);
         }
@@ -272,6 +290,10 @@ namespace Anfeta.UI.ViewModels
         /// <summary>Warmup del modelo IA</summary>
         private async Task WarmupModelAsync()
         {
+            UpdateUiSafe("Revisando conexión con el modelo...", "Revisando...");
+            IsModelReady = false;
+            ListenOnceCommand.NotifyCanExecuteChanged();
+
             try
             {
                 Debug.WriteLine("[IA] Warmup start: InterpretRawAsync('ping')");
@@ -292,12 +314,25 @@ namespace Anfeta.UI.ViewModels
                 IsModelReady = false;
 
                 UpdateUiSafe(
-                    infoMessage: "No pude conectar con el modelo. Revisa el servicio e intenta reiniciar la app.",
+                    infoMessage: "No pude conectar con el modelo. Revisa tu API key y vuelve a intentar.",
                     statusText: "Modelo no disponible"
                 );
 
                 ListenOnceCommand.NotifyCanExecuteChanged();
                 Debug.WriteLine("[IA] Warmup ERROR: " + ex);
+            }
+        }
+
+        public async Task RecheckModelAsync()
+        {
+            await _warmupLock.WaitAsync();
+            try
+            {
+                await WarmupModelAsync();
+            }
+            finally
+            {
+                _warmupLock.Release();
             }
         }
 
@@ -502,7 +537,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Actualizar contexto después de ejecutar
                 _contextManager.AddToHistory(intent, appKey);
                 if (intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(appKey))
                 {
@@ -533,10 +567,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Actualizar contexto
                 _contextManager.AddToHistory($"API:{resource}:{action}", null);
-
-                // Mostrar y hablar el resultado real
                 await ResetAfterActionAsync(msg, "Listo.", speak: msg);
                 return;
             }
@@ -553,7 +584,6 @@ namespace Anfeta.UI.ViewModels
         {
             Debug.WriteLine("[STT] ListenOnceAsync start");
 
-            // DETENER TTS SI ESTÁ HABLANDO
             try
             {
                 _tts.Stop();
@@ -595,7 +625,6 @@ namespace Anfeta.UI.ViewModels
             var mySession = Interlocked.Increment(ref _listenSessionId);
 
             IsListening = true;
-
             UpdateUiSafe("Escuchando... habla ahora", "Escuchando... habla ahora", recognized: "");
 
             if (_backgroundMode)
@@ -608,6 +637,7 @@ namespace Anfeta.UI.ViewModels
             {
                 Debug.WriteLine("[STT] RecognizeOnceAsync...");
                 var text = await _speechService.RecognizeOnceAsync(ct);
+
                 Debug.WriteLine("------------------------------------");
                 Debug.WriteLine("[STT] TEXTO: " + (text ?? "<null>"));
                 Debug.WriteLine("------------------------------------");
@@ -621,19 +651,16 @@ namespace Anfeta.UI.ViewModels
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
-                    await ResetAfterActionAsync("No se detectó voz. Intenta otra vez.", "No se entendió", speak: "No detecté voz. Intenta de nuevo.");
+                    await ResetAfterActionAsync("No se detectó voz. Intenta otra vez.", "No se entendió",
+                        speak: "No detecté voz. Intenta de nuevo.");
                     return;
                 }
 
                 UpdateUiSafe("Texto detectado correctamente.", $"Entendí: {text}", recognized: text);
 
-                // Confirmación en segundo plano
                 if (_backgroundMode)
-                {
                     await SpeakSafeAsync("Mensaje recibido.");
-                }
 
-                // Verificación antes de lógica pesada
                 if (_cancelRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[VM] Cancel detectado post-texto -> no interpretar");
@@ -645,27 +672,22 @@ namespace Anfeta.UI.ViewModels
                 if (_isInActivityCreation && _activityFlow != null)
                 {
                     Debug.WriteLine("[ACTIVITY_FLOW] Procesando respuesta en flujo de creación");
-
                     var (shouldContinue, message, readyData) = _activityFlow.ProcessResponse(text);
 
                     if (!shouldContinue)
                     {
-                        // Flujo terminado (cancelado o listo para crear)
                         _isInActivityCreation = false;
 
                         if (readyData != null)
                         {
-                            // Construir request para backend
                             var request = new CreateActividadRequest
                             {
                                 Titulo = readyData.Titulo ?? "Sin título",
                                 Prioridad = readyData.Prioridad,
-                                // NO enviamos Status ni Tipo - el backend usa sus defaults
                                 DueStart = readyData.DueStart?.ToString("o"),
                                 DueEnd = readyData.DueEnd?.ToString("o")
                             };
 
-                            // Ejecutar creación
                             var (ok, apiMsg) = await _apiExecutor.ExecuteAsync(
                                 "weblab",
                                 "actividades",
@@ -677,12 +699,10 @@ namespace Anfeta.UI.ViewModels
                             return;
                         }
 
-                        // Flujo cancelado
                         await ResetAfterActionAsync(message, "Flujo cancelado", speak: message);
                         return;
                     }
 
-                    // Flujo continúa - mostrar siguiente pregunta
                     IsListening = false;
                     ListenOnceCommand.NotifyCanExecuteChanged();
                     UpdateUiSafe(message, "Creando actividad...");
@@ -690,7 +710,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Detectar inicio de creación de actividad
                 if (IsCreateActivityCommand(text))
                 {
                     Debug.WriteLine("[ACTIVITY_FLOW] Iniciando flujo de creación");
@@ -704,8 +723,6 @@ namespace Anfeta.UI.ViewModels
                     await SpeakSafeAsync(startMessage);
                     return;
                 }
-
-                // ===== FLUJO NORMAL (código existente continúa igual) =====
 
                 // pending confirmación
                 if (HasPending())
@@ -736,13 +753,12 @@ namespace Anfeta.UI.ViewModels
                 var requestedFromSpeech = ExtractRequestedAppFromSpeech(text);
                 Debug.WriteLine("[STT] requestedFromSpeech=" + (requestedFromSpeech ?? "<null>"));
 
-                // CLASIFICACIÓN RÁPIDA (bypass IA para comandos obvios)
+                // CLASIFICACIÓN RÁPIDA (bypass IA)
                 var (fastHandled, fastResult) = _fastClassifier.TryFastClassify(text);
                 if (fastHandled && fastResult != null)
                 {
                     Debug.WriteLine($"[FAST] Clasificado sin IA: {fastResult.Intent} → {fastResult.AppKey}");
 
-                    // ✅ NUEVO: Manejo especial para CreateActivity
                     if (fastResult.Intent == "CreateActivity" && fastResult.Scope == "API")
                     {
                         Debug.WriteLine("[ACTIVITY_FLOW] Iniciando flujo de creación (desde FastClassifier)");
@@ -762,7 +778,6 @@ namespace Anfeta.UI.ViewModels
 
                     if (fastRequiresConfirmation)
                     {
-                        // Guardar como pending y esperar confirmación
                         _pendingIntent = fastResult.Intent;
                         _pendingScope = fastResult.Scope;
                         _pendingAppKey = fastResult.AppKey;
@@ -783,7 +798,6 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // Si NO requiere confirmación, ejecutar directamente
                     if (!_localExecutor.TryExecute(fastResult.Intent, fastResult.Scope, fastResult.AppKey, out var fastExecMsg))
                     {
                         await ResetAfterActionAsync(fastExecMsg, "Error", speak: fastExecMsg);
@@ -800,10 +814,9 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Comando complejo -> requiere IA
+                // ===== IA =====
                 Debug.WriteLine("[IA] Comando complejo → InterpretRawAsync...");
 
-                // Validación antes de llamar a IA
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[IA] Cancel/sesion inválida antes de interpretar -> abortar");
@@ -811,7 +824,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // VARIABLES DECLARADAS FUERA (para usarlas después del if/else)
                 InterpretationResult parsedResult;
                 string intent;
                 string scope;
@@ -821,7 +833,6 @@ namespace Anfeta.UI.ViewModels
                 string? action = null;
                 string? paramsJson = null;
 
-                // Verificar caché antes de llamar a IA
                 if (_interpretationCache.TryGet(text, out var cachedResult) && cachedResult != null)
                 {
                     Debug.WriteLine("[CACHE] Usando resultado cacheado");
@@ -835,7 +846,6 @@ namespace Anfeta.UI.ViewModels
                     Debug.WriteLine("[IA] Llamando a Groq/Ollama (no en caché)");
                     var ia = await _interpreter.InterpretRawAsync(text);
 
-                    // Validación después de llamar a IA
                     if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                     {
                         Debug.WriteLine("[IA] Resultado IA ignorado por cancel/sesion nueva");
@@ -864,7 +874,6 @@ namespace Anfeta.UI.ViewModels
                     if (root.TryGetProperty("app_key", out var appEl) && appEl.ValueKind != JsonValueKind.Null)
                         appKey = appEl.GetString();
 
-                    // Extraer campos API si existen
                     if (root.TryGetProperty("provider", out var providerEl) && providerEl.ValueKind != JsonValueKind.Null)
                         provider = providerEl.GetString();
 
@@ -874,11 +883,8 @@ namespace Anfeta.UI.ViewModels
                     if (root.TryGetProperty("action", out var actionEl) && actionEl.ValueKind != JsonValueKind.Null)
                         action = actionEl.GetString();
 
-                    // Extraer params como JSON string
                     if (root.TryGetProperty("params", out var paramsEl) && paramsEl.ValueKind == JsonValueKind.Object)
-                    {
                         paramsJson = paramsEl.GetRawText();
-                    }
 
                     Debug.WriteLine($"[IA] Parsed -> intent={intent}, scope={scope}, app_key={appKey}, provider={provider}, resource={resource}, action={action}");
 
@@ -890,11 +896,9 @@ namespace Anfeta.UI.ViewModels
                         Confidence = root.TryGetProperty("confidence", out var confEl) ? confEl.GetDouble() : 0.5
                     };
 
-                    // Guardar en caché
                     _interpretationCache.Set(text, parsedResult);
                 }
 
-                // VALIDACIÓN CON IntentValidator
                 var validation = _validator.Validate(parsedResult, text);
 
                 if (!validation.IsValid)
@@ -907,7 +911,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Si fue inferido, usar resultado enriquecido
                 if (validation.WasInferred && validation.EnrichedResult != null)
                 {
                     appKey = validation.EnrichedResult.AppKey;
@@ -915,7 +918,6 @@ namespace Anfeta.UI.ViewModels
                     Debug.WriteLine($"[Validator] Inferido: intent={intent}, app_key={appKey}");
                 }
 
-                // Anti-sustitución
                 if (!string.IsNullOrWhiteSpace(requestedFromSpeech) &&
                     string.Equals(intent, "OpenApp", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase) &&
@@ -930,7 +932,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Validación antes de ejecutar
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[EXEC] Cancel/sesion inválida antes de ejecutar -> abortar");
@@ -938,7 +939,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Verificar si requiere confirmación
                 var requiresConfirmation = RequiresConfirmation(scope, action);
 
                 if (requiresConfirmation)
@@ -975,7 +975,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // EJECUTAR ACCIÓN DIRECTAMENTE (sin confirmación)
                 if (string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
                 {
                     if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
@@ -988,16 +987,11 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // Actualizar contexto después de ejecutar
                     _contextManager.AddToHistory(intent, appKey);
                     if (intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(appKey))
-                    {
                         _contextManager.SetActiveApp(appKey);
-                    }
                     else if (intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
-                    {
                         _contextManager.ClearActiveApp();
-                    }
 
                     await ResetAfterActionAsync(msg, msg, speak: msg);
                     return;
@@ -1019,10 +1013,7 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // Actualizar contexto
                     _contextManager.AddToHistory($"API:{resource}:{action}", null);
-
-                    // Mostrar y hablar el resultado real
                     await ResetAfterActionAsync(msg, "Listo.", speak: msg);
                     return;
                 }

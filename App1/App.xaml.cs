@@ -68,28 +68,37 @@ namespace Anfeta.UI
                     services.AddSingleton<CorrectionCommandDetector>();
 
                     // =========================
-                    // GROQ (sustituye Ollama)
+                    // GROQ 
                     // =========================
-                    services.AddSingleton(sp =>
+
+                    services.AddSingleton<ApiKeyRepository>();
+                    services.AddSingleton<ApiKeyService>();
+
+                    services.AddTransient<GroqAuthHeaderHandler>();
+
+                    services.AddHttpClient("Groq", client =>
                     {
-                        var http = new HttpClient
-                        {
-                            BaseAddress = new Uri(GroqConfig.BaseUrl),
-                            Timeout = TimeSpan.FromSeconds(60)
-                        };
-
-                        // TEMP: key pegada en código
-                        http.DefaultRequestHeaders.Authorization =
-                            new AuthenticationHeaderValue("Bearer", GroqConfig.ApiKey);
-
-                        return http;
-                    });
+                        client.BaseAddress = new Uri(GroqConfig.BaseUrl);
+                        client.Timeout = TimeSpan.FromSeconds(60);
+                    })
+                    .AddHttpMessageHandler<GroqAuthHeaderHandler>();
 
                     services.AddSingleton<ICommandInterpretationService>(sp =>
                     {
-                        var http = sp.GetRequiredService<HttpClient>();
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        var http = factory.CreateClient("Groq");
                         return new GroqInterpretationService(http, GroqConfig.ModelName);
                     });
+                    services.AddHttpClient("GroqValidate", client =>
+                    {
+                        client.BaseAddress = new Uri(GroqConfig.BaseUrl);
+                        client.Timeout = TimeSpan.FromSeconds(30);
+                    });
+                    services.AddSingleton<GroqKeyValidator>();
+                    services.AddTransient<Anfeta.UI.Views.ApiKeysView>();
+                    services.AddSingleton<GroqRuntimeService>();
+
+
 
                     // =========================
                     // Auth / Weblab (LOCAL)
@@ -517,6 +526,15 @@ namespace Anfeta.UI
         {
             try
             {
+                var keyService = AppHost.Services.GetRequiredService<ApiKeyService>();
+                var key = await keyService.GetActiveGroqKeyAsync();
+
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    Debug.WriteLine("GROQ: no hay API key activa (configúrala en Settings)");
+                    return;
+                }
+
                 var interpreter = AppHost.Services.GetRequiredService<ICommandInterpretationService>();
                 await interpreter.InterpretRawAsync("ping");
                 Debug.WriteLine("GROQ WARMUP OK");
@@ -526,6 +544,7 @@ namespace Anfeta.UI
                 Debug.WriteLine("GROQ WARMUP ERROR: " + ex.Message);
             }
         }
+
 
         private void TestDatabaseConnection()
         {

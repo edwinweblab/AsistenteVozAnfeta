@@ -361,5 +361,10 @@ namespace Anfeta.UI.Views
             _statusTimer.Stop();
             _statusTimer.Start();
         }
+        private void BtnApiKeys_Click(object sender, RoutedEventArgs e)
+        {
+            Frame.Navigate(typeof(Anfeta.UI.Views.ApiKeysView));
+        }
+
     }
 }

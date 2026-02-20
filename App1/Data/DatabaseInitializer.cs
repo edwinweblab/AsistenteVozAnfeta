@@ -25,6 +25,23 @@ namespace Anfeta.UI.Data
 
             using var command = connection.CreateCommand();
             command.CommandText = @"
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider VARCHAR NOT NULL,
+                name VARCHAR,
+                api_key TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0,
+                last_validated_at DATETIME,
+                created_at DATETIME,
+                updated_at DATETIME
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_single_active_provider
+            ON api_keys(provider)
+            WHERE is_active = 1;
+
+            CREATE INDEX IF NOT EXISTS idx_api_keys_provider
+            ON api_keys(provider);
 
             -- ========================
             -- CONTROL DE ESQUEMA
