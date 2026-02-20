@@ -175,7 +175,7 @@ namespace Anfeta.UI.Services.Weblab
 
                 if (req.Assignees == null || req.Assignees.Count == 0)
                 {
-                    return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada y asignada a ti: {req.Titulo}." };
+                    return new ApiPlainResponse { Ok = true, PlainText = $"Actividad creada y asignada a ti" };
                 }
                 else if (req.Assignees.Count == 1)
                 {

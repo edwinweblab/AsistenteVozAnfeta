@@ -2,6 +2,7 @@
 using Anfeta.UI.Models;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -808,6 +809,144 @@ namespace Anfeta.UI.Services.Activity
             return (true, GetDueEndQuestion(), null);
         }
 
+        /// <summary>
+        /// Genera variaciones comunes de nombres para búsqueda fuzzy
+        /// </summary>
+        private List<string> GetNameVariations(string name)
+        {
+            var variations = new List<string>();
+
+            if (string.IsNullOrWhiteSpace(name))
+                return variations;
+
+            var lower = name.ToLowerInvariant();
+
+            // Variaciones comunes de nombres
+            var replacements = new Dictionary<string, string[]>
+            {
+                { "bryan", new[] { "brian", "brayan" } },
+                { "brian", new[] { "bryan", "brayan" } },
+                { "stefany", new[] { "stephanie", "estefania", "estefany" } },
+                { "stephanie", new[] { "stefany", "estefania", "estefany" } },
+                { "jonathan", new[] { "jonatan", "johnny" } },
+                { "cristian", new[] { "christian", "cristhian" } },
+                { "christian", new[] { "cristian", "cristhian" } },
+                { "jose", new[] { "josé", "pepe" } },
+                { "maria", new[] { "maría" } },
+                { "edwin", new[] { "edwing" } }
+            };
+
+            foreach (var kvp in replacements)
+            {
+                if (lower.Contains(kvp.Key))
+                {
+                    foreach (var replacement in kvp.Value)
+                    {
+                        var variation = lower.Replace(kvp.Key, replacement);
+                        // Capitalizar primera letra
+                        if (variation.Length > 0)
+                        {
+                            variation = char.ToUpper(variation[0]) + variation.Substring(1);
+                        }
+                        variations.Add(variation);
+                    }
+                }
+            }
+
+            return variations;
+        }
+
+
+        /// <summary>
+        /// Extrae solo el primer nombre de un nombre completo
+        /// Ejemplo: "Bryan cruz Hernández" → "Bryan"
+        /// </summary>
+        private string ExtractFirstName(string fullName)
+        {
+            if (string.IsNullOrWhiteSpace(fullName))
+                return string.Empty;
+
+            var parts = fullName.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts.Length == 0)
+                return string.Empty;
+
+            // Capitalizar primera letra
+            var firstName = parts[0];
+            if (firstName.Length > 0)
+            {
+                firstName = char.ToUpper(firstName[0]) + firstName.Substring(1).ToLower();
+            }
+
+            return firstName;
+        }
+
+        /// <summary>
+        /// Quita tildes y caracteres especiales
+        /// Ejemplo: "Hernández" → "Hernandez"
+        /// </summary>
+        private string RemoveAccents(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return text;
+
+            var normalized = text.Normalize(System.Text.NormalizationForm.FormD);
+            var result = new System.Text.StringBuilder();
+
+            foreach (var c in normalized)
+            {
+                var category = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+                if (category != System.Globalization.UnicodeCategory.NonSpacingMark)
+                {
+                    result.Append(c);
+                }
+            }
+
+            return result.ToString().Normalize(System.Text.NormalizationForm.FormC);
+        }
+
+        /// <summary>
+        /// Filtra resultados por apellido similar
+        /// </summary>
+        private List<UserSearchItem> FilterByLastName(List<UserSearchItem> items, string searchLastName)
+        {
+            if (string.IsNullOrWhiteSpace(searchLastName))
+                return items;
+
+            var normalizedSearch = RemoveAccents(searchLastName.ToLowerInvariant());
+            var filtered = new List<UserSearchItem>();
+
+            foreach (var item in items)
+            {
+                if (string.IsNullOrWhiteSpace(item.LastName))
+                    continue;
+
+                var normalizedLast = RemoveAccents(item.LastName.ToLowerInvariant());
+
+                // Verificar si el apellido del resultado contiene alguna palabra del apellido buscado
+                var searchWords = normalizedSearch.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                var itemWords = normalizedLast.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var searchWord in searchWords)
+                {
+                    foreach (var itemWord in itemWords)
+                    {
+                        // Si encuentra coincidencia en al menos una palabra del apellido
+                        if (itemWord.Contains(searchWord) || searchWord.Contains(itemWord))
+                        {
+                            filtered.Add(item);
+                            System.Diagnostics.Debug.WriteLine($"[FLOW] Apellido coincidente: '{item.LastName}' contiene '{searchLastName}'");
+                            goto NextItem; // Salir de ambos loops
+                        }
+                    }
+                }
+
+            NextItem:;
+            }
+
+            return filtered;
+        }
+
         // Inicia búsqueda de assignee
         private (bool, string, ActivityCreationState?) StartSearchingAssignee(string name)
         {
@@ -817,7 +956,133 @@ namespace Anfeta.UI.Services.Activity
             System.Diagnostics.Debug.WriteLine($"[FLOW] Iniciando búsqueda de '{name}'");
 
             // Ejecutar búsqueda en Task.Run para evitar deadlock
-            _state.PendingSearchTask = Task.Run(async () => await _usersClient.SearchUsersAsync(name));
+            _state.PendingSearchTask = Task.Run(async () =>
+            {
+                var originalName = name.Trim();
+
+                // ESTRATEGIA 1: Buscar nombre completo tal cual
+                System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 1: Nombre completo '{originalName}'");
+                var result = await _usersClient.SearchUsersAsync(originalName);
+
+                if (result.Success && result.Items.Count > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FLOW] ✅ Encontrado con nombre completo: {result.Items.Count} resultados");
+                    return result;
+                }
+
+                // ESTRATEGIA 2: Nombre completo SIN tildes
+                var normalized = RemoveAccents(originalName);
+                if (normalized != originalName)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 2: Sin tildes '{normalized}'");
+                    result = await _usersClient.SearchUsersAsync(normalized);
+
+                    if (result.Success && result.Items.Count > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[FLOW] ✅ Encontrado sin tildes: {result.Items.Count} resultados");
+                        return result;
+                    }
+                }
+
+                // Extraer primer nombre para estrategias 3-5
+                var firstName = ExtractFirstName(originalName);
+                var hasMultipleWords = originalName.Contains(" ");
+
+                // ESTRATEGIA 3: Variaciones del primer nombre + apellido completo
+                if (hasMultipleWords)
+                {
+                    var restOfName = originalName.Substring(firstName.Length).Trim();
+                    var variations = GetNameVariations(firstName);
+
+                    foreach (var variation in variations)
+                    {
+                        var fullVariation = $"{variation} {restOfName}";
+                        System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 3: Variación con apellido '{fullVariation}'");
+                        result = await _usersClient.SearchUsersAsync(fullVariation);
+
+                        if (result.Success && result.Items.Count > 0)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[FLOW] ✅ Encontrado con variación completa: {result.Items.Count} resultados");
+                            return result;
+                        }
+
+                        // También sin tildes
+                        var fullVariationNormalized = RemoveAccents(fullVariation);
+                        if (fullVariationNormalized != fullVariation)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 3b: Variación sin tildes '{fullVariationNormalized}'");
+                            result = await _usersClient.SearchUsersAsync(fullVariationNormalized);
+
+                            if (result.Success && result.Items.Count > 0)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[FLOW] ✅ Encontrado con variación sin tildes: {result.Items.Count} resultados");
+                                return result;
+                            }
+                        }
+                    }
+                }
+
+                // ESTRATEGIA 4: Variaciones solo del primer nombre (sin apellido)
+                var nameVariations = GetNameVariations(firstName);
+                foreach (var variation in nameVariations)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 4: Variación solo nombre '{variation}'");
+                    result = await _usersClient.SearchUsersAsync(variation);
+
+                    if (result.Success && result.Items.Count > 0)
+                    {
+                        // Si encontró resultados, verificar si alguno coincide con el apellido
+                        if (hasMultipleWords)
+                        {
+                            var lastName = originalName.Substring(firstName.Length).Trim();
+                            var filtered = FilterByLastName(result.Items, lastName);
+
+                            if (filtered.Count > 0)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[FLOW] ✅ Encontrado con variación y apellido coincidente: {filtered.Count} resultados");
+                                return new UserSearchResponse { Success = true, Items = filtered };
+                            }
+                        }
+
+                        System.Diagnostics.Debug.WriteLine($"[FLOW] ⚠️ Encontrado con variación pero sin validar apellido: {result.Items.Count} resultados");
+                    }
+                }
+
+                // ESTRATEGIA 5: Solo primer nombre (último recurso)
+                if (!string.IsNullOrWhiteSpace(firstName))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 5: Solo primer nombre '{firstName}'");
+                    result = await _usersClient.SearchUsersAsync(firstName);
+
+                    if (result.Success && result.Items.Count > 0)
+                    {
+                        // Si el usuario dijo nombre completo, filtrar por apellido
+                        if (hasMultipleWords)
+                        {
+                            var lastName = originalName.Substring(firstName.Length).Trim();
+                            var filtered = FilterByLastName(result.Items, lastName);
+
+                            if (filtered.Count > 0)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[FLOW] ✅ Encontrado por primer nombre con apellido coincidente: {filtered.Count} resultados");
+                                return new UserSearchResponse { Success = true, Items = filtered };
+                            }
+
+                            System.Diagnostics.Debug.WriteLine($"[FLOW] ⚠️ Encontrado por primer nombre pero apellido no coincide");
+                        }
+                        else
+                        {
+                            // Si solo dijo un nombre (sin apellido), aceptar cualquier resultado
+                            System.Diagnostics.Debug.WriteLine($"[FLOW] ✅ Encontrado por primer nombre: {result.Items.Count} resultados");
+                            return result;
+                        }
+                    }
+                }
+
+                // No encontrado con ninguna estrategia
+                System.Diagnostics.Debug.WriteLine($"[FLOW] ❌ No encontrado con ninguna estrategia");
+                return new UserSearchResponse { Success = true, Items = new List<UserSearchItem>() };
+            });
 
             return ProcessSearchingAssigneePhase();
         }

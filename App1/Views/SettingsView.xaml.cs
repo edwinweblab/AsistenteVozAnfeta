@@ -1,5 +1,6 @@
 ﻿using Anfeta.UI.Models;
 using Anfeta.UI.Services;
+using Anfeta.UI.Services.Search;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -8,9 +9,14 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Capture;
+using Windows.Storage;
+using Windows.Storage.Pickers;
 using Windows.UI;
+using WinRT.Interop;
 namespace Anfeta.UI.Views
 {
     public sealed partial class SettingsView : Page
@@ -20,6 +26,13 @@ namespace Anfeta.UI.Views
         private List<AudioDeviceInfo> _inputDevices;
         private List<AudioDeviceInfo> _outputDevices;
         private DispatcherTimer _statusTimer;
+        //DropBox 
+        private const string LS_DropboxRoot = "DropboxRoot";
+        private const string LS_DropboxRootChanged = "DropboxRootChanged";
+        private const string LS_DropboxIndexReady = "DropboxIndexReady";
+        private CancellationTokenSource? _indexCts;
+
+
 
         public SettingsView()
         {
@@ -36,6 +49,8 @@ namespace Anfeta.UI.Views
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             LoadCurrentHotkey();
+            // 🔥 para que no se vea en blanco al volver
+            LoadDropboxRootIntoUI();
 
             _ = Task.Run(async () =>
             {
@@ -367,4 +382,5 @@ namespace Anfeta.UI.Views
         }
 
     }
+
 }

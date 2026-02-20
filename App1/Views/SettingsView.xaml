@@ -15,7 +15,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Header con botones de ayuda -->
+            <!--  Header con botones de ayuda  -->
             <Grid Grid.Row="0">
                 <StackPanel Spacing="4">
                     <TextBlock Text="Configuración"
@@ -45,25 +45,115 @@
                         <FontIcon Glyph="&#xE713;" FontSize="16" Foreground="#CBD5E1"/>
                     </Button>
 
-                    <!-- Problemas comunes -->
-                    <Button x:Name="BtnShowTroubleshoot"
-                            Click="BtnShowTroubleshoot_Click"
-                            Width="40" Height="40"
-                            Background="#14FFFFFF"
-                            BorderBrush="#30FFFFFF"
-                            BorderThickness="1"
-                            CornerRadius="20"
-                            ToolTipService.ToolTip="¿Problemas con el audio?">
-                        <FontIcon Glyph="&#xE897;" FontSize="16" Foreground="{StaticResource AnfetaWarningBrush}"/>
+                    <!--  Problemas comunes  -->
+                    <Button
+                        x:Name="BtnShowTroubleshoot"
+                        Width="40"
+                        Height="40"
+                        Background="#14FFFFFF"
+                        BorderBrush="#30FFFFFF"
+                        BorderThickness="1"
+                        Click="BtnShowTroubleshoot_Click"
+                        CornerRadius="20"
+                        ToolTipService.ToolTip="¿Problemas con el audio?">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{StaticResource AnfetaWarningBrush}"
+                            Glyph="&#xE897;" />
                     </Button>
                 </StackPanel>
             </Grid>
 
-            <!-- ========== SECCIÓN AUDIO ========== -->
+            <!--  ========== SECCIÓN DROPBOX (RUTA) ==========  -->
             <StackPanel Grid.Row="1" Spacing="12">
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon Glyph="&#xE767;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                    <TextBlock Text="Audio" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                    <FontIcon
+                        FontSize="18"
+                        Foreground="{StaticResource AnfetaAccentBrush}"
+                        Glyph="&#xEC50;" />
+                    <TextBlock
+                        FontSize="18"
+                        FontWeight="SemiBold"
+                        Foreground="#F7FAFC"
+                        Text="Dropbox" />
+                </StackPanel>
+
+                <Border
+                    Height="2"
+                    Background="{StaticResource AnfetaAccentBrush}"
+                    CornerRadius="1" />
+
+                <Border Style="{StaticResource CardStyle}">
+                    <Grid RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Spacing="4">
+                            <TextBlock
+                                FontSize="14"
+                                FontWeight="SemiBold"
+                                Foreground="#F7FAFC"
+                                Text="Ruta de Dropbox" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="#94A3B8"
+                                Text="Selecciona la carpeta raíz que usará ANFETA para indexar y buscar."
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <TextBox
+                            x:Name="DropboxPathBox"
+                            Grid.Row="1"
+                            Height="44"
+                            HorizontalAlignment="Stretch"
+                            IsReadOnly="True"
+                            PlaceholderText="Aún no configurado..." />
+
+                        <StackPanel
+                            Grid.Row="2"
+                            Orientation="Horizontal"
+                            Spacing="10">
+                            <Button
+                                x:Name="BtnPickDropboxRoot"
+                                MinWidth="220"
+                                Click="BtnPickDropboxRoot_Click"
+                                Style="{StaticResource SecondaryButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon FontSize="16" Glyph="&#xE8B7;" />
+                                    <TextBlock Text="Seleccionar carpeta..." />
+                                </StackPanel>
+                            </Button>
+
+                            <Button
+                                x:Name="BtnResetDropboxRoot"
+                                MinWidth="140"
+                                Click="BtnResetDropboxRoot_Click"
+                                Style="{StaticResource SecondaryButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon FontSize="16" Glyph="&#xE74D;" />
+                                    <TextBlock Text="Reiniciar" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!--  ========== SECCIÓN AUDIO ==========  -->
+            <StackPanel Grid.Row="2" Spacing="12">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon
+                        FontSize="18"
+                        Foreground="{StaticResource AnfetaAccentBrush}"
+                        Glyph="&#xE767;" />
+                    <TextBlock
+                        FontSize="18"
+                        FontWeight="SemiBold"
+                        Foreground="#F7FAFC"
+                        Text="Audio" />
                 </StackPanel>
 
                 <Border Height="2" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="1"/>
@@ -80,19 +170,29 @@
                                Foreground="#94A3B8"/>
                 </StackPanel>
 
-                <!-- Card Entrada -->
+                <!--  Card Entrada  -->
                 <Border Style="{StaticResource CardStyle}">
                     <Grid RowSpacing="14">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE720;" FontSize="20" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                            <TextBlock Text="Entrada (Micrófono)" FontSize="16" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                        <StackPanel
+                            Grid.Row="0"
+                            Orientation="Horizontal"
+                            Spacing="10">
+                            <FontIcon
+                                FontSize="20"
+                                Foreground="{StaticResource AnfetaAccentBrush}"
+                                Glyph="&#xE720;" />
+                            <TextBlock
+                                FontSize="16"
+                                FontWeight="SemiBold"
+                                Foreground="#F7FAFC"
+                                Text="Entrada (Micrófono)" />
                         </StackPanel>
 
                         <ComboBox Grid.Row="1"
@@ -109,8 +209,11 @@
                                 HorizontalAlignment="Left"
                                 MinWidth="180">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon x:Name="IconTestMic" Glyph="&#xE768;" FontSize="16"/>
-                                <TextBlock x:Name="TxtTestMic" Text="Probar Micrófono"/>
+                                <FontIcon
+                                    x:Name="IconTestMic"
+                                    FontSize="16"
+                                    Glyph="&#xE768;" />
+                                <TextBlock x:Name="TxtTestMic" Text="Probar Micrófono" />
                             </StackPanel>
                         </Button>
 
@@ -119,35 +222,47 @@
                                     Visibility="Collapsed"
                                     Spacing="8">
                             <Grid>
-                                <ProgressBar x:Name="PgMicLevel"
-                                             Maximum="100"
-                                             Height="28"
-                                             CornerRadius="4"
-                                             Foreground="{StaticResource AnfetaAccentBrush}"/>
-                                <TextBlock x:Name="TxtMicLevel"
-                                           Text="0%"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           Foreground="White"
-                                           FontWeight="SemiBold"
-                                           FontSize="12"/>
+                                <ProgressBar
+                                    x:Name="PgMicLevel"
+                                    Height="28"
+                                    CornerRadius="4"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Maximum="100" />
+                                <TextBlock
+                                    x:Name="TxtMicLevel"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    Foreground="White"
+                                    Text="0%" />
                             </Grid>
                         </StackPanel>
                     </Grid>
                 </Border>
 
-                <!-- Card Salida -->
+                <!--  Card Salida  -->
                 <Border Style="{StaticResource CardStyle}">
                     <Grid RowSpacing="14">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE767;" FontSize="20" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                            <TextBlock Text="Salida (Altavoces)" FontSize="16" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                        <StackPanel
+                            Grid.Row="0"
+                            Orientation="Horizontal"
+                            Spacing="10">
+                            <FontIcon
+                                FontSize="20"
+                                Foreground="{StaticResource AnfetaAccentBrush}"
+                                Glyph="&#xE767;" />
+                            <TextBlock
+                                FontSize="16"
+                                FontWeight="SemiBold"
+                                Foreground="#F7FAFC"
+                                Text="Salida (Altavoces)" />
                         </StackPanel>
 
                         <ComboBox Grid.Row="1"
@@ -164,29 +279,42 @@
                                 HorizontalAlignment="Left"
                                 MinWidth="180">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon x:Name="IconTestSpeaker" Glyph="&#xE768;" FontSize="16"/>
-                                <TextBlock x:Name="TxtTestSpeaker" Text="Probar Sonido"/>
+                                <FontIcon
+                                    x:Name="IconTestSpeaker"
+                                    FontSize="16"
+                                    Glyph="&#xE768;" />
+                                <TextBlock x:Name="TxtTestSpeaker" Text="Probar Sonido" />
                             </StackPanel>
                         </Button>
                     </Grid>
                 </Border>
             </StackPanel>
 
-            <!-- ========== SECCIÓN ATAJOS ========== -->
-            <StackPanel Grid.Row="2" Spacing="12">
+            <!--  ========== SECCIÓN ATAJOS ==========  -->
+            <StackPanel Grid.Row="3" Spacing="12">
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon Glyph="&#xE92E;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                    <TextBlock Text="Atajos de Teclado" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                    <FontIcon
+                        FontSize="18"
+                        Foreground="{StaticResource AnfetaAccentBrush}"
+                        Glyph="&#xE92E;" />
+                    <TextBlock
+                        FontSize="18"
+                        FontWeight="SemiBold"
+                        Foreground="#F7FAFC"
+                        Text="Atajos de Teclado" />
                 </StackPanel>
 
-                <Border Height="2" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="1"/>
+                <Border
+                    Height="2"
+                    Background="{StaticResource AnfetaAccentBrush}"
+                    CornerRadius="1" />
 
                 <Border Style="{StaticResource CardStyle}">
                     <Grid RowSpacing="14">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <StackPanel Grid.Row="0" Spacing="6">

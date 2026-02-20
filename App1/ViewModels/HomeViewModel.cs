@@ -685,7 +685,8 @@ namespace Anfeta.UI.ViewModels
                                 Titulo = readyData.Titulo ?? "Sin título",
                                 Prioridad = readyData.Prioridad,
                                 DueStart = readyData.DueStart?.ToString("o"),
-                                DueEnd = readyData.DueEnd?.ToString("o")
+                                DueEnd = readyData.DueEnd?.ToString("o"),
+                                Assignees = readyData.Assignees
                             };
 
                             var (ok, apiMsg) = await _apiExecutor.ExecuteAsync(

@@ -121,7 +121,8 @@ namespace Anfeta.UI.Services.Activity
             }
             else
             {
-                var dateMatch = Regex.Match(command, @"el\s+(\d{1,2})\s+de\s+(\w+)");
+                // ✅ PATRÓN MEJORADO: detecta CON o SIN "el"
+                var dateMatch = Regex.Match(command, @"(?:el\s+)?(\d{1,2})\s+de\s+(\w+)(?:\s+(?:del|de)\s+(\d{4}))?");
                 if (dateMatch.Success)
                 {
                     if (int.TryParse(dateMatch.Groups[1].Value, out var day))
@@ -131,9 +132,16 @@ namespace Anfeta.UI.Services.Activity
 
                         if (month > 0)
                         {
+                            // ✅ Detectar año si está presente
                             var year = now.Year;
-                            if (month < now.Month || (month == now.Month && day < now.Day))
+                            if (dateMatch.Groups[3].Success && int.TryParse(dateMatch.Groups[3].Value, out var parsedYear))
+                            {
+                                year = parsedYear;
+                            }
+                            else if (month < now.Month || (month == now.Month && day < now.Day))
+                            {
                                 year++;
+                            }
 
                             try
                             {
@@ -141,6 +149,7 @@ namespace Anfeta.UI.Services.Activity
                             }
                             catch
                             {
+                                // Fecha inválida (ej: 31 de febrero)
                             }
                         }
                     }

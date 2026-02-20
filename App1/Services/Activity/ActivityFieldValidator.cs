@@ -51,8 +51,8 @@ namespace Anfeta.UI.Services.Activity
         {
             var now = DateTimeOffset.Now;
 
-            // Si es pasado (con margen de 10 min)
-            if (fecha < now.AddMinutes(-10))
+            // Si es pasado (con margen de 5 min en lugar de 10)
+            if (fecha < now.AddMinutes(-5))  // ✅ CAMBIAR DE -10 A -5
             {
                 // Si es HOY pero pasado
                 if (fecha.Date == now.Date)
