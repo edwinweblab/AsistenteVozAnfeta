@@ -7,54 +7,42 @@
     <ScrollViewer>
         <Grid Padding="24" RowSpacing="24">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <!--  Header  -->
-                <RowDefinition Height="Auto" />
-                <!--  Dropbox  -->
-                <RowDefinition Height="Auto" />
-                <!--  Audio  -->
-                <RowDefinition Height="Auto" />
-                <!--  Atajos  -->
-                <RowDefinition Height="Auto" />
-                <!--  InfoBar  -->
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!--  Header con botones de ayuda  -->
             <Grid Grid.Row="0">
                 <StackPanel Spacing="4">
-                    <TextBlock
-                        FontSize="28"
-                        FontWeight="SemiBold"
-                        Foreground="#F7FAFC"
-                        Text="Configuración" />
-                    <TextBlock
-                        FontSize="13"
-                        Foreground="#94A3B8"
-                        Text="Personaliza audio y atajos de teclado" />
+                    <TextBlock Text="Configuración"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               Foreground="#F7FAFC"/>
+                    <TextBlock Text="Personaliza audio y atajos de teclado"
+                               FontSize="13"
+                               Foreground="#94A3B8"/>
                 </StackPanel>
 
-                <!--  Botones arriba-derecha  -->
-                <StackPanel
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Top"
-                    Orientation="Horizontal"
-                    Spacing="8">
+                <!-- Botones arriba-derecha -->
+                <StackPanel Orientation="Horizontal"
+                            Spacing="8"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top">
 
-                    <!--  Ayuda de Windows  -->
-                    <Button
-                        x:Name="BtnOpenWindowsSettings"
-                        Width="40"
-                        Height="40"
-                        Background="#14FFFFFF"
-                        BorderBrush="#30FFFFFF"
-                        BorderThickness="1"
-                        Click="BtnOpenWindowsSettings_Click"
-                        CornerRadius="20"
-                        ToolTipService.ToolTip="Abrir Configuración de Windows">
-                        <FontIcon
-                            FontSize="16"
-                            Foreground="#CBD5E1"
-                            Glyph="&#xE713;" />
+                    <!-- Ayuda de Windows -->
+                    <Button x:Name="BtnOpenWindowsSettings"
+                            Click="BtnOpenWindowsSettings_Click"
+                            Width="40" Height="40"
+                            Background="#14FFFFFF"
+                            BorderBrush="#30FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="20"
+                            ToolTipService.ToolTip="Abrir Configuración de Windows">
+                        <FontIcon Glyph="&#xE713;" FontSize="16" Foreground="#CBD5E1"/>
                     </Button>
 
                     <!--  Problemas comunes  -->
@@ -168,23 +156,18 @@
                         Text="Audio" />
                 </StackPanel>
 
-                <Border
-                    Height="2"
-                    Background="{StaticResource AnfetaAccentBrush}"
-                    CornerRadius="1" />
+                <Border Height="2" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="1"/>
 
-                <!--  Estado actual  -->
-                <StackPanel Margin="0,4,0,8" Spacing="4">
-                    <TextBlock
-                        x:Name="TxtCurrentInput"
-                        FontSize="12"
-                        Foreground="#94A3B8"
-                        Text="Entrada: No configurado" />
-                    <TextBlock
-                        x:Name="TxtCurrentOutput"
-                        FontSize="12"
-                        Foreground="#94A3B8"
-                        Text="Salida: No configurado" />
+                <!-- Estado actual -->
+                <StackPanel Spacing="4" Margin="0,4,0,8">
+                    <TextBlock x:Name="TxtCurrentInput"
+                               Text="Entrada: No configurado"
+                               FontSize="12"
+                               Foreground="#94A3B8"/>
+                    <TextBlock x:Name="TxtCurrentOutput"
+                               Text="Salida: No configurado"
+                               FontSize="12"
+                               Foreground="#94A3B8"/>
                 </StackPanel>
 
                 <!--  Card Entrada  -->
@@ -212,21 +195,19 @@
                                 Text="Entrada (Micrófono)" />
                         </StackPanel>
 
-                        <ComboBox
-                            x:Name="CbInputDevice"
-                            Grid.Row="1"
-                            Height="44"
-                            HorizontalAlignment="Stretch"
-                            PlaceholderText="Seleccionar micrófono"
-                            SelectionChanged="CbInputDevice_SelectionChanged" />
+                        <ComboBox Grid.Row="1"
+                                  x:Name="CbInputDevice"
+                                  PlaceholderText="Seleccionar micrófono"
+                                  HorizontalAlignment="Stretch"
+                                  SelectionChanged="CbInputDevice_SelectionChanged"
+                                  Height="44"/>
 
-                        <Button
-                            x:Name="BtnTestMic"
-                            Grid.Row="2"
-                            MinWidth="180"
-                            HorizontalAlignment="Left"
-                            Click="BtnTestMic_Click"
-                            Style="{StaticResource SecondaryButtonStyle}">
+                        <Button Grid.Row="2"
+                                x:Name="BtnTestMic"
+                                Click="BtnTestMic_Click"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Left"
+                                MinWidth="180">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon
                                     x:Name="IconTestMic"
@@ -236,11 +217,10 @@
                             </StackPanel>
                         </Button>
 
-                        <StackPanel
-                            x:Name="PnlMicLevel"
-                            Grid.Row="3"
-                            Spacing="8"
-                            Visibility="Collapsed">
+                        <StackPanel Grid.Row="3"
+                                    x:Name="PnlMicLevel"
+                                    Visibility="Collapsed"
+                                    Spacing="8">
                             <Grid>
                                 <ProgressBar
                                     x:Name="PgMicLevel"
@@ -285,21 +265,19 @@
                                 Text="Salida (Altavoces)" />
                         </StackPanel>
 
-                        <ComboBox
-                            x:Name="CbOutputDevice"
-                            Grid.Row="1"
-                            Height="44"
-                            HorizontalAlignment="Stretch"
-                            PlaceholderText="Seleccionar altavoces"
-                            SelectionChanged="CbOutputDevice_SelectionChanged" />
+                        <ComboBox Grid.Row="1"
+                                  x:Name="CbOutputDevice"
+                                  PlaceholderText="Seleccionar altavoces"
+                                  HorizontalAlignment="Stretch"
+                                  SelectionChanged="CbOutputDevice_SelectionChanged"
+                                  Height="44"/>
 
-                        <Button
-                            x:Name="BtnTestSpeaker"
-                            Grid.Row="2"
-                            MinWidth="180"
-                            HorizontalAlignment="Left"
-                            Click="BtnTestSpeaker_Click"
-                            Style="{StaticResource SecondaryButtonStyle}">
+                        <Button Grid.Row="2"
+                                x:Name="BtnTestSpeaker"
+                                Click="BtnTestSpeaker_Click"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Left"
+                                MinWidth="180">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon
                                     x:Name="IconTestSpeaker"
@@ -340,55 +318,77 @@
                         </Grid.RowDefinitions>
 
                         <StackPanel Grid.Row="0" Spacing="6">
-                            <TextBlock
-                                FontSize="14"
-                                Foreground="#CBD5E1"
-                                Text="Activar micrófono" />
-                            <TextBlock
-                                FontSize="12"
-                                Foreground="#94A3B8"
-                                Text="Presiona esta combinación en cualquier momento para iniciar escucha."
-                                TextWrapping="Wrap" />
+                            <TextBlock Text="Activar micrófono" FontSize="14" Foreground="#CBD5E1"/>
+                            <TextBlock Text="Presiona esta combinación en cualquier momento para iniciar escucha."
+                                       FontSize="12"
+                                       Foreground="#94A3B8"
+                                       TextWrapping="Wrap"/>
                         </StackPanel>
 
-                        <Border
-                            Grid.Row="1"
-                            Padding="16,12"
-                            HorizontalAlignment="Left"
-                            Background="#14FFFFFF"
-                            BorderBrush="#30FFFFFF"
-                            BorderThickness="1"
-                            CornerRadius="8">
-                            <TextBlock
-                                x:Name="TxtHotkeyDisplay"
-                                FontSize="16"
-                                FontWeight="SemiBold"
-                                Foreground="{StaticResource AnfetaAccentBrush}"
-                                Text="Ctrl + Alt + V" />
+                        <Border Grid.Row="1"
+                                Background="#14FFFFFF"
+                                BorderBrush="#30FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="16,12"
+                                HorizontalAlignment="Left">
+                            <TextBlock x:Name="TxtHotkeyDisplay"
+                                       Text="Ctrl + Alt + V"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource AnfetaAccentBrush}"/>
                         </Border>
 
-                        <Button
-                            x:Name="BtnChangeHotkey"
-                            Grid.Row="2"
-                            Height="48"
-                            MinWidth="48"
-                            Padding="0"
-                            HorizontalAlignment="Left"
-                            Click="BtnChangeHotkey_Click"
-                            Style="{StaticResource SecondaryButtonStyle}"
-                            ToolTipService.ToolTip="Cambiar atajo de teclado">
-                            <FontIcon FontSize="18" Glyph="&#xE70F;" />
+                        <Button Grid.Row="2"
+                                x:Name="BtnChangeHotkey"
+                                Click="BtnChangeHotkey_Click"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Left"
+                                Width="48"
+                                Height="48"
+                                Padding="0"
+                                ToolTipService.ToolTip="Cambiar atajo de teclado">
+                            <FontIcon Glyph="&#xE70F;" FontSize="18"/>
                         </Button>
                     </Grid>
                 </Border>
             </StackPanel>
 
-            <!--  InfoBar  -->
+            <!-- ========== SECCIÓN API KEYS ========== -->
+            <StackPanel Grid.Row="3" Spacing="12">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon Glyph="&#xE8D7;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
+                    <TextBlock Text="API Keys" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                </StackPanel>
+
+                <Border Height="2" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="1"/>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <Grid RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0"
+                                   Text="Administra tus llaves (por ejemplo Groq) y selecciona cuál está activa."
+                                   FontSize="12"
+                                   Foreground="#94A3B8"
+                                   TextWrapping="Wrap"/>
+
+                        <Button Grid.Row="1"
+                                Content="Administrar API Keys"
+                                Click="BtnApiKeys_Click"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                HorizontalAlignment="Left"
+                                MinWidth="220"/>
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!-- InfoBar -->
             <StackPanel Grid.Row="4" Spacing="12">
-                <InfoBar
-                    x:Name="InfoStatus"
-                    IsClosable="True"
-                    IsOpen="False" />
+                <InfoBar x:Name="InfoStatus" IsOpen="False" IsClosable="True"/>
             </StackPanel>
 
         </Grid>
