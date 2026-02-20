@@ -14,33 +14,38 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Capture;
 using Windows.Storage;
-using Windows.Storage.Pickers;
 using Windows.UI;
 using WinRT.Interop;
+
 namespace Anfeta.UI.Views
 {
     public sealed partial class SettingsView : Page
     {
-        private AudioService _audioService;
-        private SettingsService _settingsService;
-        private List<AudioDeviceInfo> _inputDevices;
-        private List<AudioDeviceInfo> _outputDevices;
-        private DispatcherTimer _statusTimer;
-        //DropBox 
+        private readonly AudioService _audioService;
+        private readonly SettingsService _settingsService;
+
+        private List<AudioDeviceInfo> _inputDevices = new();
+        private List<AudioDeviceInfo> _outputDevices = new();
+
+        private readonly DispatcherTimer _statusTimer;
+
+        // Dropbox
         private const string LS_DropboxRoot = "DropboxRoot";
-        private const string LS_DropboxRootChanged = "DropboxRootChanged";
-        private const string LS_DropboxIndexReady = "DropboxIndexReady";
         private CancellationTokenSource? _indexCts;
-
-
 
         public SettingsView()
         {
             InitializeComponent();
+
             _audioService = new AudioService();
             _settingsService = new SettingsService(new AppStateService());
+
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-            _statusTimer.Tick += (s, e) => { InfoStatus.IsOpen = false; _statusTimer.Stop(); };
+            _statusTimer.Tick += (s, e) =>
+            {
+                InfoStatus.IsOpen = false;
+                _statusTimer.Stop();
+            };
 
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
@@ -49,7 +54,8 @@ namespace Anfeta.UI.Views
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             LoadCurrentHotkey();
-            // 🔥 para que no se vea en blanco al volver
+
+            // Dropbox: para que no se vea vacío al volver
             LoadDropboxRootIntoUI();
 
             _ = Task.Run(async () =>
@@ -59,21 +65,45 @@ namespace Anfeta.UI.Views
             });
         }
 
-        /// <summary>Carga el hotkey actual desde AppState</summary>
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            _audioService?.StopMicTest();
+            _audioService?.StopTestSound();
+            _audioService?.Dispose();
+
+            _indexCts?.Cancel();
+            _indexCts = null;
+        }
+
+        // =========================
+        // Hotkey
+        // =========================
         private void LoadCurrentHotkey()
         {
             var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
             TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
         }
 
-        private void OnUnloaded(object sender, RoutedEventArgs e)
+        private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
         {
-            _audioService?.StopMicTest();
-            _audioService?.StopTestSound();
-            _audioService?.Dispose();
+            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+
+            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(appState, _settingsService)
+            {
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary)
+            {
+                TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
+                ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
+            }
         }
 
-        /// <summary>Solicita permiso de micrófono</summary>
+        // =========================
+        // Audio
+        // =========================
         private async Task RequestMicPermissionAsync()
         {
             try
@@ -89,7 +119,10 @@ namespace Anfeta.UI.Views
             }
             catch
             {
-                ShowStatus("Permiso de micrófono denegado. Habilítalo en Configuración de Windows.", InfoBarSeverity.Warning);
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    ShowStatus("Permiso de micrófono denegado. Habilítalo en Configuración de Windows.", InfoBarSeverity.Warning);
+                });
             }
         }
 
@@ -97,37 +130,27 @@ namespace Anfeta.UI.Views
         {
             await Task.Run(() =>
             {
-                _inputDevices = _audioService.GetInputDevices();
-                _outputDevices = _audioService.GetOutputDevices();
+                _inputDevices = _audioService.GetInputDevices() ?? new List<AudioDeviceInfo>();
+                _outputDevices = _audioService.GetOutputDevices() ?? new List<AudioDeviceInfo>();
 
                 DispatcherQueue.TryEnqueue(() =>
                 {
                     CbInputDevice.Items.Clear();
                     foreach (var device in _inputDevices)
-                    {
                         CbInputDevice.Items.Add(device.DisplayName);
-                    }
 
                     CbOutputDevice.Items.Clear();
                     foreach (var device in _outputDevices)
-                    {
                         CbOutputDevice.Items.Add(device.DisplayName);
-                    }
 
-                    if (_inputDevices.Count > 0)
-                    {
-                        CbInputDevice.SelectedIndex = 0;
-                    }
-
-                    if (_outputDevices.Count > 0)
-                    {
-                        CbOutputDevice.SelectedIndex = 0;
-                    }
+                    if (_inputDevices.Count > 0) CbInputDevice.SelectedIndex = 0;
+                    if (_outputDevices.Count > 0) CbOutputDevice.SelectedIndex = 0;
 
                     UpdateCurrentDeviceLabels();
                 });
             });
         }
+
         private void UpdateCurrentDeviceLabels()
         {
             if (CbInputDevice.SelectedIndex >= 0 && CbInputDevice.SelectedIndex < _inputDevices.Count)
@@ -145,7 +168,7 @@ namespace Anfeta.UI.Views
 
         private void CbInputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (CbInputDevice.SelectedIndex >= 0 && _inputDevices != null)
+            if (CbInputDevice.SelectedIndex >= 0 && CbInputDevice.SelectedIndex < _inputDevices.Count)
             {
                 var device = _inputDevices[CbInputDevice.SelectedIndex];
                 _settingsService.SaveInputDevice(device.NAudioId, device.DeviceName);
@@ -156,7 +179,7 @@ namespace Anfeta.UI.Views
 
         private void CbOutputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (CbOutputDevice.SelectedIndex >= 0 && _outputDevices != null)
+            if (CbOutputDevice.SelectedIndex >= 0 && CbOutputDevice.SelectedIndex < _outputDevices.Count)
             {
                 var device = _outputDevices[CbOutputDevice.SelectedIndex];
                 _settingsService.SaveOutputDevice(device.NAudioId, device.DeviceName);
@@ -180,6 +203,7 @@ namespace Anfeta.UI.Views
                 PnlMicLevel.Visibility = Visibility.Visible;
                 PgMicLevel.ShowPaused = false;
                 PgMicLevel.ShowError = false;
+
                 BtnTestMic.IsEnabled = false;
                 IconTestMic.Glyph = "\uE769";
                 TxtTestMic.Text = "Escuchando...";
@@ -199,6 +223,7 @@ namespace Anfeta.UI.Views
                 PnlMicLevel.Visibility = Visibility.Collapsed;
                 PgMicLevel.Value = 0;
                 TxtMicLevel.Text = "0%";
+
                 ShowStatus("Prueba completada", InfoBarSeverity.Success);
             }
             catch (Exception ex)
@@ -252,10 +277,7 @@ namespace Anfeta.UI.Views
 
         private void BtnShowTroubleshoot_Click(object sender, RoutedEventArgs e)
         {
-            var flyout = new Flyout
-            {
-                Placement = FlyoutPlacementMode.Bottom
-            };
+            var flyout = new Flyout { Placement = FlyoutPlacementMode.Bottom };
 
             var scrollViewer = new ScrollViewer
             {
@@ -266,30 +288,28 @@ namespace Anfeta.UI.Views
 
             var content = new StackPanel { Spacing = 20, Padding = new Thickness(16) };
 
-            // Problema: Dispositivo predeterminado
             content.Children.Add(CreateProblemSection(
                 "\uE767",
                 "Windows usa dispositivos predeterminados",
                 "El reconocimiento de voz SIEMPRE usa el micrófono predeterminado de Windows, no el que seleccionas aquí.",
                 new[]
                 {
-            "1. Win + I → Sistema → Sonido",
-            "2. En 'Entrada', selecciona tu micrófono preferido",
-            "3. Hazlo predeterminado",
-            "4. Reinicia esta app"
+                    "1. Win + I → Sistema → Sonido",
+                    "2. En 'Entrada', selecciona tu micrófono preferido",
+                    "3. Hazlo predeterminado",
+                    "4. Reinicia esta app"
                 }
             ));
 
-            // Problema: Política de privacidad
             content.Children.Add(CreateProblemSection(
                 "\uE7BA",
                 "Error: Política de privacidad no aceptada",
                 "Si ves \"The speech privacy policy was not accepted\":",
                 new[]
                 {
-            "1. Win + I → Privacidad y seguridad → Voz",
-            "2. Activa \"Reconocimiento de voz en línea\"",
-            "3. Reinicia esta app"
+                    "1. Win + I → Privacidad y seguridad → Voz",
+                    "2. Activa \"Reconocimiento de voz en línea\"",
+                    "3. Reinicia esta app"
                 }
             ));
 
@@ -297,17 +317,12 @@ namespace Anfeta.UI.Views
             flyout.Content = scrollViewer;
             flyout.ShowAt(BtnShowTroubleshoot);
         }
-        /// <summary>Crea cada sección del dialog de problemas</summary>
+
         private StackPanel CreateProblemSection(string icon, string title, string description, string[] steps)
         {
             var section = new StackPanel { Spacing = 10 };
 
-            // Header con icono
-            var header = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 10
-            };
+            var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
 
             header.Children.Add(new FontIcon
             {
@@ -325,7 +340,6 @@ namespace Anfeta.UI.Views
 
             section.Children.Add(header);
 
-            // Descripción
             section.Children.Add(new TextBlock
             {
                 Text = description,
@@ -333,7 +347,6 @@ namespace Anfeta.UI.Views
                 Foreground = new SolidColorBrush(Color.FromArgb(255, 148, 163, 184))
             });
 
-            // Pasos
             var stepsList = new StackPanel { Spacing = 6, Margin = new Thickness(20, 4, 0, 0) };
             foreach (var step in steps)
             {
@@ -344,29 +357,128 @@ namespace Anfeta.UI.Views
                     FontSize = 13
                 });
             }
-            section.Children.Add(stepsList);
 
+            section.Children.Add(stepsList);
             return section;
         }
 
-        private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
+        // =========================
+        // Dropbox
+        // =========================
+        private void LoadDropboxRootIntoUI()
         {
-            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
-            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(appState, _settingsService)
-            {
-                XamlRoot = this.XamlRoot
-            };
+            var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
+            if (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved))
+                DropboxPathBox.Text = saved;
+            else
+                DropboxPathBox.Text = "";
+        }
 
-            var result = await dialog.ShowAsync();
-
-            if (result == ContentDialogResult.Primary)
+        private async void BtnPickDropboxRoot_Click(object sender, RoutedEventArgs e)
+        {
+            try
             {
-                TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
-                ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
+                var picker = new Windows.Storage.Pickers.FolderPicker();
+                picker.FileTypeFilter.Add("*");
+
+                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                InitializeWithWindow.Initialize(picker, hwnd);
+
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder == null)
+                {
+                    ShowStatus("Selección cancelada.", InfoBarSeverity.Informational);
+                    return;
+                }
+
+                var selectedPath = folder.Path;
+                if (string.IsNullOrWhiteSpace(selectedPath) || !Directory.Exists(selectedPath))
+                {
+                    ShowStatus("Ruta inválida. Intenta con otra carpeta.", InfoBarSeverity.Warning);
+                    return;
+                }
+
+                ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] = selectedPath;
+
+                _indexCts?.Cancel();
+                _indexCts = new CancellationTokenSource();
+                var ct = _indexCts.Token;
+
+                App.LocalIndex.Clear();
+                DropboxIndexCoordinator.StartIndexing(selectedPath);
+
+                DropboxPathBox.Text = selectedPath;
+                BtnPickDropboxRoot.IsEnabled = false;
+                BtnResetDropboxRoot.IsEnabled = false;
+
+                ShowStatus("Ruta nueva detectada, indexando...", InfoBarSeverity.Informational);
+
+                try
+                {
+                    var list = await LocalIndexBuilder.BuildAsync(selectedPath, ct);
+                    App.LocalIndex.Set(list);
+
+                    DropboxIndexCoordinator.MarkReady(selectedPath);
+                    ShowStatus($"Índice listo ({App.LocalIndex.Count} items)", InfoBarSeverity.Success);
+                }
+                catch (OperationCanceledException)
+                {
+                    // No mostrar error si cambió de ruta rápido
+                }
+                catch (Exception ex)
+                {
+                    DropboxIndexCoordinator.MarkError(selectedPath, ex.Message);
+                    ShowStatus($"Error indexando → {ex.Message}", InfoBarSeverity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowStatus($"Error eligiendo carpeta → {ex.Message}", InfoBarSeverity.Error);
+            }
+            finally
+            {
+                BtnPickDropboxRoot.IsEnabled = true;
+                BtnResetDropboxRoot.IsEnabled = true;
             }
         }
 
-        /// <summary>Muestra mensaje con auto-cierre en 3 segundos</summary>
+        private async void BtnResetDropboxRoot_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new ContentDialog
+            {
+                Title = "Cambiar ruta de Dropbox",
+                Content = "Esto limpiará la ruta actual.\n\n¿Deseas continuar?",
+                PrimaryButtonText = "Continuar",
+                CloseButtonText = "Cancelar",
+                XamlRoot = this.XamlRoot
+            };
+
+            if (await dlg.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            _indexCts?.Cancel();
+            _indexCts = null;
+
+            ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
+
+            App.LocalIndex.Clear();
+            DropboxIndexCoordinator.Reset();
+
+            DropboxPathBox.Text = "";
+            ShowStatus("Ruta reiniciada. Configura una nueva carpeta.", InfoBarSeverity.Informational);
+        }
+
+        // =========================
+        // API Keys
+        // =========================
+        private void BtnApiKeys_Click(object sender, RoutedEventArgs e)
+        {
+            Frame.Navigate(typeof(Anfeta.UI.Views.ApiKeysView));
+        }
+
+        // =========================
+        // Status
+        // =========================
         private void ShowStatus(string message, InfoBarSeverity severity)
         {
             InfoStatus.Message = message;
@@ -376,11 +488,5 @@ namespace Anfeta.UI.Views
             _statusTimer.Stop();
             _statusTimer.Start();
         }
-        private void BtnApiKeys_Click(object sender, RoutedEventArgs e)
-        {
-            Frame.Navigate(typeof(Anfeta.UI.Views.ApiKeysView));
-        }
-
     }
-
 }

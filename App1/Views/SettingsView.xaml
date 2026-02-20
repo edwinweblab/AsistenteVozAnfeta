@@ -8,14 +8,20 @@
         <Grid Padding="24" RowSpacing="24">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <!-- Header -->
                 <RowDefinition Height="Auto"/>
+                <!-- Dropbox -->
                 <RowDefinition Height="Auto"/>
+                <!-- Audio -->
                 <RowDefinition Height="Auto"/>
+                <!-- Hotkeys -->
                 <RowDefinition Height="Auto"/>
+                <!-- API Keys -->
                 <RowDefinition Height="Auto"/>
+                <!-- InfoBar -->
             </Grid.RowDefinitions>
 
-            <!--  Header con botones de ayuda  -->
+            <!-- Header con botones de ayuda -->
             <Grid Grid.Row="0">
                 <StackPanel Spacing="4">
                     <TextBlock Text="Configuración"
@@ -27,13 +33,11 @@
                                Foreground="#94A3B8"/>
                 </StackPanel>
 
-                <!-- Botones arriba-derecha -->
                 <StackPanel Orientation="Horizontal"
                             Spacing="8"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top">
 
-                    <!-- Ayuda de Windows -->
                     <Button x:Name="BtnOpenWindowsSettings"
                             Click="BtnOpenWindowsSettings_Click"
                             Width="40" Height="40"
@@ -45,43 +49,37 @@
                         <FontIcon Glyph="&#xE713;" FontSize="16" Foreground="#CBD5E1"/>
                     </Button>
 
-                    <!--  Problemas comunes  -->
-                    <Button
-                        x:Name="BtnShowTroubleshoot"
-                        Width="40"
-                        Height="40"
-                        Background="#14FFFFFF"
-                        BorderBrush="#30FFFFFF"
-                        BorderThickness="1"
-                        Click="BtnShowTroubleshoot_Click"
-                        CornerRadius="20"
-                        ToolTipService.ToolTip="¿Problemas con el audio?">
-                        <FontIcon
-                            FontSize="16"
-                            Foreground="{StaticResource AnfetaWarningBrush}"
-                            Glyph="&#xE897;" />
+                    <Button x:Name="BtnShowTroubleshoot"
+                            Width="40"
+                            Height="40"
+                            Background="#14FFFFFF"
+                            BorderBrush="#30FFFFFF"
+                            BorderThickness="1"
+                            Click="BtnShowTroubleshoot_Click"
+                            CornerRadius="20"
+                            ToolTipService.ToolTip="¿Problemas con el audio?">
+                        <FontIcon FontSize="16"
+                                  Foreground="{StaticResource AnfetaWarningBrush}"
+                                  Glyph="&#xE897;"/>
                     </Button>
                 </StackPanel>
             </Grid>
 
-            <!--  ========== SECCIÓN DROPBOX (RUTA) ==========  -->
+            <!-- ========== SECCIÓN DROPBOX ========== -->
             <StackPanel Grid.Row="1" Spacing="12">
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon
-                        FontSize="18"
-                        Foreground="{StaticResource AnfetaAccentBrush}"
-                        Glyph="&#xEC50;" />
-                    <TextBlock
-                        FontSize="18"
-                        FontWeight="SemiBold"
-                        Foreground="#F7FAFC"
-                        Text="Dropbox" />
+                    <FontIcon FontSize="18"
+                              Foreground="{StaticResource AnfetaAccentBrush}"
+                              Glyph="&#xEC50;" />
+                    <TextBlock FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="#F7FAFC"
+                               Text="Dropbox" />
                 </StackPanel>
 
-                <Border
-                    Height="2"
-                    Background="{StaticResource AnfetaAccentBrush}"
-                    CornerRadius="1" />
+                <Border Height="2"
+                        Background="{StaticResource AnfetaAccentBrush}"
+                        CornerRadius="1" />
 
                 <Border Style="{StaticResource CardStyle}">
                     <Grid RowSpacing="12">
@@ -92,46 +90,40 @@
                         </Grid.RowDefinitions>
 
                         <StackPanel Grid.Row="0" Spacing="4">
-                            <TextBlock
-                                FontSize="14"
-                                FontWeight="SemiBold"
-                                Foreground="#F7FAFC"
-                                Text="Ruta de Dropbox" />
-                            <TextBlock
-                                FontSize="12"
-                                Foreground="#94A3B8"
-                                Text="Selecciona la carpeta raíz que usará ANFETA para indexar y buscar."
-                                TextWrapping="Wrap" />
+                            <TextBlock FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="#F7FAFC"
+                                       Text="Ruta de Dropbox" />
+                            <TextBlock FontSize="12"
+                                       Foreground="#94A3B8"
+                                       Text="Selecciona la carpeta raíz que usará ANFETA para indexar y buscar."
+                                       TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <TextBox
-                            x:Name="DropboxPathBox"
-                            Grid.Row="1"
-                            Height="44"
-                            HorizontalAlignment="Stretch"
-                            IsReadOnly="True"
-                            PlaceholderText="Aún no configurado..." />
+                        <TextBox x:Name="DropboxPathBox"
+                                 Grid.Row="1"
+                                 Height="44"
+                                 HorizontalAlignment="Stretch"
+                                 IsReadOnly="True"
+                                 PlaceholderText="Aún no configurado..." />
 
-                        <StackPanel
-                            Grid.Row="2"
-                            Orientation="Horizontal"
-                            Spacing="10">
-                            <Button
-                                x:Name="BtnPickDropboxRoot"
-                                MinWidth="220"
-                                Click="BtnPickDropboxRoot_Click"
-                                Style="{StaticResource SecondaryButtonStyle}">
+                        <StackPanel Grid.Row="2"
+                                    Orientation="Horizontal"
+                                    Spacing="10">
+                            <Button x:Name="BtnPickDropboxRoot"
+                                    MinWidth="220"
+                                    Click="BtnPickDropboxRoot_Click"
+                                    Style="{StaticResource SecondaryButtonStyle}">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon FontSize="16" Glyph="&#xE8B7;" />
                                     <TextBlock Text="Seleccionar carpeta..." />
                                 </StackPanel>
                             </Button>
 
-                            <Button
-                                x:Name="BtnResetDropboxRoot"
-                                MinWidth="140"
-                                Click="BtnResetDropboxRoot_Click"
-                                Style="{StaticResource SecondaryButtonStyle}">
+                            <Button x:Name="BtnResetDropboxRoot"
+                                    MinWidth="140"
+                                    Click="BtnResetDropboxRoot_Click"
+                                    Style="{StaticResource SecondaryButtonStyle}">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon FontSize="16" Glyph="&#xE74D;" />
                                     <TextBlock Text="Reiniciar" />
@@ -142,23 +134,20 @@
                 </Border>
             </StackPanel>
 
-            <!--  ========== SECCIÓN AUDIO ==========  -->
+            <!-- ========== SECCIÓN AUDIO ========== -->
             <StackPanel Grid.Row="2" Spacing="12">
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon
-                        FontSize="18"
-                        Foreground="{StaticResource AnfetaAccentBrush}"
-                        Glyph="&#xE767;" />
-                    <TextBlock
-                        FontSize="18"
-                        FontWeight="SemiBold"
-                        Foreground="#F7FAFC"
-                        Text="Audio" />
+                    <FontIcon FontSize="18"
+                              Foreground="{StaticResource AnfetaAccentBrush}"
+                              Glyph="&#xE767;" />
+                    <TextBlock FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="#F7FAFC"
+                               Text="Audio" />
                 </StackPanel>
 
                 <Border Height="2" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="1"/>
 
-                <!-- Estado actual -->
                 <StackPanel Spacing="4" Margin="0,4,0,8">
                     <TextBlock x:Name="TxtCurrentInput"
                                Text="Entrada: No configurado"
@@ -170,7 +159,6 @@
                                Foreground="#94A3B8"/>
                 </StackPanel>
 
-                <!--  Card Entrada  -->
                 <Border Style="{StaticResource CardStyle}">
                     <Grid RowSpacing="14">
                         <Grid.RowDefinitions>
@@ -180,19 +168,14 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel
-                            Grid.Row="0"
-                            Orientation="Horizontal"
-                            Spacing="10">
-                            <FontIcon
-                                FontSize="20"
-                                Foreground="{StaticResource AnfetaAccentBrush}"
-                                Glyph="&#xE720;" />
-                            <TextBlock
-                                FontSize="16"
-                                FontWeight="SemiBold"
-                                Foreground="#F7FAFC"
-                                Text="Entrada (Micrófono)" />
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
+                            <FontIcon FontSize="20"
+                                      Foreground="{StaticResource AnfetaAccentBrush}"
+                                      Glyph="&#xE720;" />
+                            <TextBlock FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Foreground="#F7FAFC"
+                                       Text="Entrada (Micrófono)" />
                         </StackPanel>
 
                         <ComboBox Grid.Row="1"
@@ -209,10 +192,7 @@
                                 HorizontalAlignment="Left"
                                 MinWidth="180">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon
-                                    x:Name="IconTestMic"
-                                    FontSize="16"
-                                    Glyph="&#xE768;" />
+                                <FontIcon x:Name="IconTestMic" FontSize="16" Glyph="&#xE768;" />
                                 <TextBlock x:Name="TxtTestMic" Text="Probar Micrófono" />
                             </StackPanel>
                         </Button>
@@ -222,26 +202,23 @@
                                     Visibility="Collapsed"
                                     Spacing="8">
                             <Grid>
-                                <ProgressBar
-                                    x:Name="PgMicLevel"
-                                    Height="28"
-                                    CornerRadius="4"
-                                    Foreground="{StaticResource AnfetaAccentBrush}"
-                                    Maximum="100" />
-                                <TextBlock
-                                    x:Name="TxtMicLevel"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    FontSize="12"
-                                    FontWeight="SemiBold"
-                                    Foreground="White"
-                                    Text="0%" />
+                                <ProgressBar x:Name="PgMicLevel"
+                                             Height="28"
+                                             CornerRadius="4"
+                                             Foreground="{StaticResource AnfetaAccentBrush}"
+                                             Maximum="100" />
+                                <TextBlock x:Name="TxtMicLevel"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="White"
+                                           Text="0%" />
                             </Grid>
                         </StackPanel>
                     </Grid>
                 </Border>
 
-                <!--  Card Salida  -->
                 <Border Style="{StaticResource CardStyle}">
                     <Grid RowSpacing="14">
                         <Grid.RowDefinitions>
@@ -250,19 +227,14 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel
-                            Grid.Row="0"
-                            Orientation="Horizontal"
-                            Spacing="10">
-                            <FontIcon
-                                FontSize="20"
-                                Foreground="{StaticResource AnfetaAccentBrush}"
-                                Glyph="&#xE767;" />
-                            <TextBlock
-                                FontSize="16"
-                                FontWeight="SemiBold"
-                                Foreground="#F7FAFC"
-                                Text="Salida (Altavoces)" />
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
+                            <FontIcon FontSize="20"
+                                      Foreground="{StaticResource AnfetaAccentBrush}"
+                                      Glyph="&#xE767;" />
+                            <TextBlock FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Foreground="#F7FAFC"
+                                       Text="Salida (Altavoces)" />
                         </StackPanel>
 
                         <ComboBox Grid.Row="1"
@@ -279,10 +251,7 @@
                                 HorizontalAlignment="Left"
                                 MinWidth="180">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon
-                                    x:Name="IconTestSpeaker"
-                                    FontSize="16"
-                                    Glyph="&#xE768;" />
+                                <FontIcon x:Name="IconTestSpeaker" FontSize="16" Glyph="&#xE768;" />
                                 <TextBlock x:Name="TxtTestSpeaker" Text="Probar Sonido" />
                             </StackPanel>
                         </Button>
@@ -290,24 +259,21 @@
                 </Border>
             </StackPanel>
 
-            <!--  ========== SECCIÓN ATAJOS ==========  -->
+            <!-- ========== SECCIÓN ATAJOS ========== -->
             <StackPanel Grid.Row="3" Spacing="12">
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon
-                        FontSize="18"
-                        Foreground="{StaticResource AnfetaAccentBrush}"
-                        Glyph="&#xE92E;" />
-                    <TextBlock
-                        FontSize="18"
-                        FontWeight="SemiBold"
-                        Foreground="#F7FAFC"
-                        Text="Atajos de Teclado" />
+                    <FontIcon FontSize="18"
+                              Foreground="{StaticResource AnfetaAccentBrush}"
+                              Glyph="&#xE92E;" />
+                    <TextBlock FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="#F7FAFC"
+                               Text="Atajos de Teclado" />
                 </StackPanel>
 
-                <Border
-                    Height="2"
-                    Background="{StaticResource AnfetaAccentBrush}"
-                    CornerRadius="1" />
+                <Border Height="2"
+                        Background="{StaticResource AnfetaAccentBrush}"
+                        CornerRadius="1" />
 
                 <Border Style="{StaticResource CardStyle}">
                     <Grid RowSpacing="14">
@@ -355,7 +321,7 @@
             </StackPanel>
 
             <!-- ========== SECCIÓN API KEYS ========== -->
-            <StackPanel Grid.Row="3" Spacing="12">
+            <StackPanel Grid.Row="4" Spacing="12">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <FontIcon Glyph="&#xE8D7;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
                     <TextBlock Text="API Keys" FontSize="18" FontWeight="SemiBold" Foreground="#F7FAFC"/>
@@ -387,10 +353,9 @@
             </StackPanel>
 
             <!-- InfoBar -->
-            <StackPanel Grid.Row="4" Spacing="12">
+            <StackPanel Grid.Row="5" Spacing="12">
                 <InfoBar x:Name="InfoStatus" IsOpen="False" IsClosable="True"/>
             </StackPanel>
-
         </Grid>
     </ScrollViewer>
 </Page>
