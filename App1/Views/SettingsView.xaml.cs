@@ -404,7 +404,11 @@ namespace Anfeta.UI.Views
                 _indexCts = new CancellationTokenSource();
                 var ct = _indexCts.Token;
 
+                // 4) Limpiar índice viejo ANTES (evita resultados viejos)
                 App.LocalIndex.Clear();
+
+                // ✅ limpia cache persistido anterior (evita mismatch si se cancela)
+                await LocalIndexPersistence.ClearAsync();
                 DropboxIndexCoordinator.StartIndexing(selectedPath);
 
                 DropboxPathBox.Text = selectedPath;
@@ -416,8 +420,13 @@ namespace Anfeta.UI.Views
                 try
                 {
                     var list = await LocalIndexBuilder.BuildAsync(selectedPath, ct);
+                    // 7) Guardar índice global
                     App.LocalIndex.Set(list);
 
+                    // 7.1) ✅ Guardar índice persistido (para que sobreviva al cierre)
+                    await LocalIndexPersistence.SaveAsync(selectedPath, list, ct);
+
+                    // 8) Avisar "listo"
                     DropboxIndexCoordinator.MarkReady(selectedPath);
                     ShowStatus($"Índice listo ({App.LocalIndex.Count} items)", InfoBarSeverity.Success);
                 }
@@ -461,7 +470,13 @@ namespace Anfeta.UI.Views
 
             ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
 
+            // Limpiar índice global para NO mostrar resultados viejos
             App.LocalIndex.Clear();
+
+            // ✅ borrar cache persistido
+            await LocalIndexPersistence.ClearAsync();
+
+            // Avisar a SearchView que el estado cambió (sin índice)
             DropboxIndexCoordinator.Reset();
 
             DropboxPathBox.Text = "";

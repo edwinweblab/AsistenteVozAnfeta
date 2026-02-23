@@ -246,13 +246,29 @@ namespace Anfeta.UI.Views
 
             DROPBOX_ROOT = saved!.Trim();
 
+            // ✅ 2.5) Si no hay índice en memoria, intenta cargarlo desde disco
+            if (!App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
+            {
+                var (ok, cachedRoot, items) = await LocalIndexPersistence.TryLoadAsync(CancellationToken.None);
+
+                // Validar: existe cache, coincide ruta, y la carpeta sigue existiendo
+                if (ok &&
+                    !string.IsNullOrWhiteSpace(cachedRoot) &&
+                    string.Equals(cachedRoot.Trim(), DROPBOX_ROOT, StringComparison.OrdinalIgnoreCase) &&
+                    LocalIndexPersistence.RootExists(DROPBOX_ROOT) &&
+                    items.Count > 0)
+                {
+                    App.LocalIndex.Set(items);
+                    DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+                }
+            }
             // 3) Si está indexando o aún no hay índice, mostrar estado (sin Sync)
             if (DropboxIndexCoordinator.IsIndexing || !App.LocalIndex.HasData)
             {
                 ResetSearchModuleState();
                 StatusText.Text = DropboxIndexCoordinator.IsIndexing
                     ? $"Estado: Ruta nueva detectada, indexando…"
-                    : $"Estado: Aún no hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                    : $"Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                 return;
             }
 
@@ -653,7 +669,7 @@ namespace Anfeta.UI.Views
             // 2) Si no hay índice, no limpies UI a lo bestia
             if (!App.LocalIndex.HasData)
             {
-                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                StatusText.Text = "Estado: “No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                 return;
             }
 
@@ -692,7 +708,7 @@ namespace Anfeta.UI.Views
 
             if (!App.LocalIndex.HasData)
             {
-                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                StatusText.Text = "Estado: “No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                 return;
             }
 
@@ -800,7 +816,7 @@ namespace Anfeta.UI.Views
                 if (!App.LocalIndex.HasData)
                 {
                     ResetSearchModuleState();
-                    StatusText.Text = "Estado: Aún no hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                    StatusText.Text = "Estado:No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                     return;
                 }
 
@@ -828,7 +844,7 @@ namespace Anfeta.UI.Views
             if (!App.LocalIndex.HasData)
             {
                 ResetSearchModuleState();
-                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                StatusText.Text = "Estado: “No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                 return;
             }
 
@@ -850,7 +866,7 @@ namespace Anfeta.UI.Views
 
             if (!App.LocalIndex.HasData)
             {
-                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                StatusText.Text = "Estado: “No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                 return;
             }
             LoadingRing.IsActive = true;
@@ -1086,28 +1102,42 @@ namespace Anfeta.UI.Views
         #region ===== Filters / Sort =====
         private async void ChipFilter_Click(object sender, RoutedEventArgs e)
         {
-            // --- 1) Flags ---
-            if (sender == ChipBookmarks)
-                _onlyBookmarks = ChipBookmarks.IsChecked == true;
+            if (sender is not ToggleButton chip)
+                return;
 
-            if (sender == ChipFolders)
-                _onlyFolders = ChipFolders.IsChecked == true;
+            // --- 1) Flags (Bookmarks / Folders) ---
+            switch (chip.Name)
+            {
+                case nameof(ChipBookmarks):
+                    _onlyBookmarks = chip.IsChecked == true;
+                    break;
+
+                case nameof(ChipFolders):
+                    _onlyFolders = chip.IsChecked == true;
+                    break;
+            }
 
             // --- 2) Extensión (solo una a la vez) ---
-            if (sender == ChipPdf) _extFilter = ChipPdf.IsChecked == true ? "pdf" : null;
-            else if (sender == ChipDocx) _extFilter = ChipDocx.IsChecked == true ? "docx" : null;
-            else if (sender == ChipXlsx) _extFilter = ChipXlsx.IsChecked == true ? "xlsx" : null;
-            else if (sender == ChipImg) _extFilter = ChipImg.IsChecked == true ? "img" : null;
-            else if (sender == ChipUrl) _extFilter = ChipUrl.IsChecked == true ? "url" : null; // ✅ NUEVO
+            string? newExt = chip.Name switch
+            {
+                nameof(ChipPdf) => chip.IsChecked == true ? "pdf" : null,
+                nameof(ChipDocx) => chip.IsChecked == true ? "docx" : null,
+                nameof(ChipXlsx) => chip.IsChecked == true ? "xlsx" : null,
+                nameof(ChipImg) => chip.IsChecked == true ? "img" : null,
+                nameof(ChipUrl) => chip.IsChecked == true ? "url" : null,
+                _ => _extFilter
+            };
+
+            _extFilter = newExt;
 
             // Apagar SOLO los otros chips de extensión (NO tocar Bookmarks/Folders)
             if (_extFilter != null)
             {
-                if (sender != ChipPdf) ChipPdf.IsChecked = false;
-                if (sender != ChipDocx) ChipDocx.IsChecked = false;
-                if (sender != ChipXlsx) ChipXlsx.IsChecked = false;
-                if (sender != ChipImg) ChipImg.IsChecked = false;
-                if (sender != ChipUrl) ChipUrl.IsChecked = false; // ✅ NUEVO
+                if (chip.Name != nameof(ChipPdf)) ChipPdf.IsChecked = false;
+                if (chip.Name != nameof(ChipDocx)) ChipDocx.IsChecked = false;
+                if (chip.Name != nameof(ChipXlsx)) ChipXlsx.IsChecked = false;
+                if (chip.Name != nameof(ChipImg)) ChipImg.IsChecked = false;
+                if (chip.Name != nameof(ChipUrl)) ChipUrl.IsChecked = false;
             }
 
             // --- 3) Decide qué pintar según modo ---
@@ -1760,7 +1790,7 @@ namespace Anfeta.UI.Views
             if (!App.LocalIndex.HasData)
             {
                 ResetSearchModuleState();
-                StatusText.Text = "Estado: No hay índice. Ve a Settings y selecciona la ruta (auto-index).";
+                StatusText.Text = "Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                 return;
             }
 
@@ -2102,10 +2132,6 @@ namespace Anfeta.UI.Views
 
             return node;
         }
-
-
-        
-
 
         private void LoadExcludedFolders()
         {
