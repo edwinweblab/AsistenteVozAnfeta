@@ -10,70 +10,104 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Barra de estado superior -->
+        <!-- ═══════════ BARRA SUPERIOR ═══════════ -->
         <Border Grid.Row="0"
                 Background="{ThemeResource AnfetaNeutral900}"
-                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                BorderBrush="#12FFFFFF"
                 BorderThickness="0,0,0,1"
-                Padding="16,10">
-            <Grid>
+                Padding="20,0">
+            <Grid MinHeight="52">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Logo/Brand (opcional - oculto en modo compacto) -->
-                <StackPanel x:Name="BrandPanel" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <FontIcon Glyph="&#xE720;" FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                    <TextBlock Text="ASISTENTE DE VOZ" FontSize="14" FontWeight="SemiBold" Foreground="#F7FAFC"/>
+                <!-- Brand -->
+                <StackPanel x:Name="BrandPanel"
+                            Grid.Column="0"
+                            Orientation="Horizontal"
+                            Spacing="10"
+                            VerticalAlignment="Center"
+                            Margin="0,0,20,0">
+                                    <Border Width="28" Height="28"
+                            CornerRadius="6"
+                            Background="{StaticResource AnfetaAccentBrush}">
+                                        <FontIcon Glyph="&#xE720;"
+                                  FontSize="15"
+                                  Foreground="White"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Text="ANFETA"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="#64748B"
+                               CharacterSpacing="80"
+                               VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- Indicadores de estado -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="20" HorizontalAlignment="Right">
+                <!-- Separador central (spacer) -->
+                <Border Grid.Column="1"/>
 
-                    <!-- Internet Status -->
-                    <Button Background="Transparent" BorderThickness="0" Padding="8,4" CornerRadius="6"
+                <!-- Indicadores de estado -->
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center">
+
+                    <!-- Internet -->
+                    <Button Background="Transparent"
+                            BorderThickness="1"
+                            BorderBrush="Transparent"
+                            Padding="10,6"
+                            CornerRadius="8"
                             ToolTipService.ToolTip="Conexión a internet activa">
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                        </Button.Resources>
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon x:Name="IconInternet"
                                       Glyph="&#xE968;"
-                                      FontSize="16"
+                                      FontSize="14"
                                       Foreground="{StaticResource AnfetaSuccessBrush}"/>
                             <TextBlock x:Name="TxtInternet"
                                        Text="Internet"
                                        FontSize="12"
-                                       Foreground="#E2E8F0"
+                                       Foreground="#64748B"
                                        VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
 
-                    <!-- Divider -->
-                    <Border Width="1" Height="20" Background="#30FFFFFF" VerticalAlignment="Center"/>
+                    <Border Width="1" Height="16" Background="#14FFFFFF" VerticalAlignment="Center" Margin="4,0"/>
 
-                    <!-- ICONO 2: Login Anfeta -->
+                    <!-- Login Anfeta (Shared) -->
                     <Button Background="Transparent"
-                        BorderThickness="1"
-                        BorderBrush="Transparent"
-                        Padding="10,6"
-                        CornerRadius="8"
-                        Command="{Binding LinkSharedIconCommand}"
-                        ToolTipService.ToolTip="Login Anfeta - Click para iniciar sesión">
+                            BorderThickness="1"
+                            BorderBrush="Transparent"
+                            Padding="10,6"
+                            CornerRadius="8"
+                            Command="{Binding LinkSharedIconCommand}"
+                            ToolTipService.ToolTip="Login Anfeta - Click para iniciar sesión">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#10FFFFFF"/>
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#30FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
                         </Button.Resources>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
                             <FontIcon Glyph="&#xE8FA;"
-                      FontSize="16"
-                      Foreground="{Binding SharedLinkForeground}" />
+                                      FontSize="14"
+                                      Foreground="{Binding SharedLinkForeground}"/>
                             <TextBlock Text="{Binding SharedLinkText}"
-                       FontSize="12"
-                       Foreground="{Binding SharedLinkForeground}"
-                       FontWeight="SemiBold"
-                       VerticalAlignment="Center"/>
+                                       FontSize="12"
+                                       Foreground="{Binding SharedLinkForeground}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
-                    <!-- Link Status (con hover effect) -->
+
+                    <!-- Link / Perfil -->
                     <Button Background="Transparent"
                             BorderThickness="1"
                             BorderBrush="Transparent"
@@ -82,13 +116,13 @@
                             Command="{Binding LinkIconCommand}"
                             ToolTipService.ToolTip="Estado de vinculación - Click para ver tu perfil o vincular cuenta">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#10FFFFFF"/>
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#30FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
                         </Button.Resources>
-                        <StackPanel Orientation="Horizontal" Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
                             <FontIcon Glyph="&#xE72E;"
-                                      FontSize="16"
-                                      Foreground="{Binding LinkForeground}" />
+                                      FontSize="14"
+                                      Foreground="{Binding LinkForeground}"/>
                             <TextBlock Text="{Binding LinkText}"
                                        FontSize="12"
                                        Foreground="{Binding LinkForeground}"
@@ -97,42 +131,60 @@
                         </StackPanel>
                     </Button>
 
-                    <!-- Divider -->
-                    <Border Width="1" Height="20" Background="#30FFFFFF" VerticalAlignment="Center"/>
+                    <Border Width="1" Height="16" Background="#14FFFFFF" VerticalAlignment="Center" Margin="4,0"/>
 
-                    <!-- Mic Status -->
-                    <Button Background="Transparent" BorderThickness="0" Padding="8,4" CornerRadius="6"
+                    <!-- Micrófono -->
+                    <Button Background="Transparent"
+                            BorderThickness="1"
+                            BorderBrush="Transparent"
+                            Padding="10,6"
+                            CornerRadius="8"
                             ToolTipService.ToolTip="Estado del micrófono - Configurar en Configuración">
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                        </Button.Resources>
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon x:Name="IconMic"
                                       Glyph="&#xE720;"
-                                      FontSize="16"
-                                      Foreground="#94A3B8"/>
+                                      FontSize="14"
+                                      Foreground="#475569"/>
                             <TextBlock x:Name="TxtMic"
                                        Text="Micrófono"
                                        FontSize="12"
-                                       Foreground="#CBD5E1"
+                                       Foreground="#64748B"
                                        VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
 
-                    <!-- Dropbox Status (oculto en modo compacto) -->
-                    <Button x:Name="DropboxIndicator" 
-                            Background="Transparent" 
-                            BorderThickness="0" 
-                            Padding="8,4" 
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Integración con Dropbox - Próximamente">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="IconDropbox"
+                    <!-- Dropbox -->
+                    <Button x:Name="DropboxIndicator"
+                            Background="Transparent"
+                            BorderThickness="1"
+                            BorderBrush="Transparent"
+                            Padding="10,6"
+                            CornerRadius="8"
+                            Click="DropboxIndicator_Click"
+                            ToolTipService.ToolTip="Dropbox">
+                                            <Button.Resources>
+                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
+                                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                                            </Button.Resources>
+                                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                                <!-- Punto de estado -->
+                                                <Ellipse x:Name="DotDropbox"
+                                     Width="7" Height="7"
+                                     Fill="#334155"
+                                     VerticalAlignment="Center"/>
+                                                <FontIcon x:Name="IconDropbox"
                                       Glyph="&#xEC50;"
-                                      FontSize="16"
-                                      Foreground="#64748B"/>
-                            <TextBlock x:Name="TxtDropbox"
+                                      FontSize="14"
+                                      Foreground="#334155"/>
+                                            <TextBlock x:Name="TxtDropbox"
                                        Text="Dropbox"
                                        FontSize="12"
-                                       Foreground="#94A3B8"
-                                       VerticalAlignment="Center"/>
+                                       Foreground="#475569"
+                                       VerticalAlignment="Center"/> 
                         </StackPanel>
                     </Button>
 
@@ -140,55 +192,65 @@
             </Grid>
         </Border>
 
+        <!-- ═══════════ NAVEGACIÓN PRINCIPAL ═══════════ -->
         <NavigationView Grid.Row="1"
                         x:Name="AppNav"
                         PaneDisplayMode="Left"
                         IsPaneOpen="True"
-                        OpenPaneLength="240"
-                        CompactPaneLength="48"
+                        OpenPaneLength="220"
+                        CompactPaneLength="52"
                         IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="False"
                         SelectionChanged="AppNav_SelectionChanged">
 
+            <!-- Header del panel -->
             <NavigationView.PaneHeader>
-                <Grid Height="64" Padding="16,0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="36" Height="36" CornerRadius="8" 
-                                Background="{StaticResource AnfetaAccentBrush}"
-                                Padding="0"
-                                ToolTipService.ToolTip="ANFETA - Asistente de Voz">
+                <Grid Height="60" Padding="16,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                        <Border Width="34" Height="34"
+                                CornerRadius="8"
+                                Background="{StaticResource AnfetaAccentBrush}">
                             <FontIcon Glyph="&#xE720;"
-                                      FontSize="20"
+                                      FontSize="18"
                                       Foreground="White"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center"/>
                         </Border>
-                        <TextBlock Text="ANFETA"
-                                   FontSize="18"
-                                   FontWeight="SemiBold"
-                                   Margin="12,0,0,0"
-                                   VerticalAlignment="Center"
-                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="ANFETA"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                       CharacterSpacing="40"/>
+                            <TextBlock Text="Asistente de Voz"
+                                       FontSize="10"
+                                       Foreground="#475569"
+                                       Margin="0,1,0,0"/>
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </NavigationView.PaneHeader>
 
+            <!-- Items de navegación -->
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Panel Principal" Tag="Home"
-                                    ToolTipService.ToolTip="Ver el panel principal del asistente">
+                <NavigationViewItem Content="Panel Principal"
+                                    Tag="Home"
+                                    ToolTipService.ToolTip="Panel principal del asistente">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE80F;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Comandos Disponibles" Tag="Commands"
-                                    ToolTipService.ToolTip="Ver lista de comandos y capacidades disponibles">
+                <NavigationViewItem Content="Comandos Disponibles"
+                                    Tag="Commands"
+                                    ToolTipService.ToolTip="Lista de comandos disponibles">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE8F1;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Buscador" Tag="Search"
+                <NavigationViewItem Content="Buscador"
+                                    Tag="Search"
                                     ToolTipService.ToolTip="Buscar en actividades y proyectos">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE721;"/>
@@ -197,14 +259,16 @@
 
                 <NavigationViewItemSeparator/>
 
-                <NavigationViewItem Content="Configuración" Tag="Settings"
+                <NavigationViewItem Content="Configuración"
+                                    Tag="Settings"
                                     ToolTipService.ToolTip="Ajustes y configuración del sistema">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE713;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Pruebas de Sistema" Tag="Tests"
+                <NavigationViewItem Content="Pruebas de Sistema"
+                                    Tag="Tests"
                                     ToolTipService.ToolTip="Ejecutar pruebas de diagnóstico">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE7C1;"/>
@@ -212,28 +276,38 @@
                 </NavigationViewItem>
             </NavigationView.MenuItems>
 
+            <!-- Footer del panel -->
             <NavigationView.PaneFooter>
-                <StackPanel Padding="16,12"
-                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                            BorderThickness="0,1,0,0">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="#64748B"/>
-                        <TextBlock Text="Versión 1.0.0"
-                                   FontSize="11"
-                                   Foreground="#94A3B8"/>
-                    </StackPanel>
-                    <TextBlock x:Name="TxtVersionSubtitle"
-                               Text="Asistente de Voz Empresarial"
-                               FontSize="10"
-                               Foreground="#64748B"
-                               Margin="0,4,0,0"/>
-                </StackPanel>
+                <Border Padding="16,12"
+                        BorderBrush="#10FFFFFF"
+                        BorderThickness="0,1,0,0">
+                    <Grid>
+                        <StackPanel Spacing="3">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Ellipse Width="5" Height="5"
+                                         Fill="#34D399"
+                                         VerticalAlignment="Center"/>
+                                <TextBlock Text="Versión 1.0.0"
+                                           FontSize="11"
+                                           Foreground="#475569"/>
+                            </StackPanel>
+                            <TextBlock x:Name="TxtVersionSubtitle"
+                                       Text="Asistente de Voz Empresarial"
+                                       FontSize="10"
+                                       Foreground="#334155"
+                                       Margin="11,0,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
             </NavigationView.PaneFooter>
 
             <Frame x:Name="ContentFrame"/>
 
+            <!-- ═══════════ VISUAL STATES RESPONSIVOS ═══════════ -->
             <VisualStateManager.VisualStateGroups>
                 <VisualStateGroup>
+
+                    <!-- Compacto: solo iconos, sin textos -->
                     <VisualState x:Name="Compact">
                         <VisualState.StateTriggers>
                             <AdaptiveTrigger MinWindowWidth="0"/>
@@ -244,8 +318,11 @@
                             <Setter Target="DropboxIndicator.Visibility" Value="Collapsed"/>
                             <Setter Target="TxtInternet.Visibility" Value="Collapsed"/>
                             <Setter Target="TxtMic.Visibility" Value="Collapsed"/>
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
                         </VisualState.Setters>
                     </VisualState>
+
+                    <!-- Medio: textos de estado visibles, sin brand ni dropbox -->
                     <VisualState x:Name="Medium">
                         <VisualState.StateTriggers>
                             <AdaptiveTrigger MinWindowWidth="720"/>
@@ -254,8 +331,13 @@
                             <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible"/>
                             <Setter Target="BrandPanel.Visibility" Value="Collapsed"/>
                             <Setter Target="DropboxIndicator.Visibility" Value="Collapsed"/>
+                            <Setter Target="TxtInternet.Visibility" Value="Visible"/>
+                            <Setter Target="TxtMic.Visibility" Value="Visible"/>
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
                         </VisualState.Setters>
                     </VisualState>
+
+                    <!-- Ancho: todo visible -->
                     <VisualState x:Name="Wide">
                         <VisualState.StateTriggers>
                             <AdaptiveTrigger MinWindowWidth="1024"/>
@@ -264,8 +346,12 @@
                             <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible"/>
                             <Setter Target="BrandPanel.Visibility" Value="Visible"/>
                             <Setter Target="DropboxIndicator.Visibility" Value="Visible"/>
+                            <Setter Target="TxtInternet.Visibility" Value="Visible"/>
+                            <Setter Target="TxtMic.Visibility" Value="Visible"/>
+                            <Setter Target="TxtDropbox.Visibility" Value="Visible"/>
                         </VisualState.Setters>
                     </VisualState>
+
                 </VisualStateGroup>
             </VisualStateManager.VisualStateGroups>
 

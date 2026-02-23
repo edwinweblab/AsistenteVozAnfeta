@@ -86,23 +86,26 @@
                 <ColumnDefinition Width="300"/>
             </Grid.ColumnDefinitions>
 
-            <!-- ══════════════ LOGIN CARD ══════════════ -->
             <Border Grid.Column="0" Style="{StaticResource GlassBorder}" MinWidth="420">
                 <StackPanel Spacing="28">
 
                     <!-- Encabezado -->
                     <StackPanel Spacing="12" HorizontalAlignment="Center">
-                        <Border Width="68" Height="68" CornerRadius="34"
+                        <!-- Icono: candado verde si autenticado, persona si no -->
+                        <Border x:Name="HeaderIconBorder"
+                                Width="68" Height="68" CornerRadius="34"
                                 Background="{StaticResource AnfetaAccentBrush}"
                                 HorizontalAlignment="Center"
                                 ToolTipService.ToolTip="Sesión Anfeta compartida">
-                            <FontIcon Glyph="&#xE720;" FontSize="28" Foreground="White"
+                            <FontIcon x:Name="HeaderIcon"
+                                      Glyph="&#xE720;" FontSize="28" Foreground="White"
                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <StackPanel Spacing="4" HorizontalAlignment="Center">
                             <TextBlock Text="Login Anfeta" FontSize="28" FontWeight="SemiBold"
                                        Foreground="#F7FAFC" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Accede con las credenciales compartidas del equipo"
+                            <TextBlock x:Name="SubtitleText"
+                                       Text="Accede con las credenciales compartidas del equipo"
                                        FontSize="13" Foreground="#64748B" HorizontalAlignment="Center"
                                        TextWrapping="Wrap" MaxWidth="340" TextAlignment="Center"/>
                         </StackPanel>
@@ -110,8 +113,42 @@
 
                     <Border Style="{StaticResource Divider}"/>
 
-                    <!-- Campos -->
-                    <StackPanel Spacing="16">
+                    <!-- ══ PANEL SESIÓN ACTIVA ══ -->
+                    <StackPanel x:Name="SessionActivePanel" Visibility="Collapsed" Spacing="16">
+
+                        <!-- Badge sesión activa -->
+                        <Border Background="#1A34D399" BorderBrush="#4034D399" BorderThickness="1"
+                                CornerRadius="12" Padding="20,16">
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                                    <FontIcon Glyph="&#xE73E;" FontSize="22" Foreground="#34D399"
+                                              VerticalAlignment="Center"/>
+                                    <TextBlock Text="Sesión activa" FontSize="18" FontWeight="SemiBold"
+                                               Foreground="#34D399" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="ActiveUserText"
+                                           Text="Conectado como Anfeta"
+                                           FontSize="13" Foreground="#A7F3D0"
+                                           HorizontalAlignment="Center" TextAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Info token -->
+                        <Border Background="#12FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1"
+                                CornerRadius="10" Padding="16,12">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE8D7;" FontSize="14" Foreground="#60A5FA"
+                                          VerticalAlignment="Center"/>
+                                <TextBlock Text="Token almacenado y renovado automáticamente"
+                                           FontSize="12" Foreground="#94A3B8"
+                                           VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+
+                    <!-- ══ PANEL FORMULARIO LOGIN ══ -->
+                    <StackPanel x:Name="LoginFormPanel" Spacing="16">
 
                         <!-- Usuario -->
                         <StackPanel Spacing="0">
@@ -142,9 +179,7 @@
                                           ToolTipService.ToolTip="Contraseña de la sesión compartida"/>
                             </Grid>
 
-                            <!-- Contenedor custom con ojo manual -->
                             <Grid>
-                                <!-- PasswordBox (modo oculto) -->
                                 <PasswordBox x:Name="PassBox"
                                              Style="{StaticResource PassBoxStyle}"
                                              PlaceholderText="Ingresa la contraseña"
@@ -157,7 +192,6 @@
                                     </PasswordBox.Resources>
                                 </PasswordBox>
 
-                                <!-- TextBox (modo visible) -->
                                 <TextBox x:Name="PassTextBox"
                                          Style="{StaticResource InputBox}"
                                          PlaceholderText="Ingresa la contraseña"
@@ -170,22 +204,13 @@
                                     </TextBox.Resources>
                                 </TextBox>
 
-                                <!-- Botón ojo posicionado manualmente a la derecha -->
                                 <Button x:Name="TogglePassBtn"
-                                        HorizontalAlignment="Right"
-                                        VerticalAlignment="Center"
-                                        Width="40"
-                                        Height="40"
-                                        Margin="0,0,4,0"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Padding="0"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        Width="40" Height="40" Margin="0,0,4,0"
+                                        Background="Transparent" BorderThickness="0" Padding="0"
                                         Click="TogglePasswordVisibility_Click"
                                         ToolTipService.ToolTip="Mostrar/ocultar contraseña">
-                                    <FontIcon x:Name="EyeIcon"
-                                              Glyph="&#xE7B3;"
-                                              FontSize="16"
-                                              Foreground="#64748B"/>
+                                    <FontIcon x:Name="EyeIcon" Glyph="&#xE7B3;" FontSize="16" Foreground="#64748B"/>
                                 </Button>
                             </Grid>
                         </StackPanel>
@@ -207,7 +232,10 @@
 
                     <!-- Acciones -->
                     <StackPanel Spacing="10">
-                        <Button Command="{Binding LoginSharedCommand}"
+
+                        <!-- Botón iniciar sesión — solo visible cuando NO está autenticado -->
+                        <Button x:Name="LoginButton"
+                                Command="{Binding LoginSharedCommand}"
                                 Style="{StaticResource PrimaryButtonStyle}"
                                 HorizontalAlignment="Stretch"
                                 Height="48"
@@ -219,6 +247,7 @@
                             </StackPanel>
                         </Button>
 
+                        <!-- Botón cerrar sesión — siempre visible -->
                         <Button Command="{Binding LogoutSharedCommand}"
                                 Style="{StaticResource SecondaryButtonStyle}"
                                 HorizontalAlignment="Stretch"
@@ -280,16 +309,12 @@
             </StackPanel>
         </Grid>
 
-        <!-- Botón "Volver al inicio" — Esquina inferior izquierda -->
+        <!-- Botón "Volver al inicio" -->
         <Button Click="OnBackToHomeClicked"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Bottom"
+                HorizontalAlignment="Left" VerticalAlignment="Bottom"
                 Margin="20,0,0,20"
-                Background="Transparent"
-                BorderThickness="1"
-                BorderBrush="#25FFFFFF"
-                CornerRadius="10"
-                Padding="14,10"
+                Background="Transparent" BorderThickness="1" BorderBrush="#25FFFFFF"
+                CornerRadius="10" Padding="14,10"
                 ToolTipService.ToolTip="Regresar al panel principal">
             <Button.Resources>
                 <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#12FFFFFF"/>

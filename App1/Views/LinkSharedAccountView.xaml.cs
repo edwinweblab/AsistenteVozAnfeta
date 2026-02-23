@@ -22,6 +22,9 @@ namespace Anfeta.UI.Views
                 _vm = App.AppHost.Services.GetRequiredService<LinkSharedAccountViewModel>();
                 DataContext = _vm;
                 _vm.PropertyChanged += ViewModel_PropertyChanged;
+
+                // Aplicar estado inicial al cargar la vista
+                UpdateAuthState(_vm.IsAuthenticated);
             }
             catch (Exception ex)
             {
@@ -30,11 +33,56 @@ namespace Anfeta.UI.Views
             }
         }
 
-        // Reacciona a cambios del ViewModel para actualizar StatusBorder en UI
+        // Alterna entre el formulario de login y el panel de sesión activa.
+        // Entrada: isAuthenticated — estado actual de la sesión compartida.
+        private void UpdateAuthState(bool isAuthenticated)
+        {
+            if (isAuthenticated)
+            {
+                // Mostrar panel de sesión activa
+                SessionActivePanel.Visibility = Visibility.Visible;
+                LoginFormPanel.Visibility = Visibility.Collapsed;
+                LoginButton.Visibility = Visibility.Collapsed;
+
+                // Encabezado en verde con icono de candado
+                HeaderIconBorder.Background = new SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x34, 0xD3, 0x99));
+                HeaderIcon.Glyph = "\uE72E"; // Candado
+                SubtitleText.Text = "Sesión activa — el equipo tiene acceso a Weblab";
+                SubtitleText.Foreground = new SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x34, 0xD3, 0x99));
+
+                // Mostrar usuario activo
+                ActiveUserText.Text = $"Conectado como: {_vm.User}";
+            }
+            else
+            {
+                // Mostrar formulario de login
+                SessionActivePanel.Visibility = Visibility.Collapsed;
+                LoginFormPanel.Visibility = Visibility.Visible;
+                LoginButton.Visibility = Visibility.Visible;
+
+                // Encabezado en accent normal
+                HeaderIconBorder.Background = (Brush)Application.Current.Resources["AnfetaAccentBrush"];
+                HeaderIcon.Glyph = "\uE720"; // Persona
+                SubtitleText.Text = "Accede con las credenciales compartidas del equipo";
+                SubtitleText.Foreground = new SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x64, 0x74, 0x8B));
+            }
+        }
+
+        // Reacciona a cambios del ViewModel
         private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             try
             {
+                // Cambio de estado de autenticación → actualizar panels
+                if (e.PropertyName == nameof(LinkSharedAccountViewModel.IsAuthenticated))
+                {
+                    DispatcherQueue.TryEnqueue(() => UpdateAuthState(_vm.IsAuthenticated));
+                    return;
+                }
+
                 if (e.PropertyName == nameof(LinkSharedAccountViewModel.StatusMessage) ||
                     e.PropertyName == nameof(LinkSharedAccountViewModel.IsStatusError))
                 {
@@ -63,7 +111,7 @@ namespace Anfeta.UI.Views
                     }
                 }
 
-                // Cuando el ViewModel limpia Pass (ej. logout), limpiar también los campos
+                // Limpiar campos cuando el ViewModel limpia Pass (ej. logout)
                 if (e.PropertyName == nameof(LinkSharedAccountViewModel.Pass) &&
                     string.IsNullOrEmpty(_vm.Pass))
                 {
@@ -86,7 +134,6 @@ namespace Anfeta.UI.Views
                 {
                     _vm.Pass = pb.Password ?? string.Empty;
 
-                    // Mantener TextBox sincronizado sin disparar eventos en cadena
                     if (PassTextBox.Text != pb.Password)
                         PassTextBox.Text = pb.Password;
                 }
@@ -106,7 +153,6 @@ namespace Anfeta.UI.Views
 
                 if (_passwordVisible)
                 {
-                    // Mostrar texto plano
                     PassTextBox.Text = PassBox.Password;
                     PassBox.Visibility = Visibility.Collapsed;
                     PassTextBox.Visibility = Visibility.Visible;
@@ -115,7 +161,6 @@ namespace Anfeta.UI.Views
                 }
                 else
                 {
-                    // Ocultar texto
                     PassBox.Password = PassTextBox.Text;
                     PassTextBox.Visibility = Visibility.Collapsed;
                     PassBox.Visibility = Visibility.Visible;

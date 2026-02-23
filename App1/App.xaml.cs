@@ -34,6 +34,9 @@ namespace Anfeta.UI
         //Nefta
         public static LocalIndexService LocalIndex { get; } = new LocalIndexService();
 
+        // URL base actualizada
+        private const string WeblabBaseUrl = "https://wlserver-production.up.railway.app";
+
         public App()
         {
             InitializeComponent();
@@ -41,7 +44,6 @@ namespace Anfeta.UI
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
                 {
-
                     // =========================
                     // Core app services
                     // =========================
@@ -68,9 +70,8 @@ namespace Anfeta.UI
                     services.AddSingleton<CorrectionCommandDetector>();
 
                     // =========================
-                    // GROQ 
+                    // GROQ
                     // =========================
-
                     services.AddSingleton<ApiKeyRepository>();
                     services.AddSingleton<ApiKeyService>();
 
@@ -89,16 +90,16 @@ namespace Anfeta.UI
                         var http = factory.CreateClient("Groq");
                         return new GroqInterpretationService(http, GroqConfig.ModelName);
                     });
+
                     services.AddHttpClient("GroqValidate", client =>
                     {
                         client.BaseAddress = new Uri(GroqConfig.BaseUrl);
                         client.Timeout = TimeSpan.FromSeconds(30);
                     });
+
                     services.AddSingleton<GroqKeyValidator>();
                     services.AddTransient<Anfeta.UI.Views.ApiKeysView>();
                     services.AddSingleton<GroqRuntimeService>();
-
-
 
                     // =========================
                     // Auth / Weblab (LOCAL)
@@ -112,49 +113,67 @@ namespace Anfeta.UI
                     // Shared Auth (sesión compartida)
                     // =========================
                     services.AddSingleton<SharedTokenStore>();
-                    services.AddSingleton<SharedAuthStateService>();
+                    services.AddSingleton<SharedAuthStateService>(sp =>
+                        new SharedAuthStateService(
+                            sp.GetRequiredService<SharedTokenStore>(),
+                            sp.GetRequiredService<WeblabSharedAuthClient>()
+                        ));
                     services.AddSingleton<LinkSharedAccountViewModel>();
 
                     // =========================
-                    // HttpClientFactory + Auth headers (IMPORTANTE: handlers NO singleton)
+                    // HttpClient handlers (SIEMPRE Transient)
                     // =========================
                     services.AddTransient<AuthHeaderHandler>();
                     services.AddTransient<SharedAuthHeaderHandler>();
+                    services.AddTransient<SharedAuthRefreshHandler>();
 
+                    // =========================
+                    // HttpClients Weblab
+                    // =========================
+
+                    // Sin handlers — para login/refresh shared (evita dependencia circular)
+                    services.AddHttpClient("WeblabBase", client =>
+                    {
+                        client.BaseAddress = new Uri(WeblabBaseUrl);
+                        client.Timeout = TimeSpan.FromSeconds(100);
+                    });
+
+                    // Con token personal — para operaciones de usuario local
                     services.AddHttpClient("WeblabAuthed", client =>
                     {
-                        client.BaseAddress = new Uri("https://wlserver-production-6735.up.railway.app");
+                        client.BaseAddress = new Uri(WeblabBaseUrl);
                         client.Timeout = TimeSpan.FromSeconds(100);
                     })
                     .AddHttpMessageHandler<AuthHeaderHandler>();
 
-                    services.AddHttpClient("WeblabSharedAuthed", client =>
+                    // Con token shared + refresh automático — para operaciones del equipo
+                    services.AddHttpClient("WeblabSharedAuthedWithRefresh", client =>
                     {
-                        client.BaseAddress = new Uri("https://wlserver-production-6735.up.railway.app");
+                        client.BaseAddress = new Uri(WeblabBaseUrl);
                         client.Timeout = TimeSpan.FromSeconds(100);
                     })
-                    .AddHttpMessageHandler<SharedAuthHeaderHandler>()
-                    .AddHttpMessageHandler<AuthHeaderHandler>();  // ⬅️ AGREGAR ESTA LÍNEA
+                    .AddHttpMessageHandler<SharedAuthRefreshHandler>()
+                    .AddHttpMessageHandler<AuthHeaderHandler>();
 
                     // =========================
                     // Weblab API Clients
                     // =========================
 
-                    // WeblabAuthClient - Para operaciones de autenticación (LOCAL)
+                    // WeblabAuthClient — autenticación local (usa WeblabAuthed)
                     services.AddSingleton<Anfeta.UI.Services.Auth.WeblabAuthClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new Anfeta.UI.Services.Auth.WeblabAuthClient(factory.CreateClient("WeblabAuthed"));
                     });
 
-                    // WeblabSharedAuthClient - Para autenticación Shared (usa WeblabSharedAuthed)
+                    // WeblabSharedAuthClient — login/refresh shared (usa WeblabBase, sin handlers)
                     services.AddSingleton<WeblabSharedAuthClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
-                        return new WeblabSharedAuthClient(factory.CreateClient("WeblabSharedAuthed"));
+                        return new WeblabSharedAuthClient(factory.CreateClient("WeblabBase"));
                     });
 
-                    // WeblabReportesClient - Para reportes (revisiones-por-fecha)
+                    // WeblabReportesClient
                     services.AddSingleton<WeblabReportesClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
@@ -162,33 +181,33 @@ namespace Anfeta.UI
                         return new WeblabReportesClient(factory.CreateClient("WeblabAuthed"), auth);
                     });
 
-                    // WeblabUsersClient - Para búsqueda de usuarios
+                    // WeblabUsersClient
                     services.AddSingleton<WeblabUsersClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new WeblabUsersClient(factory.CreateClient("WeblabAuthed"));
                     });
 
-                    // WeblabActividadesClient - Para gestión de actividades
+                    // WeblabActividadesClient — usa shared con refresh automático
                     services.AddSingleton<WeblabActividadesClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
                         return new WeblabActividadesClient(
-                            factory.CreateClient("WeblabSharedAuthed"),  // ✅ Usa SHARED (con ambos handlers)
-                            factory.CreateClient("WeblabAuthed"),        // ✅ Para GET /auth/me
+                            factory.CreateClient("WeblabSharedAuthedWithRefresh"),
+                            factory.CreateClient("WeblabAuthed"),
                             auth
                         );
                     });
 
-                    // WeblabRevisionesClient - Para gestión de revisiones
+                    // WeblabRevisionesClient
                     services.AddSingleton<WeblabRevisionesClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
                         return new WeblabRevisionesClient(factory.CreateClient("WeblabAuthed"));
                     });
 
-                    // WeblabRecordatoriosClient - Para gestión de recordatorios
+                    // WeblabRecordatoriosClient
                     services.AddSingleton<WeblabRecordatoriosClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
@@ -201,7 +220,6 @@ namespace Anfeta.UI
                     // =========================
                     services.AddSingleton<LocalActionExecutor>();
 
-                    // ApiActionExecutor con todos los clientes necesarios
                     services.AddSingleton<ApiActionExecutor>(sp =>
                     {
                         var actividades = sp.GetRequiredService<WeblabActividadesClient>();
@@ -209,7 +227,6 @@ namespace Anfeta.UI
                         var reportes = sp.GetRequiredService<WeblabReportesClient>();
                         var recordatorios = sp.GetRequiredService<WeblabRecordatoriosClient>();
                         var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
-
                         return new ApiActionExecutor(actividades, revisiones, reportes, recordatorios, auth);
                     });
 
@@ -241,8 +258,7 @@ namespace Anfeta.UI
             _ = HomeVM;
             _ = CheckAndWarmupGroqAsync();
 
-            // 4) Asegurar device activo (genera/lee de SQLite)
-            //    + Bootstrap auth (check-device) sin bloquear UI
+            // 4) Asegurar device activo + Bootstrap auth sin bloquear UI
             try
             {
                 var deviceId = DeviceRepository.EnsureActiveDevice();
@@ -251,13 +267,11 @@ namespace Anfeta.UI
 #if DEBUG
                 DebugDumpDeviceRows();
 #endif
-                // Auto-login / check-device (no bloquea)
                 _ = BootstrapAuthAsync(deviceId);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"DEVICE ERROR: {ex.Message}");
-
             }
 
             // 5) Hotkey
@@ -278,9 +292,10 @@ namespace Anfeta.UI
         private async Task BootstrapAuthAsync(string deviceId)
         {
             try
-            {// =========================
-             // BOOTSTRAP SHARED (cargar tokens guardados)
-             // =========================
+            {
+                // =========================
+                // BOOTSTRAP SHARED (cargar tokens guardados + refresh automático)
+                // =========================
                 var sharedState = AppHost.Services.GetRequiredService<SharedAuthStateService>();
                 await sharedState.InitializeAsync();
 
@@ -299,7 +314,7 @@ namespace Anfeta.UI
                 var authApi = AppHost.Services.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
                 var tokenStore = AppHost.Services.GetRequiredService<ITokenStore>();
 
-                // 1) Cargar token local si existe (LocalSettings)
+                // 1) Cargar token local
                 await auth.InitializeAsync();
 
 #if DEBUG
@@ -309,14 +324,13 @@ namespace Anfeta.UI
                 Debug.WriteLine("===========================");
 #endif
 
-                // Si el usuario tiene token local, ya está autenticado
                 if (auth.IsAuthenticated)
                 {
                     Debug.WriteLine("AUTH: token local válido -> usuario autenticado");
                     return;
                 }
 
-                // 2) Verificar si el usuario cerró sesión manualmente
+                // 2) Verificar logout manual
                 var wasManualLogout = await tokenStore.WasManualLogoutAsync();
                 if (wasManualLogout)
                 {
@@ -324,7 +338,7 @@ namespace Anfeta.UI
                     return;
                 }
 
-                // 3) Si NO hay token local y NO fue logout manual, intentar auto-login por deviceId
+                // 3) Intentar auto-login por deviceId
                 var check = await authApi.CheckDeviceAsync(deviceId);
 
                 if (check.Ok && !string.IsNullOrWhiteSpace(check.Token))
@@ -544,7 +558,6 @@ namespace Anfeta.UI
                 Debug.WriteLine("GROQ WARMUP ERROR: " + ex.Message);
             }
         }
-
 
         private void TestDatabaseConnection()
         {

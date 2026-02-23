@@ -9,14 +9,14 @@ namespace Anfeta.UI.Services.Search
 {
     public static class LocalIndexBuilder
     {
+        /// Construye el índice local de archivos y carpetas bajo rootPath.
+        /// Retorna lista vacía si se cancela en lugar de lanzar excepción.
         public static Task<List<SearchResultRow>> BuildAsync(
             string rootPath,
             CancellationToken ct = default)
         {
             return Task.Run(() =>
             {
-                ct.ThrowIfCancellationRequested();
-
                 if (string.IsNullOrWhiteSpace(rootPath))
                     throw new ArgumentException("rootPath vacío");
 
@@ -27,7 +27,7 @@ namespace Anfeta.UI.Services.Search
 
                 foreach (var dir in Directory.EnumerateDirectories(rootPath, "*", SearchOption.AllDirectories))
                 {
-                    ct.ThrowIfCancellationRequested();
+                    if (ct.IsCancellationRequested) return tmp;
 
                     tmp.Add(new SearchResultRow
                     {
@@ -40,10 +40,9 @@ namespace Anfeta.UI.Services.Search
 
                 foreach (var file in Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories))
                 {
-                    ct.ThrowIfCancellationRequested();
+                    if (ct.IsCancellationRequested) return tmp;
 
                     var info = new FileInfo(file);
-
                     tmp.Add(new SearchResultRow
                     {
                         Name = Path.GetFileName(file),
@@ -56,6 +55,7 @@ namespace Anfeta.UI.Services.Search
                 }
 
                 return tmp;
+
             }, ct);
         }
     }
