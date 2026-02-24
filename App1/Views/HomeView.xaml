@@ -5,22 +5,10 @@
     Background="{StaticResource BgGradient}"
     Loaded="Page_Loaded"
     Unloaded="Page_Unloaded">
+
     <Page.Resources>
         <SolidColorBrush x:Key="RingBrush" Color="#FFFFFFFF"/>
-        <Style x:Key="GlassBorder" TargetType="Border">
-            <Setter Property="CornerRadius" Value="16"/>
-            <Setter Property="Padding" Value="18"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#20FFFFFF"/>
-            <Setter Property="Background">
-                <Setter.Value>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#24000000" Offset="0.0"/>
-                        <GradientStop Color="#16000000" Offset="1.0"/>
-                    </LinearGradientBrush>
-                </Setter.Value>
-            </Setter>
-        </Style>
+
         <Style x:Key="MicButtonStyle" TargetType="Button">
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="CornerRadius" Value="999"/>
@@ -28,183 +16,452 @@
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+
+        <Style x:Key="PanelCard" TargetType="Border">
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#18FFFFFF"/>
+            <Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#1C000000" Offset="0.0"/>
+                        <GradientStop Color="#10000000" Offset="1.0"/>
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="StatusBadge" TargetType="Border">
             <Setter Property="CornerRadius" Value="999"/>
-            <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Padding" Value="12,5,12,5"/>
+        </Style>
+
+        <Style x:Key="ActivityRow" TargetType="Border">
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="16,13,16,13"/>
+            <Setter Property="Background" Value="#0CFFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#10FFFFFF"/>
         </Style>
     </Page.Resources>
-    <Grid Padding="30">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <!-- Header -->
-        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="8" Margin="0,8,0,24">
-            <TextBlock Text="{Binding StatusText}" FontSize="30" FontWeight="SemiBold" Foreground="#F7FAFC" HorizontalAlignment="Center"/>
-            <TextBlock Text="Habla normal, yo me encargo del resto" FontSize="13" Foreground="#94A3B8" HorizontalAlignment="Center"/>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,8,0,0">
-                <Border Style="{StaticResource StatusBadge}" Background="#14FFFFFF">
+
+    <Grid>
+        <Grid Padding="20,14,20,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="2*"/>
+                <RowDefinition Height="12"/>
+                <RowDefinition Height="3*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- ══════════════ HEADER ══════════════ -->
+            <Grid Grid.Row="0" Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="1">
+                    <TextBlock Text="ANFETA" FontSize="10" FontWeight="Bold"
+                               Foreground="#8C7B6E" CharacterSpacing="250"/>
+                </StackPanel>
+
+                <!-- Badge idioma: azul → naranja -->
+                <Border Grid.Column="1" Style="{StaticResource StatusBadge}"
+                        Background="#1AFB923C" BorderBrush="#30FB923C" BorderThickness="1"
+                        VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE774;" FontSize="12" Foreground="#CBD5E1"/>
-                        <TextBlock Text="{Binding CurrentLanguageInfo}" FontSize="12" Foreground="#CBD5E1"/>
+                        <FontIcon Glyph="&#xE774;" FontSize="11" Foreground="#FB923C"/>
+                        <TextBlock Text="{Binding CurrentLanguageInfo}" FontSize="11"
+                                   FontWeight="SemiBold" Foreground="#FDBA74"/>
                     </StackPanel>
                 </Border>
-                <Border x:Name="MicStatusBadge" Style="{StaticResource StatusBadge}" Background="#14FF6B35" Visibility="Collapsed">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Ellipse Width="8" Height="8" Fill="#FF6B35"/>
-                        <TextBlock x:Name="MicStatusText" Text="Escuchando" FontSize="12" FontWeight="SemiBold" Foreground="#FF6B35"/>
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-        </StackPanel>
-        <Button x:Name="HelpButton" Grid.Row="0" VerticalAlignment="Top" HorizontalAlignment="Right"
-                Width="40" Height="40" Background="#14FFFFFF" BorderBrush="#30FFFFFF" CornerRadius="20" Margin="0,8,8,0"
-                ToolTipService.ToolTip="¿Problemas con el micrófono? Click para ver soluciones">
-            <FontIcon Glyph="&#xE897;" FontSize="16" Foreground="#E2E8F0"/>
-        </Button>
-        <!-- Body -->
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="24" MaxWidth="1200" HorizontalAlignment="Center">
-                <StackPanel Spacing="16" HorizontalAlignment="Center">
-                    <InfoBar IsOpen="{Binding ShowInfo}" Message="{Binding InfoMessage}" Severity="Informational"/>
-                    <Viewbox Stretch="Uniform" MaxWidth="280" MaxHeight="280">
-                        <Grid Width="280" Height="280">
-                            <Ellipse x:Name="Ring1" Fill="{StaticResource RingBrush}" Opacity="0.18" RenderTransformOrigin="0.5,0.5">
-                                <Ellipse.RenderTransform>
-                                    <ScaleTransform x:Name="Ring1Scale" ScaleX="0.70" ScaleY="0.70"/>
-                                </Ellipse.RenderTransform>
-                            </Ellipse>
-                            <Ellipse x:Name="Ring2" Fill="{StaticResource RingBrush}" Opacity="0.12" RenderTransformOrigin="0.5,0.5">
-                                <Ellipse.RenderTransform>
-                                    <ScaleTransform x:Name="Ring2Scale" ScaleX="0.62" ScaleY="0.62"/>
-                                </Ellipse.RenderTransform>
-                            </Ellipse>
-                            <Ellipse x:Name="Ring3" Fill="{StaticResource RingBrush}" Opacity="0.08" RenderTransformOrigin="0.5,0.5">
-                                <Ellipse.RenderTransform>
-                                    <ScaleTransform x:Name="Ring3Scale" ScaleX="0.55" ScaleY="0.55"/>
-                                </Ellipse.RenderTransform>
-                            </Ellipse>
-                            <Ellipse x:Name="MicGlow" Width="200" Height="200" Fill="{StaticResource AnfetaAccentBrush}" Opacity="0.18" RenderTransformOrigin="0.5,0.5">
-                                <Ellipse.RenderTransform>
-                                    <ScaleTransform x:Name="MicGlowScale" ScaleX="1.0" ScaleY="1.0"/>
-                                </Ellipse.RenderTransform>
-                            </Ellipse>
-                            <Grid Width="156" Height="156">
-                                <Ellipse Fill="#000000" Opacity="0.30" Margin="2,6,2,0"/>
-                                <Button x:Name="MicButton" Style="{StaticResource MicButtonStyle}" Width="156" Height="156" RenderTransformOrigin="0.5,0.5" ToolTipService.ToolTip="Click para hablar">
-                                    <Button.RenderTransform>
-                                        <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0"/>
-                                    </Button.RenderTransform>
-                                    <FontIcon Glyph="&#xE720;" Foreground="White" FontSize="46"/>
-                                </Button>
-                            </Grid>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal"
+                            HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="10">
+                    <Border x:Name="MicStatusBadge" Style="{StaticResource StatusBadge}"
+                            Background="#1AFF6B35" BorderBrush="#30FF6B35" BorderThickness="1"
+                            Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse Width="7" Height="7" Fill="#FF6B35"/>
+                            <TextBlock x:Name="MicStatusText" Text="Escuchando"
+                                       FontSize="11" FontWeight="SemiBold" Foreground="#FF6B35"/>
+                        </StackPanel>
+                    </Border>
+                    <Button x:Name="HelpButton" Width="36" Height="36"
+                            Background="#14FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1"
+                            CornerRadius="10"
+                            ToolTipService.ToolTip="Solucionar problemas con el micrófono">
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#20FFFFFF"/>
+                        </Button.Resources>
+                        <FontIcon Glyph="&#xE897;" FontSize="14" Foreground="#8C7B6E"/>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <Border Grid.Row="0" Height="1" Background="#0EFFFFFF"
+                    VerticalAlignment="Bottom" Margin="0,0,0,-1"/>
+
+            <!-- ══════════════ PANEL NOTIFICACIONES ══════════════ -->
+            <Border x:Name="NotifStrip"
+                    Grid.Row="1"
+                    Visibility="Collapsed"
+                    Style="{StaticResource PanelCard}"
+                    Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Padding="28,14,28,14">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Ellipse x:Name="NotifDot" Width="7" Height="7"
+                                     Fill="#34D399" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="NotifHeaderText"
+                                       Text="NOTIFICACIONES"
+                                       FontSize="10" FontWeight="Bold"
+                                       Foreground="#8C7B6E" CharacterSpacing="180"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <!-- Badge contador: azul → naranja -->
+                        <Border x:Name="NotifCountBadge"
+                                Background="#14FB923C" CornerRadius="999"
+                                Padding="8,3,8,3"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                            <TextBlock x:Name="NotifCountText"
+                                       FontSize="10" FontWeight="Bold" Foreground="#FB923C"/>
+                        </Border>
+                    </Grid>
+                    <Border Grid.Row="0" Height="1" Background="#0EFFFFFF" VerticalAlignment="Bottom"/>
+
+                    <ScrollViewer Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="0,14,0,16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="0.5*"/>
+                                <ColumnDefinition Width="7*"/>
+                                <ColumnDefinition Width="0.5*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel x:Name="NotificationsPanel" Grid.Column="1" Spacing="12"/>
                         </Grid>
-                    </Viewbox>
-                    <Border CornerRadius="999" Padding="12,7" HorizontalAlignment="Center" BorderThickness="1" BorderBrush="#18FFFFFF">
-                        <Border.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#14FFFFFF" Offset="0.0"/>
-                                <GradientStop Color="#0BFFFFFF" Offset="1.0"/>
-                            </LinearGradientBrush>
-                        </Border.Background>
-                        <TextBlock FontSize="12" Foreground="#EDF2F7">
-                            <Run Text="💡 Di: "/>
-                            <Run Text="&quot;Abrir navegador&quot;" FontWeight="SemiBold"/>
-                        </TextBlock>
-                    </Border>
-                    <Border Style="{StaticResource GlassBorder}">
-                        <StackPanel Spacing="10">
-                            <TextBlock Text="Texto detectado" FontSize="14" FontWeight="SemiBold" Foreground="#E2E8F0"/>
-                            <TextBlock Text="{Binding RecognizedText}" FontSize="16" Foreground="#F7FAFC" TextWrapping="Wrap" MinHeight="24"/>
-                            <TextBlock FontSize="12" Foreground="#94A3B8">
-                                <Run Text="Tip: "/>
-                                <Run Text="Presiona el micrófono y habla con claridad."/>
-                            </TextBlock>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-                <!-- Cards completas -->
-                <Grid x:Name="CardsGrid">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="14"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Border x:Name="CardLastAction" Grid.Column="0" Style="{StaticResource GlassBorder}">
-                        <StackPanel Spacing="12">
-                            <Grid>
-                                <TextBlock Text="Última acción" FontSize="14" FontWeight="SemiBold" Foreground="#E2E8F0"/>
-                                <Border Background="#2034D399" CornerRadius="999" Padding="10,4" HorizontalAlignment="Right">
-                                    <TextBlock Text="Éxito" FontSize="12" Foreground="#F7FAFC" FontWeight="SemiBold"/>
-                                </Border>
-                            </Grid>
-                            <TextBlock FontSize="16" Foreground="#F7FAFC" TextWrapping="Wrap">
-                                <Run Text="Entendí: "/>
-                                <Run Text="{Binding RecognizedText}" Foreground="#34D399" FontWeight="SemiBold"/>
-                            </TextBlock>
-                            <TextBlock FontSize="12" Foreground="#94A3B8">
-                                <Run Text="Respuesta: "/>
-                                <Run Text="Acción ejecutada correctamente."/>
-                            </TextBlock>
-                        </StackPanel>
-                    </Border>
-                    <Border x:Name="CardActivity" Grid.Column="2" Style="{StaticResource GlassBorder}">
-                        <StackPanel>
-                            <TextBlock Text="Actividad reciente" FontSize="14" FontWeight="SemiBold" Foreground="#E2E8F0" Margin="0,0,0,10"/>
-                            <StackPanel Spacing="12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Abrir navegador" FontSize="14" Foreground="#F7FAFC"/>
-                                    <TextBlock Grid.Column="1" Text="10:15 AM" FontSize="12" Foreground="#94A3B8" Margin="10,0"/>
-                                    <FontIcon Grid.Column="2" Glyph="&#xE73E;" Foreground="#34D399" FontSize="14"/>
-                                </Grid>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Crear tarea" FontSize="14" Foreground="#F7FAFC"/>
-                                    <TextBlock Grid.Column="1" Text="09:45 AM" FontSize="12" Foreground="#94A3B8" Margin="10,0"/>
-                                    <FontIcon Grid.Column="2" Glyph="&#xE73E;" Foreground="#34D399" FontSize="14"/>
-                                </Grid>
-                                <TextBlock Text="Entregar informe" FontSize="12" Foreground="#94A3B8" Margin="0,-8,0,0"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Eliminar archivo" FontSize="14" Foreground="#F7FAFC"/>
-                                    <TextBlock Grid.Column="1" Text="08:30 AM" FontSize="12" Foreground="#94A3B8" Margin="10,0"/>
-                                    <FontIcon Grid.Column="2" Glyph="&#xEA39;" Foreground="#EF4444" FontSize="14"/>
-                                </Grid>
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
+                    </ScrollViewer>
                 </Grid>
-            </StackPanel>
-        </ScrollViewer>
-        <!-- Footer: Audio Devices -->
-        <Border Grid.Row="2" Background="#10FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="0,1,0,0" Padding="16,12">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="24">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE720;" FontSize="14" Foreground="#94A3B8"/>
-                    <TextBlock x:Name="TxtInputDevice" Text="Entrada: No configurado" FontSize="12" Foreground="#CBD5E1"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE767;" FontSize="14" Foreground="#94A3B8"/>
-                    <TextBlock x:Name="TxtOutputDevice" Text="Salida: No configurado" FontSize="12" Foreground="#CBD5E1"/>
-                </StackPanel>
-            </StackPanel>
-        </Border>
-        <!-- VisualStates para responsive (único y consolidado) -->
+            </Border>
+
+            <!-- ══════════════ CONTENEDOR PRINCIPAL ══════════════ -->
+            <Border Grid.Row="3"
+                    Style="{StaticResource PanelCard}"
+                    Padding="0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="LeftCol"  Width="*"/>
+                        <ColumnDefinition x:Name="LeftDiv"  Width="1"/>
+                        <ColumnDefinition                   Width="2*"/>
+                        <ColumnDefinition x:Name="RightDiv" Width="1"/>
+                        <ColumnDefinition x:Name="RightCol" Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- SECCIÓN IZQUIERDA: Detectado -->
+                    <Grid Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Padding="20,14,20,14"
+                                BorderBrush="#0EFFFFFF" BorderThickness="0,0,0,1">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8BD;" FontSize="11" Foreground="#FF8A4A"/>
+                                <TextBlock Text="DETECTADO" FontSize="10" FontWeight="Bold"
+                                           Foreground="#FF8A4A" CharacterSpacing="180"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="20,16,20,20">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{Binding RecognizedText}"
+                                           FontSize="16" FontWeight="SemiBold"
+                                           Foreground="#F1F5F9"
+                                           TextWrapping="Wrap" MinHeight="24"/>
+                                <!-- azul → naranja suave -->
+                                <TextBlock Text="Esperando comando de voz..."
+                                           FontSize="11" Foreground="#FB923C"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Border Grid.Column="1" Background="#0EFFFFFF"/>
+
+                    <!-- SECCIÓN CENTRAL: Micrófono -->
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0"
+                                    HorizontalAlignment="Center"
+                                    Spacing="8"
+                                    Margin="0,18,0,0">
+                            <Border HorizontalAlignment="Center"
+                                    CornerRadius="999"
+                                    BorderThickness="1"
+                                    BorderBrush="#3034D399"
+                                    Background="#1A34D399"
+                                    Padding="14,6,14,6">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Ellipse x:Name="StatusDot" Width="7" Height="7"
+                                             Fill="#34D399" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding StatusText}"
+                                               FontSize="13" FontWeight="SemiBold"
+                                               Foreground="#A7F3D0"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="1"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    Spacing="0">
+
+                            <Viewbox Stretch="Uniform"
+                                     MaxWidth="240" MaxHeight="240"
+                                     HorizontalAlignment="Center">
+                                <Grid Width="240" Height="240">
+                                    <Ellipse x:Name="Ring1" Fill="{StaticResource RingBrush}"
+                                             Opacity="0.18" RenderTransformOrigin="0.5,0.5">
+                                        <Ellipse.RenderTransform>
+                                            <ScaleTransform x:Name="Ring1Scale" ScaleX="0.70" ScaleY="0.70"/>
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                    <Ellipse x:Name="Ring2" Fill="{StaticResource RingBrush}"
+                                             Opacity="0.12" RenderTransformOrigin="0.5,0.5">
+                                        <Ellipse.RenderTransform>
+                                            <ScaleTransform x:Name="Ring2Scale" ScaleX="0.62" ScaleY="0.62"/>
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                    <Ellipse x:Name="Ring3" Fill="{StaticResource RingBrush}"
+                                             Opacity="0.08" RenderTransformOrigin="0.5,0.5">
+                                        <Ellipse.RenderTransform>
+                                            <ScaleTransform x:Name="Ring3Scale" ScaleX="0.55" ScaleY="0.55"/>
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                    <Ellipse x:Name="MicGlow" Width="176" Height="176"
+                                             Fill="{StaticResource AnfetaAccentBrush}"
+                                             Opacity="0.18" RenderTransformOrigin="0.5,0.5">
+                                        <Ellipse.RenderTransform>
+                                            <ScaleTransform x:Name="MicGlowScale" ScaleX="1.0" ScaleY="1.0"/>
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                    <Grid Width="138" Height="138">
+                                        <Ellipse Fill="#000000" Opacity="0.26" Margin="2,6,2,0"/>
+                                        <Button x:Name="MicButton"
+                                                Style="{StaticResource MicButtonStyle}"
+                                                Width="138" Height="138"
+                                                RenderTransformOrigin="0.5,0.5"
+                                                ToolTipService.ToolTip="Presiona para hablar">
+                                            <Button.Resources>
+                                                <SolidColorBrush x:Key="ButtonBackground"            Color="#FF6B35"/>
+                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#FF8A4A"/>
+                                                <SolidColorBrush x:Key="ButtonBackgroundPressed"     Color="#E05020"/>
+                                                <SolidColorBrush x:Key="ButtonBackgroundDisabled"    Color="#374151"/>
+                                            </Button.Resources>
+                                            <Button.RenderTransform>
+                                                <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0"/>
+                                            </Button.RenderTransform>
+                                            <FontIcon Glyph="&#xE720;" Foreground="White" FontSize="42"/>
+                                        </Button>
+                                    </Grid>
+                                </Grid>
+                            </Viewbox>
+
+                            <!-- azul → naranja suave -->
+                            <TextBlock Text="Presiona para hablar"
+                                       FontSize="11" FontWeight="SemiBold" Foreground="#FB923C"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,12,0,0"/>
+                        </StackPanel>
+
+                        <!-- Dispositivos -->
+                        <Border Grid.Row="2"
+                                Margin="16,0,16,18"
+                                CornerRadius="12"
+                                Background="#0EFFFFFF"
+                                BorderBrush="#18FFFFFF"
+                                BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="1"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Entrada -->
+                                <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                            HorizontalAlignment="Center"
+                                            Spacing="8" Padding="14,10,14,10">
+                                    <FontIcon Glyph="&#xE720;" FontSize="13"
+                                              Foreground="#FF6B35" VerticalAlignment="Center"/>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="ENTRADA" FontSize="9" FontWeight="Bold"
+                                                   Foreground="#FF8A4A" CharacterSpacing="150"/>
+                                        <TextBlock x:Name="TxtInputDevice"
+                                                   Text="No configurado"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="#D4C9C0"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxLines="1"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <Border Grid.Column="1" Background="#14FFFFFF"/>
+
+                                <!-- Salida: azul → naranja -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                            HorizontalAlignment="Center"
+                                            Spacing="8" Padding="14,10,14,10">
+                                    <FontIcon Glyph="&#xE767;" FontSize="13"
+                                              Foreground="#FB923C" VerticalAlignment="Center"/>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="SALIDA" FontSize="9" FontWeight="Bold"
+                                                   Foreground="#FB923C" CharacterSpacing="150"/>
+                                        <TextBlock x:Name="TxtOutputDevice"
+                                                   Text="No configurado"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="#D4C9C0"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxLines="1"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <Border Grid.Column="3" Background="#0EFFFFFF"/>
+
+                    <!-- SECCIÓN DERECHA: Actividad reciente -->
+                    <Grid x:Name="CardActivity" Grid.Column="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header: azul → naranja -->
+                        <Border Grid.Row="0" Padding="20,14,20,14"
+                                BorderBrush="#0EFFFFFF" BorderThickness="0,0,0,1">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Ellipse Width="7" Height="7" Fill="#FB923C" VerticalAlignment="Center"/>
+                                <TextBlock Text="ACTIVIDAD RECIENTE" FontSize="10" FontWeight="Bold"
+                                           Foreground="#FB923C" CharacterSpacing="180"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+
+                        <ScrollViewer Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="12,12,12,12">
+                            <StackPanel Spacing="6">
+
+                                <Border Style="{StaticResource ActivityRow}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Grid.Column="0" Width="7" Height="7"
+                                                 Fill="#34D399" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <TextBlock Grid.Column="1" Text="Abrir navegador"
+                                                   FontSize="13" Foreground="#D4C9C0" VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="10:15" FontSize="11" Foreground="#4A3E36" VerticalAlignment="Center"/>
+                                            <FontIcon Glyph="&#xE73E;" Foreground="#34D399" FontSize="12"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource ActivityRow}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Grid.Column="0" Width="7" Height="7"
+                                                 Fill="#34D399" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <TextBlock Grid.Column="1" Text="Crear actividad"
+                                                   FontSize="13" Foreground="#D4C9C0" VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="09:45" FontSize="11" Foreground="#4A3E36" VerticalAlignment="Center"/>
+                                            <FontIcon Glyph="&#xE73E;" Foreground="#34D399" FontSize="12"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource ActivityRow}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Grid.Column="0" Width="7" Height="7"
+                                                 Fill="#EF4444" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <TextBlock Grid.Column="1" Text="Eliminar archivo"
+                                                   FontSize="13" Foreground="#D4C9C0" VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="08:30" FontSize="11" Foreground="#4A3E36" VerticalAlignment="Center"/>
+                                            <FontIcon Glyph="&#xEA39;" Foreground="#EF4444" FontSize="12"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <Border x:Name="CardLastAction"
+                                        Style="{StaticResource ActivityRow}"
+                                        Background="#0C34D399" BorderBrush="#1834D399">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Grid.Column="0" Width="7" Height="7"
+                                                 Fill="#34D399" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding RecognizedText}"
+                                                   FontSize="13" Foreground="#A7F3D0"
+                                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                        <FontIcon Grid.Column="2" Glyph="&#xE73E;"
+                                                  Foreground="#34D399" FontSize="12" Margin="8,0,0,0"/>
+                                    </Grid>
+                                </Border>
+
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="4" Height="0"/>
+
+        </Grid>
+
+        <!-- ══ RESPONSIVE ══ -->
         <VisualStateManager.VisualStateGroups>
             <VisualStateGroup>
                 <VisualState x:Name="Compact">
@@ -212,26 +469,27 @@
                         <AdaptiveTrigger MinWindowWidth="0"/>
                     </VisualState.StateTriggers>
                     <VisualState.Setters>
-                        <Setter Target="CardLastAction.(Grid.ColumnSpan)" Value="3"/>
-                        <Setter Target="CardActivity.(Grid.Column)" Value="0"/>
-                        <Setter Target="CardActivity.(Grid.Row)" Value="1"/>
-                        <Setter Target="CardActivity.(Grid.ColumnSpan)" Value="3"/>
-                        <Setter Target="CardActivity.Margin" Value="0,14,0,0"/>
+                        <Setter Target="LeftCol.Width"           Value="0"/>
+                        <Setter Target="LeftDiv.Width"           Value="0"/>
+                        <Setter Target="RightDiv.Width"          Value="0"/>
+                        <Setter Target="RightCol.Width"          Value="0"/>
+                        <Setter Target="CardActivity.Visibility" Value="Collapsed"/>
                     </VisualState.Setters>
                 </VisualState>
                 <VisualState x:Name="Wide">
                     <VisualState.StateTriggers>
-                        <AdaptiveTrigger MinWindowWidth="900"/>
+                        <AdaptiveTrigger MinWindowWidth="800"/>
                     </VisualState.StateTriggers>
                     <VisualState.Setters>
-                        <Setter Target="CardLastAction.(Grid.Column)" Value="0"/>
-                        <Setter Target="CardLastAction.(Grid.ColumnSpan)" Value="1"/>
-                        <Setter Target="CardActivity.(Grid.Column)" Value="2"/>
-                        <Setter Target="CardActivity.(Grid.ColumnSpan)" Value="1"/>
-                        <Setter Target="CardActivity.Margin" Value="0"/>
+                        <Setter Target="LeftCol.Width"           Value="*"/>
+                        <Setter Target="LeftDiv.Width"           Value="1"/>
+                        <Setter Target="RightDiv.Width"          Value="1"/>
+                        <Setter Target="RightCol.Width"          Value="*"/>
+                        <Setter Target="CardActivity.Visibility" Value="Visible"/>
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
+
     </Grid>
 </Page>

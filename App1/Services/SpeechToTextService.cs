@@ -23,6 +23,7 @@ namespace Anfeta.UI.Services
             _appState = appState;
         }
 
+        /// Retorna los idiomas disponibles para reconocimiento de voz.
         public List<LanguageInfo> GetAvailableLanguages()
         {
             var languages = SpeechRecognizer.SupportedTopicLanguages;
@@ -36,6 +37,8 @@ namespace Anfeta.UI.Services
 
         public string GetCurrentLanguage() => _currentLanguage;
 
+        /// Verifica permisos y disponibilidad del idioma con un recognizer desechable.
+        /// NO guarda recognizer persistente — SpeechRecognizer no es reutilizable.
         public async Task InitializeAsync(string languageTag = "es-MX")
         {
             await _lock.WaitAsync();
@@ -46,18 +49,14 @@ namespace Anfeta.UI.Services
                     throw new InvalidOperationException("No hay idiomas instalados.");
 
                 Language? targetLang = available.FirstOrDefault(l =>
-                    l.LanguageTag.Equals(languageTag, StringComparison.OrdinalIgnoreCase));
+                    l.LanguageTag.Equals(languageTag, StringComparison.OrdinalIgnoreCase))
+                    ?? available.First();
 
-                targetLang ??= available.First();
                 _currentLanguage = targetLang.LanguageTag;
 
                 using var probe = new SpeechRecognizer(targetLang);
                 probe.Constraints.Add(new SpeechRecognitionTopicConstraint(
                     SpeechRecognitionScenario.Dictation, "dictation"));
-
-                probe.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(3.5);
-                probe.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.2);
-                probe.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
 
                 try
                 {
@@ -73,6 +72,7 @@ namespace Anfeta.UI.Services
                 }
 
                 _initialized = true;
+                System.Diagnostics.Debug.WriteLine("[STT] Inicialización OK. Lang=" + _currentLanguage);
             }
             finally
             {
@@ -80,25 +80,20 @@ namespace Anfeta.UI.Services
             }
         }
 
-        /// <summary>Cambia temporalmente el dispositivo predeterminado del sistema</summary>
+        /// Cambia temporalmente el dispositivo de captura predeterminado del sistema.
         private void SetTemporaryDefaultDevice(int naudioId)
         {
             try
             {
                 var enumerator = new MMDeviceEnumerator();
-
-                // Guardar dispositivo predeterminado actual
                 var currentDefault = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
                 _originalDefaultDevice = currentDefault.ID;
 
-                // Obtener dispositivo objetivo
                 var captureDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active).ToList();
-
                 if (naudioId >= 0 && naudioId < captureDevices.Count)
                 {
                     var target = captureDevices[naudioId];
                     System.Diagnostics.Debug.WriteLine($"[STT] Cambiando a device: {target.FriendlyName}");
-
                     var policyConfig = new PolicyConfigClient();
                     policyConfig.SetDefaultEndpoint(target.ID, 2);
                 }
@@ -109,28 +104,28 @@ namespace Anfeta.UI.Services
             }
         }
 
-        /// <summary>Restaura el dispositivo predeterminado original</summary>
+        /// Restaura el dispositivo de captura predeterminado original.
         private void RestoreDefaultDevice()
         {
-            if (_originalDefaultDevice != null)
+            if (_originalDefaultDevice == null) return;
+            try
             {
-                try
-                {
-                    System.Diagnostics.Debug.WriteLine("[STT] Restaurando device original");
-                    var policyConfig = new PolicyConfigClient();
-                    policyConfig.SetDefaultEndpoint(_originalDefaultDevice, 2);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[STT] Error al restaurar device: {ex.Message}");
-                }
-                finally
-                {
-                    _originalDefaultDevice = null;
-                }
+                var policyConfig = new PolicyConfigClient();
+                policyConfig.SetDefaultEndpoint(_originalDefaultDevice, 2);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[STT] Error al restaurar device: {ex.Message}");
+            }
+            finally
+            {
+                _originalDefaultDevice = null;
             }
         }
 
+        /// Crea un SpeechRecognizer nuevo por cada escucha.
+        /// SpeechRecognizer NO es reutilizable después de RecognizeAsync().
+        /// El delay se reduce bajando InitialSilenceTimeout a 1.5s.
         public async Task<string?> RecognizeOnceAsync(CancellationToken ct = default)
         {
             if (!_initialized)
@@ -143,14 +138,11 @@ namespace Anfeta.UI.Services
                 if (available.Count == 0) return null;
 
                 Language? lang = available.FirstOrDefault(l =>
-                    l.LanguageTag.Equals(_currentLanguage, StringComparison.OrdinalIgnoreCase));
-                lang ??= available.First();
+                    l.LanguageTag.Equals(_currentLanguage, StringComparison.OrdinalIgnoreCase))
+                    ?? available.First();
 
-                // Cambiar dispositivo predeterminado temporalmente
                 if (_appState.InputDeviceId.HasValue)
-                {
                     SetTemporaryDefaultDevice(_appState.InputDeviceId.Value);
-                }
 
                 SpeechRecognizer? recognizer = null;
                 try
@@ -159,15 +151,18 @@ namespace Anfeta.UI.Services
                     recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(
                         SpeechRecognitionScenario.Dictation, "dictation"));
 
-                    recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(3.5);
-                    recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.2);
+                    recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(1.5);
+                    recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.0);
                     recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
 
                     _activeRecognizer = recognizer;
 
                     var compile = await recognizer.CompileConstraintsAsync();
                     if (compile.Status != SpeechRecognitionResultStatus.Success)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[STT] Compile falló: {compile.Status}");
                         return null;
+                    }
 
                     using var reg = ct.Register(() => _ = CancelAsync());
 
@@ -180,15 +175,15 @@ namespace Anfeta.UI.Services
                     {
                         if (ex.HResult == unchecked((int)0x80045509))
                             throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
+                        System.Diagnostics.Debug.WriteLine($"[STT] COMException en RecognizeAsync: {ex.HResult}");
                         return null;
                     }
 
                     if (ct.IsCancellationRequested) return null;
 
-                    if (result?.Status == SpeechRecognitionResultStatus.Success)
-                        return result.Text;
-
-                    return null;
+                    return result?.Status == SpeechRecognitionResultStatus.Success
+                        ? result.Text
+                        : null;
                 }
                 catch (System.Runtime.InteropServices.COMException ex)
                 {
@@ -202,7 +197,6 @@ namespace Anfeta.UI.Services
                     if (ReferenceEquals(_activeRecognizer, recognizer))
                         _activeRecognizer = null;
 
-                    // Restaurar dispositivo original
                     RestoreDefaultDevice();
                 }
             }
@@ -216,9 +210,7 @@ namespace Anfeta.UI.Services
         {
             var r = _activeRecognizer;
             if (r == null) return;
-
-            try { await r.StopRecognitionAsync(); }
-            catch { }
+            try { await r.StopRecognitionAsync(); } catch { }
         }
 
         public async Task ResetAsync(string languageTag = "es-MX")
