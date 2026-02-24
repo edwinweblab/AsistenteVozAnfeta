@@ -40,7 +40,6 @@
                                 CornerRadius="8"
                                 Click="BtnShowTroubleshoot_Click"
                                 ToolTipService.ToolTip="Solucionar problemas de audio">
-                            <!-- Amarillo de advertencia: se conserva -->
                             <FontIcon FontSize="14" Foreground="#FBBF24" Glyph="&#xE897;"/>
                         </Button>
                     </StackPanel>
@@ -107,22 +106,24 @@
                                    Foreground="#FFFFFF" CharacterSpacing="100" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <!-- Dispositivos activos -->
+                    <!-- Indicador de dispositivos activos del sistema -->
                     <Border CornerRadius="8" Padding="14,10"
-                            Background="#080C14" BorderBrush="#20FFFFFF" BorderThickness="1">
-                        <StackPanel Orientation="Horizontal" Spacing="20">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE720;" FontSize="11" Foreground="#8C7B6E"/>
-                                <TextBlock x:Name="TxtCurrentInput"
-                                           Text="Entrada: No configurado"
+                            Background="#0A0C0E" BorderBrush="#20FFFFFF" BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal" Spacing="20">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Ellipse Width="6" Height="6" Fill="#34D399" VerticalAlignment="Center"/>
+                                                    <!-- Renombrado: TxtCurrentInput → TxtStatusInput -->
+                                                    <TextBlock x:Name="TxtStatusInput"
+                                           Text="Cargando..."
                                            FontSize="11" Foreground="#EDE8E3"/>
-                            </StackPanel>
-                            <Border Width="1" Height="12" Background="#20FFFFFF" VerticalAlignment="Center"/>
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <FontIcon Glyph="&#xE767;" FontSize="11" Foreground="#8C7B6E"/>
-                                <TextBlock x:Name="TxtCurrentOutput"
-                                           Text="Salida: No configurado"
-                                           FontSize="11" Foreground="#EDE8E3"/>
+                                                </StackPanel>
+                                                <Border Width="1" Height="12" Background="#20FFFFFF" VerticalAlignment="Center"/>
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Ellipse Width="6" Height="6" Fill="#34D399" VerticalAlignment="Center"/>
+                                                    <!-- Renombrado: TxtCurrentOutput → TxtStatusOutput -->
+                                                <TextBlock x:Name="TxtStatusOutput"
+                                           Text="Cargando..."
+                                           FontSize="11" Foreground="#EDE8E3"/> 
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -142,10 +143,23 @@
                                     <TextBlock Text="Entrada (Micrófono)" FontSize="13" FontWeight="SemiBold"
                                                Foreground="#FFFFFF" VerticalAlignment="Center"/>
                                 </StackPanel>
-                                <ComboBox x:Name="CbInputDevice" Height="40"
-                                          HorizontalAlignment="Stretch"
-                                          PlaceholderText="Seleccionar micrófono"
-                                          SelectionChanged="CbInputDevice_SelectionChanged"/>
+
+                                <!-- Dispositivo activo del sistema — solo lectura -->
+                                <Border CornerRadius="8" Padding="14,10"
+                                        Background="#0CFFFFFF" BorderBrush="#18FFFFFF" BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <FontIcon Glyph="&#xE720;" FontSize="12"
+                                                  Foreground="#FF8A4A" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtMicDevice"
+                                                   Text="Cargando..."
+                                                   FontSize="12" Foreground="#D4C9C0"
+                                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="ANFETA usa el micrófono predeterminado de Windows. Para cambiarlo, configúralo en Sonido del sistema."
+                                           FontSize="11" Foreground="#6B5F56" TextWrapping="Wrap"/>
+
                                 <Button x:Name="BtnTestMic" Click="BtnTestMic_Click"
                                         Style="{StaticResource SecondaryButtonStyle}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -153,6 +167,7 @@
                                         <TextBlock x:Name="TxtTestMic" Text="Probar micrófono"/>
                                     </StackPanel>
                                 </Button>
+
                                 <StackPanel x:Name="PnlMicLevel" Spacing="6" Visibility="Collapsed">
                                     <Grid>
                                         <ProgressBar x:Name="PgMicLevel" Height="24" CornerRadius="4"
@@ -182,10 +197,23 @@
                                     <TextBlock Text="Salida (Altavoces)" FontSize="13" FontWeight="SemiBold"
                                                Foreground="#FFFFFF" VerticalAlignment="Center"/>
                                 </StackPanel>
-                                <ComboBox x:Name="CbOutputDevice" Height="40"
-                                          HorizontalAlignment="Stretch"
-                                          PlaceholderText="Seleccionar altavoces"
-                                          SelectionChanged="CbOutputDevice_SelectionChanged"/>
+
+                                <!-- Dispositivo activo del sistema — solo lectura -->
+                                <Border CornerRadius="8" Padding="14,10"
+                                        Background="#0CFFFFFF" BorderBrush="#18FFFFFF" BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <FontIcon Glyph="&#xE767;" FontSize="12"
+                                                  Foreground="#FB923C" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtSpeakerDevice"
+                                                   Text="Cargando..."
+                                                   FontSize="12" Foreground="#D4C9C0"
+                                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="ANFETA usa los altavoces predeterminados de Windows. Para cambiarlos, configúralos en Sonido del sistema."
+                                           FontSize="11" Foreground="#6B5F56" TextWrapping="Wrap"/>
+
                                 <Button x:Name="BtnTestSpeaker" Click="BtnTestSpeaker_Click"
                                         Style="{StaticResource SecondaryButtonStyle}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">

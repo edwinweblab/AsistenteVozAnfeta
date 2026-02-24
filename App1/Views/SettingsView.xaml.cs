@@ -1,5 +1,4 @@
-﻿using Anfeta.UI.Models;
-using Anfeta.UI.Services;
+﻿using Anfeta.UI.Services;
 using Anfeta.UI.Services.Search;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Text;
@@ -7,8 +6,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using NAudio.CoreAudioApi;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,16 +22,11 @@ namespace Anfeta.UI.Views
     {
         private readonly AudioService _audioService;
         private readonly SettingsService _settingsService;
-
-        private List<AudioDeviceInfo> _inputDevices = new();
-        private List<AudioDeviceInfo> _outputDevices = new();
-
         private readonly DispatcherTimer _statusTimer;
 
         // Dropbox
         private const string LS_DropboxRoot = "DropboxRoot";
         private CancellationTokenSource? _indexCts;
-        private bool _isInitializing = false;
 
         public SettingsView()
         {
@@ -52,11 +46,13 @@ namespace Anfeta.UI.Views
             Unloaded += OnUnloaded;
         }
 
+        // ─────────────────────────────────────────────────────────
+        // CICLO DE VIDA
+        // ─────────────────────────────────────────────────────────
+
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             LoadCurrentHotkey();
-
-            // Dropbox: para que no se vea vacío al volver
             LoadDropboxRootIntoUI();
 
             _ = Task.Run(async () =>
@@ -76,35 +72,11 @@ namespace Anfeta.UI.Views
             _indexCts = null;
         }
 
-        // =========================
-        // Hotkey
-        // =========================
-        private void LoadCurrentHotkey()
-        {
-            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
-            TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
-        }
+        // ─────────────────────────────────────────────────────────
+        // AUDIO — DISPOSITIVOS DEL SISTEMA
+        // ─────────────────────────────────────────────────────────
 
-        private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
-        {
-            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
-
-            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(appState, _settingsService)
-            {
-                XamlRoot = this.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result == ContentDialogResult.Primary)
-            {
-                TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
-                ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
-            }
-        }
-
-        // =========================
-        // Audio
-        // =========================
+        /// Solicita permiso de micrófono al sistema operativo.
         private async Task RequestMicPermissionAsync()
         {
             try
@@ -113,7 +85,6 @@ namespace Anfeta.UI.Views
                 {
                     StreamingCaptureMode = StreamingCaptureMode.Audio
                 };
-
                 var capture = new MediaCapture();
                 await capture.InitializeAsync(settings);
                 capture.Dispose();
@@ -121,90 +92,62 @@ namespace Anfeta.UI.Views
             catch
             {
                 DispatcherQueue.TryEnqueue(() =>
-                {
-                    ShowStatus("Permiso de micrófono denegado. Habilítalo en Configuración de Windows.", InfoBarSeverity.Warning);
-                });
+                    ShowStatus(
+                        "Permiso de micrófono denegado. Habilítalo en Configuración de Windows.",
+                        InfoBarSeverity.Warning));
             }
         }
 
+        /// Lee los dispositivos predeterminados del sistema y actualiza la UI y AppState.
         private async Task LoadDevicesAsync()
         {
-            _isInitializing = true;
-
             await Task.Run(() =>
             {
-                _inputDevices = _audioService.GetInputDevices() ?? new List<AudioDeviceInfo>();
-                _outputDevices = _audioService.GetOutputDevices() ?? new List<AudioDeviceInfo>();
+                var inputName = GetSystemDefaultDeviceName(DataFlow.Capture);
+                var outputName = GetSystemDefaultDeviceName(DataFlow.Render);
 
                 DispatcherQueue.TryEnqueue(() =>
                 {
-                    CbInputDevice.Items.Clear();
-                    foreach (var device in _inputDevices)
-                        CbInputDevice.Items.Add(device.DisplayName);
+                    // Barra de estado superior
+                    TxtStatusInput.Text = $"Entrada: {inputName}";
+                    TxtStatusOutput.Text = $"Salida: {outputName}";
 
-                    CbOutputDevice.Items.Clear();
-                    foreach (var device in _outputDevices)
-                        CbOutputDevice.Items.Add(device.DisplayName);
+                    // Labels dentro de cada card
+                    TxtMicDevice.Text = inputName;
+                    TxtSpeakerDevice.Text = outputName;
 
-                    if (_inputDevices.Count > 0) CbInputDevice.SelectedIndex = 0;
-                    if (_outputDevices.Count > 0) CbOutputDevice.SelectedIndex = 0;
-
-                    UpdateCurrentDeviceLabels();
-
-                    _isInitializing = false;
+                    // Sincroniza AppState → HomeView se actualiza automáticamente
+                    var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+                    appState.InputDeviceName = inputName;
+                    appState.OutputDeviceName = outputName;
                 });
             });
         }
 
-        private void UpdateCurrentDeviceLabels()
+        /// Obtiene el nombre amigable del dispositivo de audio predeterminado de Windows.
+        /// DataFlow.Capture = micrófono, DataFlow.Render = altavoces.
+        private static string GetSystemDefaultDeviceName(DataFlow flow)
         {
-            if (CbInputDevice.SelectedIndex >= 0 && CbInputDevice.SelectedIndex < _inputDevices.Count)
+            try
             {
-                var device = _inputDevices[CbInputDevice.SelectedIndex];
-                TxtCurrentInput.Text = $"Entrada: {device.DeviceName}";
+                using var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDefaultAudioEndpoint(flow, Role.Multimedia);
+                return device?.FriendlyName ?? "No disponible";
             }
-
-            if (CbOutputDevice.SelectedIndex >= 0 && CbOutputDevice.SelectedIndex < _outputDevices.Count)
+            catch
             {
-                var device = _outputDevices[CbOutputDevice.SelectedIndex];
-                TxtCurrentOutput.Text = $"Salida: {device.DeviceName}";
+                return "No disponible";
             }
         }
 
-        private void CbInputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            if (CbInputDevice.SelectedIndex >= 0 && CbInputDevice.SelectedIndex < _inputDevices.Count)
-            {
-                var device = _inputDevices[CbInputDevice.SelectedIndex];
-                _settingsService.SaveInputDevice(device.NAudioId, device.DeviceName);
-                UpdateCurrentDeviceLabels();
-                ShowStatus("Micrófono configurado", InfoBarSeverity.Success);
-            }
-        }
+        // ─────────────────────────────────────────────────────────
+        // AUDIO — PRUEBAS
+        // ─────────────────────────────────────────────────────────
 
-        private void CbOutputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            if (CbOutputDevice.SelectedIndex >= 0 && CbOutputDevice.SelectedIndex < _outputDevices.Count)
-            {
-                var device = _outputDevices[CbOutputDevice.SelectedIndex];
-                _settingsService.SaveOutputDevice(device.NAudioId, device.DeviceName);
-                UpdateCurrentDeviceLabels();
-                ShowStatus("Altavoces configurados", InfoBarSeverity.Success);
-            }
-        }
-
+        /// Inicia una prueba de nivel de micrófono durante 3 segundos.
+        /// Índice 0 = dispositivo predeterminado del sistema en NAudio.
         private async void BtnTestMic_Click(object sender, RoutedEventArgs e)
         {
-            if (CbInputDevice.SelectedIndex < 0 || CbInputDevice.SelectedIndex >= _inputDevices.Count)
-            {
-                ShowStatus("Selecciona un micrófono", InfoBarSeverity.Warning);
-                return;
-            }
-
-            var device = _inputDevices[CbInputDevice.SelectedIndex];
-
             try
             {
                 PnlMicLevel.Visibility = Visibility.Visible;
@@ -215,7 +158,7 @@ namespace Anfeta.UI.Views
                 IconTestMic.Glyph = "\uE769";
                 TxtTestMic.Text = "Escuchando...";
 
-                _audioService.StartMicTest(device.NAudioId, (level) =>
+                _audioService.StartMicTest(0, level =>
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {
@@ -242,27 +185,21 @@ namespace Anfeta.UI.Views
             {
                 BtnTestMic.IsEnabled = true;
                 IconTestMic.Glyph = "\uE768";
-                TxtTestMic.Text = "Probar Micrófono";
+                TxtTestMic.Text = "Probar micrófono";
             }
         }
 
+        /// Reproduce un tono de prueba por el dispositivo de salida predeterminado del sistema.
+        /// Índice 0 = dispositivo predeterminado del sistema en NAudio.
         private async void BtnTestSpeaker_Click(object sender, RoutedEventArgs e)
         {
-            if (CbOutputDevice.SelectedIndex < 0 || CbOutputDevice.SelectedIndex >= _outputDevices.Count)
-            {
-                ShowStatus("Selecciona altavoces", InfoBarSeverity.Warning);
-                return;
-            }
-
-            var device = _outputDevices[CbOutputDevice.SelectedIndex];
-
             try
             {
                 BtnTestSpeaker.IsEnabled = false;
                 IconTestSpeaker.Glyph = "\uE769";
                 TxtTestSpeaker.Text = "Reproduciendo...";
 
-                await _audioService.PlayTestSound(device.NAudioId);
+                await _audioService.PlayTestSound(0);
                 ShowStatus("Sonido reproducido correctamente", InfoBarSeverity.Success);
             }
             catch (Exception ex)
@@ -273,15 +210,21 @@ namespace Anfeta.UI.Views
             {
                 BtnTestSpeaker.IsEnabled = true;
                 IconTestSpeaker.Glyph = "\uE768";
-                TxtTestSpeaker.Text = "Probar Sonido";
+                TxtTestSpeaker.Text = "Probar sonido";
             }
         }
 
+        // ─────────────────────────────────────────────────────────
+        // AUDIO — CONFIGURACIÓN DE WINDOWS
+        // ─────────────────────────────────────────────────────────
+
+        /// Abre directamente la página de sonido en Configuración de Windows.
         private async void BtnOpenWindowsSettings_Click(object sender, RoutedEventArgs e)
         {
             await Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:sound"));
         }
 
+        /// Muestra un flyout con pasos para solucionar problemas comunes de audio.
         private void BtnShowTroubleshoot_Click(object sender, RoutedEventArgs e)
         {
             var flyout = new Flyout { Placement = FlyoutPlacementMode.Bottom };
@@ -298,7 +241,7 @@ namespace Anfeta.UI.Views
             content.Children.Add(CreateProblemSection(
                 "\uE767",
                 "Windows usa dispositivos predeterminados",
-                "El reconocimiento de voz SIEMPRE usa el micrófono predeterminado de Windows, no el que seleccionas aquí.",
+                "El reconocimiento de voz SIEMPRE usa el micrófono predeterminado de Windows.",
                 new[]
                 {
                     "1. Win + I → Sistema → Sonido",
@@ -325,62 +268,90 @@ namespace Anfeta.UI.Views
             flyout.ShowAt(BtnShowTroubleshoot);
         }
 
-        private StackPanel CreateProblemSection(string icon, string title, string description, string[] steps)
+        /// Construye una sección de problema con ícono, título, descripción y pasos.
+        private static StackPanel CreateProblemSection(
+            string icon, string title, string description, string[] steps)
         {
             var section = new StackPanel { Spacing = 10 };
 
             var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-
             header.Children.Add(new FontIcon
             {
                 Glyph = icon,
                 FontSize = 18,
                 Foreground = new SolidColorBrush(Color.FromArgb(255, 251, 191, 36))
             });
-
             header.Children.Add(new TextBlock
             {
                 Text = title,
                 FontSize = 16,
                 FontWeight = FontWeights.SemiBold
             });
-
             section.Children.Add(header);
 
             section.Children.Add(new TextBlock
             {
                 Text = description,
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Color.FromArgb(255, 148, 163, 184))
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 140, 123, 110))
             });
 
             var stepsList = new StackPanel { Spacing = 6, Margin = new Thickness(20, 4, 0, 0) };
             foreach (var step in steps)
-            {
                 stepsList.Children.Add(new TextBlock
                 {
                     Text = step,
                     TextWrapping = TextWrapping.Wrap,
                     FontSize = 13
                 });
-            }
 
             section.Children.Add(stepsList);
             return section;
         }
 
-        // =========================
-        // Dropbox
-        // =========================
+        // ─────────────────────────────────────────────────────────
+        // HOTKEY
+        // ─────────────────────────────────────────────────────────
+
+        /// Carga y muestra el atajo de teclado actual guardado en AppState.
+        private void LoadCurrentHotkey()
+        {
+            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+            TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
+        }
+
+        /// Abre el diálogo para cambiar el atajo de teclado global.
+        private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
+        {
+            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+
+            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(appState, _settingsService)
+            {
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary)
+            {
+                TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
+                ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // DROPBOX
+        // ─────────────────────────────────────────────────────────
+
+        /// Carga en el TextBox la ruta de Dropbox guardada en LocalSettings.
         private void LoadDropboxRootIntoUI()
         {
             var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-            if (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved))
-                DropboxPathBox.Text = saved;
-            else
-                DropboxPathBox.Text = "";
+            DropboxPathBox.Text = (!string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved))
+                ? saved
+                : string.Empty;
         }
 
+        /// Permite al usuario seleccionar una carpeta raíz e inicia la indexación.
         private async void BtnPickDropboxRoot_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -411,10 +382,7 @@ namespace Anfeta.UI.Views
                 _indexCts = new CancellationTokenSource();
                 var ct = _indexCts.Token;
 
-                // 4) Limpiar índice viejo ANTES (evita resultados viejos)
                 App.LocalIndex.Clear();
-
-                // ✅ limpia cache persistido anterior (evita mismatch si se cancela)
                 await LocalIndexPersistence.ClearAsync();
                 DropboxIndexCoordinator.StartIndexing(selectedPath);
 
@@ -427,20 +395,12 @@ namespace Anfeta.UI.Views
                 try
                 {
                     var list = await LocalIndexBuilder.BuildAsync(selectedPath, ct);
-                    // 7) Guardar índice global
                     App.LocalIndex.Set(list);
-
-                    // 7.1) ✅ Guardar índice persistido (para que sobreviva al cierre)
                     await LocalIndexPersistence.SaveAsync(selectedPath, list, ct);
-
-                    // 8) Avisar "listo"
                     DropboxIndexCoordinator.MarkReady(selectedPath);
                     ShowStatus($"Índice listo ({App.LocalIndex.Count} items)", InfoBarSeverity.Success);
                 }
-                catch (OperationCanceledException)
-                {
-                    // No mostrar error si cambió de ruta rápido
-                }
+                catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
                     DropboxIndexCoordinator.MarkError(selectedPath, ex.Message);
@@ -458,6 +418,7 @@ namespace Anfeta.UI.Views
             }
         }
 
+        /// Limpia la ruta de Dropbox y el índice local tras confirmación del usuario.
         private async void BtnResetDropboxRoot_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new ContentDialog
@@ -476,31 +437,29 @@ namespace Anfeta.UI.Views
             _indexCts = null;
 
             ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
-
-            // Limpiar índice global para NO mostrar resultados viejos
             App.LocalIndex.Clear();
-
-            // ✅ borrar cache persistido
             await LocalIndexPersistence.ClearAsync();
-
-            // Avisar a SearchView que el estado cambió (sin índice)
             DropboxIndexCoordinator.Reset();
 
-            DropboxPathBox.Text = "";
+            DropboxPathBox.Text = string.Empty;
             ShowStatus("Ruta reiniciada. Configura una nueva carpeta.", InfoBarSeverity.Informational);
         }
 
-        // =========================
-        // API Keys
-        // =========================
+        // ─────────────────────────────────────────────────────────
+        // API KEYS
+        // ─────────────────────────────────────────────────────────
+
+        /// Navega a la vista de administración de API Keys.
         private void BtnApiKeys_Click(object sender, RoutedEventArgs e)
         {
             Frame.Navigate(typeof(Anfeta.UI.Views.ApiKeysView));
         }
 
-        // =========================
-        // Status
-        // =========================
+        // ─────────────────────────────────────────────────────────
+        // STATUS BAR
+        // ─────────────────────────────────────────────────────────
+
+        /// Muestra un mensaje en la InfoBar inferior y lo cierra automáticamente a los 3 segundos.
         private void ShowStatus(string message, InfoBarSeverity severity)
         {
             InfoStatus.Message = message;
