@@ -219,7 +219,11 @@ namespace Anfeta.UI
                     // Action Executors
                     // =========================
                     services.AddSingleton<LocalActionExecutor>();
-
+                    services.AddSingleton<Anfeta.UI.Data.LocalAppsRepository>();
+                    services.AddSingleton<LocalAppsRepository>();
+                    services.AddSingleton<CapabilityRegistry>();
+                    services.AddSingleton<AllowedAppsViewModel>();
+                    // ApiActionExecutor con todos los clientes necesarios
                     services.AddSingleton<ApiActionExecutor>(sp =>
                     {
                         var actividades = sp.GetRequiredService<WeblabActividadesClient>();

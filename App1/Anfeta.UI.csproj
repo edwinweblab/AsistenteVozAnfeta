@@ -15,6 +15,7 @@
   <ItemGroup>
     <None Remove="FunctionTests\TestRunner.xaml" />
     <None Remove="Resources\Styles.xaml" />
+    <None Remove="Views\AllowedAppsView.xaml" />
     <None Remove="Views\ApiKeysView.xaml" />
     <None Remove="Views\LinkSharedAccountView.xaml" />
     <None Remove="Views\SearchView.xaml" />
@@ -64,6 +65,11 @@
 	<ItemGroup>
 		<Folder Include="Assets\vosk-model-es\" />
 		<Folder Include="Helpers\" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Page Update="Views\AllowedAppsView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </Page>
 	</ItemGroup>
 	<ItemGroup>
 	  <Page Update="Views\ApiKeysView.xaml">
