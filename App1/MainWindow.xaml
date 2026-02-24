@@ -188,6 +188,14 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
+                <NavigationViewItem Content="Aplicaciones Permitidas" Tag="AllowedApps"
+                    ToolTipService.ToolTip="Gestionar apps locales permitidas y sinónimos">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8A7;"/>
+                        <!-- icono tipo app/grid -->
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
                 <NavigationViewItem Content="Buscador" Tag="Search"
                                     ToolTipService.ToolTip="Buscar en actividades y proyectos">
                     <NavigationViewItem.Icon>

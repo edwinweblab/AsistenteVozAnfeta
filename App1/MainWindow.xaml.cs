@@ -57,6 +57,7 @@ namespace Anfeta.UI
             {
                 "Home" => typeof(HomeView),
                 "Commands" => typeof(CommandsView),
+                "AllowedApps" => typeof(AllowedAppsView),
                 "Search" => typeof(SearchView),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
