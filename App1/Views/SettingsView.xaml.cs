@@ -32,6 +32,7 @@ namespace Anfeta.UI.Views
         // Dropbox
         private const string LS_DropboxRoot = "DropboxRoot";
         private CancellationTokenSource? _indexCts;
+        private bool _isInitializing = false;
 
         public SettingsView()
         {
@@ -128,6 +129,8 @@ namespace Anfeta.UI.Views
 
         private async Task LoadDevicesAsync()
         {
+            _isInitializing = true;
+
             await Task.Run(() =>
             {
                 _inputDevices = _audioService.GetInputDevices() ?? new List<AudioDeviceInfo>();
@@ -147,6 +150,8 @@ namespace Anfeta.UI.Views
                     if (_outputDevices.Count > 0) CbOutputDevice.SelectedIndex = 0;
 
                     UpdateCurrentDeviceLabels();
+
+                    _isInitializing = false;
                 });
             });
         }
@@ -168,6 +173,7 @@ namespace Anfeta.UI.Views
 
         private void CbInputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_isInitializing) return;
             if (CbInputDevice.SelectedIndex >= 0 && CbInputDevice.SelectedIndex < _inputDevices.Count)
             {
                 var device = _inputDevices[CbInputDevice.SelectedIndex];
@@ -179,6 +185,7 @@ namespace Anfeta.UI.Views
 
         private void CbOutputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_isInitializing) return;
             if (CbOutputDevice.SelectedIndex >= 0 && CbOutputDevice.SelectedIndex < _outputDevices.Count)
             {
                 var device = _outputDevices[CbOutputDevice.SelectedIndex];

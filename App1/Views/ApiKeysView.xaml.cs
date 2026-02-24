@@ -50,6 +50,12 @@ namespace Anfeta.UI.Views
             }
         }
 
+        // Navega de regreso a SettingsView
+        private void BtnBack_Click(object sender, RoutedEventArgs e)
+        {
+            if (Frame.CanGoBack)
+                Frame.GoBack();
+        }
         private static T? FindChild<T>(DependencyObject parent, string name) where T : FrameworkElement
         {
             var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);

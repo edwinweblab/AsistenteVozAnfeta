@@ -5,239 +5,291 @@
     xmlns:data="using:Anfeta.UI.Data"
     Background="{StaticResource BgGradient}">
 
-    <ScrollViewer>
-        <Grid Padding="24" RowSpacing="16">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="24" Spacing="28">
 
-            <!-- Header -->
-            <StackPanel Grid.Row="0" Spacing="4">
-                <TextBlock Text="API Keys"
-                           FontSize="28"
-                           FontWeight="SemiBold"
-                           Foreground="#F7FAFC"/>
-                <TextBlock Text="Administra tus claves de Groq (agregar, activar, eliminar)"
-                           FontSize="13"
-                           Foreground="#94A3B8"/>
-            </StackPanel>
-
-            <!-- Info -->
-            <InfoBar x:Name="InfoStatus"
-                     Grid.Row="1"
-                     IsOpen="False"
-                     IsClosable="True"/>
-
-            <!-- Formulario agregar -->
-            <Border Grid.Row="2" Style="{StaticResource CardStyle}">
-                <Grid RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Text="Agregar nueva API key"
-                               FontSize="16"
+            <!-- HEADER -->
+            <Grid>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="API Keys"
+                               FontSize="24"
                                FontWeight="SemiBold"
-                               Foreground="#F7FAFC"/>
+                               Foreground="#FFFFFF"/>
+                    <TextBlock Text="Administra tus claves de Groq — agregar, activar y eliminar"
+                               FontSize="12"
+                               Foreground="#CBD5E1"/>
+                </StackPanel>
 
-                    <TextBox Grid.Row="1"
-                             x:Name="TxtName"
-                             PlaceholderText="Nombre (opcional)"
-                             Height="44"/>
+                <!-- Botón salir -->
+                <Button HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Width="36" Height="36"
+                        Background="Transparent"
+                        BorderBrush="#30FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Click="BtnBack_Click"
+                        ToolTipService.ToolTip="Volver a Configuración">
+                    <FontIcon FontSize="14" Foreground="#E2E8F0" Glyph="&#xE72B;"/>
+                </Button>
+            </Grid>
 
-                    <PasswordBox Grid.Row="2"
-                                 x:Name="TxtApiKey"
-                                 PlaceholderText="gsk_..."
-                                 Height="44"/>
+            <!-- ═══ SECCIÓN AGREGAR ═══ -->
+            <StackPanel Spacing="14">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Width="3" Height="18" CornerRadius="2"
+                            Background="{StaticResource AnfetaAccentBrush}"/>
+                    <FontIcon FontSize="14" Foreground="{StaticResource AnfetaAccentBrush}" Glyph="&#xE710;"/>
+                    <TextBlock Text="NUEVA CLAVE"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="#FFFFFF"
+                               CharacterSpacing="100"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
 
-                    <Grid Grid.Row="3" ColumnSpacing="12">
+                <Border Style="{StaticResource CardStyle}">
+                    <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="4"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-
-                        <CheckBox x:Name="ChkMakeActive"
-                                  Grid.Column="0"
-                                  Content="Activar al guardar"
-                                  IsChecked="True"
-                                  VerticalAlignment="Center"/>
-
-                        <Button x:Name="BtnAdd"
-                                Grid.Column="1"
-                                Content="Validar y guardar"
-                                Click="BtnAdd_Click"
-                                Style="{StaticResource SecondaryButtonStyle}"/>
+                        <Border Grid.Column="0"
+                                Background="{StaticResource AnfetaAccentBrush}"
+                                CornerRadius="12,0,0,12"
+                                Opacity="0.6"/>
+                        <StackPanel Grid.Column="1" Spacing="14" Padding="18,16">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Agregar nueva API key"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FFFFFF"/>
+                                <TextBlock Text="La clave será validada antes de guardarse."
+                                           FontSize="11"
+                                           Foreground="#CBD5E1"/>
+                            </StackPanel>
+                            <TextBox x:Name="TxtName"
+                                     PlaceholderText="Nombre (opcional)"
+                                     Height="40"
+                                     HorizontalAlignment="Stretch"/>
+                            <PasswordBox x:Name="TxtApiKey"
+                                         PlaceholderText="gsk_..."
+                                         Height="40"
+                                         HorizontalAlignment="Stretch"/>
+                            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                                <CheckBox x:Name="ChkMakeActive"
+                                          Content="Activar al guardar"
+                                          IsChecked="True"
+                                          Foreground="#E2E8F0"/>
+                                <Button x:Name="BtnAdd"
+                                        Click="BtnAdd_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon FontSize="13" Glyph="&#xE73E;"/>
+                                        <TextBlock Text="Validar y guardar"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
                     </Grid>
-                </Grid>
-            </Border>
-
-            <!-- Título lista -->
-            <StackPanel Grid.Row="3" Spacing="6">
-                <TextBlock Text="Claves registradas"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Foreground="#F7FAFC"/>
-                <Border Height="2"
-                        Background="{StaticResource AnfetaAccentBrush}"
-                        CornerRadius="1"/>
+                </Border>
             </StackPanel>
 
-            <!-- Lista -->
-            <ListView Grid.Row="4"
-                      x:Name="LvKeys"
-                      SelectionMode="None"
-                      HorizontalContentAlignment="Stretch">
+            <!-- ═══ SECCIÓN LISTA ═══ -->
+            <StackPanel Spacing="14">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Width="3" Height="18" CornerRadius="2"
+                            Background="{StaticResource AnfetaAccentBrush}"/>
+                    <FontIcon FontSize="14" Foreground="{StaticResource AnfetaAccentBrush}" Glyph="&#xE8D7;"/>
+                    <TextBlock Text="CLAVES REGISTRADAS"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="#FFFFFF"
+                               CharacterSpacing="100"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
 
-                <!-- Encabezado -->
-                <ListView.Header>
-                    <Border Style="{StaticResource CardStyle}" Padding="10,6">
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="220"/>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="132"/>
-                            </Grid.ColumnDefinitions>
+                <!-- Encabezado de tabla -->
+                <Border Background="#080C14"
+                        BorderBrush="#14FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14,10">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" MinWidth="120"/>
+                            <ColumnDefinition Width="2*" MinWidth="140"/>
+                            <ColumnDefinition Width="1*" MinWidth="80"/>
+                            <ColumnDefinition Width="3*" MinWidth="160"/>
+                            <ColumnDefinition Width="Auto" MinWidth="110"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="NOMBRE"
+                                   FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#64748B" CharacterSpacing="80"/>
+                        <TextBlock Grid.Column="1" Text="API KEY"
+                                   FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#64748B" CharacterSpacing="80"/>
+                        <TextBlock Grid.Column="2" Text="PROVEEDOR"
+                                   FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#64748B" CharacterSpacing="80"/>
+                        <TextBlock Grid.Column="3" Text="ESTADO / VALIDACIÓN"
+                                   FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#64748B" CharacterSpacing="80"/>
+                        <TextBlock Grid.Column="4" Text="ACCIONES"
+                                   FontSize="10" FontWeight="SemiBold"
+                                   Foreground="#64748B" CharacterSpacing="80"
+                                   HorizontalAlignment="Right"/>
+                    </Grid>
+                </Border>
 
-                            <TextBlock Grid.Column="0" Text="Nombre" Foreground="#94A3B8" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="1" Text="API Key" Foreground="#94A3B8" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="2" Text="Proveedor" Foreground="#94A3B8" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="3" Text="Estado / Última validación" Foreground="#94A3B8" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="4" Text="Acciones" Foreground="#94A3B8" FontWeight="SemiBold" HorizontalAlignment="Right"/>
-                        </Grid>
-                    </Border>
-                </ListView.Header>
+                <!-- Lista -->
+                <ListView x:Name="LvKeys"
+                          SelectionMode="None"
+                          HorizontalContentAlignment="Stretch">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="Margin" Value="0,0,0,8"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                        </Style>
+                    </ListView.ItemContainerStyle>
 
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="data:ApiKeyRow">
-                        <Border Margin="0,0,0,8"
-                                Padding="10"
-                                Style="{StaticResource CardStyle}">
-                            <Grid ColumnSpacing="10" VerticalAlignment="Center">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="180"/>
-                                    <ColumnDefinition Width="220"/>
-                                    <ColumnDefinition Width="90"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="132"/>
-                                </Grid.ColumnDefinitions>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="data:ApiKeyRow">
+                            <Border Style="{StaticResource CardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="4"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Background="{StaticResource AnfetaAccentBrush}"
+                                            CornerRadius="12,0,0,12"
+                                            Opacity="0.5"/>
+                                    <Grid Grid.Column="1"
+                                          ColumnSpacing="10"
+                                          VerticalAlignment="Center"
+                                          Padding="14,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="2*" MinWidth="120"/>
+                                            <ColumnDefinition Width="2*" MinWidth="140"/>
+                                            <ColumnDefinition Width="1*" MinWidth="80"/>
+                                            <ColumnDefinition Width="3*" MinWidth="160"/>
+                                            <ColumnDefinition Width="Auto" MinWidth="110"/>
+                                        </Grid.ColumnDefinitions>
 
-                                <!-- Nombre (editable) -->
-                                <TextBox x:Name="NameBox"
-                                         Grid.Column="0"
-                                         Text="{x:Bind Name, Mode=TwoWay}"
-                                         PlaceholderText="(sin nombre)"
-                                         LostFocus="Name_LostFocus"
-                                         Height="32"
-                                         Padding="10,6"/>
+                                        <!-- Nombre -->
+                                        <TextBox x:Name="NameBox"
+                                                 Grid.Column="0"
+                                                 Text="{x:Bind Name, Mode=TwoWay}"
+                                                 PlaceholderText="(sin nombre)"
+                                                 LostFocus="Name_LostFocus"
+                                                 Height="32"
+                                                 Padding="10,6"/>
 
-                                <!-- API key -->
-                                <TextBlock Grid.Column="1"
-                                           Text="{x:Bind Masked}"
-                                           Foreground="#F7FAFC"
-                                           VerticalAlignment="Center"/>
+                                        <!-- API Key -->
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{x:Bind Masked}"
+                                                   Foreground="#FFFFFF"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"/>
 
-                                <!-- Proveedor -->
-                                <TextBlock Grid.Column="2"
-                                           Text="{x:Bind Provider}"
-                                           Foreground="#94A3B8"
-                                           VerticalAlignment="Center"/>
+                                        <!-- Proveedor -->
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{x:Bind Provider}"
+                                                   Foreground="#CBD5E1"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"/>
 
-                                <!-- Estado + fecha -->
-                                <StackPanel Grid.Column="3"
-                                            Orientation="Horizontal"
-                                            Spacing="8"
-                                            VerticalAlignment="Center">
-
-                                    <!-- CHIP ACTIVA -->
-                                    <Border Padding="8,4"
-                                            CornerRadius="999"
-                                            Background="#14FFFFFF"
-                                            BorderBrush="#30FFFFFF"
-                                            BorderThickness="1"
-                                            Visibility="{x:Bind ActiveVisibility}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <SymbolIcon Symbol="Accept" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                                            <TextBlock Text="ACTIVA"
-                                                       Foreground="{StaticResource AnfetaAccentBrush}"
-                                                       FontWeight="SemiBold"/>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <!-- CHIP INACTIVA -->
-                                    <Border Padding="8,4"
-                                            CornerRadius="999"
-                                            Background="#14FFFFFF"
-                                            BorderBrush="#30FFFFFF"
-                                            BorderThickness="1"
-                                            Visibility="{x:Bind InactiveVisibility}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <SymbolIcon Symbol="Remove" Foreground="#94A3B8"/>
-                                            <TextBlock Text="INACTIVA"
+                                        <!-- Estado + fecha -->
+                                        <StackPanel Grid.Column="3"
+                                                    Orientation="Horizontal"
+                                                    Spacing="8"
+                                                    VerticalAlignment="Center">
+                                            <Border Padding="8,4"
+                                                    CornerRadius="6"
+                                                    Background="#1A34D399"
+                                                    BorderBrush="#4034D399"
+                                                    BorderThickness="1"
+                                                    Visibility="{x:Bind ActiveVisibility}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <Ellipse Width="6" Height="6" Fill="#34D399" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="ACTIVA"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="#34D399"
+                                                               CharacterSpacing="60"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border Padding="8,4"
+                                                    CornerRadius="6"
+                                                    Background="#14FFFFFF"
+                                                    BorderBrush="#18FFFFFF"
+                                                    BorderThickness="1"
+                                                    Visibility="{x:Bind InactiveVisibility}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <Ellipse Width="6" Height="6" Fill="#64748B" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="INACTIVA"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="#94A3B8"
+                                                               CharacterSpacing="60"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <TextBlock Text="{x:Bind LastValidatedAt}"
                                                        Foreground="#94A3B8"
-                                                       FontWeight="SemiBold"/>
+                                                       FontSize="11"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"/>
                                         </StackPanel>
-                                    </Border>
 
-                                    <TextBlock Text="{x:Bind LastValidatedAt}"
-                                               Foreground="#94A3B8"
-                                               FontSize="12"
-                                               VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"
-                                               MaxWidth="280"/>
-                                </StackPanel>
+                                        <!-- Acciones -->
+                                        <StackPanel Grid.Column="4"
+                                                    Orientation="Horizontal"
+                                                    Spacing="6"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center">
+                                            <Button Tag="{x:Bind Id}"
+                                                    Click="BtnActivate_Click"
+                                                    IsEnabled="{x:Bind CanActivate}"
+                                                    Width="34" Height="32"
+                                                    ToolTipService.ToolTip="Marcar como activa"
+                                                    Style="{StaticResource SecondaryButtonStyle}">
+                                                <FontIcon FontSize="13" Glyph="&#xE840;"
+                                                          Foreground="{StaticResource AnfetaAccentBrush}"/>
+                                            </Button>
+                                            <Button Tag="{x:Bind Id}"
+                                                    Click="BtnEdit_Click"
+                                                    Width="34" Height="32"
+                                                    ToolTipService.ToolTip="Editar nombre"
+                                                    Style="{StaticResource SecondaryButtonStyle}">
+                                                <FontIcon FontSize="13" Glyph="&#xE70F;"
+                                                          Foreground="#E2E8F0"/>
+                                            </Button>
+                                            <Button Tag="{x:Bind Id}"
+                                                    Click="BtnDelete_Click"
+                                                    Width="34" Height="32"
+                                                    ToolTipService.ToolTip="Eliminar"
+                                                    Style="{StaticResource SecondaryButtonStyle}">
+                                                <FontIcon FontSize="13" Glyph="&#xE74D;"
+                                                          Foreground="{StaticResource AnfetaWarningBrush}"/>
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
 
-                                <!-- Acciones -->
-                                <StackPanel Grid.Column="4"
-                                            Orientation="Horizontal"
-                                            Spacing="6"
-                                            HorizontalAlignment="Right"
-                                            VerticalAlignment="Center">
+            </StackPanel>
 
-                                    <!-- Activar (solo si NO está activa) -->
-                                    <Button Tag="{x:Bind Id}"
-                                            Click="BtnActivate_Click"
-                                            IsEnabled="{x:Bind CanActivate}"
-                                            Width="34" Height="32"
-                                            ToolTipService.ToolTip="Marcar como activa"
-                                            Style="{StaticResource SecondaryButtonStyle}">
-                                        <SymbolIcon Symbol="Pin" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                                    </Button>
+            <!-- InfoBar dentro del scroll -->
+            <InfoBar x:Name="InfoStatus"
+                     IsClosable="True"
+                     IsOpen="False"/>
 
-                                    <!-- Editar -->
-                                    <Button Tag="{x:Bind Id}"
-                                            Click="BtnEdit_Click"
-                                            Width="34" Height="32"
-                                            ToolTipService.ToolTip="Editar nombre"
-                                            Style="{StaticResource SecondaryButtonStyle}">
-                                        <SymbolIcon Symbol="Edit" Foreground="#CBD5E1"/>
-                                    </Button>
-
-                                    <!-- Eliminar -->
-                                    <Button Tag="{x:Bind Id}"
-                                            Click="BtnDelete_Click"
-                                            Width="34" Height="32"
-                                            ToolTipService.ToolTip="Eliminar"
-                                            Style="{StaticResource SecondaryButtonStyle}">
-                                        <SymbolIcon Symbol="Delete" Foreground="{StaticResource AnfetaWarningBrush}"/>
-                                    </Button>
-
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-        </Grid>
+        </StackPanel>
     </ScrollViewer>
 </Page>
