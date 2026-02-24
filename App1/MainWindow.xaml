@@ -30,24 +30,23 @@
                             Spacing="10"
                             VerticalAlignment="Center"
                             Margin="0,0,20,0">
-                                    <Border Width="28" Height="28"
+                    <Border Width="28" Height="28"
                             CornerRadius="6"
                             Background="{StaticResource AnfetaAccentBrush}">
-                                        <FontIcon Glyph="&#xE720;"
+                        <FontIcon Glyph="&#xE720;"
                                   FontSize="15"
                                   Foreground="White"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"/>
-                                    </Border>
-                                    <TextBlock Text="ANFETA"
+                    </Border>
+                    <TextBlock Text="ANFETA"
                                FontSize="12"
                                FontWeight="SemiBold"
-                               Foreground="#64748B"
+                               Foreground="#8C8075"
                                CharacterSpacing="80"
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- Separador central (spacer) -->
                 <Border Grid.Column="1"/>
 
                 <!-- Indicadores de estado -->
@@ -76,7 +75,7 @@
                             <TextBlock x:Name="TxtInternet"
                                        Text="Internet"
                                        FontSize="12"
-                                       Foreground="#64748B"
+                                       Foreground="#8C8075"
                                        VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
@@ -148,11 +147,11 @@
                             <FontIcon x:Name="IconMic"
                                       Glyph="&#xE720;"
                                       FontSize="14"
-                                      Foreground="#475569"/>
+                                      Foreground="#6B5F56"/>
                             <TextBlock x:Name="TxtMic"
                                        Text="Micrófono"
                                        FontSize="12"
-                                       Foreground="#64748B"
+                                       Foreground="#8C8075"
                                        VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
@@ -166,25 +165,24 @@
                             CornerRadius="8"
                             Click="DropboxIndicator_Click"
                             ToolTipService.ToolTip="Dropbox">
-                                            <Button.Resources>
-                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
-                                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
-                                            </Button.Resources>
-                                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                                <!-- Punto de estado -->
-                                                <Ellipse x:Name="DotDropbox"
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                        </Button.Resources>
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Ellipse x:Name="DotDropbox"
                                      Width="7" Height="7"
-                                     Fill="#334155"
+                                     Fill="#4A3E36"
                                      VerticalAlignment="Center"/>
-                                                <FontIcon x:Name="IconDropbox"
+                            <FontIcon x:Name="IconDropbox"
                                       Glyph="&#xEC50;"
                                       FontSize="14"
-                                      Foreground="#334155"/>
-                                            <TextBlock x:Name="TxtDropbox"
+                                      Foreground="#4A3E36"/>
+                            <TextBlock x:Name="TxtDropbox"
                                        Text="Dropbox"
                                        FontSize="12"
-                                       Foreground="#475569"
-                                       VerticalAlignment="Center"/> 
+                                       Foreground="#6B5F56"
+                                       VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
 
@@ -203,7 +201,6 @@
                         IsSettingsVisible="False"
                         SelectionChanged="AppNav_SelectionChanged">
 
-            <!-- Header del panel -->
             <NavigationView.PaneHeader>
                 <Grid Height="60" Padding="16,0">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
@@ -224,14 +221,13 @@
                                        CharacterSpacing="40"/>
                             <TextBlock Text="Asistente de Voz"
                                        FontSize="10"
-                                       Foreground="#475569"
+                                       Foreground="#6B5F56"
                                        Margin="0,1,0,0"/>
                         </StackPanel>
                     </StackPanel>
                 </Grid>
             </NavigationView.PaneHeader>
 
-            <!-- Items de navegación -->
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Panel Principal"
                                     Tag="Home"
@@ -276,7 +272,6 @@
                 </NavigationViewItem>
             </NavigationView.MenuItems>
 
-            <!-- Footer del panel -->
             <NavigationView.PaneFooter>
                 <Border Padding="16,12"
                         BorderBrush="#10FFFFFF"
@@ -284,17 +279,18 @@
                     <Grid>
                         <StackPanel Spacing="3">
                             <StackPanel Orientation="Horizontal" Spacing="6">
+                                <!-- Punto cambiado a naranja para unificar con el acento -->
                                 <Ellipse Width="5" Height="5"
-                                         Fill="#34D399"
+                                         Fill="#F97316"
                                          VerticalAlignment="Center"/>
                                 <TextBlock Text="Versión 1.0.0"
                                            FontSize="11"
-                                           Foreground="#475569"/>
+                                           Foreground="#8C8075"/>
                             </StackPanel>
                             <TextBlock x:Name="TxtVersionSubtitle"
                                        Text="Asistente de Voz Empresarial"
                                        FontSize="10"
-                                       Foreground="#334155"
+                                       Foreground="#4A3E36"
                                        Margin="11,0,0,0"/>
                         </StackPanel>
                     </Grid>
@@ -303,11 +299,8 @@
 
             <Frame x:Name="ContentFrame"/>
 
-            <!-- ═══════════ VISUAL STATES RESPONSIVOS ═══════════ -->
             <VisualStateManager.VisualStateGroups>
                 <VisualStateGroup>
-
-                    <!-- Compacto: solo iconos, sin textos -->
                     <VisualState x:Name="Compact">
                         <VisualState.StateTriggers>
                             <AdaptiveTrigger MinWindowWidth="0"/>
@@ -322,7 +315,6 @@
                         </VisualState.Setters>
                     </VisualState>
 
-                    <!-- Medio: textos de estado visibles, sin brand ni dropbox -->
                     <VisualState x:Name="Medium">
                         <VisualState.StateTriggers>
                             <AdaptiveTrigger MinWindowWidth="720"/>
@@ -337,7 +329,6 @@
                         </VisualState.Setters>
                     </VisualState>
 
-                    <!-- Ancho: todo visible -->
                     <VisualState x:Name="Wide">
                         <VisualState.StateTriggers>
                             <AdaptiveTrigger MinWindowWidth="1024"/>
@@ -348,10 +339,9 @@
                             <Setter Target="DropboxIndicator.Visibility" Value="Visible"/>
                             <Setter Target="TxtInternet.Visibility" Value="Visible"/>
                             <Setter Target="TxtMic.Visibility" Value="Visible"/>
-                            <Setter Target="TxtDropbox.Visibility" Value="Visible"/>
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
                         </VisualState.Setters>
                     </VisualState>
-
                 </VisualStateGroup>
             </VisualStateManager.VisualStateGroups>
 

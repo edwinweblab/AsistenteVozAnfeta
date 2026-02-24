@@ -782,7 +782,7 @@
                     Padding="16"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Background="black"
+                    Background="#1A110E"
                     CornerRadius="12">
 
                     <Grid RowSpacing="12">
