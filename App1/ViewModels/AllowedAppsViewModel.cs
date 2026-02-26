@@ -17,18 +17,23 @@ namespace Anfeta.UI.ViewModels
     {
         private readonly LocalAppsRepository _repo;
         private readonly CapabilityRegistry _registry;
+        private readonly InstalledAppsScanner _scanner;
 
         public ObservableCollection<LocalAppEntry> AllowedApps { get; } = new();
 
         [ObservableProperty] private bool isLoading;
         [ObservableProperty] private string status = "Listo.";
 
-        public AllowedAppsViewModel(LocalAppsRepository repo, CapabilityRegistry registry)
+        public AllowedAppsViewModel(LocalAppsRepository repo, CapabilityRegistry registry, InstalledAppsScanner scanner)
         {
-            _repo = repo;
-            _registry = registry;
+            _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+            _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
         }
 
+        // ===============================
+        // LOAD (cargar desde BD)
+        // ===============================
         [RelayCommand]
         public async Task LoadAsync()
         {
@@ -56,6 +61,51 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
+        // ===============================
+        // RESCAN (escaneo + upsert detected)
+        // ===============================
+        [RelayCommand]
+        public async Task RescanAsync()
+        {
+            try
+            {
+                IsLoading = true;
+                Status = "Escaneando accesos directos del Menú Inicio...";
+
+                var detected = await Task.Run(() => _scanner.ScanStartMenuShortcuts());
+
+                await Task.Run(() =>
+                {
+                    foreach (var app in detected)
+                    {
+                        // IMPORTANTE:
+                        // Agrega este método en LocalAppsRepository:
+                        // UpsertDetectedAppSafe(LocalAppEntry app)
+                        // para NO pisar seeds y dejar enabled=0 al detectar.
+                        _repo.UpsertDetectedAppSafe(app);
+                    }
+                });
+
+                // recargar lista y registry
+                await LoadAsync();
+                _registry.Reload();
+
+                Status = $"Escaneo completo. Detectadas: {detected.Count}";
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[AllowedAppsVM] RescanAsync ERROR: " + ex);
+                Status = "Error escaneando apps.";
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+
+        // ===============================
+        // TOGGLE (habilitar/deshabilitar)
+        // ===============================
         [RelayCommand]
         public void ToggleEnabled(LocalAppEntry app)
         {
@@ -77,10 +127,12 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
+        // ===============================
+        // ADD MANUAL (pendiente)
+        // ===============================
         [RelayCommand]
         public async Task AddManualAsync()
         {
-            // Lo dejamos listo para después (file picker)
             await Task.CompletedTask;
             Status = "Agregar manual: pendiente.";
         }
@@ -94,18 +146,15 @@ namespace Anfeta.UI.ViewModels
             {
                 if (app == null) return;
 
-                // cargar sinónimos actuales
                 var current = await Task.Run(() => _repo.GetSynonyms(app.AppKey));
                 var items = new ObservableCollection<string>(
                     current.Select(s => (s ?? "").Trim())
                            .Where(s => !string.IsNullOrWhiteSpace(s))
                 );
 
-                // estado edición
                 bool isEditing = false;
                 string? editingOriginal = null;
 
-                // UI controls (todo dentro del mismo dialog)
                 var input = new TextBox
                 {
                     PlaceholderText = "Escribe un sinónimo (ej: navegador, office, etc.)",
@@ -162,17 +211,14 @@ namespace Anfeta.UI.ViewModels
 
                     if (!isEditing)
                     {
-                        // agregar
                         if (items.Any(x => string.Equals(x, v, StringComparison.OrdinalIgnoreCase))) return;
                         items.Add(v);
                         input.Text = "";
                         return;
                     }
 
-                    // editar
                     if (string.IsNullOrWhiteSpace(editingOriginal)) return;
 
-                    // evitar duplicados (excepto si es el mismo)
                     if (items.Any(x => string.Equals(x, v, StringComparison.OrdinalIgnoreCase)) &&
                         !string.Equals(editingOriginal, v, StringComparison.OrdinalIgnoreCase))
                         return;
@@ -185,7 +231,6 @@ namespace Anfeta.UI.ViewModels
                     SetEditMode(false);
                 }
 
-                // Habilitar botones según selección
                 list.SelectionChanged += (_, __) =>
                 {
                     var has = list.SelectedItem != null;
@@ -193,17 +238,14 @@ namespace Anfeta.UI.ViewModels
                     btnDel.IsEnabled = has;
                 };
 
-                // Agregar o Guardar edición (mismo botón)
                 btnAddOrSave.Click += (_, __) => NormalizeAndAddOrEdit();
 
-                // Enter agrega/guarda
                 input.KeyDown += (_, e) =>
                 {
                     if (e.Key == Windows.System.VirtualKey.Enter)
                         NormalizeAndAddOrEdit();
                 };
 
-                // Editar (inline)
                 btnEdit.Click += (_, __) =>
                 {
                     if (list.SelectedItem is not string selected) return;
@@ -213,19 +255,16 @@ namespace Anfeta.UI.ViewModels
                     SetEditMode(true, selected);
                 };
 
-                // Cancelar edición
                 btnCancelEdit.Click += (_, __) =>
                 {
                     input.Text = "";
                     SetEditMode(false);
                 };
 
-                // Eliminar
                 btnDel.Click += (_, __) =>
                 {
                     if (list.SelectedItem is not string selected) return;
 
-                    // si estaban editando el mismo, cancelar
                     if (isEditing && string.Equals(editingOriginal, selected, StringComparison.OrdinalIgnoreCase))
                     {
                         input.Text = "";
@@ -235,7 +274,6 @@ namespace Anfeta.UI.ViewModels
                     items.Remove(selected);
                 };
 
-                // Doble click = editar
                 list.DoubleTapped += (_, __) =>
                 {
                     if (list.SelectedItem is not string selected) return;
@@ -245,7 +283,6 @@ namespace Anfeta.UI.ViewModels
                     SetEditMode(true, selected);
                 };
 
-                // Layout dialog
                 var header = new TextBlock
                 {
                     Text = "Sinónimos actuales",

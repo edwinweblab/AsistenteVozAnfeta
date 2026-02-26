@@ -219,10 +219,14 @@ namespace Anfeta.UI
                     // Action Executors
                     // =========================
                     services.AddSingleton<LocalActionExecutor>();
-                    services.AddSingleton<Anfeta.UI.Data.LocalAppsRepository>();
                     services.AddSingleton<LocalAppsRepository>();
                     services.AddSingleton<CapabilityRegistry>();
                     services.AddSingleton<AllowedAppsViewModel>();
+                    // Scanner de apps instaladas (el que te está faltando)
+                    services.AddSingleton<InstalledAppsScanner>();
+
+                    // ViewModel de AllowedApps (mejor Transient, no Singleton)
+                    services.AddTransient<AllowedAppsViewModel>();
                     // ApiActionExecutor con todos los clientes necesarios
                     services.AddSingleton<ApiActionExecutor>(sp =>
                     {
