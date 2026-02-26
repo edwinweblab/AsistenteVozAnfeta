@@ -252,6 +252,7 @@ namespace Anfeta.UI
                     services.AddSingleton<LocalAppsRepository>();
                     services.AddSingleton<CapabilityRegistry>();
                     services.AddSingleton<AllowedAppsViewModel>();
+                    services.AddSingleton<IFilePickerService, FilePickerService>();
                     // Scanner de apps instaladas (el que te está faltando)
                     services.AddSingleton<InstalledAppsScanner>();
 

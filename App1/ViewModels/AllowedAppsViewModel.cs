@@ -10,7 +10,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-
+using System.IO;
 namespace Anfeta.UI.ViewModels
 {
     public sealed partial class AllowedAppsViewModel : ObservableObject
@@ -18,17 +18,20 @@ namespace Anfeta.UI.ViewModels
         private readonly LocalAppsRepository _repo;
         private readonly CapabilityRegistry _registry;
         private readonly InstalledAppsScanner _scanner;
+        private readonly IFilePickerService _filePicker;
+
 
         public ObservableCollection<LocalAppEntry> AllowedApps { get; } = new();
 
         [ObservableProperty] private bool isLoading;
         [ObservableProperty] private string status = "Listo.";
 
-        public AllowedAppsViewModel(LocalAppsRepository repo, CapabilityRegistry registry, InstalledAppsScanner scanner)
+        public AllowedAppsViewModel(LocalAppsRepository repo, CapabilityRegistry registry, InstalledAppsScanner scanner, IFilePickerService filePicker)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
+            _filePicker = filePicker;
         }
 
         // ===============================
@@ -133,8 +136,77 @@ namespace Anfeta.UI.ViewModels
         [RelayCommand]
         public async Task AddManualAsync()
         {
-            await Task.CompletedTask;
-            Status = "Agregar manual: pendiente.";
+            try
+            {
+                IsLoading = true;
+                Status = "Selecciona un .exe...";
+
+                var path = await _filePicker.PickExePathAsync();
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    Status = "Cancelado.";
+                    return;
+                }
+
+                if (!File.Exists(path))
+                {
+                    Status = "El archivo no existe.";
+                    return;
+                }
+
+                var exeName = Path.GetFileName(path);
+                var baseName = Path.GetFileNameWithoutExtension(path);
+
+                // FriendlyName por defecto (luego lo puedes editar si quieres)
+                var friendlyName = baseName;
+
+                // AppKey única (si ya existe, agrega sufijos -2, -3, etc.)
+                var appKey = MakeUniqueKey(baseName);
+
+                var entry = new LocalAppEntry
+                {
+                    AppKey = appKey,
+                    FriendlyName = friendlyName,
+                    Category = "manual",
+                    ExecutableName = exeName,
+                    ExecutablePath = path,
+                    Enabled = false,
+                    Source = "manual"
+                };
+
+                await Task.Run(() => _repo.UpsertApp(entry));
+
+                await LoadAsync();
+                _registry.Reload();
+
+                Status = $"Agregada: {friendlyName} (deshabilitada por defecto)";
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[AllowedAppsVM] AddManualAsync ERROR: " + ex);
+                Status = "Error agregando app manual.";
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+
+        private string MakeUniqueKey(string baseText)
+        {
+            var keyBase = (baseText ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(keyBase)) keyBase = "app";
+
+            var key = keyBase;
+            var n = 2;
+
+            while (_repo.ExistsAppKey(key))
+            {
+                key = $"{keyBase}-{n}";
+                n++;
+            }
+
+            return key;
         }
 
         // ===============================
