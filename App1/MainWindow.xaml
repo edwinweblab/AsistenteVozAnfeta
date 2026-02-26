@@ -270,6 +270,14 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
+                <NavigationViewItem Content="Google Calendar"
+                    Tag="GoogleCalendar"
+                    ToolTipService.ToolTip="Conectar y gestionar Google Calendar">
+                <NavigationViewItem.Icon>
+                    <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE787;"/>
+                </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
                 <NavigationViewItem Content="Pruebas de Sistema"
                                     Tag="Tests"
                                     ToolTipService.ToolTip="Ejecutar pruebas de diagnóstico">

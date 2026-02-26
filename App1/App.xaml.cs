@@ -216,6 +216,25 @@ namespace Anfeta.UI
                     });
 
                     // =========================
+                    // Google Calendar
+                    // =========================
+                    services.AddSingleton<Anfeta.UI.Services.Calendar.GoogleCalendarClient>(sp =>
+                    {
+                        var factory = sp.GetRequiredService<IHttpClientFactory>();
+                        return new Anfeta.UI.Services.Calendar.GoogleCalendarClient(
+                            factory.CreateClient("WeblabBase"));
+                    });
+
+                    services.AddSingleton<Anfeta.UI.Services.Calendar.GoogleAuthService>(sp =>
+                    {
+                        var calendarClient = sp.GetRequiredService<Anfeta.UI.Services.Calendar.GoogleCalendarClient>();
+                        var authClient = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
+                        return new Anfeta.UI.Services.Calendar.GoogleAuthService(calendarClient, authClient);
+                    });
+
+                    services.AddSingleton<GoogleCalendarViewModel>();
+
+                    // =========================
                     // Action Executors
                     // =========================
                     services.AddSingleton<LocalActionExecutor>();
@@ -231,8 +250,10 @@ namespace Anfeta.UI
                         var reportes = sp.GetRequiredService<WeblabReportesClient>();
                         var recordatorios = sp.GetRequiredService<WeblabRecordatoriosClient>();
                         var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
-                        return new ApiActionExecutor(actividades, revisiones, reportes, recordatorios, auth);
-                    });
+                        var googleCalendar = sp.GetRequiredService<Anfeta.UI.Services.Calendar.GoogleCalendarClient>();
+                        var googleAuth = sp.GetRequiredService<Anfeta.UI.Services.Calendar.GoogleAuthService>();
+                        return new ApiActionExecutor(actividades, revisiones, reportes, recordatorios, auth, googleCalendar, googleAuth);
+                    }); ;
 
                     // =========================
                     // ViewModels

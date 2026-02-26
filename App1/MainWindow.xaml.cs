@@ -69,6 +69,7 @@ namespace Anfeta.UI
                 "Search" => typeof(SearchView),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
+                "GoogleCalendar" => typeof(GoogleCalendarView), 
                 _ => typeof(HomeView)
             };
 

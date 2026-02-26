@@ -1,6 +1,7 @@
 ﻿// Services/ApiActionExecutor.cs
 using Anfeta.UI.Models;
 using Anfeta.UI.Services.Auth;
+using Anfeta.UI.Services.Calendar;
 using Anfeta.UI.Services.Weblab;
 using System;
 using System.Text.Json;
@@ -16,6 +17,8 @@ namespace Anfeta.UI.Services
         private readonly WeblabAuthClient _auth;
         private readonly WeblabReportesClient _reportes;
         private readonly WeblabRecordatoriosClient _recordatorios;
+        private readonly GoogleCalendarClient _googleCalendar;  // NUEVO
+        private readonly GoogleAuthService _googleAuth;          // NUEVO
         private string? _cachedAssignee;
 
         public ApiActionExecutor(
@@ -23,14 +26,17 @@ namespace Anfeta.UI.Services
             WeblabRevisionesClient revisiones,
             WeblabReportesClient reportes,
             WeblabRecordatoriosClient recordatorios,
-            WeblabAuthClient auth)
-
+            WeblabAuthClient auth,
+            GoogleCalendarClient googleCalendar,   // NUEVO
+            GoogleAuthService googleAuth)           // NUEVO
         {
             _actividades = actividades;
             _revisiones = revisiones;
             _reportes = reportes;
             _recordatorios = recordatorios;
             _auth = auth;
+            _googleCalendar = googleCalendar;
+            _googleAuth = googleAuth;
         }
 
         /// <summary>
@@ -240,6 +246,117 @@ namespace Anfeta.UI.Services
                 }
 
                 return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, complete.");
+            }
+
+            // =========================
+            // GOOGLE CALENDAR
+            // =========================
+            if (provider == "google")
+            {
+                if (resource != "calendar")
+                    return (false, $"Resource '{resource}' no soportado para Google. Usa 'calendar'.");
+
+                // ── STATUS ──────────────────────────────────────────
+                if (action == "status")
+                {
+                    var connected = await _googleAuth.IsConnectedAsync(ct);
+                    return connected
+                        ? (true, "Tu Google Calendar está conectado.")
+                        : (false, "Tu Google Calendar no está conectado. Di 'conectar Google Calendar' para vincularlo.");
+                }
+
+                // ── CONNECT ─────────────────────────────────────────
+                if (action == "connect")
+                {
+                    var (ok, msg) = await _googleAuth.StartOAuthAsync(ct);
+                    return (ok, msg);
+                }
+
+                // ── DISCONNECT ──────────────────────────────────────
+                if (action == "disconnect")
+                {
+                    var (ok, msg) = await _googleAuth.DisconnectAsync(ct);
+                    return (ok, msg);
+                }
+
+                // ── CREATE EVENT ────────────────────────────────────
+                if (action == "create")
+                {
+                    // Verificar conexión antes de intentar crear
+                    var connected = await _googleAuth.IsConnectedAsync(ct);
+                    if (!connected)
+                        return (false, "Tu Google Calendar no está conectado. Di 'conectar Google Calendar' primero.");
+
+                    var userId = await _googleAuth.GetUserIdAsync(ct);
+                    if (string.IsNullOrWhiteSpace(userId))
+                        return (false, "No se pudo identificar tu usuario.");
+
+                    var summary = TryGetString(paramsJson, "summary");
+                    var start = TryGetString(paramsJson, "start");
+                    var end = TryGetString(paramsJson, "end");
+
+                    if (string.IsNullOrWhiteSpace(summary))
+                        return (false, "Falta el título del evento (params.summary).");
+
+                    if (string.IsNullOrWhiteSpace(start))
+                        return (false, "Falta la fecha de inicio del evento (params.start).");
+
+                    if (string.IsNullOrWhiteSpace(end))
+                        return (false, "Falta la fecha de fin del evento (params.end).");
+
+                    var description = TryGetString(paramsJson, "description");
+                    var location = TryGetString(paramsJson, "location");
+
+                    var result = await _googleCalendar.CreateEventAsync(
+                        userId!, summary!, start!, end!,
+                        description, location, ct);
+
+                    // El backend indicó que necesita auth (tokens expirados/revocados)
+                    if (result.AuthNeeded)
+                    {
+                        await _googleAuth.StartOAuthAsync(ct);
+                        return (false, "Tu sesión de Google expiró. Se abrió el navegador para reconectar.");
+                    }
+
+                    return (result.Ok, result.Message);
+                }
+
+                // ── LIST EVENTS ─────────────────────────────────────
+                if (action == "list")
+                {
+                    var connected = await _googleAuth.IsConnectedAsync(ct);
+                    if (!connected)
+                        return (false, "Tu Google Calendar no está conectado.");
+
+                    var userId = await _googleAuth.GetUserIdAsync(ct);
+                    var timeMin = TryGetString(paramsJson, "timeMin");
+                    var timeMax = TryGetString(paramsJson, "timeMax");
+                    var max = TryGetInt(paramsJson, "maxResults") ?? 10;
+
+                    var (ok, msg, _) = await _googleCalendar.ListEventsAsync(
+                        userId!, timeMin, timeMax, max, ct);
+
+                    return (ok, msg);
+                }
+
+                // ── DELETE EVENT ────────────────────────────────────
+                if (action == "delete")
+                {
+                    var connected = await _googleAuth.IsConnectedAsync(ct);
+                    if (!connected)
+                        return (false, "Tu Google Calendar no está conectado.");
+
+                    var userId = await _googleAuth.GetUserIdAsync(ct);
+                    var eventId = TryGetString(paramsJson, "eventId");
+
+                    if (string.IsNullOrWhiteSpace(eventId))
+                        return (false, "Falta el ID del evento (params.eventId).");
+
+                    var (ok, msg) = await _googleCalendar.DeleteEventAsync(userId!, eventId!, ct);
+                    return (ok, msg);
+                }
+
+                return (false, $"Acción '{action}' no soportada para Google Calendar. Disponibles: status, connect, disconnect, create, list, delete.");
             }
 
             return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones, reportes, recordatorios.");
