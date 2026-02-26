@@ -24,6 +24,7 @@ using System.Threading.Tasks;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
+using static Anfeta.UI.Helpers.AppSettingsKeys;
 
 namespace Anfeta.UI.Views
 {
@@ -35,8 +36,6 @@ namespace Anfeta.UI.Views
         // enums
         private enum ViewMode { Explorer, Bookmarks }
         private ViewMode _mode = ViewMode.Explorer;
-        // settings keys
-        private const string LS_DropboxRoot = "DropboxRoot";
         // Win32 file attributes (Dropbox / OneDrive placeholders)
         private const int FILE_ATTRIBUTE_OFFLINE = 0x00001000;
         private const int FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000;
@@ -80,7 +79,8 @@ namespace Anfeta.UI.Views
         //Contraibles
         private const string LS_CommandsExpanded = "CommandsExpanded";
         private const string LS_ExcludedExpanded = "ExcludedExpanded";
-
+        //Utils AutoIndex
+        private CancellationTokenSource? _autoReindexCts;
         #endregion
 
         #region ===== Internal Models / Views =====
@@ -262,6 +262,31 @@ namespace Anfeta.UI.Views
                     DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
                 }
             }
+            // ✅ 2.6) Revisar si la carpeta cambió desde el último indexado
+            if (App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
+            {
+                var lastIndexedStr =
+                    ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] as string;
+
+                DateTimeOffset? lastIndexedUtc = null;
+
+                if (!string.IsNullOrWhiteSpace(lastIndexedStr) &&
+                    DateTimeOffset.TryParse(lastIndexedStr, out var parsed))
+                {
+                    lastIndexedUtc = parsed.ToUniversalTime();
+                }
+
+                var folderLastWriteUtc = Directory.GetLastWriteTimeUtc(DROPBOX_ROOT);
+
+                var shouldReindex =
+                    lastIndexedUtc == null ||
+                    folderLastWriteUtc > lastIndexedUtc.Value.UtcDateTime;
+
+                if (shouldReindex)
+                {
+                    await ReindexCurrentRootAsync();
+                }
+            }
             // 3) Si está indexando o aún no hay índice, mostrar estado (sin Sync)
             if (DropboxIndexCoordinator.IsIndexing || !App.LocalIndex.HasData)
             {
@@ -333,6 +358,46 @@ namespace Anfeta.UI.Views
                 await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
 
                 StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
+            }
+        }
+        private async Task ReindexCurrentRootAsync()
+        {
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+                return;
+
+            try
+            {
+                _autoReindexCts?.Cancel();
+                _autoReindexCts = new CancellationTokenSource();
+                var ct = _autoReindexCts.Token;
+
+                StatusText.Text = "Estado: Detecté cambios en la carpeta. Reindexando…";
+                DropboxIndexCoordinator.StartIndexing(DROPBOX_ROOT);
+
+                // Limpiar para evitar resultados viejos mientras reindexa
+                App.LocalIndex.Clear();
+
+                var list = await LocalIndexBuilder.BuildAsync(DROPBOX_ROOT, ct);
+
+                App.LocalIndex.Set(list);
+                await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, list, ct);
+
+                // ✅ guardar fecha de último indexado
+                ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] =
+                    DateTimeOffset.UtcNow.ToString("O");
+
+                DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+
+                StatusText.Text = $"Estado: Reindex listo ✅ ({App.LocalIndex.Count} items)";
+            }
+            catch (OperationCanceledException)
+            {
+                // ok
+            }
+            catch (Exception ex)
+            {
+                DropboxIndexCoordinator.MarkError(DROPBOX_ROOT, ex.Message);
+                StatusText.Text = $"Estado: Error reindexando → {ex.Message}";
             }
         }
         #endregion

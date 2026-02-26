@@ -15,6 +15,7 @@ using Windows.Media.Capture;
 using Windows.Storage;
 using Windows.UI;
 using WinRT.Interop;
+using static Anfeta.UI.Helpers.AppSettingsKeys;
 
 namespace Anfeta.UI.Views
 {
@@ -25,8 +26,8 @@ namespace Anfeta.UI.Views
         private readonly DispatcherTimer _statusTimer;
 
         // Dropbox
-        private const string LS_DropboxRoot = "DropboxRoot";
-        private CancellationTokenSource? _indexCts;
+        private CancellationTokenSource? _indexCts; 
+
 
         public SettingsView()
         {
@@ -397,6 +398,8 @@ namespace Anfeta.UI.Views
                     var list = await LocalIndexBuilder.BuildAsync(selectedPath, ct);
                     App.LocalIndex.Set(list);
                     await LocalIndexPersistence.SaveAsync(selectedPath, list, ct);
+                    ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] =
+                    DateTimeOffset.UtcNow.ToString("O");
                     DropboxIndexCoordinator.MarkReady(selectedPath);
                     ShowStatus($"Índice listo ({App.LocalIndex.Count} items)", InfoBarSeverity.Success);
                 }
@@ -439,6 +442,7 @@ namespace Anfeta.UI.Views
             ApplicationData.Current.LocalSettings.Values.Remove(LS_DropboxRoot);
             App.LocalIndex.Clear();
             await LocalIndexPersistence.ClearAsync();
+            ApplicationData.Current.LocalSettings.Values.Remove(LS_LastIndexedUtc);
             DropboxIndexCoordinator.Reset();
 
             DropboxPathBox.Text = string.Empty;

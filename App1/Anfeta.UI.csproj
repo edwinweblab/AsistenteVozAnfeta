@@ -64,7 +64,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Folder Include="Assets\vosk-model-es\" />
-		<Folder Include="Helpers\" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Page Update="Views\AllowedAppsView.xaml">
