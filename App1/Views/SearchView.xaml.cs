@@ -2,6 +2,7 @@
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.VoiceCommands;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -25,11 +26,14 @@ using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
+using Microsoft.Extensions.DependencyInjection;
+using Anfeta.UI.Views.Dialogs;
+
 
 namespace Anfeta.UI.Views
 {
 
-    public sealed partial class SearchView : Page 
+    public sealed partial class SearchView : Page,ISearchCommandSink
 
     {
         #region ===== Fields / Const / Enums =====
@@ -81,6 +85,12 @@ namespace Anfeta.UI.Views
         private const string LS_ExcludedExpanded = "ExcludedExpanded";
         //Utils AutoIndex
         private CancellationTokenSource? _autoReindexCts;
+        //ComandoVoz 
+        private readonly VoiceCommandsRepository _voiceRepo;
+        private readonly VoiceCommandEngine _voiceEngine; 
+        private readonly VoiceSearchOrchestrator _voiceOrchestrator;
+        private bool _isListening = false;
+        private CancellationTokenSource? _voiceCts;
         #endregion
 
         #region ===== Internal Models / Views =====
@@ -192,8 +202,13 @@ namespace Anfeta.UI.Views
             ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
             Loaded += SearchView_Loaded;
-            
-            
+
+            var stt = App.AppHost.Services.GetRequiredService<ISpeechToTextService>();
+
+            var repo = new VoiceCommandsRepository();
+            _voiceEngine = new VoiceCommandEngine(repo);
+
+            _voiceOrchestrator = new VoiceSearchOrchestrator(stt, _voiceEngine);
 
             StatusText.Text = "Estado: Dropbox (API)";
             ModeText.Text = "Modo: Buscar";
@@ -218,7 +233,7 @@ namespace Anfeta.UI.Views
             CommandsSidebarList.ItemsSource = _savedSearches;
             RefreshCommandsSidebarUi();
             LoadSidebarExpandedStates();
-
+            await _voiceEngine.ReloadAsync();
 
             // 1) Bookmarks
             try
@@ -2842,6 +2857,99 @@ namespace Anfeta.UI.Views
             ls[LS_ExcludedExpanded] = ExcludedExpander.IsExpanded;
         }
 
+        #endregion
+        #region ===== Comandos de voz =====
+
+        // SearchView.xaml.cs (dentro de SearchView)
+        public Task ExecuteSearchTextFromExternalAsync(string text)
+        {
+            // 1) Pon texto en el SearchBox
+            _allowProgrammaticSearch = true;
+            SearchBox.Text = text ?? "";
+            SearchBox.Focus(FocusState.Programmatic);
+
+            // 2) Dispara el MISMO flujo que ya usas en la ayuda/chips
+            TriggerSearchFromHelp(SearchBox.Text);
+
+            // 3) Regresa el flag (para que el usuario siga normal)
+            _allowProgrammaticSearch = false;
+
+            return Task.CompletedTask;
+        }
+        // arriba: using Anfeta.UI.Services.Search;
+            public Task ExecuteSearchTextAsync(string text)
+            {
+                return ExecuteSearchTextFromExternalAsync(text);
+            }
+
+
+        private async void VoiceMenu_Config_Click(object sender, RoutedEventArgs e)
+        {
+            var repo = App.AppHost.Services.GetRequiredService<VoiceCommandsRepository>();
+            var engine = App.AppHost.Services.GetRequiredService<VoiceCommandEngine>();
+
+            var dlg = new VoiceCommandsDialog(repo, engine)
+            {
+                XamlRoot = this.XamlRoot
+            };
+
+            await dlg.ShowAsync();
+        }
+        private void SetListeningUi(bool listening)
+        {
+            _isListening = listening;
+
+            VoiceRing.IsActive = listening;
+            VoiceRing.Visibility = listening ? Visibility.Visible : Visibility.Collapsed;
+
+            VoiceSplit.IsEnabled = !listening; // <- importante: ahora es VoiceSplit
+            StatusText.Text = listening ? "Estado: 🎙 Escuchando…" : "Estado: Listo";
+        }
+
+        
+        private async void VoiceSplit_Click(SplitButton sender, SplitButtonClickEventArgs args)
+        {
+            await StartVoiceAsync();
+        }
+        private async void VoiceMenu_Listen_Click(object sender, RoutedEventArgs e)
+        {
+            await StartVoiceAsync();
+        }
+        private async Task StartVoiceAsync()
+        {
+            if (_isListening)
+            {
+                _voiceCts?.Cancel();
+                return;
+            }
+
+            _voiceCts?.Cancel();
+            _voiceCts = new CancellationTokenSource();
+
+            SetListeningUi(true);
+
+            try
+            {
+                var res = await _voiceOrchestrator.ListenAndExecuteAsync(this, _voiceCts.Token);
+                VoiceDebugText.Text = res.Matched
+                ? $"Voz: “{res.Phrase}” ✅ {res.CommandName} → {res.Token}"
+                : $"Voz: “{res.Phrase}” ❌ sin comando";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text = "Estado: Voz cancelada";
+            }
+            finally
+            {
+                SetListeningUi(false);
+            }
+        }
+        private void SetVoiceHeard(string? phrase)
+        {
+            VoiceDebugText.Text = string.IsNullOrWhiteSpace(phrase)
+                ? "Voz: (no se entendió nada)"
+                : $"Voz entendió: “{phrase}”";
+        }
         #endregion 
         #region ===== XAML handlers pendientes (stubs) =====
 

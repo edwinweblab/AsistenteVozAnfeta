@@ -1,0 +1,31 @@
+﻿<ContentDialog
+    x:Class="Anfeta.UI.Views.Dialogs.VoiceCommandEditDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Editar comando de voz"
+    PrimaryButtonText="Aceptar"
+    SecondaryButtonText="Cancelar">
+
+    <Grid RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="6">
+            <TextBlock Opacity="0.75" Text="Nombre" />
+            <TextBox x:Name="NameBox" PlaceholderText="Ej. Abrir" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Spacing="6">
+            <TextBlock Opacity="0.75" Text="Sinónimos (separados por coma)" />
+            <TextBox x:Name="SynonymsBox" PlaceholderText="Ej. abre, ábreme, open" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Spacing="6">
+            <TextBlock Opacity="0.75" Text="Token (auto)" />
+            <TextBox x:Name="TokenBox" IsReadOnly="True" />
+        </StackPanel>
+    </Grid>
+</ContentDialog>

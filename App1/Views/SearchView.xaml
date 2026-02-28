@@ -38,13 +38,15 @@
                         <ColumnDefinition Width="*" />
                         <!--  Search  -->
                         <ColumnDefinition Width="Auto" />
+                        <!--  VOZ  -->
+                        <ColumnDefinition Width="Auto" />
                         <!--  Ayuda  -->
+                        <ColumnDefinition Width="Auto" />
+                        <!--  Voz  -->
                         <ColumnDefinition Width="Auto" />
                         <!--  Notion  -->
                         <ColumnDefinition Width="Auto" />
                         <!--  Detalles  -->
-                        <ColumnDefinition Width="Auto" />
-                        <!--  Más  -->
                     </Grid.ColumnDefinitions>
                     <!--  Carpetas  -->
                     <ToggleButton
@@ -62,10 +64,44 @@
                         QueryIcon="Find"
                         QuerySubmitted="SearchBox_QuerySubmitted"
                         TextChanged="SearchBox_TextChanged" />
+                    <!--  VOZ  -->
+                    <Grid
+                        Grid.Column="2"
+                        Width="48"
+                        Height="34">
+                        <muxc:SplitButton
+                            x:Name="VoiceSplit"
+                            Width="48"
+                            Height="34"
+                            HorizontalContentAlignment="Center"
+                            Click="VoiceSplit_Click"
+                            ToolTipService.ToolTip="Voz">
+
+                            <muxc:SplitButton.Content>
+                                <SymbolIcon Symbol="Microphone" />
+                            </muxc:SplitButton.Content>
+
+                            <muxc:SplitButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Click="VoiceMenu_Listen_Click" Text="Escuchar ahora" />
+                                    <MenuFlyoutItem Click="VoiceMenu_Config_Click" Text="Configurar comandos de voz…" />
+                                </MenuFlyout>
+                            </muxc:SplitButton.Flyout>
+                        </muxc:SplitButton>
+
+                        <ProgressRing
+                            x:Name="VoiceRing"
+                            Width="16"
+                            Height="16"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsActive="False"
+                            Visibility="Collapsed" />
+                    </Grid>
                     <!--  AYUDA  -->
                     <Button
                         x:Name="BtnHelp"
-                        Grid.Column="2"
+                        Grid.Column="3"
                         Width="34"
                         Height="34"
                         Click="MenuHelp_Click"
@@ -76,13 +112,13 @@
                     <!--  Notion  -->
                     <ToggleButton
                         x:Name="ToggleNotion"
-                        Grid.Column="3"
+                        Grid.Column="4"
                         Content="Notion"
                         ToolTipService.ToolTip="Incluir páginas Notion relacionadas" />
                     <!--  Detalles  -->
                     <ToggleButton
                         x:Name="ToggleDetailsPane"
-                        Grid.Column="4"
+                        Grid.Column="5"
                         Click="ToggleDetailsPane_Click"
                         Content="Detalles"
                         IsChecked="False"
@@ -749,13 +785,19 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-
             <TextBlock
                 x:Name="StatusText"
                 Grid.Column="0"
                 Opacity="0.7"
                 Text="Estado: Dropbox (API)" />
-
+            <TextBlock
+                x:Name="VoiceDebugText"
+                Grid.Column="0"
+                Margin="0,18,0,0"
+                FontSize="12"
+                Opacity="0.65"
+                Text=""
+                TextTrimming="CharacterEllipsis" />
             <TextBlock
                 x:Name="ModeText"
                 Grid.Column="1"

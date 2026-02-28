@@ -1,0 +1,131 @@
+﻿<ContentDialog
+    x:Class="Anfeta.UI.Views.Dialogs.VoiceCommandsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Comandos de voz"
+    PrimaryButtonText="Guardar"
+    SecondaryButtonText="Cancelar">
+
+    <Grid RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock
+            Grid.Row="0"
+            Opacity="0.75"
+            Text="Crea comandos con sinónimos. Al decir un sinónimo se insertará el token en el buscador." />
+
+        <!--  ====== CONTENEDOR CENTRAL: LISTA vs EDITOR ======  -->
+        <Grid Grid.Row="1">
+            <!--  ===== LISTA =====  -->
+            <Grid x:Name="ListPanel">
+                <ListView x:Name="CommandsList" SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Opacity="0.7"
+                                        Text="{Binding Token}" />
+                                    <TextBlock
+                                        FontSize="12"
+                                        Opacity="0.7"
+                                        Text="{Binding SynonymsText}" />
+                                </StackPanel>
+
+                                <Button
+                                    Grid.Column="1"
+                                    Click="BtnEdit_Click"
+                                    Content="Editar"
+                                    Tag="{Binding}" />
+                                <Button
+                                    Grid.Column="2"
+                                    Click="BtnDelete_Click"
+                                    Content="Eliminar"
+                                    Tag="{Binding}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+
+            <!--  ===== EDITOR (INLINE) =====  -->
+            <Grid
+                x:Name="EditPanel"
+                RowSpacing="10"
+                Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                    Grid.Row="0"
+                    Opacity="0.75"
+                    Text="Nombre" />
+                <TextBox
+                    x:Name="EditNameBox"
+                    Grid.Row="1"
+                    PlaceholderText="Ej. Abrir" />
+
+                <TextBlock
+                    Grid.Row="2"
+                    Opacity="0.75"
+                    Text="Sinónimos (separados por coma)" />
+                <TextBox
+                    x:Name="EditSynonymsBox"
+                    Grid.Row="3"
+                    PlaceholderText="Ej. abre, ábreme, open" />
+
+                <TextBlock
+                    Grid.Row="4"
+                    Opacity="0.75"
+                    Text="Token (auto)" />
+                <TextBox
+                    x:Name="EditTokenBox"
+                    Grid.Row="5"
+                    IsReadOnly="True" />
+            </Grid>
+        </Grid>
+
+        <!--  ====== BOTONERA INFERIOR ======  -->
+        <StackPanel
+            Grid.Row="2"
+            HorizontalAlignment="Left"
+            Orientation="Horizontal"
+            Spacing="8">
+
+            <Button
+                x:Name="BtnAdd"
+                Click="BtnAdd_Click"
+                Content="+ Agregar comando" />
+
+            <Button
+                x:Name="BtnSaveEdit"
+                Click="BtnSaveEdit_Click"
+                Content="Aplicar"
+                Visibility="Collapsed" />
+
+            <Button
+                x:Name="BtnCancelEdit"
+                Click="BtnCancelEdit_Click"
+                Content="Cancelar edición"
+                Visibility="Collapsed" />
+        </StackPanel>
+    </Grid>
+</ContentDialog>
