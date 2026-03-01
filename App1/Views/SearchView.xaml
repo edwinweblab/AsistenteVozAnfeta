@@ -65,14 +65,13 @@
                         QuerySubmitted="SearchBox_QuerySubmitted"
                         TextChanged="SearchBox_TextChanged" />
                     <!--  VOZ  -->
-                    <Grid
-                        Grid.Column="2"
-                        Width="48"
-                        Height="34">
+                    <Grid Grid.Column="2" Height="36">
+
                         <muxc:SplitButton
                             x:Name="VoiceSplit"
-                            Width="48"
-                            Height="34"
+                            Height="36"
+                            MinWidth="72"
+                            Padding="8,0"
                             HorizontalContentAlignment="Center"
                             Click="VoiceSplit_Click"
                             ToolTipService.ToolTip="Voz">

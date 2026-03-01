@@ -28,6 +28,9 @@ using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 using Microsoft.Extensions.DependencyInjection;
 using Anfeta.UI.Views.Dialogs;
+using Microsoft.UI;
+using Windows.UI;
+
 
 
 namespace Anfeta.UI.Views
@@ -91,6 +94,17 @@ namespace Anfeta.UI.Views
         private readonly VoiceSearchOrchestrator _voiceOrchestrator;
         private bool _isListening = false;
         private CancellationTokenSource? _voiceCts;
+        private readonly ISpeechToTextService _stt;
+        private readonly VoiceCommandsRepository _repo;
+        // opcional: bandera para evitar doble init
+        private bool _voiceInitDone;
+        private readonly IVoicePostActionService _voicePost;
+        private Brush? _voiceSplitDefaultBg;
+        private Brush? _voiceSplitDefaultFg;
+
+        private readonly Brush _voiceActiveBg = new SolidColorBrush(Color.FromArgb(255, 60, 20, 20));  // rojo oscuro suave
+        private readonly Brush _voiceActiveFg = new SolidColorBrush(Colors.White);
+
         #endregion
 
         #region ===== Internal Models / Views =====
@@ -202,13 +216,15 @@ namespace Anfeta.UI.Views
             ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
             Loaded += SearchView_Loaded;
+            _voiceSplitDefaultBg = VoiceSplit.Background;
+            _voiceSplitDefaultFg = VoiceSplit.Foreground;
+            var sp = App.AppHost.Services;
 
-            var stt = App.AppHost.Services.GetRequiredService<ISpeechToTextService>();
-
-            var repo = new VoiceCommandsRepository();
-            _voiceEngine = new VoiceCommandEngine(repo);
-
-            _voiceOrchestrator = new VoiceSearchOrchestrator(stt, _voiceEngine);
+            _stt = sp.GetRequiredService<ISpeechToTextService>();
+            _repo = sp.GetRequiredService<VoiceCommandsRepository>();
+            _voiceEngine = sp.GetRequiredService<VoiceCommandEngine>();
+            _voiceOrchestrator = sp.GetRequiredService<VoiceSearchOrchestrator>();
+            _voicePost = sp.GetRequiredService<IVoicePostActionService>(); 
 
             StatusText.Text = "Estado: Dropbox (API)";
             ModeText.Text = "Modo: Buscar";
@@ -233,6 +249,10 @@ namespace Anfeta.UI.Views
             CommandsSidebarList.ItemsSource = _savedSearches;
             RefreshCommandsSidebarUi();
             LoadSidebarExpandedStates();
+            
+            if (_voiceInitDone) return;
+            _voiceInitDone = true;
+
             await _voiceEngine.ReloadAsync();
 
             // 1) Bookmarks
@@ -1070,7 +1090,7 @@ namespace Anfeta.UI.Views
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
+            _voicePost.NotifySearchResults(Results);
             await Task.CompletedTask;
 
         }
@@ -1174,7 +1194,7 @@ namespace Anfeta.UI.Views
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
+            _voicePost.NotifySearchResults(Results);
             await Task.CompletedTask;
         }
         #endregion
@@ -2881,67 +2901,117 @@ namespace Anfeta.UI.Views
             {
                 return ExecuteSearchTextFromExternalAsync(text);
             }
-
-
         private async void VoiceMenu_Config_Click(object sender, RoutedEventArgs e)
         {
-            var repo = App.AppHost.Services.GetRequiredService<VoiceCommandsRepository>();
-            var engine = App.AppHost.Services.GetRequiredService<VoiceCommandEngine>();
+            var dialog = new VoiceCommandsDialog(_repo, _voiceEngine);
 
-            var dlg = new VoiceCommandsDialog(repo, engine)
-            {
-                XamlRoot = this.XamlRoot
-            };
+            // si tu dialog necesita XamlRoot:
+            dialog.XamlRoot = this.XamlRoot;
 
-            await dlg.ShowAsync();
+            await dialog.ShowAsync();
+
+            // IMPORTANTÍSIMO: cuando cierras dialog, recarga engine (por si guardaron comandos)
+            await _voiceEngine.ReloadAsync();
         }
         private void SetListeningUi(bool listening)
         {
             _isListening = listening;
 
+            // ProgressRing
             VoiceRing.IsActive = listening;
             VoiceRing.Visibility = listening ? Visibility.Visible : Visibility.Collapsed;
 
-            VoiceSplit.IsEnabled = !listening; // <- importante: ahora es VoiceSplit
-            StatusText.Text = listening ? "Estado: 🎙 Escuchando…" : "Estado: Listo";
-        }
+            // Mic habilitado siempre (para permitir cancelar con segundo click)
+            VoiceSplit.IsEnabled = true;
 
-        
+            // Cambio visual cuando está escuchando
+            if (listening)
+            {
+                VoiceSplit.Background = _voiceActiveBg;
+                VoiceSplit.Foreground = _voiceActiveFg;
+                StatusText.Text = "Estado: 🎙 Escuchando…";
+            }
+            else
+            {
+                VoiceSplit.Background = _voiceSplitDefaultBg;
+                VoiceSplit.Foreground = _voiceSplitDefaultFg;
+                StatusText.Text = "Estado: Listo";
+            }
+        }
         private async void VoiceSplit_Click(SplitButton sender, SplitButtonClickEventArgs args)
         {
-            await StartVoiceAsync();
+            if (_isListening)
+                await CancelVoiceAsync();
+            else
+                await StartVoiceAsync();
+
         }
         private async void VoiceMenu_Listen_Click(object sender, RoutedEventArgs e)
         {
-            await StartVoiceAsync();
+            if (_isListening)
+                await CancelVoiceAsync();
+            else
+                await StartVoiceAsync();
+
         }
         private async Task StartVoiceAsync()
         {
-            if (_isListening)
-            {
-                _voiceCts?.Cancel();
-                return;
-            }
+            // Si ya está escuchando, esto evita doble ejecución
+            if (_isListening) return;
 
-            _voiceCts?.Cancel();
+            _isListening = true;
+            _voiceCts?.Dispose();
             _voiceCts = new CancellationTokenSource();
 
             SetListeningUi(true);
+            VoiceDebugText.Text = "🎙️ Escuchando...";
 
             try
             {
                 var res = await _voiceOrchestrator.ListenAndExecuteAsync(this, _voiceCts.Token);
-                VoiceDebugText.Text = res.Matched
-                ? $"Voz: “{res.Phrase}” ✅ {res.CommandName} → {res.Token}"
-                : $"Voz: “{res.Phrase}” ❌ sin comando";
+
+                VoiceDebugText.Text = string.IsNullOrWhiteSpace(res?.Phrase)
+                    ? "🎙️ Sin resultado"
+                    : (res.Matched
+                        ? $"✅ '{res.Phrase}' → {res.CommandName} ({res.Token})"
+                        : $"❓ '{res.Phrase}' (sin match)");
             }
             catch (OperationCanceledException)
             {
-                StatusText.Text = "Estado: Voz cancelada";
+                VoiceDebugText.Text = "🎙️ Cancelado";
             }
             finally
             {
                 SetListeningUi(false);
+
+                _isListening = false;
+                _voiceCts?.Dispose();
+                _voiceCts = null;
+            }
+        }
+
+        // Llama esto cuando vuelvas a presionar el botón del mic estando en escucha
+        private async Task CancelVoiceAsync()
+        {
+            if (!_isListening) return;
+
+            try
+            {
+                _voiceCts?.Cancel();
+
+                // Si ya tienes VoicePostActionService inyectado:
+                await _voicePost.StopAllAsync();
+            }
+            catch { }
+            finally
+            {
+                _isListening = false;
+
+                SetListeningUi(false);
+                VoiceDebugText.Text = "🎙️ Cancelado";
+
+                _voiceCts?.Dispose();
+                _voiceCts = null;
             }
         }
         private void SetVoiceHeard(string? phrase)

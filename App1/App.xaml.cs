@@ -59,7 +59,8 @@ namespace Anfeta.UI
                     // VOICE
                     services.AddSingleton<VoiceCommandsRepository>();
                     services.AddSingleton<VoiceCommandEngine>();
-                    services.AddSingleton<VoiceSearchOrchestrator>(); 
+                    services.AddSingleton<VoiceSearchOrchestrator>();
+                    services.AddSingleton<IVoicePostActionService, VoicePostActionService>();
 
                     // Context system (ORDEN IMPORTA)
                     services.AddSingleton<CapabilityRegistry>();
