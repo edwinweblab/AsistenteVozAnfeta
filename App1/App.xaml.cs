@@ -5,6 +5,7 @@ using Anfeta.UI.Services.Auth;
 using Anfeta.UI.Services.Groq;
 using Anfeta.UI.Services.Interpretation;
 using Anfeta.UI.Services.Speech;
+using Anfeta.UI.Services.VoiceCommands;
 using Anfeta.UI.Services.Weblab;
 using Anfeta.UI.ViewModels;
 using Anfeta.UI.Views.Dialogs;
@@ -56,6 +57,13 @@ namespace Anfeta.UI
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
+
+                    //VoiceComamands
+                    // VOICE
+                    services.AddSingleton<VoiceCommandsRepository>();
+                    services.AddSingleton<VoiceCommandEngine>();
+                    services.AddSingleton<VoiceSearchOrchestrator>();
+                    services.AddSingleton<IVoicePostActionService, VoicePostActionService>();
 
                     // Context system (ORDEN IMPORTA)
                     services.AddSingleton<CapabilityRegistry>();

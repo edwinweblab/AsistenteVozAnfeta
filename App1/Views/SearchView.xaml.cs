@@ -2,6 +2,7 @@
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.VoiceCommands;
 using Anfeta.UI.Services.Speech;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -25,19 +26,24 @@ using System.Threading.Tasks;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
+using static Anfeta.UI.Helpers.AppSettingsKeys;
+using Microsoft.Extensions.DependencyInjection;
+using Anfeta.UI.Views.Dialogs;
+using Microsoft.UI;
+using Windows.UI;
+
+
 
 namespace Anfeta.UI.Views
 {
 
-    public sealed partial class SearchView : Page 
+    public sealed partial class SearchView : Page,ISearchCommandSink
 
     {
         #region ===== Fields / Const / Enums =====
         // enums
         private enum ViewMode { Explorer, Bookmarks }
         private ViewMode _mode = ViewMode.Explorer;
-        // settings keys
-        private const string LS_DropboxRoot = "DropboxRoot";
         // Win32 file attributes (Dropbox / OneDrive placeholders)
         private const int FILE_ATTRIBUTE_OFFLINE = 0x00001000;
         private const int FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000;
@@ -81,6 +87,24 @@ namespace Anfeta.UI.Views
         //Contraibles
         private const string LS_CommandsExpanded = "CommandsExpanded";
         private const string LS_ExcludedExpanded = "ExcludedExpanded";
+        //Utils AutoIndex
+        private CancellationTokenSource? _autoReindexCts;
+        //ComandoVoz 
+        private readonly VoiceCommandsRepository _voiceRepo;
+        private readonly VoiceCommandEngine _voiceEngine; 
+        private readonly VoiceSearchOrchestrator _voiceOrchestrator;
+        private bool _isListening = false;
+        private CancellationTokenSource? _voiceCts;
+        private readonly ISpeechToTextService _stt;
+        private readonly VoiceCommandsRepository _repo;
+        // opcional: bandera para evitar doble init
+        private bool _voiceInitDone;
+        private readonly IVoicePostActionService _voicePost;
+        private Brush? _voiceSplitDefaultBg;
+        private Brush? _voiceSplitDefaultFg;
+
+        private readonly Brush _voiceActiveBg = new SolidColorBrush(Color.FromArgb(255, 60, 20, 20));  // rojo oscuro suave
+        private readonly Brush _voiceActiveFg = new SolidColorBrush(Colors.White);
 
         #endregion
 
@@ -193,8 +217,15 @@ namespace Anfeta.UI.Views
             ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
             Loaded += SearchView_Loaded;
-            
-            
+            _voiceSplitDefaultBg = VoiceSplit.Background;
+            _voiceSplitDefaultFg = VoiceSplit.Foreground;
+            var sp = App.AppHost.Services;
+
+            _stt = sp.GetRequiredService<ISpeechToTextService>();
+            _repo = sp.GetRequiredService<VoiceCommandsRepository>();
+            _voiceEngine = sp.GetRequiredService<VoiceCommandEngine>();
+            _voiceOrchestrator = sp.GetRequiredService<VoiceSearchOrchestrator>();
+            _voicePost = sp.GetRequiredService<IVoicePostActionService>(); 
 
             StatusText.Text = "Estado: Dropbox (API)";
             ModeText.Text = "Modo: Buscar";
@@ -219,7 +250,11 @@ namespace Anfeta.UI.Views
             CommandsSidebarList.ItemsSource = _savedSearches;
             RefreshCommandsSidebarUi();
             LoadSidebarExpandedStates();
+            
+            if (_voiceInitDone) return;
+            _voiceInitDone = true;
 
+            await _voiceEngine.ReloadAsync();
 
             // 1) Bookmarks
             try
@@ -261,6 +296,31 @@ namespace Anfeta.UI.Views
                 {
                     App.LocalIndex.Set(items);
                     DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+                }
+            }
+            // ✅ 2.6) Revisar si la carpeta cambió desde el último indexado
+            if (App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
+            {
+                var lastIndexedStr =
+                    ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] as string;
+
+                DateTimeOffset? lastIndexedUtc = null;
+
+                if (!string.IsNullOrWhiteSpace(lastIndexedStr) &&
+                    DateTimeOffset.TryParse(lastIndexedStr, out var parsed))
+                {
+                    lastIndexedUtc = parsed.ToUniversalTime();
+                }
+
+                var folderLastWriteUtc = Directory.GetLastWriteTimeUtc(DROPBOX_ROOT);
+
+                var shouldReindex =
+                    lastIndexedUtc == null ||
+                    folderLastWriteUtc > lastIndexedUtc.Value.UtcDateTime;
+
+                if (shouldReindex)
+                {
+                    await ReindexCurrentRootAsync();
                 }
             }
             // 3) Si está indexando o aún no hay índice, mostrar estado (sin Sync)
@@ -334,6 +394,46 @@ namespace Anfeta.UI.Views
                 await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
 
                 StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
+            }
+        }
+        private async Task ReindexCurrentRootAsync()
+        {
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+                return;
+
+            try
+            {
+                _autoReindexCts?.Cancel();
+                _autoReindexCts = new CancellationTokenSource();
+                var ct = _autoReindexCts.Token;
+
+                StatusText.Text = "Estado: Detecté cambios en la carpeta. Reindexando…";
+                DropboxIndexCoordinator.StartIndexing(DROPBOX_ROOT);
+
+                // Limpiar para evitar resultados viejos mientras reindexa
+                App.LocalIndex.Clear();
+
+                var list = await LocalIndexBuilder.BuildAsync(DROPBOX_ROOT, ct);
+
+                App.LocalIndex.Set(list);
+                await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, list, ct);
+
+                // ✅ guardar fecha de último indexado
+                ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] =
+                    DateTimeOffset.UtcNow.ToString("O");
+
+                DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+
+                StatusText.Text = $"Estado: Reindex listo ✅ ({App.LocalIndex.Count} items)";
+            }
+            catch (OperationCanceledException)
+            {
+                // ok
+            }
+            catch (Exception ex)
+            {
+                DropboxIndexCoordinator.MarkError(DROPBOX_ROOT, ex.Message);
+                StatusText.Text = $"Estado: Error reindexando → {ex.Message}";
             }
         }
         #endregion
@@ -991,7 +1091,7 @@ namespace Anfeta.UI.Views
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
+            _voicePost.NotifySearchResults(Results);
             await Task.CompletedTask;
 
         }
@@ -1095,7 +1195,7 @@ namespace Anfeta.UI.Views
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
+            _voicePost.NotifySearchResults(Results);
             await Task.CompletedTask;
         }
         #endregion
@@ -2778,6 +2878,149 @@ namespace Anfeta.UI.Views
             ls[LS_ExcludedExpanded] = ExcludedExpander.IsExpanded;
         }
 
+        #endregion
+        #region ===== Comandos de voz =====
+
+        // SearchView.xaml.cs (dentro de SearchView)
+        public Task ExecuteSearchTextFromExternalAsync(string text)
+        {
+            // 1) Pon texto en el SearchBox
+            _allowProgrammaticSearch = true;
+            SearchBox.Text = text ?? "";
+            SearchBox.Focus(FocusState.Programmatic);
+
+            // 2) Dispara el MISMO flujo que ya usas en la ayuda/chips
+            TriggerSearchFromHelp(SearchBox.Text);
+
+            // 3) Regresa el flag (para que el usuario siga normal)
+            _allowProgrammaticSearch = false;
+
+            return Task.CompletedTask;
+        }
+        // arriba: using Anfeta.UI.Services.Search;
+            public Task ExecuteSearchTextAsync(string text)
+            {
+                return ExecuteSearchTextFromExternalAsync(text);
+            }
+        private async void VoiceMenu_Config_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new VoiceCommandsDialog(_repo, _voiceEngine);
+
+            // si tu dialog necesita XamlRoot:
+            dialog.XamlRoot = this.XamlRoot;
+
+            await dialog.ShowAsync();
+
+            // IMPORTANTÍSIMO: cuando cierras dialog, recarga engine (por si guardaron comandos)
+            await _voiceEngine.ReloadAsync();
+        }
+        private void SetListeningUi(bool listening)
+        {
+            _isListening = listening;
+
+            // ProgressRing
+            VoiceRing.IsActive = listening;
+            VoiceRing.Visibility = listening ? Visibility.Visible : Visibility.Collapsed;
+
+            // Mic habilitado siempre (para permitir cancelar con segundo click)
+            VoiceSplit.IsEnabled = true;
+
+            // Cambio visual cuando está escuchando
+            if (listening)
+            {
+                VoiceSplit.Background = _voiceActiveBg;
+                VoiceSplit.Foreground = _voiceActiveFg;
+                StatusText.Text = "Estado: 🎙 Escuchando…";
+            }
+            else
+            {
+                VoiceSplit.Background = _voiceSplitDefaultBg;
+                VoiceSplit.Foreground = _voiceSplitDefaultFg;
+                StatusText.Text = "Estado: Listo";
+            }
+        }
+        private async void VoiceSplit_Click(SplitButton sender, SplitButtonClickEventArgs args)
+        {
+            if (_isListening)
+                await CancelVoiceAsync();
+            else
+                await StartVoiceAsync();
+
+        }
+        private async void VoiceMenu_Listen_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isListening)
+                await CancelVoiceAsync();
+            else
+                await StartVoiceAsync();
+
+        }
+        private async Task StartVoiceAsync()
+        {
+            // Si ya está escuchando, esto evita doble ejecución
+            if (_isListening) return;
+
+            _isListening = true;
+            _voiceCts?.Dispose();
+            _voiceCts = new CancellationTokenSource();
+
+            SetListeningUi(true);
+            VoiceDebugText.Text = "🎙️ Escuchando...";
+
+            try
+            {
+                var res = await _voiceOrchestrator.ListenAndExecuteAsync(this, _voiceCts.Token);
+
+                VoiceDebugText.Text = string.IsNullOrWhiteSpace(res?.Phrase)
+                    ? "🎙️ Sin resultado"
+                    : (res.Matched
+                        ? $"✅ '{res.Phrase}' → {res.CommandName} ({res.Token})"
+                        : $"❓ '{res.Phrase}' (sin match)");
+            }
+            catch (OperationCanceledException)
+            {
+                VoiceDebugText.Text = "🎙️ Cancelado";
+            }
+            finally
+            {
+                SetListeningUi(false);
+
+                _isListening = false;
+                _voiceCts?.Dispose();
+                _voiceCts = null;
+            }
+        }
+
+        // Llama esto cuando vuelvas a presionar el botón del mic estando en escucha
+        private async Task CancelVoiceAsync()
+        {
+            if (!_isListening) return;
+
+            try
+            {
+                _voiceCts?.Cancel();
+
+                // Si ya tienes VoicePostActionService inyectado:
+                await _voicePost.StopAllAsync();
+            }
+            catch { }
+            finally
+            {
+                _isListening = false;
+
+                SetListeningUi(false);
+                VoiceDebugText.Text = "🎙️ Cancelado";
+
+                _voiceCts?.Dispose();
+                _voiceCts = null;
+            }
+        }
+        private void SetVoiceHeard(string? phrase)
+        {
+            VoiceDebugText.Text = string.IsNullOrWhiteSpace(phrase)
+                ? "Voz: (no se entendió nada)"
+                : $"Voz entendió: “{phrase}”";
+        }
         #endregion 
         #region ===== XAML handlers pendientes (stubs) =====
 
