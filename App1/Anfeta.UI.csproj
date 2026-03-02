@@ -66,6 +66,7 @@
 	<ItemGroup>
 		<Folder Include="Assets\vosk-model-es\" />
 		<Folder Include="Helpers\" />
+		<Folder Include="Views\Account\" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Page Update="Views\GoogleCalendarView.xaml">

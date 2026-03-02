@@ -6,7 +6,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Anfeta.UI.Models;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Auth;
 
 namespace Anfeta.UI.Services.Weblab

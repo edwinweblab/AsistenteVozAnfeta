@@ -1,7 +1,8 @@
-﻿using Anfeta.UI.Models;
+﻿using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.Speech;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;

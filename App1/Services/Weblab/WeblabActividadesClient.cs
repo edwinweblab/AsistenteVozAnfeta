@@ -1,5 +1,5 @@
 ﻿// Services/Weblab/WeblabActividadesClient.cs
-using Anfeta.UI.Models;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Auth;
 using System;
 using System.Collections.Generic;
@@ -32,7 +32,7 @@ namespace Anfeta.UI.Services.Weblab
         /// Entrada: CreateActividadRequest
         /// Salida: ApiPlainResponse
         /// </summary>
-        public async Task<ApiPlainResponse> CreateActivityAsync(Anfeta.UI.Models.CreateActividadRequest req, CancellationToken ct = default)
+        public async Task<ApiPlainResponse> CreateActivityAsync(CreateActividadRequest req, CancellationToken ct = default)
         {
             try
             {

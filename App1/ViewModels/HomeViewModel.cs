@@ -1,7 +1,12 @@
 ﻿// ViewModels/HomeViewModel.cs
 using Anfeta.UI.Models;
+using Anfeta.UI.Models.Interpretation;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Activity;
+using Anfeta.UI.Services.Groq;
+using Anfeta.UI.Services.Interpretation;
+using Anfeta.UI.Services.Speech;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;

@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models;
+﻿using Anfeta.UI.Models.Weblab;
 using System;
 
 public class BookmarkItem
