@@ -24,7 +24,7 @@
                         <TextBlock Text="Google Calendar"
                                    FontSize="24" FontWeight="SemiBold"
                                    Foreground="#FFFFFF"/>
-                        <TextBlock Text="Conecta tu cuenta de Google para crear y gestionar eventos con tu voz."
+                        <TextBlock Text="Crea y gestiona eventos de calendario con tu voz."
                                    FontSize="12" Foreground="#D4C9C0"/>
                     </StackPanel>
                 </Grid>
@@ -50,9 +50,13 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
+                            <!-- Barra lateral: verde si conectado, naranja si no -->
                             <Border Grid.Column="0"
-                                    Background="{StaticResource AnfetaAccentBrush}"
-                                    CornerRadius="12,0,0,12" Opacity="0.6"/>
+                                    CornerRadius="12,0,0,12" Opacity="0.7">
+                                <Border.Background>
+                                    <SolidColorBrush Color="{x:Bind ViewModel.StatusBarColor, Mode=OneWay}"/>
+                                </Border.Background>
+                            </Border>
 
                             <Grid Grid.Column="1" Padding="18,16" ColumnSpacing="16">
                                 <Grid.ColumnDefinitions>
@@ -61,7 +65,6 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
 
-                                <!-- Ícono estado -->
                                 <Border Grid.Column="0"
                                         Width="40" Height="40"
                                         CornerRadius="10"
@@ -76,7 +79,6 @@
                                               VerticalAlignment="Center"/>
                                 </Border>
 
-                                <!-- Textos -->
                                 <StackPanel Grid.Column="1"
                                             VerticalAlignment="Center"
                                             Spacing="3" Margin="4,0,0,0">
@@ -88,7 +90,6 @@
                                                TextWrapping="Wrap"/>
                                 </StackPanel>
 
-                                <!-- ProgressRing -->
                                 <ProgressRing Grid.Column="2"
                                               IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
                                               Width="22" Height="22"
@@ -99,24 +100,163 @@
                     </Border>
                 </StackPanel>
 
-                <!-- ═══ SECCIÓN ACCIONES ═══ -->
-                <StackPanel Spacing="14">
+                <!-- ═══ PANEL CONECTADO ═══ -->
+                <StackPanel Spacing="14"
+                            Visibility="{x:Bind ViewModel.IsConnected, Mode=OneWay,
+                                         Converter={StaticResource BoolToVisibilityConverter}}">
+
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border Width="3" Height="18" CornerRadius="2" Background="#34D399"/>
+                        <FontIcon FontSize="14" Foreground="#34D399" Glyph="&#xE720;"/>
+                        <TextBlock Text="COMANDOS DE VOZ"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   Foreground="#FFFFFF" CharacterSpacing="100"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Card comandos disponibles -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="#34D399"
+                                    CornerRadius="12,0,0,12" Opacity="0.5"/>
+                            <StackPanel Grid.Column="1" Spacing="12" Padding="18,16">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="Tu calendario está listo para usarse"
+                                               FontSize="13" FontWeight="SemiBold"
+                                               Foreground="#FFFFFF"/>
+                                    <TextBlock Text="Puedes usar estos comandos de voz en cualquier momento:"
+                                               FontSize="11" Foreground="#D4C9C0"/>
+                                </StackPanel>
+
+                                <!-- Comando crear -->
+                                <Border CornerRadius="8" Padding="14,10"
+                                        Background="#0CFFFFFF"
+                                        BorderBrush="#18FFFFFF" BorderThickness="1">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0"
+                                                Width="32" Height="32" CornerRadius="8"
+                                                Background="#1A34D399" BorderBrush="#2534D399"
+                                                BorderThickness="1" VerticalAlignment="Center">
+                                            <FontIcon Glyph="&#xE710;" FontSize="13"
+                                                      Foreground="#34D399"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="Crear evento"
+                                                       FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="#F1F5F9"/>
+                                            <TextBlock FontSize="11" Foreground="#6B5F56">
+                                                <Run Text="&quot;Crear evento&quot;"/>
+                                                <Run Text=" · "/>
+                                                <Run Text="&quot;Agendar reunión&quot;"/>
+                                                <Run Text=" · "/>
+                                                <Run Text="&quot;Nueva cita&quot;"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Comando listar -->
+                                <Border CornerRadius="8" Padding="14,10"
+                                        Background="#0CFFFFFF"
+                                        BorderBrush="#18FFFFFF" BorderThickness="1">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0"
+                                                Width="32" Height="32" CornerRadius="8"
+                                                Background="#1A60A5FA" BorderBrush="#2560A5FA"
+                                                BorderThickness="1" VerticalAlignment="Center">
+                                            <FontIcon Glyph="&#xE823;" FontSize="13"
+                                                      Foreground="#60A5FA"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="Ver eventos"
+                                                       FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="#F1F5F9"/>
+                                            <TextBlock FontSize="11" Foreground="#6B5F56">
+                                                <Run Text="&quot;Mis eventos&quot;"/>
+                                                <Run Text=" · "/>
+                                                <Run Text="&quot;Ver calendario&quot;"/>
+                                                <Run Text=" · "/>
+                                                <Run Text="&quot;Eventos de hoy&quot;"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Card desconectar (discreta, al fondo) -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="#EF4444"
+                                    CornerRadius="12,0,0,12" Opacity="0.4"/>
+                            <Grid Grid.Column="1" Padding="18,14" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="Revocar acceso"
+                                               FontSize="12" FontWeight="SemiBold"
+                                               Foreground="#FCA5A5"/>
+                                    <TextBlock Text="Desvincula tu cuenta de Google de ANFETA."
+                                               FontSize="11" Foreground="#6B5F56"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Command="{x:Bind ViewModel.DisconnectCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon FontSize="13" Glyph="&#xEA3A;"/>
+                                        <TextBlock Text="Desconectar"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                </StackPanel>
+
+                <!-- ═══ PANEL DESCONECTADO ═══ -->
+                <StackPanel Spacing="14"
+                            Visibility="{x:Bind ViewModel.IsDisconnected, Mode=OneWay,
+                                         Converter={StaticResource BoolToVisibilityConverter}}">
+
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <Border Width="3" Height="18" CornerRadius="2"
                                 Background="{StaticResource AnfetaAccentBrush}"/>
                         <FontIcon FontSize="14"
                                   Foreground="{StaticResource AnfetaAccentBrush}"
                                   Glyph="&#xE8D4;"/>
-                        <TextBlock Text="ACCIONES"
+                        <TextBlock Text="CONECTAR CUENTA"
                                    FontSize="11" FontWeight="SemiBold"
                                    Foreground="#FFFFFF" CharacterSpacing="100"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <!-- Card Conectar -->
-                    <Border Style="{StaticResource CardStyle}"
-                            Visibility="{x:Bind ViewModel.IsDisconnected, Mode=OneWay,
-                                         Converter={StaticResource BoolToVisibilityConverter}}">
+                    <!-- Card conectar -->
+                    <Border Style="{StaticResource CardStyle}">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="4"/>
@@ -130,7 +270,7 @@
                                     <TextBlock Text="Vincular cuenta de Google"
                                                FontSize="13" FontWeight="SemiBold"
                                                Foreground="#FFFFFF"/>
-                                    <TextBlock Text="Se abrirá el navegador o podrás copiar la URL para autorizarla manualmente."
+                                    <TextBlock Text="Se abrirá el navegador o podrás copiar la URL para autorizarla en el navegador de tu preferencia."
                                                FontSize="11" Foreground="#D4C9C0"
                                                TextWrapping="Wrap"/>
                                 </StackPanel>
@@ -145,39 +285,7 @@
                         </Grid>
                     </Border>
 
-                    <!-- Card Desconectar -->
-                    <Border Style="{StaticResource CardStyle}"
-                            Visibility="{x:Bind ViewModel.IsConnected, Mode=OneWay,
-                                         Converter={StaticResource BoolToVisibilityConverter}}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="4"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0"
-                                    Background="#EF4444"
-                                    CornerRadius="12,0,0,12" Opacity="0.5"/>
-                            <StackPanel Grid.Column="1" Spacing="14" Padding="18,16">
-                                <StackPanel Spacing="3">
-                                    <TextBlock Text="Cuenta de Google vinculada"
-                                               FontSize="13" FontWeight="SemiBold"
-                                               Foreground="#FFFFFF"/>
-                                    <TextBlock Text="Tu cuenta está conectada. Puedes revocar el acceso en cualquier momento."
-                                               FontSize="11" Foreground="#D4C9C0"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                                <Button Command="{x:Bind ViewModel.DisconnectCommand}"
-                                        Style="{StaticResource SecondaryButtonStyle}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontSize="14" Glyph="&#xEA3A;"/>
-                                        <TextBlock Text="Desconectar cuenta"/>
-                                    </StackPanel>
-                                </Button>
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-
-                    <!-- Card Verificar (siempre visible) -->
+                    <!-- Pasos -->
                     <Border Style="{StaticResource CardStyle}">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -187,123 +295,67 @@
                             <Border Grid.Column="0"
                                     Background="{StaticResource AnfetaAccentBrush}"
                                     CornerRadius="12,0,0,12" Opacity="0.3"/>
-                            <StackPanel Grid.Column="1" Spacing="14" Padding="18,16">
-                                <StackPanel Spacing="3">
-                                    <TextBlock Text="Verificar estado"
-                                               FontSize="13" FontWeight="SemiBold"
-                                               Foreground="#FFFFFF"/>
-                                    <TextBlock Text="Consulta el estado actual de tu conexión con Google Calendar."
-                                               FontSize="11" Foreground="#D4C9C0"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                                <Button Command="{x:Bind ViewModel.RefreshStatusCommand}"
-                                        Style="{StaticResource SecondaryButtonStyle}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontSize="14" Glyph="&#xE72C;"/>
-                                        <TextBlock Text="Verificar conexión"/>
-                                    </StackPanel>
-                                </Button>
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-                </StackPanel>
-
-                <!-- ═══ SECCIÓN INSTRUCCIONES ═══ -->
-                <StackPanel Spacing="14">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Border Width="3" Height="18" CornerRadius="2"
-                                Background="{StaticResource AnfetaAccentBrush}"/>
-                        <FontIcon FontSize="14"
-                                  Foreground="{StaticResource AnfetaAccentBrush}"
-                                  Glyph="&#xE946;"/>
-                        <TextBlock Text="¿CÓMO CONECTAR?"
-                                   FontSize="11" FontWeight="SemiBold"
-                                   Foreground="#FFFFFF" CharacterSpacing="100"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
-
-                    <Border Style="{StaticResource CardStyle}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="4"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0"
-                                    Background="{StaticResource AnfetaAccentBrush}"
-                                    CornerRadius="12,0,0,12" Opacity="0.5"/>
                             <StackPanel Grid.Column="1" Spacing="10" Padding="18,16">
 
-                                <!-- Paso 1 -->
+                                <TextBlock Text="¿Cómo conectar?"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="#FFFFFF"/>
+
                                 <Border CornerRadius="8" Padding="14,10"
-                                        Background="#0CFFFFFF"
-                                        BorderBrush="#18FFFFFF" BorderThickness="1">
+                                        Background="#0CFFFFFF" BorderBrush="#18FFFFFF" BorderThickness="1">
                                     <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <Border Grid.Column="0"
-                                                Width="22" Height="22" CornerRadius="999"
-                                                Background="#1AFF6B35" BorderBrush="#30FF6B35"
-                                                BorderThickness="1" VerticalAlignment="Center">
+                                        <Border Grid.Column="0" Width="22" Height="22" CornerRadius="999"
+                                                Background="#1AFF6B35" BorderBrush="#30FF6B35" BorderThickness="1"
+                                                VerticalAlignment="Center">
                                             <TextBlock Text="1" FontSize="10" FontWeight="Bold"
                                                        Foreground="{StaticResource AnfetaAccentBrush}"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"/>
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
-                                        <TextBlock Grid.Column="1"
-                                                   Text="Presiona 'Conectar con Google'."
-                                                   FontSize="12" Foreground="#D4C9C0"
-                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1" Text="Presiona 'Conectar con Google'."
+                                                   FontSize="12" Foreground="#D4C9C0" VerticalAlignment="Center"/>
                                     </Grid>
                                 </Border>
 
-                                <!-- Paso 2 -->
                                 <Border CornerRadius="8" Padding="14,10"
-                                        Background="#0CFFFFFF"
-                                        BorderBrush="#18FFFFFF" BorderThickness="1">
+                                        Background="#0CFFFFFF" BorderBrush="#18FFFFFF" BorderThickness="1">
                                     <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <Border Grid.Column="0"
-                                                Width="22" Height="22" CornerRadius="999"
-                                                Background="#1AFF6B35" BorderBrush="#30FF6B35"
-                                                BorderThickness="1" VerticalAlignment="Top"
-                                                Margin="0,2,0,0">
+                                        <Border Grid.Column="0" Width="22" Height="22" CornerRadius="999"
+                                                Background="#1AFF6B35" BorderBrush="#30FF6B35" BorderThickness="1"
+                                                VerticalAlignment="Top" Margin="0,2,0,0">
                                             <TextBlock Text="2" FontSize="10" FontWeight="Bold"
                                                        Foreground="{StaticResource AnfetaAccentBrush}"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"/>
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="6">
                                             <TextBlock Text="Elige cómo abrir la URL:"
                                                        FontSize="12" Foreground="#D4C9C0"/>
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <Border CornerRadius="6" Padding="8,3,8,3"
-                                                        Background="#1AFF6B35" BorderBrush="#25FF6B35"
-                                                        BorderThickness="1">
+                                                        Background="#1AFF6B35" BorderBrush="#25FF6B35" BorderThickness="1">
                                                     <StackPanel Orientation="Horizontal" Spacing="5">
                                                         <FontIcon Glyph="&#xE8A7;" FontSize="10"
                                                                   Foreground="{StaticResource AnfetaAccentBrush}"/>
-                                                        <TextBlock Text="Abrir navegador"
-                                                                   FontSize="10" FontWeight="SemiBold"
+                                                        <TextBlock Text="Abrir navegador" FontSize="10"
+                                                                   FontWeight="SemiBold"
                                                                    Foreground="{StaticResource AnfetaAccentBrush}"/>
                                                     </StackPanel>
                                                 </Border>
-                                                <TextBlock Text="o" FontSize="11"
-                                                           Foreground="#4A3E36"
+                                                <TextBlock Text="o" FontSize="11" Foreground="#4A3E36"
                                                            VerticalAlignment="Center"/>
                                                 <Border CornerRadius="6" Padding="8,3,8,3"
-                                                        Background="#1A60A5FA" BorderBrush="#2560A5FA"
-                                                        BorderThickness="1">
+                                                        Background="#1A60A5FA" BorderBrush="#2560A5FA" BorderThickness="1">
                                                     <StackPanel Orientation="Horizontal" Spacing="5">
-                                                        <FontIcon Glyph="&#xE8C8;" FontSize="10"
-                                                                  Foreground="#93C5FD"/>
-                                                        <TextBlock Text="Copiar URL"
-                                                                   FontSize="10" FontWeight="SemiBold"
-                                                                   Foreground="#93C5FD"/>
+                                                        <FontIcon Glyph="&#xE8C8;" FontSize="10" Foreground="#93C5FD"/>
+                                                        <TextBlock Text="Copiar URL" FontSize="10"
+                                                                   FontWeight="SemiBold" Foreground="#93C5FD"/>
                                                     </StackPanel>
                                                 </Border>
                                             </StackPanel>
@@ -311,23 +363,19 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- Paso 3 -->
                                 <Border CornerRadius="8" Padding="14,10"
-                                        Background="#0CFFFFFF"
-                                        BorderBrush="#18FFFFFF" BorderThickness="1">
+                                        Background="#0CFFFFFF" BorderBrush="#18FFFFFF" BorderThickness="1">
                                     <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <Border Grid.Column="0"
-                                                Width="22" Height="22" CornerRadius="999"
-                                                Background="#1AFF6B35" BorderBrush="#30FF6B35"
-                                                BorderThickness="1" VerticalAlignment="Center">
+                                        <Border Grid.Column="0" Width="22" Height="22" CornerRadius="999"
+                                                Background="#1AFF6B35" BorderBrush="#30FF6B35" BorderThickness="1"
+                                                VerticalAlignment="Center">
                                             <TextBlock Text="3" FontSize="10" FontWeight="Bold"
                                                        Foreground="{StaticResource AnfetaAccentBrush}"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"/>
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
                                         <TextBlock Grid.Column="1"
                                                    Text="Autoriza el acceso en tu navegador preferido."
@@ -336,23 +384,19 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- Paso 4 -->
                                 <Border CornerRadius="8" Padding="14,10"
-                                        Background="#0CFFFFFF"
-                                        BorderBrush="#18FFFFFF" BorderThickness="1">
+                                        Background="#0CFFFFFF" BorderBrush="#18FFFFFF" BorderThickness="1">
                                     <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <Border Grid.Column="0"
-                                                Width="22" Height="22" CornerRadius="999"
-                                                Background="#1AFF6B35" BorderBrush="#30FF6B35"
-                                                BorderThickness="1" VerticalAlignment="Center">
+                                        <Border Grid.Column="0" Width="22" Height="22" CornerRadius="999"
+                                                Background="#1AFF6B35" BorderBrush="#30FF6B35" BorderThickness="1"
+                                                VerticalAlignment="Center">
                                             <TextBlock Text="4" FontSize="10" FontWeight="Bold"
                                                        Foreground="{StaticResource AnfetaAccentBrush}"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"/>
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
                                         <TextBlock Grid.Column="1"
                                                    Text="Regresa a la app y presiona 'Verificar conexión'."
@@ -361,35 +405,45 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- Paso final - destacado -->
-                                <Border CornerRadius="8" Padding="14,10"
-                                        Background="#0A34D399"
-                                        BorderBrush="#1834D399" BorderThickness="1">
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Border Grid.Column="0"
-                                                Width="22" Height="22" CornerRadius="999"
-                                                Background="#1A34D399" BorderBrush="#3034D399"
-                                                BorderThickness="1" VerticalAlignment="Center">
-                                            <FontIcon Glyph="&#xE73E;" FontSize="10"
-                                                      Foreground="#34D399"
-                                                      HorizontalAlignment="Center"
-                                                      VerticalAlignment="Center"/>
-                                        </Border>
-                                        <TextBlock Grid.Column="1"
-                                                   Text="¡Listo! Di 'crear evento', 'agendar reunión' o 'nueva cita'."
-                                                   FontSize="12" FontWeight="SemiBold"
-                                                   Foreground="#A7F3D0"
-                                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
-                                    </Grid>
-                                </Border>
-
                             </StackPanel>
                         </Grid>
                     </Border>
+
+                    <!-- Verificar (solo visible en desconectado, tras autorizar) -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0"
+                                    Background="{StaticResource AnfetaAccentBrush}"
+                                    CornerRadius="12,0,0,12" Opacity="0.2"/>
+                            <Grid Grid.Column="1" Padding="18,14" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="¿Ya autorizaste en el navegador?"
+                                               FontSize="12" FontWeight="SemiBold"
+                                               Foreground="#FFFFFF"/>
+                                    <TextBlock Text="Verifica el estado para confirmar la conexión."
+                                               FontSize="11" Foreground="#6B5F56"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Command="{x:Bind ViewModel.RefreshStatusCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon FontSize="13" Glyph="&#xE72C;"/>
+                                        <TextBlock Text="Verificar"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
                 </StackPanel>
 
             </StackPanel>

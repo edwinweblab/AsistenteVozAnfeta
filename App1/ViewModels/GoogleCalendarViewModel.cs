@@ -23,6 +23,10 @@ namespace Anfeta.UI.ViewModels
         // PROPIEDADES OBSERVABLES
         // ─────────────────────────────────────────────
 
+        // Color de la barra lateral de la card de estado
+        // Propiedad de solo lectura — se recalcula cuando cambia IsConnected
+        public string StatusBarColor => IsConnected ? "#34D399" : "#FF6B35";
+
         private bool _isConnected;
         public bool IsConnected
         {
@@ -34,8 +38,14 @@ namespace Anfeta.UI.ViewModels
                     OnPropertyChanged(nameof(IsDisconnected));
                     OnPropertyChanged(nameof(ConnectionStatusText));
                     OnPropertyChanged(nameof(ConnectionStatusIcon));
+                    OnPropertyChanged(nameof(StatusBarColor));
                     ConnectCommand.NotifyCanExecuteChanged();
                     DisconnectCommand.NotifyCanExecuteChanged();
+
+                    // Actualiza el indicador en la barra superior
+                    if (App.MainWindowInstance is MainWindow mainWindow)
+                        App.UIQueue?.TryEnqueue(() =>
+                            mainWindow.UpdateGoogleCalendarIndicator(value));
                 }
             }
         }

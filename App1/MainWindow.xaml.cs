@@ -43,6 +43,7 @@ namespace Anfeta.UI
                 AppNav.SelectedItem = AppNav.MenuItems[0];
 
             SubscribeDropboxState();
+            CheckGoogleCalendarStatusOnStartup();
 
             this.Closed += MainWindow_Closed;
 
@@ -91,6 +92,23 @@ namespace Anfeta.UI
                 ContentFrame?.Navigate(typeof(SettingsView));
         }
 
+        /// Verifica el estado de Google Calendar al iniciar y actualiza el indicador.
+        private async void CheckGoogleCalendarStatusOnStartup()
+        {
+            try
+            {
+                var googleAuth = App.AppHost.Services
+                    .GetRequiredService<Anfeta.UI.Services.Calendar.GoogleAuthService>();
+
+                var connected = await googleAuth.IsConnectedAsync();
+                DispatcherQueue.TryEnqueue(() => UpdateGoogleCalendarIndicator(connected));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GCAL_INDICATOR] Error al verificar estado startup: {ex.Message}");
+            }
+        }
+
         // ═══════════════════════════════════════════
         // Dropbox indicator
         // ═══════════════════════════════════════════
@@ -107,6 +125,47 @@ namespace Anfeta.UI
         {
             DispatcherQueue.TryEnqueue(UpdateDropboxIndicator);
         }
+
+
+        /// Navega a Google Calendar al hacer click en el indicador.
+        private void GoogleCalendarIndicator_Click(object sender, RoutedEventArgs e)
+        {
+            var calItem = AppNav.MenuItems
+                .OfType<NavigationViewItem>()
+                .FirstOrDefault(i => i.Tag?.ToString() == "GoogleCalendar");
+
+            if (calItem != null)
+                AppNav.SelectedItem = calItem;
+
+            if (ContentFrame?.CurrentSourcePageType != typeof(GoogleCalendarView))
+                ContentFrame?.Navigate(typeof(GoogleCalendarView));
+        }
+
+        /// Actualiza el indicador de Google Calendar en la barra superior.
+        /// Entrada: connected (bool) — estado de conexión actual.
+        public void UpdateGoogleCalendarIndicator(bool connected)
+        {
+            if (DotGoogleCal == null || IconGoogleCal == null || TxtGoogleCal == null) return;
+
+            if (connected)
+            {
+                var green = new SolidColorBrush(Color.FromArgb(255, 52, 211, 153));
+                DotGoogleCal.Fill = green;
+                IconGoogleCal.Foreground = green;
+                TxtGoogleCal.Foreground = green;
+                ToolTipService.SetToolTip(GoogleCalendarIndicator, "Google Calendar conectado");
+            }
+            else
+            {
+                var neutral = new SolidColorBrush(Color.FromArgb(255, 74, 62, 54));
+                var neutralText = new SolidColorBrush(Color.FromArgb(255, 107, 95, 86));
+                DotGoogleCal.Fill = neutral;
+                IconGoogleCal.Foreground = neutral;
+                TxtGoogleCal.Foreground = neutralText;
+                ToolTipService.SetToolTip(GoogleCalendarIndicator, "Google Calendar no conectado — click para conectar");
+            }
+        }
+
 
         /// Actualiza el botón Dropbox según el estado actual:
         /// sin configurar → rojo | indexando → amarillo | listo → verde | error → rojo
@@ -165,5 +224,6 @@ namespace Anfeta.UI
             Debug.WriteLine("MAINWINDOW: Closed");
             ((App)Application.Current).CleanupAndExit();
         }
+
     }
 }

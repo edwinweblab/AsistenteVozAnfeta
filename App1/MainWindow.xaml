@@ -185,6 +185,35 @@
                                        VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
+                    <!-- Google Calendar -->
+                    <Button x:Name="GoogleCalendarIndicator"
+                            Background="Transparent"
+                            BorderThickness="1"
+                            BorderBrush="Transparent"
+                            Padding="10,6"
+                            CornerRadius="8"
+                            Click="GoogleCalendarIndicator_Click"
+                            ToolTipService.ToolTip="Google Calendar">
+                                            <Button.Resources>
+                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
+                                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                                            </Button.Resources>
+                                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                                <Ellipse x:Name="DotGoogleCal"
+                                     Width="7" Height="7"
+                                     Fill="#4A3E36"
+                                     VerticalAlignment="Center"/>
+                                                <FontIcon x:Name="IconGoogleCal"
+                                      Glyph="&#xE787;"
+                                      FontSize="14"
+                                      Foreground="#4A3E36"/>
+                                                <TextBlock x:Name="TxtGoogleCal"
+                                       Text="Calendar"
+                                       FontSize="12"
+                                       Foreground="#6B5F56"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
 
                 </StackPanel>
             </Grid>
@@ -327,6 +356,7 @@
                             <Setter Target="TxtInternet.Visibility" Value="Collapsed"/>
                             <Setter Target="TxtMic.Visibility" Value="Collapsed"/>
                             <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
+                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed"/>
                         </VisualState.Setters>
                     </VisualState>
 
@@ -341,6 +371,7 @@
                             <Setter Target="TxtInternet.Visibility" Value="Visible"/>
                             <Setter Target="TxtMic.Visibility" Value="Visible"/>
                             <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
+                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed"/>
                         </VisualState.Setters>
                     </VisualState>
 
@@ -355,6 +386,7 @@
                             <Setter Target="TxtInternet.Visibility" Value="Visible"/>
                             <Setter Target="TxtMic.Visibility" Value="Visible"/>
                             <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
+                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Visible"/>
                         </VisualState.Setters>
                     </VisualState>
                 </VisualStateGroup>

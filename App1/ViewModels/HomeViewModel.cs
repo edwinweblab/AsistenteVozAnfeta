@@ -774,7 +774,9 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    var fastRequiresConfirmation = RequiresConfirmation(fastResult.Scope, null);
+                    // ── FAST CLASSIFIER: routing por scope ──────────────────────────
+                    // Cambio: acción = fastResult.Action (antes pasaba null → bug)
+                    var fastRequiresConfirmation = RequiresConfirmation(fastResult.Scope, fastResult.Action);
                     Debug.WriteLine($"[FAST] requires_confirmation={fastRequiresConfirmation}");
 
                     if (fastRequiresConfirmation)
@@ -782,37 +784,64 @@ namespace Anfeta.UI.ViewModels
                         _pendingIntent = fastResult.Intent;
                         _pendingScope = fastResult.Scope;
                         _pendingAppKey = fastResult.AppKey;
+                        _pendingProvider = fastResult.Provider;
+                        _pendingResource = fastResult.Resource;
+                        _pendingAction = fastResult.Action;
                         _pendingRawJson = JsonSerializer.Serialize(fastResult);
 
                         IsListening = false;
                         ListenOnceCommand.NotifyCanExecuteChanged();
 
                         UpdateUiSafe(
-                            $"Confirmación requerida para: {fastResult.Intent} {(fastResult.AppKey ?? "")}. Di 'confirmar' o 'cancelar'.",
+                            $"Confirmación requerida para: {fastResult.Intent}. Di 'confirmar' o 'cancelar'.",
                             "Confirmación requerida"
                         );
 
                         if (_backgroundMode)
                             await SpeakSafeAsync("Confirmación requerida. Di confirmar o cancelar.");
 
-                        Debug.WriteLine("[FAST] Acción guardada como pending. Esperando confirmación...");
+                        Debug.WriteLine("[FAST] Acción API guardada como pending. Esperando confirmación...");
                         return;
                     }
 
-                    if (!_localExecutor.TryExecute(fastResult.Intent, fastResult.Scope, fastResult.AppKey, out var fastExecMsg))
+                    // LOCAL: ejecutar directamente
+                    if (string.Equals(fastResult.Scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ResetAfterActionAsync(fastExecMsg, "Error", speak: fastExecMsg);
+                        if (!_localExecutor.TryExecute(fastResult.Intent, fastResult.Scope, fastResult.AppKey, out var fastExecMsg))
+                        {
+                            await ResetAfterActionAsync(fastExecMsg, "Error", speak: fastExecMsg);
+                            return;
+                        }
+
+                        _contextManager.AddToHistory(fastResult.Intent, fastResult.AppKey);
+                        if (fastResult.Intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase))
+                            _contextManager.SetActiveApp(fastResult.AppKey!);
+                        else if (fastResult.Intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
+                            _contextManager.ClearActiveApp();
+
+                        await ResetAfterActionAsync(fastExecMsg, fastExecMsg, speak: fastExecMsg);
                         return;
                     }
 
-                    _contextManager.AddToHistory(fastResult.Intent, fastResult.AppKey);
-                    if (fastResult.Intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase))
-                        _contextManager.SetActiveApp(fastResult.AppKey!);
-                    else if (fastResult.Intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
-                        _contextManager.ClearActiveApp();
+                    // API: ejecutar a través del executor
+                    if (string.Equals(fastResult.Scope, "API", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Serializar params si existen
+                        string? fastParamsJson = null;
+                        if (fastResult.Params?.Count > 0)
+                            fastParamsJson = JsonSerializer.Serialize(fastResult.Params);
 
-                    await ResetAfterActionAsync(fastExecMsg, fastExecMsg, speak: fastExecMsg);
-                    return;
+                        var (fastOk, fastMsg) = await _apiExecutor.ExecuteAsync(
+                            fastResult.Provider,
+                            fastResult.Resource,
+                            fastResult.Action,
+                            fastParamsJson,
+                            ct);
+
+                        _contextManager.AddToHistory($"API:{fastResult.Resource}:{fastResult.Action}", null);
+                        await ResetAfterActionAsync(fastMsg, fastOk ? "Listo." : "Error", speak: fastMsg);
+                        return;
+                    }
                 }
 
                 // ===== IA =====

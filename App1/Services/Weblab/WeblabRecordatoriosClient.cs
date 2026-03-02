@@ -32,7 +32,10 @@ namespace Anfeta.UI.Services.Weblab
                 if (!ok || string.IsNullOrWhiteSpace(phone))
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu teléfono." };
 
-                var url = $"/api/recordatorios/usuario/{Uri.EscapeDataString(phone)}";
+                var normalizedPhone = phone.Replace("+", "").Replace(" ", "");
+                if (normalizedPhone.Length > 10)
+                    normalizedPhone = normalizedPhone[^10..];
+                var url = $"/api/recordatorios/usuario/{Uri.EscapeDataString(normalizedPhone)}";
 
                 using var resp = await _http.GetAsync(url, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
@@ -76,8 +79,12 @@ namespace Anfeta.UI.Services.Weblab
                 if (!resp.IsSuccessStatusCode)
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude obtener recordatorios pendientes." };
 
+                var normalizedPhone = phone.Replace("+", "").Replace(" ", "");
+                if (normalizedPhone.Length > 10)
+                    normalizedPhone = normalizedPhone[^10..];
+
                 var recordatorios = ParseRecordatorios(json)
-                    .Where(r => r.UserId == phone.Replace("+52", ""))
+                    .Where(r => r.UserId == normalizedPhone)
                     .ToList();
 
                 if (recordatorios.Count == 0)
@@ -108,7 +115,10 @@ namespace Anfeta.UI.Services.Weblab
                 if (!ok || string.IsNullOrWhiteSpace(phone))
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu teléfono." };
 
-                var url = $"/api/recordatorios/usuario/{Uri.EscapeDataString(phone)}";
+                var normalizedPhone = phone.Replace("+", "").Replace(" ", "");
+                if (normalizedPhone.Length > 10)
+                    normalizedPhone = normalizedPhone[^10..];
+                var url = $"/api/recordatorios/usuario/{Uri.EscapeDataString(normalizedPhone)}";
 
                 using var resp = await _http.GetAsync(url, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);
@@ -149,7 +159,10 @@ namespace Anfeta.UI.Services.Weblab
                 if (!ok || string.IsNullOrWhiteSpace(phone))
                     return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu teléfono." };
 
-                var url = $"/api/recordatorios/usuario/{Uri.EscapeDataString(phone)}";
+                var normalizedPhone = phone.Replace("+", "").Replace(" ", "");
+                if (normalizedPhone.Length > 10)
+                    normalizedPhone = normalizedPhone[^10..];
+                var url = $"/api/recordatorios/usuario/{Uri.EscapeDataString(normalizedPhone)}";
 
                 using var resp = await _http.GetAsync(url, ct);
                 var json = await resp.Content.ReadAsStringAsync(ct);

@@ -4,6 +4,8 @@ using Anfeta.UI.Services.Auth;
 using Anfeta.UI.Services.Calendar;
 using Anfeta.UI.Services.Weblab;
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,8 +19,8 @@ namespace Anfeta.UI.Services
         private readonly WeblabAuthClient _auth;
         private readonly WeblabReportesClient _reportes;
         private readonly WeblabRecordatoriosClient _recordatorios;
-        private readonly GoogleCalendarClient _googleCalendar;  // NUEVO
-        private readonly GoogleAuthService _googleAuth;          // NUEVO
+        private readonly GoogleCalendarClient _googleCalendar;
+        private readonly GoogleAuthService _googleAuth;
         private string? _cachedAssignee;
 
         public ApiActionExecutor(
@@ -27,8 +29,8 @@ namespace Anfeta.UI.Services
             WeblabReportesClient reportes,
             WeblabRecordatoriosClient recordatorios,
             WeblabAuthClient auth,
-            GoogleCalendarClient googleCalendar,   // NUEVO
-            GoogleAuthService googleAuth)           // NUEVO
+            GoogleCalendarClient googleCalendar,
+            GoogleAuthService googleAuth)
         {
             _actividades = actividades;
             _revisiones = revisiones;
@@ -40,7 +42,9 @@ namespace Anfeta.UI.Services
         }
 
         /// <summary>
-        /// Ejecuta llamada API basada en provider/resource/action
+        /// Ejecuta llamada API basada en provider/resource/action.
+        /// Entrada: provider (weblab|google), resource, action, paramsJson opcional.
+        /// Salida: (ok, mensaje para TTS).
         /// </summary>
         public Task<(bool ok, string message)> ExecuteAsync(
             string? provider,
@@ -61,202 +65,201 @@ namespace Anfeta.UI.Services
             resource = (resource ?? "").Trim().ToLowerInvariant();
             action = (action ?? "").Trim().ToLowerInvariant();
 
-            if (string.IsNullOrWhiteSpace(provider) || provider != "weblab")
-                return (false, $"Provider no soportado: '{provider}'. Solo 'weblab' está disponible.");
-
-            if (string.IsNullOrWhiteSpace(resource))
-                return (false, "Falta especificar el resource (actividades, revisiones, etc).");
-
-            if (string.IsNullOrWhiteSpace(action))
-                return (false, "Falta especificar la action (list, today, search, get, etc).");
-
-            // =========================
-            // ACTIVIDADES
-            // =========================
-            if (resource == "actividades")
+            // ── VALIDAR PROVIDER ─────────────────────────────────────────────
+            var validProviders = new[] { "weblab", "google" };
+            if (string.IsNullOrWhiteSpace(provider) ||
+                !Array.Exists(validProviders, p => p == provider))
             {
-                // ✅ TODAS MIS ACTIVIDADES
-                if (action == "list")
+                return (false, $"Provider no soportado: '{provider}'. Disponibles: weblab, google.");
+            }
+
+            // Para weblab, resource y action son obligatorios
+            if (provider == "weblab")
+            {
+                if (string.IsNullOrWhiteSpace(resource))
+                    return (false, "Falta especificar el resource (actividades, revisiones, etc).");
+
+                if (string.IsNullOrWhiteSpace(action))
+                    return (false, "Falta especificar la action (list, today, search, get, etc).");
+            }
+
+            // ════════════════════════════════════════
+            // WEBLAB
+            // ════════════════════════════════════════
+            if (provider == "weblab")
+            {
+                // ── ACTIVIDADES ──────────────────────────────────────────────
+                if (resource == "actividades")
                 {
-                    var limit = TryGetInt(paramsJson, "limit") ?? 10;
-                    var r = await _actividades.GetMyActivitiesAsync(limit, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // ✅ MIS ACTIVIDADES DE HOY
-                if (action == "today")
-                {
-                    var assignee = await GetOrFetchAssigneeAsync(ct);
-                    if (string.IsNullOrWhiteSpace(assignee))
-                        return (false, "No pude identificar tu usuario.");
-
-                    var r = await _actividades.GetTodayActivitiesAsync(assignee, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // ✅ BUSCAR
-                if (action == "search")
-                {
-                    var q = TryGetString(paramsJson, "q");
-                    if (string.IsNullOrWhiteSpace(q))
-                        return (false, "Búsqueda inválida: falta params.q.");
-
-                    var limit = TryGetInt(paramsJson, "limit") ?? 10;
-                    var r = await _actividades.SearchTitlesAsync(q!, limit, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // ✅ DETALLES POR ID
-                if (action == "get")
-                {
-                    var id = TryGetString(paramsJson, "id");
-                    if (string.IsNullOrWhiteSpace(id))
-                        return (false, "Falta el ID de la actividad.");
-
-                    var r = await _actividades.GetActivityByIdAsync(id!, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // ✅ CREAR ACTIVIDAD
-                if (action == "create")
-                {
-                    CreateActividadRequest? request = null;
-                    try
+                    if (action == "list")
                     {
-                        request = JsonSerializer.Deserialize<CreateActividadRequest>(paramsJson);
-                    }
-                    catch (Exception ex)
-                    {
-                        return (false, $"Error parseando datos de actividad: {ex.Message}");
+                        var limit = TryGetInt(paramsJson, "limit") ?? 10;
+                        var r = await _actividades.GetMyActivitiesAsync(limit, ct);
+                        return (r.Ok, r.PlainText);
                     }
 
-                    if (request == null || string.IsNullOrWhiteSpace(request.Titulo))
-                        return (false, "Falta el título de la actividad.");
+                    if (action == "today")
+                    {
+                        var assignee = await GetOrFetchAssigneeAsync(ct);
+                        if (string.IsNullOrWhiteSpace(assignee))
+                            return (false, "No pude identificar tu usuario.");
 
-                    var r = await _actividades.CreateActivityAsync(request, ct);
-                    return (r.Ok, r.PlainText);
+                        var r = await _actividades.GetTodayActivitiesAsync(assignee, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "search")
+                    {
+                        var q = TryGetString(paramsJson, "q");
+                        if (string.IsNullOrWhiteSpace(q))
+                            return (false, "Búsqueda inválida: falta params.q.");
+
+                        var limit = TryGetInt(paramsJson, "limit") ?? 10;
+                        var r = await _actividades.SearchTitlesAsync(q!, limit, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "get")
+                    {
+                        var id = TryGetString(paramsJson, "id");
+                        if (string.IsNullOrWhiteSpace(id))
+                            return (false, "Falta el ID de la actividad.");
+
+                        var r = await _actividades.GetActivityByIdAsync(id!, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "create")
+                    {
+                        CreateActividadRequest? request = null;
+                        try
+                        {
+                            request = JsonSerializer.Deserialize<CreateActividadRequest>(paramsJson);
+                        }
+                        catch (Exception ex)
+                        {
+                            return (false, $"Error parseando datos de actividad: {ex.Message}");
+                        }
+
+                        if (request == null || string.IsNullOrWhiteSpace(request.Titulo))
+                            return (false, "Falta el título de la actividad.");
+
+                        var r = await _actividades.CreateActivityAsync(request, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get, create.");
                 }
 
-                return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get, create.");
+                // ── REVISIONES ───────────────────────────────────────────────
+                if (resource == "revisiones")
+                {
+                    if (action == "today")
+                    {
+                        var r = await _revisiones.GetTodayRevisionsAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "en-curso" || action == "activa")
+                    {
+                        var r = await _revisiones.GetActiveRevisionsAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    return (false, $"Acción '{action}' no soportada para revisiones. Disponibles: today, en-curso.");
+                }
+
+                // ── REPORTES ─────────────────────────────────────────────────
+                if (resource == "reportes")
+                {
+                    if (action == "list")
+                    {
+                        var date = TryGetString(paramsJson, "date");
+                        var r = await _reportes.GetMyRevisionsReportAsync(date, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "today")
+                    {
+                        var today = DateTime.Today.ToString("yyyy-MM-dd");
+                        var r = await _reportes.GetMyRevisionsReportAsync(today, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    return (false, $"Acción '{action}' no soportada para reportes. Disponibles: list, today.");
+                }
+
+                // ── RECORDATORIOS ─────────────────────────────────────────────
+                if (resource == "recordatorios")
+                {
+                    if (action == "list")
+                    {
+                        var r = await _recordatorios.GetMyRecordatoriosAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "pending" || action == "pendientes")
+                    {
+                        var r = await _recordatorios.GetMyPendingRecordatoriosAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "today")
+                    {
+                        var r = await _recordatorios.GetMyTodayRecordatoriosAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "tomorrow" || action == "mañana")
+                    {
+                        var r = await _recordatorios.GetMyTomorrowRecordatoriosAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "create")
+                    {
+                        var mensaje = TryGetString(paramsJson, "mensaje");
+                        var fechaHora = TryGetString(paramsJson, "fechaHora");
+
+                        if (string.IsNullOrWhiteSpace(mensaje))
+                            return (false, "Falta el mensaje del recordatorio.");
+
+                        if (string.IsNullOrWhiteSpace(fechaHora))
+                            return (false, "Falta la fecha/hora del recordatorio.");
+
+                        var duracion = TryGetInt(paramsJson, "duracionMinutos") ?? 30;
+                        var r = await _recordatorios.CreateRecordatorioAsync(mensaje!, fechaHora!, duracion, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "complete")
+                    {
+                        var id = TryGetString(paramsJson, "id");
+                        if (string.IsNullOrWhiteSpace(id))
+                            return (false, "Falta el ID del recordatorio.");
+
+                        var r = await _recordatorios.CompleteRecordatorioAsync(id!, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, complete.");
+                }
+
+                return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones, reportes, recordatorios.");
             }
 
-            // =========================
-            // REVISIONES
-            // =========================
-            if (resource == "revisiones")
-            {
-                if (action == "today")
-                {
-                    var r = await _revisiones.GetTodayRevisionsAsync(ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                if (action == "en-curso" || action == "activa")
-                {
-                    var r = await _revisiones.GetActiveRevisionsAsync(ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                return (false, $"Acción '{action}' no soportada para revisiones. Disponibles: today, en-curso.");
-            }
-
-            // =========================
-            // REPORTES
-            // =========================
-            if (resource == "reportes")
-            {
-                if (action == "list")
-                {
-                    var date = TryGetString(paramsJson, "date");
-                    var r = await _reportes.GetMyRevisionsReportAsync(date, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                if (action == "today")
-                {
-                    var today = DateTime.Today.ToString("yyyy-MM-dd");
-                    var r = await _reportes.GetMyRevisionsReportAsync(today, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                return (false, $"Acción '{action}' no soportada para reportes. Disponibles: list, today.");
-            }
-
-            // =========================
-            // RECORDATORIOS
-            // =========================
-            if (resource == "recordatorios")
-            {
-                // Todos los recordatorios del usuario
-                if (action == "list")
-                {
-                    var r = await _recordatorios.GetMyRecordatoriosAsync(ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // Recordatorios pendientes (activos y no enviados)
-                if (action == "pending" || action == "pendientes")
-                {
-                    var r = await _recordatorios.GetMyPendingRecordatoriosAsync(ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // Recordatorios de hoy
-                if (action == "today")
-                {
-                    var r = await _recordatorios.GetMyTodayRecordatoriosAsync(ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // Recordatorios de mañana
-                if (action == "tomorrow" || action == "mañana")
-                {
-                    var r = await _recordatorios.GetMyTomorrowRecordatoriosAsync(ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // Crear recordatorio
-                if (action == "create")
-                {
-                    var mensaje = TryGetString(paramsJson, "mensaje");
-                    var fechaHora = TryGetString(paramsJson, "fechaHora");
-
-                    if (string.IsNullOrWhiteSpace(mensaje))
-                        return (false, "Falta el mensaje del recordatorio.");
-
-                    if (string.IsNullOrWhiteSpace(fechaHora))
-                        return (false, "Falta la fecha/hora del recordatorio.");
-
-                    var duracion = TryGetInt(paramsJson, "duracionMinutos") ?? 30;
-
-                    var r = await _recordatorios.CreateRecordatorioAsync(mensaje!, fechaHora!, duracion, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                // Completar recordatorio
-                if (action == "complete")
-                {
-                    var id = TryGetString(paramsJson, "id");
-
-                    if (string.IsNullOrWhiteSpace(id))
-                        return (false, "Falta el ID del recordatorio.");
-
-                    var r = await _recordatorios.CompleteRecordatorioAsync(id!, ct);
-                    return (r.Ok, r.PlainText);
-                }
-
-                return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, complete.");
-            }
-
-            // =========================
-            // GOOGLE CALENDAR
-            // =========================
+            // ════════════════════════════════════════
+            // GOOGLE
+            // ════════════════════════════════════════
             if (provider == "google")
             {
                 if (resource != "calendar")
                     return (false, $"Resource '{resource}' no soportado para Google. Usa 'calendar'.");
 
-                // ── STATUS ──────────────────────────────────────────
+                if (string.IsNullOrWhiteSpace(action))
+                    return (false, "Falta especificar la action para Google Calendar.");
+
+                // ── STATUS ───────────────────────────────────────────────────
                 if (action == "status")
                 {
                     var connected = await _googleAuth.IsConnectedAsync(ct);
@@ -265,24 +268,23 @@ namespace Anfeta.UI.Services
                         : (false, "Tu Google Calendar no está conectado. Di 'conectar Google Calendar' para vincularlo.");
                 }
 
-                // ── CONNECT ─────────────────────────────────────────
+                // ── CONNECT ──────────────────────────────────────────────────
                 if (action == "connect")
                 {
                     var (ok, msg) = await _googleAuth.StartOAuthAsync(ct);
                     return (ok, msg);
                 }
 
-                // ── DISCONNECT ──────────────────────────────────────
+                // ── DISCONNECT ───────────────────────────────────────────────
                 if (action == "disconnect")
                 {
                     var (ok, msg) = await _googleAuth.DisconnectAsync(ct);
                     return (ok, msg);
                 }
 
-                // ── CREATE EVENT ────────────────────────────────────
+                // ── CREATE EVENT ─────────────────────────────────────────────
                 if (action == "create")
                 {
-                    // Verificar conexión antes de intentar crear
                     var connected = await _googleAuth.IsConnectedAsync(ct);
                     if (!connected)
                         return (false, "Tu Google Calendar no está conectado. Di 'conectar Google Calendar' primero.");
@@ -296,22 +298,20 @@ namespace Anfeta.UI.Services
                     var end = TryGetString(paramsJson, "end");
 
                     if (string.IsNullOrWhiteSpace(summary))
-                        return (false, "Falta el título del evento (params.summary).");
+                        return (false, "Falta el título del evento.");
 
                     if (string.IsNullOrWhiteSpace(start))
-                        return (false, "Falta la fecha de inicio del evento (params.start).");
+                        return (false, "Falta la fecha de inicio del evento.");
 
                     if (string.IsNullOrWhiteSpace(end))
-                        return (false, "Falta la fecha de fin del evento (params.end).");
+                        return (false, "Falta la fecha de fin del evento.");
 
                     var description = TryGetString(paramsJson, "description");
                     var location = TryGetString(paramsJson, "location");
 
                     var result = await _googleCalendar.CreateEventAsync(
-                        userId!, summary!, start!, end!,
-                        description, location, ct);
+                        userId!, summary!, start!, end!, description, location, ct);
 
-                    // El backend indicó que necesita auth (tokens expirados/revocados)
                     if (result.AuthNeeded)
                     {
                         await _googleAuth.StartOAuthAsync(ct);
@@ -321,7 +321,7 @@ namespace Anfeta.UI.Services
                     return (result.Ok, result.Message);
                 }
 
-                // ── LIST EVENTS ─────────────────────────────────────
+                // ── LIST EVENTS ──────────────────────────────────────────────
                 if (action == "list")
                 {
                     var connected = await _googleAuth.IsConnectedAsync(ct);
@@ -329,17 +329,31 @@ namespace Anfeta.UI.Services
                         return (false, "Tu Google Calendar no está conectado.");
 
                     var userId = await _googleAuth.GetUserIdAsync(ct);
+                    if (string.IsNullOrWhiteSpace(userId))
+                        return (false, "No pude identificar tu usuario.");
+
                     var timeMin = TryGetString(paramsJson, "timeMin");
                     var timeMax = TryGetString(paramsJson, "timeMax");
+
+                    // Si no vienen rangos en params → asumir hoy por defecto
+                    if (string.IsNullOrWhiteSpace(timeMin))
+                    {
+                        timeMin = DateTime.Today.ToString("yyyy-MM-dd'T'00:00:00'-06:00'");
+                        timeMax = DateTime.Today.ToString("yyyy-MM-dd'T'23:59:59'-06:00'");
+                    }
+
                     var max = TryGetInt(paramsJson, "maxResults") ?? 10;
 
-                    var (ok, msg, _) = await _googleCalendar.ListEventsAsync(
+                    var (ok, _, items) = await _googleCalendar.ListEventsAsync(
                         userId!, timeMin, timeMax, max, ct);
 
-                    return (ok, msg);
+                    if (!ok)
+                        return (false, "No pude consultar tu Google Calendar.");
+
+                    return (true, BuildCalendarVoiceResponse(items, timeMin, timeMax));
                 }
 
-                // ── DELETE EVENT ────────────────────────────────────
+                // ── DELETE EVENT ─────────────────────────────────────────────
                 if (action == "delete")
                 {
                     var connected = await _googleAuth.IsConnectedAsync(ct);
@@ -350,7 +364,7 @@ namespace Anfeta.UI.Services
                     var eventId = TryGetString(paramsJson, "eventId");
 
                     if (string.IsNullOrWhiteSpace(eventId))
-                        return (false, "Falta el ID del evento (params.eventId).");
+                        return (false, "Falta el ID del evento.");
 
                     var (ok, msg) = await _googleCalendar.DeleteEventAsync(userId!, eventId!, ct);
                     return (ok, msg);
@@ -359,9 +373,14 @@ namespace Anfeta.UI.Services
                 return (false, $"Acción '{action}' no soportada para Google Calendar. Disponibles: status, connect, disconnect, create, list, delete.");
             }
 
-            return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones, reportes, recordatorios.");
+            return (false, $"Provider '{provider}' no manejado.");
         }
 
+        // ────────────────────────────────────────────────────────────────────
+        // HELPERS PRIVADOS
+        // ────────────────────────────────────────────────────────────────────
+
+        /// Obtiene o cachea el assignee del usuario autenticado.
         private async Task<string?> GetOrFetchAssigneeAsync(CancellationToken ct)
         {
             if (!string.IsNullOrWhiteSpace(_cachedAssignee))
@@ -377,6 +396,7 @@ namespace Anfeta.UI.Services
             return null;
         }
 
+        /// Extrae string de un JSON por nombre de propiedad.
         private static string? TryGetString(string? json, string prop)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
@@ -386,16 +406,13 @@ namespace Anfeta.UI.Services
                 var root = doc.RootElement;
                 if (root.ValueKind != JsonValueKind.Object) return null;
                 if (!root.TryGetProperty(prop, out var el)) return null;
-
                 if (el.ValueKind == JsonValueKind.String) return el.GetString();
                 return el.GetRawText();
             }
-            catch
-            {
-                return null;
-            }
+            catch { return null; }
         }
 
+        /// Extrae int de un JSON por nombre de propiedad.
         private static int? TryGetInt(string? json, string prop)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
@@ -404,16 +421,66 @@ namespace Anfeta.UI.Services
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
                 if (!root.TryGetProperty(prop, out var el)) return null;
-
                 if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var v)) return v;
                 if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var s)) return s;
+                return null;
+            }
+            catch { return null; }
+        }
 
-                return null;
-            }
-            catch
+        /// Construye respuesta de voz legible a partir de la lista de eventos.
+        /// Entrada: lista de eventos, rango de consulta (para inferir si es "hoy" o "semana").
+        /// Salida: texto para TTS.
+        private static string BuildCalendarVoiceResponse(
+            List<GoogleCalendarEventItem> items,
+            string? timeMin,
+            string? timeMax)
+        {
+            // Detectar si el rango es solo hoy
+            var isOnlyToday =
+                timeMin != null &&
+                DateTime.TryParse(timeMin, out var rangeMin) &&
+                rangeMin.Date == DateTime.Today &&
+                timeMax != null &&
+                DateTime.TryParse(timeMax, out var rangeMax) &&
+                rangeMax.Date == DateTime.Today;
+
+            if (items.Count == 0)
             {
-                return null;
+                return isOnlyToday
+                    ? "No tienes eventos en tu calendario para hoy."
+                    : "No tienes eventos próximos en tu calendario.";
             }
+
+            var header = isOnlyToday
+                ? $"Hoy tienes {items.Count} evento{(items.Count > 1 ? "s" : "")}"
+                : $"Tienes {items.Count} evento{(items.Count > 1 ? "s" : "")} próximo{(items.Count > 1 ? "s" : "")}";
+
+            var parts = new List<string> { header };
+            var culture = new CultureInfo("es-MX");
+
+            foreach (var ev in items)
+            {
+                if (string.IsNullOrWhiteSpace(ev.Summary)) continue;
+
+                if (DateTime.TryParse(ev.Start, out var startDt))
+                {
+                    var hora = startDt.ToString("HH:mm");
+                    var fecha = startDt.Date == DateTime.Today
+                        ? ""
+                        : startDt.ToString("dddd dd", culture);
+
+                    parts.Add(string.IsNullOrWhiteSpace(fecha)
+                        ? $"a las {hora}, {ev.Summary}"
+                        : $"el {fecha} a las {hora}, {ev.Summary}");
+                }
+                else
+                {
+                    parts.Add(ev.Summary);
+                }
+            }
+
+            return string.Join(". ", parts) + ".";
         }
     }
 }

@@ -276,7 +276,12 @@ namespace Anfeta.UI.Services.Calendar
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                if (!root.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Array)
+                JsonElement dataEl;
+                if (root.TryGetProperty("events", out var eventsEl) && eventsEl.ValueKind == JsonValueKind.Array)
+                    dataEl = eventsEl;
+                else if (root.TryGetProperty("data", out var dataEl2) && dataEl2.ValueKind == JsonValueKind.Array)
+                    dataEl = dataEl2;
+                else
                     return (true, "No hay eventos disponibles.", empty);
 
                 var items = new System.Collections.Generic.List<GoogleCalendarEventItem>();
