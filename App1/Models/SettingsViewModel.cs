@@ -1,6 +1,7 @@
 ﻿// ViewModels/SettingsViewModel.cs
 using Anfeta.UI.Models;
 using Anfeta.UI.Services;
+using Anfeta.UI.Services.Speech;
 using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;

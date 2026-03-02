@@ -1,5 +1,5 @@
 ﻿using Anfeta.UI.Data;
-using Anfeta.UI.Services;
+using Anfeta.UI.Services.Groq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;

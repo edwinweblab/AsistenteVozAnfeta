@@ -1,5 +1,6 @@
 ﻿using Anfeta.UI.Services;
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.Speech;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;

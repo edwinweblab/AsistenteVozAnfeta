@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models;
+﻿using Anfeta.UI.Models.Weblab;
 using System;
 using System.Collections.Generic;
 using System.IO;
