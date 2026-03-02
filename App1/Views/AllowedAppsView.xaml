@@ -30,7 +30,7 @@
 				<Button Content="Re-escanear apps instaladas"
                         Padding="14,10"
                         CornerRadius="10"
-                        Command="{Binding LoadCommand}"/>
+                        Command="{Binding RescanCommand}"/>
 
 				<Button Content="Agregar manualmente (.exe)"
                         Padding="14,10"

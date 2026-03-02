@@ -1,4 +1,4 @@
-﻿// LocalActionExecutor.cs
+﻿// Services/LocalActionExecutor.cs
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -25,7 +25,10 @@ namespace Anfeta.UI.Services.Interpretation
             _registry = registry;
         }
 
-        /// <summary>Verificar si app está permitida</summary>
+        /// <summary>
+        /// Verificar si app está permitida
+        /// (Tu registry SOLO carga apps enabled=1, así que si existe aquí, está permitida)
+        /// </summary>
         public bool IsAllowedApp(string? appKey)
         {
             if (string.IsNullOrWhiteSpace(appKey)) return false;
@@ -38,9 +41,17 @@ namespace Anfeta.UI.Services.Interpretation
             return _registry.GetAllowedAppsMessage();
         }
 
-        /// <summary>Ejecutar acción local</summary>
+        /// <summary>
+        /// Ejecutar acción local
+        /// Soporta:
+        /// - .lnk (recomendado para apps del menú inicio como Discord)
+        /// - ruta .exe completa
+        /// - nombre .exe (si está en PATH o Windows lo resuelve)
+        /// </summary>
         public bool TryExecute(string intent, string scope, string? appKey, out string message)
         {
+            message = "";
+
             if (!string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
             {
                 message = "Acción no es LOCAL.";
@@ -63,41 +74,53 @@ namespace Anfeta.UI.Services.Interpretation
             var appDef = _registry.GetApp(key);
             if (appDef == null)
             {
-                message = $"La aplicación '{key}' no está disponible.";
+                message = $"La aplicación '{key}' no está permitida o no existe.";
                 return false;
             }
 
-            // Puede ser ruta completa o solo nombre exe (según registry)
-            var exeOrPath = (appDef.ExecutableName ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(exeOrPath))
+            // En tu CapabilityRegistry, ExecutableName ya contiene:
+            // - EjecutablePath (ruta completa) si existe
+            // - Si no, ExecutableName
+            var target = (appDef.ExecutableName ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(target))
             {
                 message = $"La aplicación '{appDef.FriendlyName}' no tiene ejecutable configurado.";
                 return false;
             }
 
-            // Determinar nombre de ejecutable para blacklist (si es ruta, se toma el filename)
-            var exeNameOnly = GetExeNameOnly(exeOrPath);
+            // Si es .lnk, Windows resuelve target+args+workdir
+            var isLink = target.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase);
 
-            if (IsBlocked(exeNameOnly))
+            // Blacklist solo aplica a EXE directos (no a .lnk)
+            if (!isLink)
             {
-                message = $"Por seguridad no puedo ejecutar '{exeNameOnly}'.";
-                return false;
+                var exeNameOnly = GetExeNameOnly(target);
+                if (IsBlocked(exeNameOnly))
+                {
+                    message = $"Por seguridad no puedo ejecutar '{exeNameOnly}'.";
+                    return false;
+                }
             }
 
             try
             {
-                Process.Start(new ProcessStartInfo
+                // Para .lnk: UseShellExecute=true es lo correcto
+                // Para .exe: también funciona bien.
+                var psi = new ProcessStartInfo
                 {
-                    FileName = exeOrPath,   // ruta completa o exe name
+                    FileName = target,
                     UseShellExecute = true
-                });
+                };
+
+                Process.Start(psi);
 
                 message = $"Acción OK: abierto {appDef.FriendlyName}.";
                 return true;
             }
             catch (Exception ex)
             {
-                message = $"Error al ejecutar {key}: {ex.Message}";
+                // Tip: Win32Exception suele dar mensaje útil cuando el target no se puede iniciar.
+                message = $"Error al ejecutar {appDef.FriendlyName}: {ex.Message}";
                 return false;
             }
         }
@@ -112,16 +135,16 @@ namespace Anfeta.UI.Services.Interpretation
 
         private static string GetExeNameOnly(string exeOrPath)
         {
-            // Si es ruta: C:\...\WINWORD.EXE -> winword.exe
-            // Si ya es exe: chrome.exe -> chrome.exe
             try
             {
                 var name = Path.GetFileName(exeOrPath);
-                return string.IsNullOrWhiteSpace(name) ? exeOrPath.ToLowerInvariant() : name.ToLowerInvariant();
+                return string.IsNullOrWhiteSpace(name)
+                    ? exeOrPath.Trim().ToLowerInvariant()
+                    : name.Trim().ToLowerInvariant();
             }
             catch
             {
-                return exeOrPath.ToLowerInvariant();
+                return exeOrPath.Trim().ToLowerInvariant();
             }
         }
 
