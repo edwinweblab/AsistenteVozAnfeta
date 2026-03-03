@@ -1,4 +1,5 @@
-﻿using Anfeta.UI.Models;
+﻿// Data/LocalAppsRepository.cs
+using Anfeta.UI.Models;
 using Microsoft.Data.Sqlite;
 using System;
 using System.Collections.Generic;
@@ -260,7 +261,7 @@ WHERE app_key = @k;
         }
 
         /// <summary>
-        /// Inserta o actualiza app (manual/detected/seed). 
+        /// Inserta o actualiza app (manual/detected/seed).
         /// Nota: app.AppKey se normaliza a minúsculas.
         /// </summary>
         public void UpsertApp(LocalAppEntry app)
@@ -298,6 +299,35 @@ ON CONFLICT(app_key) DO UPDATE SET
             cmd.Parameters.AddWithValue("@en", app.Enabled ? 1 : 0);
             cmd.Parameters.AddWithValue("@src", source);
             cmd.ExecuteNonQuery();
+        }
+
+        /// <summary>
+        /// Upsert seguro para apps detectadas:
+        /// - No pisa "enabled" si el usuario ya la habilitó/deshabilitó.
+        /// - Marca source="detected".
+        /// - Opcional: no sobreescribe apps "seed" (whitelist inicial).
+        /// </summary>
+        public void UpsertDetectedAppSafe(LocalAppEntry detected)
+        {
+            if (detected == null) throw new ArgumentNullException(nameof(detected));
+            if (string.IsNullOrWhiteSpace(detected.AppKey)) return;
+            if (string.IsNullOrWhiteSpace(detected.FriendlyName)) return;
+            if (string.IsNullOrWhiteSpace(detected.ExecutableName)) return;
+
+            var key = NormalizeKey(detected.AppKey);
+
+            var existing = GetByKey(key);
+
+            // Si ya existe, preserva enabled del usuario
+            detected.AppKey = key;
+            detected.Source = "detected";
+            detected.Enabled = existing?.Enabled ?? false;
+
+            // Si ya es seed, no lo pises (evita que detected reemplace tu whitelist)
+            if (existing != null && string.Equals(existing.Source, "seed", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            UpsertApp(detected);
         }
 
         /// <summary>
