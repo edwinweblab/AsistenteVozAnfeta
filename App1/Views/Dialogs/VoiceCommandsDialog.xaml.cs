@@ -1,7 +1,10 @@
 ﻿using Anfeta.UI.Services.VoiceCommands;
+using Anfeta.UI.Views.VoiceCommands;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
@@ -15,7 +18,8 @@ public sealed partial class VoiceCommandsDialog : ContentDialog
     private readonly ObservableCollection<VoiceCommandRow> _rows = new();
     private VoiceCommandRow? _editingRow;
     private readonly TokenGenerator _tokenGen = new();
-
+    private readonly VoiceCommandsTextImportService _importService;
+    private List<VoiceCommand> _pendingImported = new();
     public VoiceCommandsDialog(VoiceCommandsRepository repo, VoiceCommandEngine engine)
     {
         InitializeComponent();
@@ -23,7 +27,7 @@ public sealed partial class VoiceCommandsDialog : ContentDialog
         _engine = engine;
 
         CommandsList.ItemsSource = _rows;
-
+        _importService = App.AppHost.Services.GetRequiredService<VoiceCommandsTextImportService>();
         Loaded += async (_, __) => await LoadAsync();
         PrimaryButtonClick += async (_, __) => await SaveAsync();
     }
@@ -181,4 +185,151 @@ public sealed partial class VoiceCommandsDialog : ContentDialog
         BtnCancelEdit.Visibility = Visibility.Collapsed;
         BtnAdd.Visibility = Visibility.Visible;
     }
+    private void BtnImport_Click(object sender, RoutedEventArgs e)
+    {
+        ListPanel.Visibility = Visibility.Collapsed;
+        EditPanel.Visibility = Visibility.Collapsed;
+        ImportPanel.Visibility = Visibility.Visible;
+
+        BtnAdd.Visibility = Visibility.Collapsed;
+        BtnImport.Visibility = Visibility.Collapsed;
+
+        BtnSaveEdit.Visibility = Visibility.Collapsed;
+        BtnCancelEdit.Visibility = Visibility.Collapsed;
+    }
+    private void BtnImportAnalyze_Click(object sender, RoutedEventArgs e)
+    {
+        var raw = ImportBox.Text ?? "";
+        var parsed = _importService.Parse(raw);
+        _pendingImported = _importService.BuildCommandsGroupedByToken(parsed);
+
+        var top = _pendingImported
+        .Take(8)
+        .Select(c => $"{c.Token}  ({c.Synonyms?.Count ?? 0} sinónimos)")
+        .ToList();
+
+        ImportPreviewText.Text =
+            $"Detectados: {_pendingImported.Count} tokens. " +
+            $"Líneas ignoradas: {parsed.SkippedLines.Count}.\n" +
+            string.Join("\n", top) +
+            (_pendingImported.Count > 8 ? "\n…" : "");
+    }
+
+    private async void BtnImportApply_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pendingImported.Count == 0)
+            BtnImportAnalyze_Click(sender, e);
+
+        if (_pendingImported.Count == 0) return;
+
+        var replace = ImportReplace.IsChecked == true;
+
+        if (replace)
+        {
+            await _repo.SaveAsync(_pendingImported);
+        }
+        else
+        {
+            var existing = await _repo.LoadAsync();
+            var merged = MergeByToken(existing, _pendingImported);
+            await _repo.SaveAsync(merged);
+        }
+
+        await _engine.ReloadAsync();
+
+        // recarga UI
+        await LoadAsync();
+
+        ExitImportMode();
+    }
+
+    private void BtnImportCancel_Click(object sender, RoutedEventArgs e)
+    {
+        ExitImportMode();
+    }
+
+    private void ExitImportMode()
+    {
+        ImportPanel.Visibility = Visibility.Collapsed;
+        ListPanel.Visibility = Visibility.Visible;
+
+        BtnAdd.Visibility = Visibility.Visible;
+        BtnImport.Visibility = Visibility.Visible;
+
+        ImportPreviewText.Text = "Aún no analizado.";
+        ImportBox.Text = "";
+        _pendingImported.Clear();
+    }
+    private static List<VoiceCommand> MergeByToken(
+    List<VoiceCommand> existing,
+    List<VoiceCommand> incoming)
+    {
+        // index por token (clave)
+        var map = new Dictionary<string, VoiceCommand>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var e in existing ?? new List<VoiceCommand>())
+        {
+            if (string.IsNullOrWhiteSpace(e?.Token)) continue;
+            if (!map.ContainsKey(e.Token))
+                map[e.Token] = e;
+        }
+
+        foreach (var inc in incoming ?? new List<VoiceCommand>())
+        {
+            if (inc is null) continue;
+            if (string.IsNullOrWhiteSpace(inc.Token)) continue;
+
+            if (!map.TryGetValue(inc.Token, out var cur))
+            {
+                // nuevo token -> entra tal cual
+                cur = new VoiceCommand
+                {
+                    Name = string.IsNullOrWhiteSpace(inc.Name) ? inc.Token : inc.Name,
+                    Token = inc.Token,
+                    IsEnabled = inc.IsEnabled,
+                    Synonyms = new List<string>()
+                };
+                map[inc.Token] = cur;
+            }
+
+            // habilita si llega algo nuevo (import suele ser verdad)
+            cur.IsEnabled = true;
+
+            // merge synonyms
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (cur.Synonyms != null)
+            {
+                foreach (var s in cur.Synonyms)
+                    AddSyn(set, s);
+            }
+
+            if (inc.Synonyms != null)
+            {
+                foreach (var s in inc.Synonyms)
+                    AddSyn(set, s);
+            }
+
+            // opcional: asegura que el token también sea un "match" por voz
+            // (si NO lo quieres como sinónimo, comenta esta línea)
+            AddSyn(set, inc.Token);
+
+            cur.Synonyms = set
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return map.Values
+            .OrderBy(c => c.Token, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        static void AddSyn(HashSet<string> set, string? s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return;
+            s = s.Trim();
+            if (s.Length == 0) return;
+            set.Add(s);
+        }
+    }
+
 }

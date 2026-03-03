@@ -1009,7 +1009,12 @@ namespace Anfeta.UI.Views
                 if (!LooksAdvanced(rawQuery))
                 {
                     var q = rawQuery.ToLowerInvariant();
-                    items = items.Where(x => (x.Name ?? "").ToLowerInvariant().Contains(q));
+                    items = items.Where(x =>
+                    {
+                        var name = (x.Name ?? "").ToLowerInvariant();
+                        var target = (x.Target ?? "").ToLowerInvariant();
+                        return name.Contains(q) || target.Contains(q);
+                    });
                 }
                 else
                 {
@@ -1081,7 +1086,7 @@ namespace Anfeta.UI.Views
 
                 // 🔥 ICONO SIEMPRE
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
-
+                
                 Results.Add(it);
             }
 
@@ -1118,7 +1123,12 @@ namespace Anfeta.UI.Views
                 if (!LooksAdvanced(rawQuery))
                 {
                     var q = rawQuery.ToLowerInvariant();
-                    items = items.Where(x => (x.Name ?? "").ToLowerInvariant().Contains(q));
+                    items = items.Where(x =>
+                    {
+                        var name = (x.Name ?? "").ToLowerInvariant();
+                        var target = (x.Target ?? "").ToLowerInvariant();
+                        return name.Contains(q) || target.Contains(q);
+                    });
                 }
                 else
                 {
@@ -1187,6 +1197,7 @@ namespace Anfeta.UI.Views
 
                 it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
+                
                 Results.Add(it);
             }
 
