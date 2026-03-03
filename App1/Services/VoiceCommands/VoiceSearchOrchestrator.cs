@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.Speech;
 
 namespace Anfeta.UI.Services.VoiceCommands
 {

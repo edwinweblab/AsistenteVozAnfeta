@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using Anfeta.UI.Models;
+using Anfeta.UI.Models.Weblab;
 
 namespace Anfeta.UI.Services.VoiceCommands;
 
