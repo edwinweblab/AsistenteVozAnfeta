@@ -1,39 +1,127 @@
-﻿using System;
+﻿using Anfeta.UI.Models.Weblab;
+using System;
 using System.Collections.Generic;
+using Anfeta.UI.Services.Speech;
 using System.Linq;
-using Anfeta.UI.Models.Weblab;
+using System.IO;
 
-namespace Anfeta.UI.Services.Speech
+public sealed class LocalIndexService
 {
-    public sealed class LocalIndexService
+    private readonly object _gate = new();
+    private List<SearchResultRow> _items = new();
+
+    public bool HasData { get { lock (_gate) return _items.Count > 0; } }
+    public int Count { get { lock (_gate) return _items.Count; } }
+
+    public IReadOnlyList<SearchResultRow> Snapshot()
     {
-        private readonly object _lock = new();
-        private List<SearchResultRow>? _items;
+        lock (_gate) return _items.ToList();
+    }
 
-        public bool HasData
-        {
-            get { lock (_lock) return _items is { Count: > 0 }; }
-        }
+    public void Set(List<SearchResultRow> items)
+    {
+        if (items == null || items.Count == 0)
+            throw new InvalidOperationException("Refusing to set empty index.");
 
-        public int Count
-        {
-            get { lock (_lock) return _items?.Count ?? 0; }
-        }
+        lock (_gate) _items = items;
+    }
 
-        public void Set(IEnumerable<SearchResultRow> items)
+    public bool RemoveExact(string fullPath)
+    {
+        var norm = Norm(fullPath);
+        lock (_gate)
         {
-            if (items == null) throw new ArgumentNullException(nameof(items));
-            lock (_lock) _items = items.ToList();
+            var before = _items.Count;
+            _items.RemoveAll(x => Norm(x.FullPath) == norm);
+            return _items.Count != before;
         }
+    }
 
-        public List<SearchResultRow> GetAll()
+    public int RemovePrefix(string folderPath)
+    {
+        var prefix = EnsureDirPrefix(folderPath);
+        lock (_gate)
         {
-            lock (_lock) return _items?.ToList() ?? new List<SearchResultRow>();
+            var before = _items.Count;
+            _items.RemoveAll(x => Norm(x.FullPath).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            return before - _items.Count;
         }
+    }
 
-        public void Clear()
+    public int RenameExact(string oldPath, string newPath, bool isFolder)
+    {
+        var oldN = Norm(oldPath);
+        var newN = Norm(newPath);
+
+        lock (_gate)
         {
-            lock (_lock) _items = null;
+            var hit = _items.FirstOrDefault(x => Norm(x.FullPath) == oldN);
+            if (hit == null) return 0;
+
+            hit.FullPath = newN;
+            hit.Name = Path.GetFileName(newN);
+            hit.Type = isFolder ? "FOLDER" : "FILE";
+            return 1;
         }
+    }
+
+    public int RenamePrefix(string oldFolder, string newFolder)
+    {
+        var oldFolderN = Norm(oldFolder);
+        var newFolderN = Norm(newFolder);
+
+        var oldPrefix = EnsureDirPrefix(oldFolderN);
+        var newPrefix = EnsureDirPrefix(newFolderN);
+
+        lock (_gate)
+        {
+            int changed = 0;
+
+            foreach (var it in _items)
+            {
+                var p = Norm(it.Target); // ✅ usa Target (tu ruta real)
+
+                // ✅ 1) Caso exacto: la carpeta raíz guardada SIN '\'
+                if (string.Equals(p, oldFolderN, StringComparison.OrdinalIgnoreCase))
+                {
+                    it.Target = newFolderN;
+                    it.Name = Path.GetFileName(newFolderN);
+                    it.Type = "FOLDER";
+                    changed++;
+                    continue;
+                }
+
+                // ✅ 2) Caso hijos: todo lo que cuelga de esa carpeta
+                if (!p.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var rest = p.Substring(oldPrefix.Length);
+                var updated = newPrefix + rest;
+
+                it.Target = updated;
+                it.Name = Path.GetFileName(updated);
+                changed++;
+            }
+
+            return changed;
+        }
+    }
+
+    private static string Norm(string p) => (p ?? "").Trim().Replace('/', '\\');
+
+    private static string EnsureDirPrefix(string folder)
+    {
+        var p = Norm(folder);
+        if (!p.EndsWith("\\", StringComparison.Ordinal)) p += "\\";
+        return p;
+    }
+    public void Clear()
+    {
+        lock (_gate) _items.Clear();
+    }
+
+    public List<SearchResultRow> GetAll()
+    {
+        lock (_gate) return _items.ToList();
     }
 }

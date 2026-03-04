@@ -105,6 +105,12 @@ namespace Anfeta.UI.Views
 
         private readonly Brush _voiceActiveBg = new SolidColorBrush(Color.FromArgb(255, 60, 20, 20));  // rojo oscuro suave
         private readonly Brush _voiceActiveFg = new SolidColorBrush(Colors.White);
+        //Acciones Click Derecho 
+        private readonly SemaphoreSlim _bootstrapLock = new(1, 1);
+        private bool _bootstrappedOnce = false;
+        private readonly SemaphoreSlim _mutLock = new(1, 1);
+        private CancellationTokenSource? _refreshCts;
+
 
         #endregion
 
@@ -250,11 +256,16 @@ namespace Anfeta.UI.Views
             CommandsSidebarList.ItemsSource = _savedSearches;
             RefreshCommandsSidebarUi();
             LoadSidebarExpandedStates();
-            
-            if (_voiceInitDone) return;
-            _voiceInitDone = true;
 
-            await _voiceEngine.ReloadAsync();
+            // ✅ Voice init solo 1 vez, pero NO debe cortar el resto del Loaded
+            if (!_voiceInitDone)
+            {
+                _voiceInitDone = true;
+                await _voiceEngine.ReloadAsync();
+            }
+
+            // ✅ Bootstrap del índice/UI (siempre)
+            await EnsureIndexBootstrappedAsync();
 
             // 1) Bookmarks
             try
@@ -343,6 +354,104 @@ namespace Anfeta.UI.Views
 
             StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
         }
+        private async Task EnsureIndexBootstrappedAsync()
+        {
+            await _bootstrapLock.WaitAsync();
+            try
+            {
+                // Si ya lo hicimos en esta instancia y hay data, no re-hacer
+                if (_bootstrappedOnce && App.LocalIndex.HasData)
+                    return;
+
+                // 1) Leer ruta guardada
+                var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
+                var hasValidDropboxRoot = !string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved);
+
+                if (!hasValidDropboxRoot)
+                {
+                    DROPBOX_ROOT = "";
+                    ResetSearchModuleState();
+                    StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Configura la ruta en Settings.";
+                    _bootstrappedOnce = true;
+                    return;
+                }
+
+                DROPBOX_ROOT = saved!.Trim();
+
+                // 2) Si no hay índice en memoria, intenta cargarlo desde disco (solo si NO estamos indexando)
+                if (!App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
+                {
+                    var (ok, cachedRoot, items) = await LocalIndexPersistence.TryLoadAsync(CancellationToken.None);
+
+                    var cacheMatchesRoot =
+                        ok &&
+                        !string.IsNullOrWhiteSpace(cachedRoot) &&
+                        string.Equals(cachedRoot.Trim(), DROPBOX_ROOT, StringComparison.OrdinalIgnoreCase) &&
+                        LocalIndexPersistence.RootExists(DROPBOX_ROOT) &&
+                        items != null &&
+                        items.Count > 0;
+
+                    if (cacheMatchesRoot)
+                    {
+                        App.LocalIndex.Set(items);
+                        DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+                    }
+                }
+
+                // 3) Auto-reindex (solo si ya hay índice y no está indexando)
+                if (App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
+                {
+                    var lastIndexedStr =
+                        ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] as string;
+
+                    DateTimeOffset? lastIndexedUtc = null;
+                    if (!string.IsNullOrWhiteSpace(lastIndexedStr) &&
+                        DateTimeOffset.TryParse(lastIndexedStr, out var parsed))
+                    {
+                        lastIndexedUtc = parsed.ToUniversalTime();
+                    }
+
+                    var folderLastWriteUtc = Directory.GetLastWriteTimeUtc(DROPBOX_ROOT);
+
+                    var shouldReindex =
+                        lastIndexedUtc == null ||
+                        folderLastWriteUtc > lastIndexedUtc.Value.UtcDateTime;
+
+                    if (shouldReindex)
+                    {
+                        await ReindexCurrentRootAsync(); // ya lo haremos transaccional abajo
+                    }
+                }
+
+                // 4) Si no hay índice o está indexando -> UI “vacía controlada”
+                if (DropboxIndexCoordinator.IsIndexing || !App.LocalIndex.HasData)
+                {
+                    ResetSearchModuleState();
+                    StatusText.Text = DropboxIndexCoordinator.IsIndexing
+                        ? $"Estado: Ruta nueva detectada, indexando…"
+                        : $"Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
+
+                    _bootstrappedOnce = true;
+                    return;
+                }
+
+                // 5) Ya hay índice -> inicializar Explorer (árbol + browse)
+                LoadFoldersRoot();
+                BuildTreeRoot();
+                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+
+                CommandsSidebarList.ItemsSource = _savedSearches;
+                RefreshCommandsSidebarUi();
+
+                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
+
+                _bootstrappedOnce = true;
+            }
+            finally
+            {
+                _bootstrapLock.Release();
+            }
+        }
         #endregion
 
         #region ===== Index Coordinator (Auto-index) =====
@@ -413,8 +522,18 @@ namespace Anfeta.UI.Views
                 // Limpiar para evitar resultados viejos mientras reindexa
                 App.LocalIndex.Clear();
 
+                // ✅ Construir primero (transaccional)
                 var list = await LocalIndexBuilder.BuildAsync(DROPBOX_ROOT, ct);
 
+                // ✅ Nunca sobreescribas con vacío
+                if (list == null || list.Count == 0)
+                {
+                    StatusText.Text = "Estado: Reindex produjo 0 items. Conservo el índice anterior.";
+                    DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+                    return;
+                }
+
+                // ✅ Swap atómico en memoria + persistencia
                 App.LocalIndex.Set(list);
                 await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, list, ct);
 
@@ -3032,17 +3151,300 @@ namespace Anfeta.UI.Views
                 ? "Voz: (no se entendió nada)"
                 : $"Voz entendió: “{phrase}”";
         }
-        #endregion 
+        #endregion
+
+        #region ===== Acciones Click Derecho =====
+        private void CancelRefreshWork()
+        {
+            try { _refreshCts?.Cancel(); } catch { }
+            _refreshCts?.Dispose();
+            _refreshCts = new CancellationTokenSource();
+        }
+        private enum FileChangeKind { Rename, Delete }
+
+        private async Task ApplyFileChangeAsync(FileChangeKind kind, SearchResultRow row, string? newFullPath = null)
+        {
+            if (row == null) return;
+
+            await _mutLock.WaitAsync();
+            try
+            {
+                CancelRefreshWork(); // ✅ evita carreras de refresh/search/browse
+
+                var oldPath = row.Target; // en tu modelo, Target = ruta completa
+                var isFolder = row.IsFolder; // read-only, ok
+
+                // 1) DISCO (source of truth)
+                if (kind == FileChangeKind.Delete)
+                {
+                    if (isFolder) Directory.Delete(oldPath, recursive: true);
+                    else File.Delete(oldPath);
+                }
+                else // Rename
+                {
+                    if (string.IsNullOrWhiteSpace(newFullPath))
+                        throw new ArgumentException("newFullPath requerido");
+
+                    if (isFolder) Directory.Move(oldPath, newFullPath);
+                    else File.Move(oldPath, newFullPath);
+                }
+                StatusText.Text = $"DEBUG: isFolder={isFolder} old='{oldPath}' new='{newFullPath}'";
+                // 2) ÍNDICE EN MEMORIA
+                if (kind == FileChangeKind.Delete)
+                {
+                    if (isFolder) App.LocalIndex.RemovePrefix(oldPath);
+                    else App.LocalIndex.RemoveExact(oldPath);
+                }
+                else
+                {
+                    if (isFolder) App.LocalIndex.RenamePrefix(oldPath, newFullPath!);
+                    else App.LocalIndex.RenameExact(oldPath, newFullPath!, isFolder: false);
+                }
+
+                // 3) PERSISTIR (sin vacío)
+                var snapshot = App.LocalIndex.GetAll();
+                if (snapshot.Count == 0)
+                    throw new InvalidOperationException("Índice quedó vacío: no se persistirá.");
+
+                await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, snapshot, CancellationToken.None);
+                StatusText.Text = $"DEBUG: indexCount={App.LocalIndex.Count}";
+                // 4) UI refresh “seguro”
+                await RefreshAfterFileChangeAsync(oldPath);
+            }
+            finally
+            {
+                _mutLock.Release();
+            }
+        }
+        private async Task RefreshAfterFileChangeAsync(string affectedOldPath)
+        {
+            if (ResultsList.SelectedItem is SearchResultRow sel)
+            {
+                if (string.Equals(sel.Target, affectedOldPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    ResultsList.SelectedItem = null;
+                }
+            }
+
+            LoadFoldersRoot();
+            BuildTreeRoot();
+
+            await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+        }
+        
+        private async Task<string?> PromptRenameAsync(string currentName)
+        {
+            var tb = new TextBox
+            {
+                Text = currentName,
+                Width = 320
+            };
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Renombrar",
+                Content = tb,
+                PrimaryButtonText = "Aceptar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            var result = await dialog.ShowAsync();
+            return result == ContentDialogResult.Primary ? tb.Text : null;
+        }
+        private SearchResultRow? GetCtxRowFromFlyout(object sender)
+        {
+            var mfi = sender as MenuFlyoutItem;
+            var flyout = mfi?.Parent as MenuFlyout;
+            var fe = flyout?.Target as FrameworkElement;
+            return fe?.DataContext as SearchResultRow;
+        }
+        private SearchResultRow? GetCtxRowOrSelected(object sender)
+         => GetCtxRowFromFlyout(sender) ?? ResultsList.SelectedItem as SearchResultRow;
+        #endregion
+
+
         #region ===== XAML handlers pendientes (stubs) =====
 
         private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
 
-        private async void CtxOpen_Click(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
+        private void CtxOpen_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null) return;
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = row.Target,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al abrir: {ex.Message}";
+            }
+        }
+        private async void CtxOpenInApp_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null) return;
+
+            try
+            {
+                if (row.IsFolder)
+                {
+                    // Navegar directamente a la carpeta
+                    await BrowseFolderAsync(row.Target, pushHistory: true);
+                }
+                else
+                {
+                    // Es archivo → navegar a su carpeta padre
+                    var parent = Path.GetDirectoryName(row.Target);
+                    if (string.IsNullOrWhiteSpace(parent))
+                        return;
+
+                    await BrowseFolderAsync(parent, pushHistory: true);
+
+                    // Opcional: intentar seleccionarlo visualmente
+                    var match = Results
+                        .FirstOrDefault(x => string.Equals(x.Target, row.Target, StringComparison.OrdinalIgnoreCase));
+
+                    if (match != null)
+                        ResultsList.SelectedItem = match;
+                }
+
+                StatusText.Text = "Abierto en ANFETA ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al abrir en ANFETA: {ex.Message}";
+            }
+        }
+        private void CtxCopyName_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null) return;
+
+            try
+            {
+                var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                pkg.SetText(row.Name);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
+                StatusText.Text = "Copiado: nombre ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al copiar: {ex.Message}";
+            }
+        }
+        private void CtxCopyFullPath_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null) return;
+
+            try
+            {
+                var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                pkg.SetText(row.Target);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
+                StatusText.Text = "Copiado: ruta ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al copiar ruta: {ex.Message}";
+            }
+        }
+        private void CtxOpenPath_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null) return;
+
+            try
+            {
+                var args = row.IsFolder ? $"\"{row.Target}\"" : $"/select,\"{row.Target}\"";
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = args,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al abrir ruta: {ex.Message}";
+            }
+        }
         private void CtxOpenWeb_Click(object sender, RoutedEventArgs e) { }
-        private void CtxCopyPath_Click(object sender, RoutedEventArgs e) { }
-        private void CtxCopyLink_Click(object sender, RoutedEventArgs e) { }
-        private void CtxRename_Click(object sender, RoutedEventArgs e) { }
-        private void CtxDelete_Click(object sender, RoutedEventArgs e) { }
+        private void CtxCopyPath_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null) { StatusText.Text = "DEBUG: row null (copiar ruta)"; return; }
+
+            var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            pkg.SetText(row.Target);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
+
+            StatusText.Text = "Copiado: ruta ✅";
+        }
+        private void CtxCopyLink_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null) { StatusText.Text = "DEBUG: row null (copiar link)"; return; }
+
+            // temporal: copia el path (luego lo cambiamos por Dropbox web link real)
+            var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            pkg.SetText(row.Target);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
+
+            StatusText.Text = "Copiado ✅";
+        }
+        private async void CtxRename_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowFromFlyout(sender) ?? ResultsList.SelectedItem as SearchResultRow;
+            if (row == null) return;
+
+            var newName = await PromptRenameAsync(row.Name);
+            if (string.IsNullOrWhiteSpace(newName) || string.Equals(newName, row.Name, StringComparison.Ordinal))
+                return;
+
+            var dir = Path.GetDirectoryName(row.Target) ?? DROPBOX_ROOT;
+            var newFullPath = Path.Combine(dir, newName.Trim());
+
+            try
+            {
+                await ApplyFileChangeAsync(FileChangeKind.Rename, row, newFullPath);
+                StatusText.Text = "Estado: Renombrado ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al renombrar: {ex.Message}";
+            }
+        }
+        private async void CtxDelete_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowFromFlyout(sender)
+                      ?? ResultsList.SelectedItem as SearchResultRow;
+
+            if (row == null)
+            {
+                StatusText.Text = "DEBUG: No se pudo detectar el item del menú.";
+                return;
+            }
+
+            try
+            {
+                await ApplyFileChangeAsync(FileChangeKind.Delete, row);
+                StatusText.Text = "Estado: Eliminado ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al eliminar: {ex.Message}";
+            }
+        }
         private void CtxBookmark_Click(object sender, RoutedEventArgs e) { }
         private void BtnDetailsInfo_Click(object sender, RoutedEventArgs e) { }
         #endregion
