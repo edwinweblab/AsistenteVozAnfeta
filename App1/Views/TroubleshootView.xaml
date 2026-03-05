@@ -2,251 +2,310 @@
     x:Class="Anfeta.UI.Views.TroubleshootView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Background="{StaticResource BgGradient}"
-	>
-	
-	<Page.Resources>
-        <!-- Colores (mismo estilo que HomeView) -->
-        <SolidColorBrush x:Key="AnfetaAccentBrush" Color="#FF6B35"/>
-        <SolidColorBrush x:Key="AnfetaSuccessBrush" Color="#34D399"/>
-        <SolidColorBrush x:Key="AnfetaWarningBrush" Color="#FBBF24"/>
-        <SolidColorBrush x:Key="N100" Color="#F7FAFC"/>
-        <SolidColorBrush x:Key="N200" Color="#EDF2F7"/>
-        <SolidColorBrush x:Key="N300" Color="#E2E8F0"/>
-        <SolidColorBrush x:Key="N400" Color="#CBD5E1"/>
-        <SolidColorBrush x:Key="N500" Color="#94A3B8"/>
+    Background="{StaticResource BgGradient}">
 
-        <!-- Reemplazado por un color sólido -->
-        <SolidColorBrush x:Key="BgGradient" Color="#111111"/>
+    <Page.Resources>
+        <!--  Colores (mismo estilo que HomeView)  -->
+        <SolidColorBrush x:Key="AnfetaAccentBrush" Color="#FF6B35" />
+        <SolidColorBrush x:Key="AnfetaSuccessBrush" Color="#34D399" />
+        <SolidColorBrush x:Key="AnfetaWarningBrush" Color="#FBBF24" />
+        <SolidColorBrush x:Key="N100" Color="#F7FAFC" />
+        <SolidColorBrush x:Key="N200" Color="#EDF2F7" />
+        <SolidColorBrush x:Key="N300" Color="#E2E8F0" />
+        <SolidColorBrush x:Key="N400" Color="#CBD5E1" />
+        <SolidColorBrush x:Key="N500" Color="#94A3B8" />
+
+        <!--  Reemplazado por un color sólido  -->
+        <SolidColorBrush x:Key="BgGradient" Color="#111111" />
 
         <Style x:Key="GlassBorder" TargetType="Border">
-            <Setter Property="CornerRadius" Value="16"/>
-            <Setter Property="Padding" Value="18"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#20FFFFFF"/>
+            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="Padding" Value="18" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="#20FFFFFF" />
             <Setter Property="Background">
                 <Setter.Value>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#24000000" Offset="0.0"/>
-                        <GradientStop Color="#16000000" Offset="1.0"/>
+                        <GradientStop Offset="0.0" Color="#24000000" />
+                        <GradientStop Offset="1.0" Color="#16000000" />
                     </LinearGradientBrush>
                 </Setter.Value>
             </Setter>
         </Style>
     </Page.Resources>
 
-    <Grid Background="{StaticResource BgGradient}" Padding="30">
+    <Grid Padding="30" Background="{StaticResource BgGradient}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Header con botón de regreso -->
-        <StackPanel Grid.Row="0" Spacing="16" Margin="0,0,0,24">
-            <Button x:Name="BackButton"
-                    HorizontalAlignment="Left"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Padding="8">
+        <!--  Header con botón de regreso  -->
+        <StackPanel
+            Grid.Row="0"
+            Margin="0,0,0,24"
+            Spacing="16">
+            <Button
+                x:Name="BackButton"
+                Padding="8"
+                HorizontalAlignment="Left"
+                Background="Transparent"
+                BorderThickness="0">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE72B;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{StaticResource N300}"/>
-                    <TextBlock Text="Volver" FontSize="14" Foreground="{StaticResource N300}"/>
+                    <FontIcon
+                        FontFamily="Segoe MDL2 Assets"
+                        FontSize="16"
+                        Foreground="{StaticResource N300}"
+                        Glyph="&#xE72B;" />
+                    <TextBlock
+                        FontSize="14"
+                        Foreground="{StaticResource N300}"
+                        Text="Volver" />
                 </StackPanel>
             </Button>
 
-            <TextBlock Text="Solución de problemas"
-                       FontSize="32"
-                       FontWeight="SemiBold"
-                       Foreground="{StaticResource N200}"/>
+            <TextBlock
+                FontSize="32"
+                FontWeight="SemiBold"
+                Foreground="{StaticResource N200}"
+                Text="Solución de problemas" />
 
-            <TextBlock Text="Aquí encontrarás soluciones a los problemas más comunes"
-                       FontSize="14"
-                       Foreground="{StaticResource N500}"/>
+            <TextBlock
+                FontSize="14"
+                Foreground="{StaticResource N500}"
+                Text="Aquí encontrarás soluciones a los problemas más comunes" />
         </StackPanel>
 
-        <!-- Contenido con scroll -->
+        <!--  Contenido con scroll  -->
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="20" MaxWidth="800">
+            <StackPanel MaxWidth="800" Spacing="20">
 
-                <!-- Problema 1: Política de privacidad -->
+                <!--  Problema 1: Política de privacidad  -->
                 <Border Style="{StaticResource GlassBorder}">
                     <StackPanel Spacing="12">
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE7BA;" FontFamily="Segoe MDL2 Assets" 
-                                      FontSize="20" Foreground="{StaticResource AnfetaWarningBrush}"/>
-                            <TextBlock Text="Error: Política de privacidad no aceptada"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource N200}"/>
+                            <FontIcon
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="20"
+                                Foreground="{StaticResource AnfetaWarningBrush}"
+                                Glyph="&#xE7BA;" />
+                            <TextBlock
+                                FontSize="18"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource N200}"
+                                Text="Error: Política de privacidad no aceptada" />
                         </StackPanel>
 
-                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource N300}">
-                            <Run Text="Si ves el mensaje "/>
-                            <Run Text="&quot;The speech privacy policy was not accepted&quot;" FontWeight="SemiBold"/>
-                            <Run Text=", sigue estos pasos:"/>
+                        <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
+                            <Run Text="Si ves el mensaje " />
+                            <Run FontWeight="SemiBold" Text="&quot;The speech privacy policy was not accepted&quot;" />
+                            <Run Text=", sigue estos pasos:" />
                         </TextBlock>
 
-                        <StackPanel Spacing="8" Margin="20,0,0,0">
+                        <StackPanel Margin="20,0,0,0" Spacing="8">
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="1. Presiona " Foreground="{StaticResource N400}"/>
-                                <Run Text="Win + I" FontWeight="SemiBold" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                                <Run Text=" para abrir Configuración" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="1. Presiona " />
+                                <Run
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Text="Win + I" />
+                                <Run Foreground="{StaticResource N400}" Text=" para abrir Configuración" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="2. Ve a " Foreground="{StaticResource N400}"/>
-                                <Run Text="Privacidad y seguridad → Voz" FontWeight="SemiBold" Foreground="{StaticResource AnfetaAccentBrush}"/>
+                                <Run Foreground="{StaticResource N400}" Text="2. Ve a " />
+                                <Run
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Text="Privacidad y seguridad → Voz" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="3. Activa " Foreground="{StaticResource N400}"/>
-                                <Run Text="Reconocimiento de voz en línea" FontWeight="SemiBold" Foreground="{StaticResource AnfetaSuccessBrush}"/>
+                                <Run Foreground="{StaticResource N400}" Text="3. Activa " />
+                                <Run
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AnfetaSuccessBrush}"
+                                    Text="Reconocimiento de voz en línea" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="4. Reinicia esta aplicación" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="4. Reinicia esta aplicación" />
                             </TextBlock>
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <!-- Problema 2: Idioma no instalado -->
+                <!--  Problema 2: Idioma no instalado  -->
                 <Border Style="{StaticResource GlassBorder}">
                     <StackPanel Spacing="12">
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE774;" FontFamily="Segoe MDL2 Assets" 
-                                      FontSize="20" Foreground="{StaticResource AnfetaWarningBrush}"/>
-                            <TextBlock Text="Error: Idioma no soportado"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource N200}"/>
+                            <FontIcon
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="20"
+                                Foreground="{StaticResource AnfetaWarningBrush}"
+                                Glyph="&#xE774;" />
+                            <TextBlock
+                                FontSize="18"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource N200}"
+                                Text="Error: Idioma no soportado" />
                         </StackPanel>
 
-                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource N300}">
-                            <Run Text="Si ves "/>
-                            <Run Text="&quot;The requested language is not supported&quot;" FontWeight="SemiBold"/>
-                            <Run Text=", necesitas instalar el paquete de español:"/>
+                        <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
+                            <Run Text="Si ves " />
+                            <Run FontWeight="SemiBold" Text="&quot;The requested language is not supported&quot;" />
+                            <Run Text=", necesitas instalar el paquete de español:" />
                         </TextBlock>
 
-                        <StackPanel Spacing="8" Margin="20,0,0,0">
+                        <StackPanel Margin="20,0,0,0" Spacing="8">
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="1. " Foreground="{StaticResource N400}"/>
-                                <Run Text="Win + I" FontWeight="SemiBold" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                                <Run Text=" → Hora e idioma → Idioma y región" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="1. " />
+                                <Run
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Text="Win + I" />
+                                <Run Foreground="{StaticResource N400}" Text=" → Hora e idioma → Idioma y región" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="2. Click en " Foreground="{StaticResource N400}"/>
-                                <Run Text="Agregar un idioma" FontWeight="SemiBold" Foreground="{StaticResource AnfetaAccentBrush}"/>
+                                <Run Foreground="{StaticResource N400}" Text="2. Click en " />
+                                <Run
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Text="Agregar un idioma" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="3. Busca " Foreground="{StaticResource N400}"/>
-                                <Run Text="Español (México)" FontWeight="SemiBold" Foreground="{StaticResource AnfetaSuccessBrush}"/>
-                                <Run Text=" y marca:" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="3. Busca " />
+                                <Run
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AnfetaSuccessBrush}"
+                                    Text="Español (México)" />
+                                <Run Foreground="{StaticResource N400}" Text=" y marca:" />
                             </TextBlock>
 
                             <StackPanel Margin="40,4,0,0" Spacing="4">
                                 <TextBlock Foreground="{StaticResource N300}">
-                                    <Run Text="✓ Reconocimiento de voz" Foreground="{StaticResource AnfetaSuccessBrush}"/>
+                                    <Run Foreground="{StaticResource AnfetaSuccessBrush}" Text="✓ Reconocimiento de voz" />
                                 </TextBlock>
                                 <TextBlock Foreground="{StaticResource N300}">
-                                    <Run Text="✓ Texto a voz" Foreground="{StaticResource AnfetaSuccessBrush}"/>
+                                    <Run Foreground="{StaticResource AnfetaSuccessBrush}" Text="✓ Texto a voz" />
                                 </TextBlock>
                             </StackPanel>
 
-                            <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap" Margin="0,4,0,0">
-                                <Run Text="4. Espera a que descargue (~100 MB) y " Foreground="{StaticResource N400}"/>
-                                <Run Text="reinicia tu PC" FontWeight="SemiBold" Foreground="{StaticResource AnfetaWarningBrush}"/>
+                            <TextBlock
+                                Margin="0,4,0,0"
+                                Foreground="{StaticResource N300}"
+                                TextWrapping="Wrap">
+                                <Run Foreground="{StaticResource N400}" Text="4. Espera a que descargue (~100 MB) y " />
+                                <Run
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AnfetaWarningBrush}"
+                                    Text="reinicia tu PC" />
                             </TextBlock>
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <!-- Problema 3: Micrófono no detecta -->
+                <!--  Problema 3: Micrófono no detecta  -->
                 <Border Style="{StaticResource GlassBorder}">
                     <StackPanel Spacing="12">
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE720;" FontFamily="Segoe MDL2 Assets" 
-                                      FontSize="20" Foreground="{StaticResource AnfetaWarningBrush}"/>
-                            <TextBlock Text="No detecta mi voz"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource N200}"/>
+                            <FontIcon
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="20"
+                                Foreground="{StaticResource AnfetaWarningBrush}"
+                                Glyph="&#xE720;" />
+                            <TextBlock
+                                FontSize="18"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource N200}"
+                                Text="No detecta mi voz" />
                         </StackPanel>
 
-                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource N300}">
-                            <Run Text="Si el micrófono no responde o no detecta tu voz:"/>
+                        <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
+                            <Run Text="Si el micrófono no responde o no detecta tu voz:" />
                         </TextBlock>
 
-                        <StackPanel Spacing="8" Margin="20,0,0,0">
+                        <StackPanel Margin="20,0,0,0" Spacing="8">
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="✓ Habla más fuerte y claro" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="✓ Habla más fuerte y claro" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="✓ Reduce el ruido de fondo" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="✓ Reduce el ruido de fondo" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="✓ Verifica que el micrófono esté conectado y funcionando" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="✓ Verifica que el micrófono esté conectado y funcionando" />
                             </TextBlock>
 
                             <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
-                                <Run Text="✓ Reinicia la aplicación" Foreground="{StaticResource N400}"/>
+                                <Run Foreground="{StaticResource N400}" Text="✓ Reinicia la aplicación" />
                             </TextBlock>
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
-                <!-- Problema 4: Se traba al hacer múltiples clicks -->
+                <!--  Problema 4: Se traba al hacer múltiples clicks  -->
                 <Border Style="{StaticResource GlassBorder}">
                     <StackPanel Spacing="12">
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE711;" FontFamily="Segoe MDL2 Assets" 
-                                      FontSize="20" Foreground="{StaticResource AnfetaSuccessBrush}"/>
-                            <TextBlock Text="Se traba al presionar varias veces"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource N200}"/>
+                            <FontIcon
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="20"
+                                Foreground="{StaticResource AnfetaSuccessBrush}"
+                                Glyph="&#xE711;" />
+                            <TextBlock
+                                FontSize="18"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource N200}"
+                                Text="Se traba al presionar varias veces" />
                         </StackPanel>
 
-                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource N300}">
-                            <Run Text="✓ " Foreground="{StaticResource AnfetaSuccessBrush}" FontWeight="SemiBold"/>
-                            <Run Text="Este problema ya fue solucionado en la última versión." Foreground="{StaticResource AnfetaSuccessBrush}"/>
+                        <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
+                            <Run
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource AnfetaSuccessBrush}"
+                                Text="✓ " />
+                            <Run Foreground="{StaticResource AnfetaSuccessBrush}" Text="Este problema ya fue solucionado en la última versión." />
                         </TextBlock>
 
-                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource N400}">
-                            <Run Text="Ahora puedes presionar el micrófono múltiples veces sin problemas. El sistema cancela automáticamente el reconocimiento anterior."/>
+                        <TextBlock Foreground="{StaticResource N400}" TextWrapping="Wrap">
+                            <Run Text="Ahora puedes presionar el micrófono múltiples veces sin problemas. El sistema cancela automáticamente el reconocimiento anterior." />
                         </TextBlock>
                     </StackPanel>
                 </Border>
 
-                <!-- Contacto/Ayuda adicional -->
-                <Border Style="{StaticResource GlassBorder}" Background="#14FF6B35">
+                <!--  Contacto/Ayuda adicional  -->
+                <Border Background="#14FF6B35" Style="{StaticResource GlassBorder}">
                     <StackPanel Spacing="10">
                         <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE946;" FontFamily="Segoe MDL2 Assets" 
-                                      FontSize="18" Foreground="{StaticResource AnfetaAccentBrush}"/>
-                            <TextBlock Text="¿Aún tienes problemas?"
-                                       FontSize="16"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource N200}"/>
+                            <FontIcon
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="18"
+                                Foreground="{StaticResource AnfetaAccentBrush}"
+                                Glyph="&#xE946;" />
+                            <TextBlock
+                                FontSize="16"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource N200}"
+                                Text="¿Aún tienes problemas?" />
                         </StackPanel>
 
-                        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource N300}">
-                            <Run Text="Si ninguna de estas soluciones funcionó, intenta:"/>
+                        <TextBlock Foreground="{StaticResource N300}" TextWrapping="Wrap">
+                            <Run Text="Si ninguna de estas soluciones funcionó, intenta:" />
                         </TextBlock>
 
-                        <StackPanel Spacing="6" Margin="20,0,0,0">
+                        <StackPanel Margin="20,0,0,0" Spacing="6">
                             <TextBlock Foreground="{StaticResource N300}">
-                                <Run Text="• Reiniciar Windows completamente"/>
+                                <Run Text="• Reiniciar Windows completamente" />
                             </TextBlock>
                             <TextBlock Foreground="{StaticResource N300}">
-                                <Run Text="• Verificar actualizaciones de Windows"/>
+                                <Run Text="• Verificar actualizaciones de Windows" />
                             </TextBlock>
                             <TextBlock Foreground="{StaticResource N300}">
-                                <Run Text="• Probar con otro micrófono"/>
+                                <Run Text="• Probar con otro micrófono" />
                             </TextBlock>
                         </StackPanel>
                     </StackPanel>

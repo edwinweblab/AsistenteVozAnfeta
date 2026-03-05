@@ -566,7 +566,7 @@
                             DoubleTapped="ResultsList_DoubleTapped"
                             RightTapped="ResultsList_RightTapped"
                             SelectionChanged="ResultsList_SelectionChanged"
-                            SelectionMode="Single">
+                            SelectionMode="Extended">
 
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="models:SearchResultRow">
@@ -606,20 +606,26 @@
                             </ListView.ItemTemplate>
                             <ListView.ContextFlyout>
                                 <MenuFlyout>
-                                    <!--  1) Abrir dentro de ANFETA (navegar/browse en tu app)  -->
-                                    <MenuFlyoutItem Click="CtxOpenInApp_Click" Text="Abrir" />
 
-                                    <!--  2) Abrir en Explorador de Windows (selecciona el archivo)  -->
-                                    <MenuFlyoutItem Click="CtxOpenPath_Click" Text="Abrir Ubicacion PC" />
+                                    <!-- Navegar dentro del buscador -->
+                                    <MenuFlyoutItem Click="CtxOpenInApp_Click" Text="Abrir en ANFETA" />
+
+                                    <!-- Abrir con Windows -->
+                                    <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir en Windows" />
+
+                                    <!-- Abrir carpeta en Explorer -->
+                                    <MenuFlyoutItem Click="CtxOpenPath_Click" Text="Abrir Ubicación (PC)" />
+
                                     <MenuFlyoutSeparator />
 
                                     <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar Nombre" />
-                                    <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar Ruta Ubicacion" />
+                                    <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar Ruta" />
 
                                     <MenuFlyoutSeparator />
 
                                     <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
                                     <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
+
                                 </MenuFlyout>
                             </ListView.ContextFlyout>
                         </ListView>
@@ -748,7 +754,7 @@
                 x:Name="StatusText"
                 Grid.Column="0"
                 Opacity="0.7"
-                Text="Estado: Dropbox (API)" />
+                Text="Estado: Dropbox Local" />
             <TextBlock
                 x:Name="VoiceDebugText"
                 Grid.Column="0"

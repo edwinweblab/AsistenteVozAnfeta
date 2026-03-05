@@ -7,389 +7,566 @@
     Unloaded="Page_Unloaded">
 
     <Page.Resources>
-        <SolidColorBrush x:Key="RingBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="RingBrush" Color="#FFFFFFFF" />
 
         <Style x:Key="MicButtonStyle" TargetType="Button">
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="CornerRadius" Value="999"/>
-            <Setter Property="Background" Value="{StaticResource AnfetaAccentBrush}"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="999" />
+            <Setter Property="Background" Value="{StaticResource AnfetaAccentBrush}" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
         <Style x:Key="PanelCard" TargetType="Border">
-            <Setter Property="CornerRadius" Value="16"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#18FFFFFF"/>
+            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="#18FFFFFF" />
             <Setter Property="Background">
                 <Setter.Value>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#1C000000" Offset="0.0"/>
-                        <GradientStop Color="#10000000" Offset="1.0"/>
+                        <GradientStop Offset="0.0" Color="#1C000000" />
+                        <GradientStop Offset="1.0" Color="#10000000" />
                     </LinearGradientBrush>
                 </Setter.Value>
             </Setter>
         </Style>
 
         <Style x:Key="StatusBadge" TargetType="Border">
-            <Setter Property="CornerRadius" Value="999"/>
-            <Setter Property="Padding" Value="12,5,12,5"/>
+            <Setter Property="CornerRadius" Value="999" />
+            <Setter Property="Padding" Value="12,5,12,5" />
         </Style>
 
         <Style x:Key="ActivityRow" TargetType="Border">
-            <Setter Property="CornerRadius" Value="10"/>
-            <Setter Property="Padding" Value="16,13,16,13"/>
-            <Setter Property="Background" Value="#0CFFFFFF"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#10FFFFFF"/>
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="16,13,16,13" />
+            <Setter Property="Background" Value="#0CFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="#10FFFFFF" />
         </Style>
     </Page.Resources>
 
     <Grid>
         <Grid Padding="20,14,20,12">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="2*"/>
-                <RowDefinition Height="12"/>
-                <RowDefinition Height="3*"/>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="2*" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="3*" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- ══════════════ HEADER ══════════════ -->
+            <!--  ══════════════ HEADER ══════════════  -->
             <Grid Grid.Row="0" Margin="0,0,0,14">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="1">
-                    <TextBlock Text="ANFETA" FontSize="10" FontWeight="Bold"
-                               Foreground="#8C7B6E" CharacterSpacing="250"/>
+                <StackPanel
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Spacing="1">
+                    <TextBlock
+                        CharacterSpacing="250"
+                        FontSize="10"
+                        FontWeight="Bold"
+                        Foreground="#8C7B6E"
+                        Text="ANFETA" />
                 </StackPanel>
 
-                <!-- Badge idioma: azul → naranja -->
-                <Border Grid.Column="1" Style="{StaticResource StatusBadge}"
-                        Background="#1AFB923C" BorderBrush="#30FB923C" BorderThickness="1"
-                        VerticalAlignment="Center">
+                <!--  Badge idioma: azul → naranja  -->
+                <Border
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Background="#1AFB923C"
+                    BorderBrush="#30FB923C"
+                    BorderThickness="1"
+                    Style="{StaticResource StatusBadge}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE774;" FontSize="11" Foreground="#FB923C"/>
-                        <TextBlock Text="{Binding CurrentLanguageInfo}" FontSize="11"
-                                   FontWeight="SemiBold" Foreground="#FDBA74"/>
+                        <FontIcon
+                            FontSize="11"
+                            Foreground="#FB923C"
+                            Glyph="&#xE774;" />
+                        <TextBlock
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="#FDBA74"
+                            Text="{Binding CurrentLanguageInfo}" />
                     </StackPanel>
                 </Border>
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal"
-                            HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="10">
-                    <Border x:Name="MicStatusBadge" Style="{StaticResource StatusBadge}"
-                            Background="#1AFF6B35" BorderBrush="#30FF6B35" BorderThickness="1"
-                            Visibility="Collapsed">
+                <StackPanel
+                    Grid.Column="2"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="10">
+                    <Border
+                        x:Name="MicStatusBadge"
+                        Background="#1AFF6B35"
+                        BorderBrush="#30FF6B35"
+                        BorderThickness="1"
+                        Style="{StaticResource StatusBadge}"
+                        Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="7" Height="7" Fill="#FF6B35"/>
-                            <TextBlock x:Name="MicStatusText" Text="Escuchando"
-                                       FontSize="11" FontWeight="SemiBold" Foreground="#FF6B35"/>
+                            <Ellipse
+                                Width="7"
+                                Height="7"
+                                Fill="#FF6B35" />
+                            <TextBlock
+                                x:Name="MicStatusText"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="#FF6B35"
+                                Text="Escuchando" />
                         </StackPanel>
                     </Border>
-                    <Button x:Name="HelpButton" Width="36" Height="36"
-                            Background="#14FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1"
-                            CornerRadius="10"
-                            ToolTipService.ToolTip="Solucionar problemas con el micrófono">
+                    <Button
+                        x:Name="HelpButton"
+                        Width="36"
+                        Height="36"
+                        Background="#14FFFFFF"
+                        BorderBrush="#20FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        ToolTipService.ToolTip="Solucionar problemas con el micrófono">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#20FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#20FFFFFF" />
                         </Button.Resources>
-                        <FontIcon Glyph="&#xE897;" FontSize="14" Foreground="#8C7B6E"/>
+                        <FontIcon
+                            FontSize="14"
+                            Foreground="#8C7B6E"
+                            Glyph="&#xE897;" />
                     </Button>
                 </StackPanel>
             </Grid>
 
-            <Border Grid.Row="0" Height="1" Background="#0EFFFFFF"
-                    VerticalAlignment="Bottom" Margin="0,0,0,-1"/>
+            <Border
+                Grid.Row="0"
+                Height="1"
+                Margin="0,0,0,-1"
+                VerticalAlignment="Bottom"
+                Background="#0EFFFFFF" />
 
-            <!-- ══════════════ PANEL NOTIFICACIONES ══════════════ -->
-            <Border x:Name="NotifStrip"
-                    Grid.Row="1"
-                    Visibility="Collapsed"
-                    Style="{StaticResource PanelCard}"
-                    Padding="0">
+            <!--  ══════════════ PANEL NOTIFICACIONES ══════════════  -->
+            <Border
+                x:Name="NotifStrip"
+                Grid.Row="1"
+                Padding="0"
+                Style="{StaticResource PanelCard}"
+                Visibility="Collapsed">
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
                     <Grid Grid.Row="0" Padding="28,14,28,14">
-                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <Ellipse x:Name="NotifDot" Width="7" Height="7"
-                                     Fill="#34D399" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="NotifHeaderText"
-                                       Text="NOTIFICACIONES"
-                                       FontSize="10" FontWeight="Bold"
-                                       Foreground="#8C7B6E" CharacterSpacing="180"
-                                       VerticalAlignment="Center"/>
+                        <StackPanel
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <Ellipse
+                                x:Name="NotifDot"
+                                Width="7"
+                                Height="7"
+                                VerticalAlignment="Center"
+                                Fill="#34D399" />
+                            <TextBlock
+                                x:Name="NotifHeaderText"
+                                VerticalAlignment="Center"
+                                CharacterSpacing="180"
+                                FontSize="10"
+                                FontWeight="Bold"
+                                Foreground="#8C7B6E"
+                                Text="NOTIFICACIONES" />
                         </StackPanel>
-                        <!-- Badge contador: azul → naranja -->
-                        <Border x:Name="NotifCountBadge"
-                                Background="#14FB923C" CornerRadius="999"
-                                Padding="8,3,8,3"
-                                HorizontalAlignment="Right" VerticalAlignment="Center"
-                                Visibility="Collapsed">
-                            <TextBlock x:Name="NotifCountText"
-                                       FontSize="10" FontWeight="Bold" Foreground="#FB923C"/>
+                        <!--  Badge contador: azul → naranja  -->
+                        <Border
+                            x:Name="NotifCountBadge"
+                            Padding="8,3,8,3"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Background="#14FB923C"
+                            CornerRadius="999"
+                            Visibility="Collapsed">
+                            <TextBlock
+                                x:Name="NotifCountText"
+                                FontSize="10"
+                                FontWeight="Bold"
+                                Foreground="#FB923C" />
                         </Border>
                     </Grid>
-                    <Border Grid.Row="0" Height="1" Background="#0EFFFFFF" VerticalAlignment="Bottom"/>
+                    <Border
+                        Grid.Row="0"
+                        Height="1"
+                        VerticalAlignment="Bottom"
+                        Background="#0EFFFFFF" />
 
-                    <ScrollViewer Grid.Row="1"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  Padding="0,14,0,16">
+                    <ScrollViewer
+                        Grid.Row="1"
+                        Padding="0,14,0,16"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="0.5*"/>
-                                <ColumnDefinition Width="7*"/>
-                                <ColumnDefinition Width="0.5*"/>
+                                <ColumnDefinition Width="0.5*" />
+                                <ColumnDefinition Width="7*" />
+                                <ColumnDefinition Width="0.5*" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel x:Name="NotificationsPanel" Grid.Column="1" Spacing="12"/>
+                            <StackPanel
+                                x:Name="NotificationsPanel"
+                                Grid.Column="1"
+                                Spacing="12" />
                         </Grid>
                     </ScrollViewer>
                 </Grid>
             </Border>
 
-            <!-- ══════════════ CONTENEDOR PRINCIPAL ══════════════ -->
-            <Border Grid.Row="3"
-                    Style="{StaticResource PanelCard}"
-                    Padding="0">
+            <!--  ══════════════ CONTENEDOR PRINCIPAL ══════════════  -->
+            <Border
+                Grid.Row="3"
+                Padding="0"
+                Style="{StaticResource PanelCard}">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition x:Name="LeftCol"  Width="*"/>
-                        <ColumnDefinition x:Name="LeftDiv"  Width="1"/>
-                        <ColumnDefinition                   Width="2*"/>
-                        <ColumnDefinition x:Name="RightDiv" Width="1"/>
-                        <ColumnDefinition x:Name="RightCol" Width="*"/>
+                        <ColumnDefinition x:Name="LeftCol" Width="*" />
+                        <ColumnDefinition x:Name="LeftDiv" Width="1" />
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition x:Name="RightDiv" Width="1" />
+                        <ColumnDefinition x:Name="RightCol" Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- SECCIÓN IZQUIERDA: Detectado -->
+                    <!--  SECCIÓN IZQUIERDA: Detectado  -->
                     <Grid Grid.Column="0">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <Border Grid.Row="0" Padding="20,14,20,14"
-                                BorderBrush="#0EFFFFFF" BorderThickness="0,0,0,1">
+                        <Border
+                            Grid.Row="0"
+                            Padding="20,14,20,14"
+                            BorderBrush="#0EFFFFFF"
+                            BorderThickness="0,0,0,1">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon Glyph="&#xE8BD;" FontSize="11" Foreground="#FF8A4A"/>
-                                <TextBlock Text="DETECTADO" FontSize="10" FontWeight="Bold"
-                                           Foreground="#FF8A4A" CharacterSpacing="180"
-                                           VerticalAlignment="Center"/>
+                                <FontIcon
+                                    FontSize="11"
+                                    Foreground="#FF8A4A"
+                                    Glyph="&#xE8BD;" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    CharacterSpacing="180"
+                                    FontSize="10"
+                                    FontWeight="Bold"
+                                    Foreground="#FF8A4A"
+                                    Text="DETECTADO" />
                             </StackPanel>
                         </Border>
 
-                        <ScrollViewer Grid.Row="1"
-                                      VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled"
-                                      Padding="20,16,20,20">
+                        <ScrollViewer
+                            Grid.Row="1"
+                            Padding="20,16,20,20"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
                             <StackPanel Spacing="6">
-                                <TextBlock Text="{Binding RecognizedText}"
-                                           FontSize="16" FontWeight="SemiBold"
-                                           Foreground="#F1F5F9"
-                                           TextWrapping="Wrap" MinHeight="24"/>
-                                <!-- azul → naranja suave -->
-                                <TextBlock Text="Esperando comando de voz..."
-                                           FontSize="11" Foreground="#FB923C"/>
+                                <TextBlock
+                                    MinHeight="24"
+                                    FontSize="16"
+                                    FontWeight="SemiBold"
+                                    Foreground="#F1F5F9"
+                                    Text="{Binding RecognizedText}"
+                                    TextWrapping="Wrap" />
+                                <!--  azul → naranja suave  -->
+                                <TextBlock
+                                    FontSize="11"
+                                    Foreground="#FB923C"
+                                    Text="Esperando comando de voz..." />
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>
 
-                    <Border Grid.Column="1" Background="#0EFFFFFF"/>
+                    <Border Grid.Column="1" Background="#0EFFFFFF" />
 
-                    <!-- SECCIÓN CENTRAL: Micrófono -->
+                    <!--  SECCIÓN CENTRAL: Micrófono  -->
                     <Grid Grid.Column="2">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <StackPanel Grid.Row="0"
-                                    HorizontalAlignment="Center"
-                                    Spacing="8"
-                                    Margin="0,18,0,0">
-                            <Border HorizontalAlignment="Center"
-                                    CornerRadius="999"
-                                    BorderThickness="1"
-                                    BorderBrush="#3034D399"
-                                    Background="#1A34D399"
-                                    Padding="14,6,14,6">
+                        <StackPanel
+                            Grid.Row="0"
+                            Margin="0,18,0,0"
+                            HorizontalAlignment="Center"
+                            Spacing="8">
+                            <Border
+                                Padding="14,6,14,6"
+                                HorizontalAlignment="Center"
+                                Background="#1A34D399"
+                                BorderBrush="#3034D399"
+                                BorderThickness="1"
+                                CornerRadius="999">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Ellipse x:Name="StatusDot" Width="7" Height="7"
-                                             Fill="#34D399" VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding StatusText}"
-                                               FontSize="13" FontWeight="SemiBold"
-                                               Foreground="#A7F3D0"
-                                               VerticalAlignment="Center"/>
+                                    <Ellipse
+                                        x:Name="StatusDot"
+                                        Width="7"
+                                        Height="7"
+                                        VerticalAlignment="Center"
+                                        Fill="#34D399" />
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Foreground="#A7F3D0"
+                                        Text="{Binding StatusText}" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
 
-                        <StackPanel Grid.Row="1"
-                                    VerticalAlignment="Center"
-                                    HorizontalAlignment="Center"
-                                    Spacing="0">
+                        <StackPanel
+                            Grid.Row="1"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="0">
 
-                            <Viewbox Stretch="Uniform"
-                                     MaxWidth="240" MaxHeight="240"
-                                     HorizontalAlignment="Center">
+                            <Viewbox
+                                MaxWidth="240"
+                                MaxHeight="240"
+                                HorizontalAlignment="Center"
+                                Stretch="Uniform">
                                 <Grid Width="240" Height="240">
-                                    <Ellipse x:Name="Ring1" Fill="{StaticResource RingBrush}"
-                                             Opacity="0.18" RenderTransformOrigin="0.5,0.5">
+                                    <Ellipse
+                                        x:Name="Ring1"
+                                        Fill="{StaticResource RingBrush}"
+                                        Opacity="0.18"
+                                        RenderTransformOrigin="0.5,0.5">
                                         <Ellipse.RenderTransform>
-                                            <ScaleTransform x:Name="Ring1Scale" ScaleX="0.70" ScaleY="0.70"/>
+                                            <ScaleTransform x:Name="Ring1Scale" ScaleX="0.70" ScaleY="0.70" />
                                         </Ellipse.RenderTransform>
                                     </Ellipse>
-                                    <Ellipse x:Name="Ring2" Fill="{StaticResource RingBrush}"
-                                             Opacity="0.12" RenderTransformOrigin="0.5,0.5">
+                                    <Ellipse
+                                        x:Name="Ring2"
+                                        Fill="{StaticResource RingBrush}"
+                                        Opacity="0.12"
+                                        RenderTransformOrigin="0.5,0.5">
                                         <Ellipse.RenderTransform>
-                                            <ScaleTransform x:Name="Ring2Scale" ScaleX="0.62" ScaleY="0.62"/>
+                                            <ScaleTransform x:Name="Ring2Scale" ScaleX="0.62" ScaleY="0.62" />
                                         </Ellipse.RenderTransform>
                                     </Ellipse>
-                                    <Ellipse x:Name="Ring3" Fill="{StaticResource RingBrush}"
-                                             Opacity="0.08" RenderTransformOrigin="0.5,0.5">
+                                    <Ellipse
+                                        x:Name="Ring3"
+                                        Fill="{StaticResource RingBrush}"
+                                        Opacity="0.08"
+                                        RenderTransformOrigin="0.5,0.5">
                                         <Ellipse.RenderTransform>
-                                            <ScaleTransform x:Name="Ring3Scale" ScaleX="0.55" ScaleY="0.55"/>
+                                            <ScaleTransform x:Name="Ring3Scale" ScaleX="0.55" ScaleY="0.55" />
                                         </Ellipse.RenderTransform>
                                     </Ellipse>
-                                    <Ellipse x:Name="MicGlow" Width="176" Height="176"
-                                             Fill="{StaticResource AnfetaAccentBrush}"
-                                             Opacity="0.18" RenderTransformOrigin="0.5,0.5">
+                                    <Ellipse
+                                        x:Name="MicGlow"
+                                        Width="176"
+                                        Height="176"
+                                        Fill="{StaticResource AnfetaAccentBrush}"
+                                        Opacity="0.18"
+                                        RenderTransformOrigin="0.5,0.5">
                                         <Ellipse.RenderTransform>
-                                            <ScaleTransform x:Name="MicGlowScale" ScaleX="1.0" ScaleY="1.0"/>
+                                            <ScaleTransform x:Name="MicGlowScale" ScaleX="1.0" ScaleY="1.0" />
                                         </Ellipse.RenderTransform>
                                     </Ellipse>
                                     <Grid Width="138" Height="138">
-                                        <Ellipse Fill="#000000" Opacity="0.26" Margin="2,6,2,0"/>
-                                        <Button x:Name="MicButton"
-                                                Style="{StaticResource MicButtonStyle}"
-                                                Width="138" Height="138"
-                                                RenderTransformOrigin="0.5,0.5"
-                                                ToolTipService.ToolTip="Presiona para hablar">
+                                        <Ellipse
+                                            Margin="2,6,2,0"
+                                            Fill="#000000"
+                                            Opacity="0.26" />
+                                        <Button
+                                            x:Name="MicButton"
+                                            Width="138"
+                                            Height="138"
+                                            RenderTransformOrigin="0.5,0.5"
+                                            Style="{StaticResource MicButtonStyle}"
+                                            ToolTipService.ToolTip="Presiona para hablar">
                                             <Button.Resources>
-                                                <SolidColorBrush x:Key="ButtonBackground"            Color="#FF6B35"/>
-                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#FF8A4A"/>
-                                                <SolidColorBrush x:Key="ButtonBackgroundPressed"     Color="#E05020"/>
-                                                <SolidColorBrush x:Key="ButtonBackgroundDisabled"    Color="#374151"/>
+                                                <SolidColorBrush x:Key="ButtonBackground" Color="#FF6B35" />
+                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#FF8A4A" />
+                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#E05020" />
+                                                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#374151" />
                                             </Button.Resources>
                                             <Button.RenderTransform>
-                                                <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0"/>
+                                                <ScaleTransform x:Name="MicScale" ScaleX="1.0" ScaleY="1.0" />
                                             </Button.RenderTransform>
-                                            <FontIcon Glyph="&#xE720;" Foreground="White" FontSize="42"/>
+                                            <FontIcon
+                                                FontSize="42"
+                                                Foreground="White"
+                                                Glyph="&#xE720;" />
                                         </Button>
                                     </Grid>
                                 </Grid>
                             </Viewbox>
 
-                            <!-- azul → naranja suave -->
-                            <TextBlock Text="Presiona para hablar"
-                                       FontSize="11" FontWeight="SemiBold" Foreground="#FB923C"
-                                       HorizontalAlignment="Center"
-                                       Margin="0,12,0,0"/>
+                            <!--  azul → naranja suave  -->
+                            <TextBlock
+                                Margin="0,12,0,0"
+                                HorizontalAlignment="Center"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="#FB923C"
+                                Text="Presiona para hablar" />
                         </StackPanel>
 
-                        <!-- Dispositivos -->
-                        <Border Grid.Row="2"
-                                Margin="16,0,16,18"
-                                CornerRadius="12"
-                                Background="#0EFFFFFF"
-                                BorderBrush="#18FFFFFF"
-                                BorderThickness="1">
+                        <!--  Dispositivos  -->
+                        <Border
+                            Grid.Row="2"
+                            Margin="16,0,16,18"
+                            Background="#0EFFFFFF"
+                            BorderBrush="#18FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="12">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="1"/>
-                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="1" />
+                                    <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
-                                <!-- Entrada -->
-                                <StackPanel Grid.Column="0" Orientation="Horizontal"
-                                            HorizontalAlignment="Center"
-                                            Spacing="8" Padding="14,10,14,10">
-                                    <FontIcon Glyph="&#xE720;" FontSize="13"
-                                              Foreground="#FF6B35" VerticalAlignment="Center"/>
-                                    <StackPanel Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="ENTRADA" FontSize="9" FontWeight="Bold"
-                                                   Foreground="#FF8A4A" CharacterSpacing="150"/>
-                                        <TextBlock x:Name="TxtInputDevice"
-                                                   Text="No configurado"
-                                                   FontSize="11" FontWeight="SemiBold"
-                                                   Foreground="#D4C9C0"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   MaxLines="1"/>
+                                <!--  Entrada  -->
+                                <StackPanel
+                                    Grid.Column="0"
+                                    Padding="14,10,14,10"
+                                    HorizontalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <FontIcon
+                                        VerticalAlignment="Center"
+                                        FontSize="13"
+                                        Foreground="#FF6B35"
+                                        Glyph="&#xE720;" />
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock
+                                            CharacterSpacing="150"
+                                            FontSize="9"
+                                            FontWeight="Bold"
+                                            Foreground="#FF8A4A"
+                                            Text="ENTRADA" />
+                                        <TextBlock
+                                            x:Name="TxtInputDevice"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="#D4C9C0"
+                                            MaxLines="1"
+                                            Text="No configurado"
+                                            TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                 </StackPanel>
 
-                                <Border Grid.Column="1" Background="#14FFFFFF"/>
+                                <Border Grid.Column="1" Background="#14FFFFFF" />
 
-                                <!-- Salida: azul → naranja -->
-                                <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                            HorizontalAlignment="Center"
-                                            Spacing="8" Padding="14,10,14,10">
-                                    <FontIcon Glyph="&#xE767;" FontSize="13"
-                                              Foreground="#FB923C" VerticalAlignment="Center"/>
-                                    <StackPanel Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="SALIDA" FontSize="9" FontWeight="Bold"
-                                                   Foreground="#FB923C" CharacterSpacing="150"/>
-                                        <TextBlock x:Name="TxtOutputDevice"
-                                                   Text="No configurado"
-                                                   FontSize="11" FontWeight="SemiBold"
-                                                   Foreground="#D4C9C0"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   MaxLines="1"/>
+                                <!--  Salida: azul → naranja  -->
+                                <StackPanel
+                                    Grid.Column="2"
+                                    Padding="14,10,14,10"
+                                    HorizontalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <FontIcon
+                                        VerticalAlignment="Center"
+                                        FontSize="13"
+                                        Foreground="#FB923C"
+                                        Glyph="&#xE767;" />
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock
+                                            CharacterSpacing="150"
+                                            FontSize="9"
+                                            FontWeight="Bold"
+                                            Foreground="#FB923C"
+                                            Text="SALIDA" />
+                                        <TextBlock
+                                            x:Name="TxtOutputDevice"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="#D4C9C0"
+                                            MaxLines="1"
+                                            Text="No configurado"
+                                            TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                 </StackPanel>
                             </Grid>
                         </Border>
                     </Grid>
 
-                    <Border Grid.Column="3" Background="#0EFFFFFF"/>
+                    <Border Grid.Column="3" Background="#0EFFFFFF" />
 
-                    <!-- SECCIÓN DERECHA: Actividad reciente -->
+                    <!--  SECCIÓN DERECHA: Actividad reciente  -->
                     <Grid x:Name="CardActivity" Grid.Column="4">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <!-- Header: azul → naranja -->
-                        <Border Grid.Row="0" Padding="20,14,20,14"
-                                BorderBrush="#0EFFFFFF" BorderThickness="0,0,0,1">
+                        <!--  Header: azul → naranja  -->
+                        <Border
+                            Grid.Row="0"
+                            Padding="20,14,20,14"
+                            BorderBrush="#0EFFFFFF"
+                            BorderThickness="0,0,0,1">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Ellipse Width="7" Height="7" Fill="#FB923C" VerticalAlignment="Center"/>
-                                <TextBlock Text="ACTIVIDAD RECIENTE" FontSize="10" FontWeight="Bold"
-                                           Foreground="#FB923C" CharacterSpacing="180"
-                                           VerticalAlignment="Center"/>
+                                <Ellipse
+                                    Width="7"
+                                    Height="7"
+                                    VerticalAlignment="Center"
+                                    Fill="#FB923C" />
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    CharacterSpacing="180"
+                                    FontSize="10"
+                                    FontWeight="Bold"
+                                    Foreground="#FB923C"
+                                    Text="ACTIVIDAD RECIENTE" />
                             </StackPanel>
                         </Border>
 
-                        <ScrollViewer Grid.Row="1"
-                                      VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled"
-                                      Padding="12,12,12,12">
+                        <ScrollViewer
+                            Grid.Row="1"
+                            Padding="12,12,12,12"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
                             <StackPanel Spacing="6">
 
                                 <Border Style="{StaticResource ActivityRow}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Ellipse Grid.Column="0" Width="7" Height="7"
-                                                 Fill="#34D399" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        <TextBlock Grid.Column="1" Text="Abrir navegador"
-                                                   FontSize="13" Foreground="#D4C9C0" VerticalAlignment="Center"/>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="10:15" FontSize="11" Foreground="#4A3E36" VerticalAlignment="Center"/>
-                                            <FontIcon Glyph="&#xE73E;" Foreground="#34D399" FontSize="12"/>
+                                        <Ellipse
+                                            Grid.Column="0"
+                                            Width="7"
+                                            Height="7"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center"
+                                            Fill="#34D399" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            FontSize="13"
+                                            Foreground="#D4C9C0"
+                                            Text="Abrir navegador" />
+                                        <StackPanel
+                                            Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            Spacing="6">
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                FontSize="11"
+                                                Foreground="#4A3E36"
+                                                Text="10:15" />
+                                            <FontIcon
+                                                FontSize="12"
+                                                Foreground="#34D399"
+                                                Glyph="&#xE73E;" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -397,17 +574,36 @@
                                 <Border Style="{StaticResource ActivityRow}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Ellipse Grid.Column="0" Width="7" Height="7"
-                                                 Fill="#34D399" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        <TextBlock Grid.Column="1" Text="Crear actividad"
-                                                   FontSize="13" Foreground="#D4C9C0" VerticalAlignment="Center"/>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="09:45" FontSize="11" Foreground="#4A3E36" VerticalAlignment="Center"/>
-                                            <FontIcon Glyph="&#xE73E;" Foreground="#34D399" FontSize="12"/>
+                                        <Ellipse
+                                            Grid.Column="0"
+                                            Width="7"
+                                            Height="7"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center"
+                                            Fill="#34D399" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            FontSize="13"
+                                            Foreground="#D4C9C0"
+                                            Text="Crear actividad" />
+                                        <StackPanel
+                                            Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            Spacing="6">
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                FontSize="11"
+                                                Foreground="#4A3E36"
+                                                Text="09:45" />
+                                            <FontIcon
+                                                FontSize="12"
+                                                Foreground="#34D399"
+                                                Glyph="&#xE73E;" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -415,38 +611,71 @@
                                 <Border Style="{StaticResource ActivityRow}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Ellipse Grid.Column="0" Width="7" Height="7"
-                                                 Fill="#EF4444" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        <TextBlock Grid.Column="1" Text="Eliminar archivo"
-                                                   FontSize="13" Foreground="#D4C9C0" VerticalAlignment="Center"/>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="08:30" FontSize="11" Foreground="#4A3E36" VerticalAlignment="Center"/>
-                                            <FontIcon Glyph="&#xEA39;" Foreground="#EF4444" FontSize="12"/>
+                                        <Ellipse
+                                            Grid.Column="0"
+                                            Width="7"
+                                            Height="7"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center"
+                                            Fill="#EF4444" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            FontSize="13"
+                                            Foreground="#D4C9C0"
+                                            Text="Eliminar archivo" />
+                                        <StackPanel
+                                            Grid.Column="2"
+                                            Orientation="Horizontal"
+                                            Spacing="6">
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                FontSize="11"
+                                                Foreground="#4A3E36"
+                                                Text="08:30" />
+                                            <FontIcon
+                                                FontSize="12"
+                                                Foreground="#EF4444"
+                                                Glyph="&#xEA39;" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
 
-                                <Border x:Name="CardLastAction"
-                                        Style="{StaticResource ActivityRow}"
-                                        Background="#0C34D399" BorderBrush="#1834D399">
+                                <Border
+                                    x:Name="CardLastAction"
+                                    Background="#0C34D399"
+                                    BorderBrush="#1834D399"
+                                    Style="{StaticResource ActivityRow}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Ellipse Grid.Column="0" Width="7" Height="7"
-                                                 Fill="#34D399" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{Binding RecognizedText}"
-                                                   FontSize="13" Foreground="#A7F3D0"
-                                                   VerticalAlignment="Center" TextWrapping="Wrap"/>
-                                        <FontIcon Grid.Column="2" Glyph="&#xE73E;"
-                                                  Foreground="#34D399" FontSize="12" Margin="8,0,0,0"/>
+                                        <Ellipse
+                                            Grid.Column="0"
+                                            Width="7"
+                                            Height="7"
+                                            Margin="0,0,10,0"
+                                            VerticalAlignment="Center"
+                                            Fill="#34D399" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            FontSize="13"
+                                            Foreground="#A7F3D0"
+                                            Text="{Binding RecognizedText}"
+                                            TextWrapping="Wrap" />
+                                        <FontIcon
+                                            Grid.Column="2"
+                                            Margin="8,0,0,0"
+                                            FontSize="12"
+                                            Foreground="#34D399"
+                                            Glyph="&#xE73E;" />
                                     </Grid>
                                 </Border>
 
@@ -457,39 +686,38 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="4" Height="0"/>
+            <Border Grid.Row="4" Height="0" />
 
         </Grid>
 
-        <!-- ══ RESPONSIVE ══ -->
+        <!--  ══ RESPONSIVE ══  -->
         <VisualStateManager.VisualStateGroups>
             <VisualStateGroup>
                 <VisualState x:Name="Compact">
                     <VisualState.StateTriggers>
-                        <AdaptiveTrigger MinWindowWidth="0"/>
+                        <AdaptiveTrigger MinWindowWidth="0" />
                     </VisualState.StateTriggers>
                     <VisualState.Setters>
-                        <Setter Target="LeftCol.Width"           Value="0"/>
-                        <Setter Target="LeftDiv.Width"           Value="0"/>
-                        <Setter Target="RightDiv.Width"          Value="0"/>
-                        <Setter Target="RightCol.Width"          Value="0"/>
-                        <Setter Target="CardActivity.Visibility" Value="Collapsed"/>
+                        <Setter Target="LeftCol.Width" Value="0" />
+                        <Setter Target="LeftDiv.Width" Value="0" />
+                        <Setter Target="RightDiv.Width" Value="0" />
+                        <Setter Target="RightCol.Width" Value="0" />
+                        <Setter Target="CardActivity.Visibility" Value="Collapsed" />
                     </VisualState.Setters>
                 </VisualState>
                 <VisualState x:Name="Wide">
                     <VisualState.StateTriggers>
-                        <AdaptiveTrigger MinWindowWidth="800"/>
+                        <AdaptiveTrigger MinWindowWidth="800" />
                     </VisualState.StateTriggers>
                     <VisualState.Setters>
-                        <Setter Target="LeftCol.Width"           Value="*"/>
-                        <Setter Target="LeftDiv.Width"           Value="1"/>
-                        <Setter Target="RightDiv.Width"          Value="1"/>
-                        <Setter Target="RightCol.Width"          Value="*"/>
-                        <Setter Target="CardActivity.Visibility" Value="Visible"/>
+                        <Setter Target="LeftCol.Width" Value="*" />
+                        <Setter Target="LeftDiv.Width" Value="1" />
+                        <Setter Target="RightDiv.Width" Value="1" />
+                        <Setter Target="RightCol.Width" Value="*" />
+                        <Setter Target="CardActivity.Visibility" Value="Visible" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
-
     </Grid>
 </Page>

@@ -1,9 +1,13 @@
-﻿using Anfeta.UI.Models.Weblab;
+﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Search;
-using Anfeta.UI.Services.VoiceCommands;
 using Anfeta.UI.Services.Speech;
+using Anfeta.UI.Services.VoiceCommands;
+using Anfeta.UI.Views.Dialogs;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -25,12 +29,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.UI;
 using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
-using Microsoft.Extensions.DependencyInjection;
-using Anfeta.UI.Views.Dialogs;
-using Microsoft.UI;
-using Windows.UI;
 
 
 
@@ -110,7 +111,10 @@ namespace Anfeta.UI.Views
         private bool _bootstrappedOnce = false;
         private readonly SemaphoreSlim _mutLock = new(1, 1);
         private CancellationTokenSource? _refreshCts;
-
+        private string? _currentFolderPath;
+        //Cambio de Pestaña Buscador
+        public event EventHandler<string>? TabTitleChanged;
+        public event EventHandler? WorkspaceChanged;
 
         #endregion
 
@@ -233,7 +237,7 @@ namespace Anfeta.UI.Views
             _voiceOrchestrator = sp.GetRequiredService<VoiceSearchOrchestrator>();
             _voicePost = sp.GetRequiredService<IVoicePostActionService>(); 
 
-            StatusText.Text = "Estado: Dropbox (API)";
+            StatusText.Text = "Estado: Dropbox Local";
             ModeText.Text = "Modo: Buscar";
             CountText.Text = "0 resultados";
             EmptyResultsHint.Visibility = Visibility.Visible;
@@ -257,102 +261,17 @@ namespace Anfeta.UI.Views
             RefreshCommandsSidebarUi();
             LoadSidebarExpandedStates();
 
-            // ✅ Voice init solo 1 vez, pero NO debe cortar el resto del Loaded
             if (!_voiceInitDone)
             {
                 _voiceInitDone = true;
                 await _voiceEngine.ReloadAsync();
             }
 
-            // ✅ Bootstrap del índice/UI (siempre)
+            // ✅ Bookmarks (no afecta tabs)
+            _ = LoadBookmarksAsync(); // fire-and-forget seguro
+
+            // ✅ Bootstrap índice/UI (una sola fuente de verdad)
             await EnsureIndexBootstrappedAsync();
-
-            // 1) Bookmarks
-            try
-            {
-                _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
-                StatusText.Text = $"Estado: Bookmarks cargados ✅ ({_bookmarks.Count})";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error cargando bookmarks → {ex.Message}";
-                _bookmarks = new();
-            }
-
-            // 2) Leer ruta guardada
-            var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-            var hasValidDropboxRoot = !string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved);
-
-            if (!hasValidDropboxRoot)
-            {
-                DROPBOX_ROOT = "";
-                ResetSearchModuleState();
-                StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Configura la ruta en Settings.";
-                return;
-            }
-
-            DROPBOX_ROOT = saved!.Trim();
-
-            // ✅ 2.5) Si no hay índice en memoria, intenta cargarlo desde disco
-            if (!App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
-            {
-                var (ok, cachedRoot, items) = await LocalIndexPersistence.TryLoadAsync(CancellationToken.None);
-
-                // Validar: existe cache, coincide ruta, y la carpeta sigue existiendo
-                if (ok &&
-                    !string.IsNullOrWhiteSpace(cachedRoot) &&
-                    string.Equals(cachedRoot.Trim(), DROPBOX_ROOT, StringComparison.OrdinalIgnoreCase) &&
-                    LocalIndexPersistence.RootExists(DROPBOX_ROOT) &&
-                    items.Count > 0)
-                {
-                    App.LocalIndex.Set(items);
-                    DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
-                }
-            }
-            // ✅ 2.6) Revisar si la carpeta cambió desde el último indexado
-            if (App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
-            {
-                var lastIndexedStr =
-                    ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] as string;
-
-                DateTimeOffset? lastIndexedUtc = null;
-
-                if (!string.IsNullOrWhiteSpace(lastIndexedStr) &&
-                    DateTimeOffset.TryParse(lastIndexedStr, out var parsed))
-                {
-                    lastIndexedUtc = parsed.ToUniversalTime();
-                }
-
-                var folderLastWriteUtc = Directory.GetLastWriteTimeUtc(DROPBOX_ROOT);
-
-                var shouldReindex =
-                    lastIndexedUtc == null ||
-                    folderLastWriteUtc > lastIndexedUtc.Value.UtcDateTime;
-
-                if (shouldReindex)
-                {
-                    await ReindexCurrentRootAsync();
-                }
-            }
-            // 3) Si está indexando o aún no hay índice, mostrar estado (sin Sync)
-            if (DropboxIndexCoordinator.IsIndexing || !App.LocalIndex.HasData)
-            {
-                ResetSearchModuleState();
-                StatusText.Text = DropboxIndexCoordinator.IsIndexing
-                    ? $"Estado: Ruta nueva detectada, indexando…"
-                    : $"Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
-                return;
-            }
-
-            // 4) Ya hay índice: cargar árbol + root
-            LoadFoldersRoot();
-            BuildTreeRoot();
-            await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
-            CommandsSidebarList.ItemsSource = _savedSearches;
-            RefreshCommandsSidebarUi();
-
-
-            StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
         }
         private async Task EnsureIndexBootstrappedAsync()
         {
@@ -438,7 +357,13 @@ namespace Anfeta.UI.Views
                 // 5) Ya hay índice -> inicializar Explorer (árbol + browse)
                 LoadFoldersRoot();
                 BuildTreeRoot();
-                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+
+                // ✅ si ya traigo una carpeta restaurada, NO me regreses al root
+                var startFolder = (!string.IsNullOrWhiteSpace(_currentFolderPath) && Directory.Exists(_currentFolderPath))
+                    ? _currentFolderPath
+                    : DROPBOX_ROOT;
+
+                await BrowseFolderAsync(startFolder, pushHistory: false);
 
                 CommandsSidebarList.ItemsSource = _savedSearches;
                 RefreshCommandsSidebarUi();
@@ -500,7 +425,14 @@ namespace Anfeta.UI.Views
                 // Refresca árbol + navega a root
                 LoadFoldersRoot();
                 BuildTreeRoot();
-                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+                // antes: await BrowseFolderAsync(DROPBOX_ROOT, pushHistory:false);
+
+                var startFolder =
+                    (!string.IsNullOrWhiteSpace(_currentFolderPath) && Directory.Exists(_currentFolderPath))
+                        ? _currentFolderPath
+                        : DROPBOX_ROOT;
+
+                await BrowseFolderAsync(startFolder, pushHistory: false);
 
                 StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
             }
@@ -627,6 +559,18 @@ namespace Anfeta.UI.Views
 
         private async Task BrowseFolderAsync(string folder, bool pushHistory = true)
         {
+            _currentFolderPath = folder;
+            NotifyWorkspaceChanged();
+            // Si hay texto de búsqueda, el tab debe reflejar la búsqueda, no la carpeta.
+            var q = (SearchBox?.Text ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                SetTabTitle(q);
+            }
+            else
+            {
+                SetTabTitle(Path.GetFileName(folder.TrimEnd('\\')));
+            }
             if (!Directory.Exists(folder))
             {
                 StatusText.Text = "Estado: Carpeta no existe";
@@ -1060,14 +1004,15 @@ namespace Anfeta.UI.Views
                 StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
                 return;
             }
-
+            SetTabTitle(SearchBox.Text);
             if (!App.LocalIndex.HasData)
             {
                 ResetSearchModuleState();
                 StatusText.Text = "Estado: “No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
+
                 return;
             }
-
+            NotifyWorkspaceChanged();
             _searchDebounceTimer!.Stop();
             _searchDebounceTimer.Start();
         }
@@ -1488,7 +1433,19 @@ namespace Anfeta.UI.Views
 
             await Task.CompletedTask;
         }
-
+        private async Task LoadBookmarksAsync()
+        {
+            try
+            {
+                _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
+                StatusText.Text = $"Estado: Bookmarks cargados ✅ ({_bookmarks.Count})";
+            }
+            catch (Exception ex)
+            {
+                _bookmarks = new();
+                StatusText.Text = $"Estado: Error cargando bookmarks → {ex.Message}";
+            }
+        }
         private async void BtnStar_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not Button btn) return;
@@ -3188,7 +3145,7 @@ namespace Anfeta.UI.Views
                     if (isFolder) Directory.Move(oldPath, newFullPath);
                     else File.Move(oldPath, newFullPath);
                 }
-                StatusText.Text = $"DEBUG: isFolder={isFolder} old='{oldPath}' new='{newFullPath}'";
+                
                 // 2) ÍNDICE EN MEMORIA
                 if (kind == FileChangeKind.Delete)
                 {
@@ -3207,31 +3164,119 @@ namespace Anfeta.UI.Views
                     throw new InvalidOperationException("Índice quedó vacío: no se persistirá.");
 
                 await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, snapshot, CancellationToken.None);
-                StatusText.Text = $"DEBUG: indexCount={App.LocalIndex.Count}";
+
                 // 4) UI refresh “seguro”
-                await RefreshAfterFileChangeAsync(oldPath);
+                await RefreshAfterFileChangeAsync(kind, oldPath, newFullPath);
             }
             finally
             {
                 _mutLock.Release();
             }
         }
-        private async Task RefreshAfterFileChangeAsync(string affectedOldPath)
+        private async Task ApplyBatchDeleteAsync(List<SearchResultRow> rows)
         {
+            if (rows == null || rows.Count == 0) return;
+
+            await _mutLock.WaitAsync();
+            try
+            {
+                CancelRefreshWork();
+
+                // 1) DISCO: borrar todos primero (source of truth)
+                foreach (var row in rows)
+                {
+                    var path = row.Target;
+                    var isFolder = row.IsFolder;
+
+                    if (isFolder) Directory.Delete(path, recursive: true);
+                    else File.Delete(path);
+                }
+
+                // 2) ÍNDICE: aplicar cambios en memoria (sin persistir en cada uno)
+                foreach (var row in rows)
+                {
+                    var path = row.Target;
+                    var isFolder = row.IsFolder;
+
+                    if (isFolder) App.LocalIndex.RemovePrefix(path);
+                    else App.LocalIndex.RemoveExact(path);
+                }
+
+                // 3) PERSISTIR: una sola vez
+                var snapshot = App.LocalIndex.GetAll();
+                if (snapshot.Count == 0)
+                    throw new InvalidOperationException("Índice quedó vacío: no se persistirá.");
+
+                await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, snapshot, CancellationToken.None);
+
+                // 4) UI refresh: una sola vez
+                // (usa el primero como "affectedOldPath" solo para limpiar selección si aplica)
+                await RefreshAfterFileChangeAsync(FileChangeKind.Delete, rows[0].Target, null);
+            }
+            finally
+            {
+                _mutLock.Release();
+            }
+        }
+        private async Task RefreshAfterFileChangeAsync(FileChangeKind kind, string oldPath, string? newPath)
+        {
+            // 1) Limpia selección si apuntaba al item afectado
             if (ResultsList.SelectedItem is SearchResultRow sel)
             {
-                if (string.Equals(sel.Target, affectedOldPath, StringComparison.OrdinalIgnoreCase))
-                {
+                if (string.Equals(sel.Target, oldPath, StringComparison.OrdinalIgnoreCase))
                     ResultsList.SelectedItem = null;
+            }
+
+            // 2) Si renombraste carpeta, actualiza la carpeta actual si estaba dentro
+            if (kind == FileChangeKind.Rename && !string.IsNullOrWhiteSpace(newPath))
+            {
+                var current = _currentFolderPath;
+
+                if (!string.IsNullOrWhiteSpace(current))
+                {
+                    var oldN = NormalizePath(oldPath);
+                    var newN = NormalizePath(newPath);
+                    var curN = NormalizePath(current);
+
+                    // caso A: estabas exactamente en la carpeta renombrada
+                    if (string.Equals(curN, oldN, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _currentFolderPath = newN;
+                    }
+                    // caso B: estabas dentro de esa carpeta (hijo)
+                    else
+                    {
+                        var oldPrefix = EnsureDirPrefix(oldN);
+                        if (curN.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var rest = curN.Substring(oldPrefix.Length);
+                            _currentFolderPath = EnsureDirPrefix(newN) + rest;
+                        }
+                    }
                 }
             }
 
+            // 3) Rebuild árbol
             LoadFoldersRoot();
             BuildTreeRoot();
 
-            await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+            // 4) Volver a carpeta actual si existe, si no root
+            var targetFolder = _currentFolderPath;
+            if (string.IsNullOrWhiteSpace(targetFolder) || !Directory.Exists(targetFolder))
+                targetFolder = DROPBOX_ROOT;
+
+            await BrowseFolderAsync(targetFolder, pushHistory: false);
         }
-        
+
+        private static string NormalizePath(string p) => (p ?? "").Trim().Replace('/', '\\');
+
+        private static string EnsureDirPrefix(string folder)
+        {
+            var p = NormalizePath(folder);
+            if (!p.EndsWith("\\", StringComparison.Ordinal)) p += "\\";
+            return p;
+        }
+
         private async Task<string?> PromptRenameAsync(string currentName)
         {
             var tb = new TextBox
@@ -3262,25 +3307,158 @@ namespace Anfeta.UI.Views
         }
         private SearchResultRow? GetCtxRowOrSelected(object sender)
          => GetCtxRowFromFlyout(sender) ?? ResultsList.SelectedItem as SearchResultRow;
-        #endregion
+        private List<SearchResultRow> GetSelectedRowsOrCtx(object sender)
+        {
+            // 1) Si hay multi selección, úsala
+            var selected = ResultsList.SelectedItems?.Cast<SearchResultRow>().ToList();
+            if (selected != null && selected.Count > 0)
+                return selected;
 
+            // 2) si no, usa el item del flyout
+            var ctx = GetCtxRowOrSelected(sender);
+            return ctx != null ? new List<SearchResultRow> { ctx } : new List<SearchResultRow>();
+        }
+        private async Task<bool> ConfirmOpenManyAsync(int count, int maxToOpen)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Confirmar",
+                Content = $"Vas a abrir {Math.Min(count, maxToOpen)} de {count} elementos.\n¿Deseas continuar?",
+                PrimaryButtonText = "Abrir",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Close
+            };
+
+            var res = await dialog.ShowAsync();
+            return res == ContentDialogResult.Primary;
+        }
+        private async Task<bool> ConfirmDeleteAsync(List<SearchResultRow> rows)
+        {
+            var count = rows.Count;
+            if (count <= 0) return false;
+
+            // Muestra máximo 6 nombres para no saturar
+            var preview = string.Join("\n", rows.Take(6).Select(r => $"• {r.Name}"));
+            if (count > 6) preview += $"\n• … y {count - 6} más";
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Confirmar eliminación",
+                Content = $"Vas a eliminar {count} elemento(s):\n\n{preview}\n\n¿Deseas continuar?",
+                PrimaryButtonText = "Eliminar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Close
+            };
+
+            var res = await dialog.ShowAsync();
+            return res == ContentDialogResult.Primary;
+        }
+
+        #endregion
+        #region ===== CAMBIO DE PESTAÑA =====
+        private void SetTabTitle(string title)
+        {
+            title = (title ?? "").Trim();
+            if (title.Length > 28) title = title.Substring(0, 28) + "…";
+            if (string.IsNullOrWhiteSpace(title)) title = "Buscar";
+
+            TabTitleChanged?.Invoke(this, title);
+        }
+        public Anfeta.UI.Models.SearchTabState GetTabState()
+        {
+            return new Anfeta.UI.Models.SearchTabState
+            {
+                Header = "", // lo controla el TabHeader con TabTitleChanged
+                Query = (SearchBox?.Text ?? "").Trim(),
+                CurrentFolder = _currentFolderPath ?? ""
+            };
+        }
+        private async Task RunSearchNowAsync(string query)
+        {
+            // usa el mismo método que ya usas cuando corre el debounce
+            await RunSearchAsync(query); // <— si ya existe en tu SearchView
+        }
+        public async Task RestoreTabStateAsync(SearchTabState s)
+        {
+            if (s == null) return;
+
+            // ✅ fija carpeta guardada primero (para que el bootstrap la respete)
+            _currentFolderPath = (s.CurrentFolder ?? "").Trim();
+
+            // ✅ texto sin disparar lógica de usuario
+            _allowProgrammaticSearch = true;
+            SearchBox.Text = s.Query ?? "";
+            _allowProgrammaticSearch = false;
+
+            // Si hay query -> buscar
+            if (!string.IsNullOrWhiteSpace(s.Query))
+            {
+                await RunSearchImmediateAsync(s.Query);
+                return;
+            }
+
+            // Si no hay query -> navegar a carpeta guardada
+            if (!string.IsNullOrWhiteSpace(_currentFolderPath) && Directory.Exists(_currentFolderPath))
+            {
+                await BrowseFolderAsync(_currentFolderPath, pushHistory: false);
+                return;
+            }
+
+            // fallback
+            if (!string.IsNullOrWhiteSpace(DROPBOX_ROOT) && Directory.Exists(DROPBOX_ROOT))
+                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+        }
+        private async Task RunSearchImmediateAsync(string query)
+        {
+            if (!App.LocalIndex.HasData) return;
+
+            // Cancela trabajos previos igual que haces normalmente
+            CancelRefreshWork();
+
+            // Usa tu método que ya filtra y llena Results
+            await RunSearchAsync(query); // <-- aquí pon el método REAL que ya tienes
+        }
+        private void NotifyWorkspaceChanged()
+        {
+            WorkspaceChanged?.Invoke(this, EventArgs.Empty);
+        }
+        #endregion
 
         #region ===== XAML handlers pendientes (stubs) =====
 
         private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
 
-        private void CtxOpen_Click(object sender, RoutedEventArgs e)
+        private async void CtxOpen_Click(object sender, RoutedEventArgs e)
         {
-            var row = GetCtxRowOrSelected(sender);
-            if (row == null) return;
+            var rows = GetSelectedRowsOrCtx(sender);
+            if (rows.Count == 0) return;
 
             try
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                const int MAX_OPEN = 5;
+
+                if (rows.Count > 1)
                 {
-                    FileName = row.Target,
-                    UseShellExecute = true
-                });
+                    var ok = await ConfirmOpenManyAsync(rows.Count, MAX_OPEN);
+                    if (!ok) return;
+                }
+
+                var max = Math.Min(rows.Count, MAX_OPEN);
+                for (int i = 0; i < max; i++)
+                {
+                    var r = rows[i];
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = r.Target,
+                        UseShellExecute = true
+                    });
+                }
+
+                StatusText.Text = rows.Count == 1
+                    ? "Abierto ✅"
+                    : $"Abiertos {Math.Min(rows.Count, MAX_OPEN)} de {rows.Count} ✅";
             }
             catch (Exception ex)
             {
@@ -3289,31 +3467,33 @@ namespace Anfeta.UI.Views
         }
         private async void CtxOpenInApp_Click(object sender, RoutedEventArgs e)
         {
-            var row = GetCtxRowOrSelected(sender);
-            if (row == null) return;
+            var rows = GetSelectedRowsOrCtx(sender);
+            if (rows.Count == 0) return;
+
+            var first = rows[0];
 
             try
             {
-                if (row.IsFolder)
+                if (first.IsFolder)
                 {
-                    // Navegar directamente a la carpeta
-                    await BrowseFolderAsync(row.Target, pushHistory: true);
+                    await BrowseFolderAsync(first.Target, pushHistory: true);
                 }
                 else
                 {
-                    // Es archivo → navegar a su carpeta padre
-                    var parent = Path.GetDirectoryName(row.Target);
-                    if (string.IsNullOrWhiteSpace(parent))
-                        return;
+                    var parent = Path.GetDirectoryName(first.Target);
+                    if (string.IsNullOrWhiteSpace(parent)) return;
 
                     await BrowseFolderAsync(parent, pushHistory: true);
 
-                    // Opcional: intentar seleccionarlo visualmente
-                    var match = Results
-                        .FirstOrDefault(x => string.Equals(x.Target, row.Target, StringComparison.OrdinalIgnoreCase));
+                    // si hay varios seleccionados, intenta re-seleccionarlos si están en esa carpeta
+                    foreach (var r in rows.Take(50)) // límite para no lag
+                    {
+                        var match = Results.FirstOrDefault(x =>
+                            string.Equals(x.Target, r.Target, StringComparison.OrdinalIgnoreCase));
 
-                    if (match != null)
-                        ResultsList.SelectedItem = match;
+                        if (match != null)
+                            ResultsList.SelectedItems.Add(match);
+                    }
                 }
 
                 StatusText.Text = "Abierto en ANFETA ✅";
@@ -3325,20 +3505,16 @@ namespace Anfeta.UI.Views
         }
         private void CtxCopyName_Click(object sender, RoutedEventArgs e)
         {
-            var row = GetCtxRowOrSelected(sender);
-            if (row == null) return;
+            var rows = GetSelectedRowsOrCtx(sender);
+            if (rows.Count == 0) return;
 
-            try
-            {
-                var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
-                pkg.SetText(row.Name);
-                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
-                StatusText.Text = "Copiado: nombre ✅";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Error al copiar: {ex.Message}";
-            }
+            var text = string.Join(Environment.NewLine, rows.Select(r => r.Name));
+
+            var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            pkg.SetText(text);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
+
+            StatusText.Text = rows.Count == 1 ? "Copiado: nombre ✅" : $"Copiados {rows.Count} nombres ✅";
         }
         private void CtxCopyFullPath_Click(object sender, RoutedEventArgs e)
         {
@@ -3359,36 +3535,61 @@ namespace Anfeta.UI.Views
         }
         private void CtxOpenPath_Click(object sender, RoutedEventArgs e)
         {
-            var row = GetCtxRowOrSelected(sender);
-            if (row == null) return;
+            var rows = GetSelectedRowsOrCtx(sender);
+            if (rows.Count == 0) return;
+
+            var first = rows[0];
 
             try
             {
-                var args = row.IsFolder ? $"\"{row.Target}\"" : $"/select,\"{row.Target}\"";
-
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                if (rows.Count == 1)
                 {
-                    FileName = "explorer.exe",
-                    Arguments = args,
-                    UseShellExecute = true
-                });
+                    var args = first.IsFolder
+                        ? $"\"{first.Target}\""
+                        : $"/select,\"{first.Target}\"";
+
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = args,
+                        UseShellExecute = true
+                    });
+
+                    StatusText.Text = "Explorer abierto ✅";
+                }
+                else
+                {
+                    var folder = first.IsFolder ? first.Target : (Path.GetDirectoryName(first.Target) ?? DROPBOX_ROOT);
+
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = $"\"{folder}\"",
+                        UseShellExecute = true
+                    });
+
+                    StatusText.Text = $"Explorer abierto (primer elemento) ✅";
+                }
             }
             catch (Exception ex)
             {
-                StatusText.Text = $"Error al abrir ruta: {ex.Message}";
+                StatusText.Text = $"Error Open Path: {ex.Message}";
             }
         }
         private void CtxOpenWeb_Click(object sender, RoutedEventArgs e) { }
         private void CtxCopyPath_Click(object sender, RoutedEventArgs e)
         {
-            var row = GetCtxRowOrSelected(sender);
-            if (row == null) { StatusText.Text = "DEBUG: row null (copiar ruta)"; return; }
+            var rows = GetSelectedRowsOrCtx(sender);
+            if (rows.Count == 0) return;
+
+            // Copia 1 por línea (como Explorer / Everything)
+            var text = string.Join(Environment.NewLine, rows.Select(r => r.Target));
 
             var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
-            pkg.SetText(row.Target);
+            pkg.SetText(text);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
 
-            StatusText.Text = "Copiado: ruta ✅";
+            StatusText.Text = rows.Count == 1 ? "Copiado: ruta ✅" : $"Copiadas {rows.Count} rutas ✅";
         }
         private void CtxCopyLink_Click(object sender, RoutedEventArgs e)
         {
@@ -3426,19 +3627,22 @@ namespace Anfeta.UI.Views
         }
         private async void CtxDelete_Click(object sender, RoutedEventArgs e)
         {
-            var row = GetCtxRowFromFlyout(sender)
-                      ?? ResultsList.SelectedItem as SearchResultRow;
+            var rows = GetSelectedRowsOrCtx(sender);
+            if (rows.Count == 0) return;
 
-            if (row == null)
-            {
-                StatusText.Text = "DEBUG: No se pudo detectar el item del menú.";
-                return;
-            }
+            var ok = await ConfirmDeleteAsync(rows);
+            if (!ok) return;
 
             try
             {
-                await ApplyFileChangeAsync(FileChangeKind.Delete, row);
-                StatusText.Text = "Estado: Eliminado ✅";
+                if (rows.Count == 1)
+                    await ApplyFileChangeAsync(FileChangeKind.Delete, rows[0]);
+                else
+                    await ApplyBatchDeleteAsync(rows);
+
+                StatusText.Text = rows.Count == 1
+                    ? "Estado: Eliminado ✅"
+                    : $"Estado: Eliminados {rows.Count} ✅";
             }
             catch (Exception ex)
             {
