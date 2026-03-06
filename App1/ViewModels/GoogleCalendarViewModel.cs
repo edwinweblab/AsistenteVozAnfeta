@@ -6,7 +6,6 @@ using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
-using Microsoft.UI.Xaml.Controls;
 
 namespace Anfeta.UI.ViewModels
 {
@@ -23,8 +22,7 @@ namespace Anfeta.UI.ViewModels
         // PROPIEDADES OBSERVABLES
         // ─────────────────────────────────────────────
 
-        // Color de la barra lateral de la card de estado
-        // Propiedad de solo lectura — se recalcula cuando cambia IsConnected
+        /// <summary>Color de la barra lateral según estado de conexión.</summary>
         public string StatusBarColor => IsConnected ? "#34D399" : "#FF6B35";
 
         private bool _isConnected;
@@ -50,7 +48,7 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // Inverso de IsConnected para binding de visibilidad
+        /// <summary>Inverso de IsConnected para binding de visibilidad.</summary>
         public bool IsDisconnected => !IsConnected;
 
         private bool _isLoading;
@@ -75,12 +73,12 @@ namespace Anfeta.UI.ViewModels
             private set => SetProperty(ref _statusMessage, value);
         }
 
-        // Texto descriptivo del estado actual
+        /// <summary>Texto descriptivo del estado actual.</summary>
         public string ConnectionStatusText => IsConnected
             ? "Google Calendar conectado"
             : "Google Calendar no conectado";
 
-        // Icono según estado (usa Segoe Fluent Icons)
+        /// <summary>Icono según estado (Segoe Fluent Icons).</summary>
         public string ConnectionStatusIcon => IsConnected
             ? "\uE73E"   // Checkmark
             : "\uEA3A";  // Cancel
@@ -124,6 +122,8 @@ namespace Anfeta.UI.ViewModels
         /// <summary>
         /// Verifica el estado real de conexión contra el backend.
         /// Debe llamarse al cargar la View (OnNavigatedTo o Loaded).
+        /// Entrada: ninguna
+        /// Efecto: actualiza IsConnected y StatusMessage.
         /// </summary>
         public async Task InitializeAsync()
         {
@@ -136,6 +136,8 @@ namespace Anfeta.UI.ViewModels
 
         /// <summary>
         /// Muestra diálogo de elección y ejecuta OAuth según preferencia del usuario.
+        /// Entrada: ninguna (se ejecuta desde ConnectCommand)
+        /// Efecto: abre navegador o copia URL al portapapeles.
         /// </summary>
         private async Task ConnectAsync()
         {
@@ -144,7 +146,6 @@ namespace Anfeta.UI.ViewModels
 
             try
             {
-                // El comando viene del hilo UI — no necesita dispatcher
                 var dialog = new ContentDialog
                 {
                     Title = "Conectar Google Calendar",
@@ -182,6 +183,8 @@ namespace Anfeta.UI.ViewModels
 
         /// <summary>
         /// Revoca los tokens de Google en el backend y actualiza el estado.
+        /// Entrada: ninguna (se ejecuta desde DisconnectCommand)
+        /// Efecto: IsConnected = false, tokens eliminados en backend.
         /// </summary>
         private async Task DisconnectAsync()
         {
@@ -212,6 +215,8 @@ namespace Anfeta.UI.ViewModels
 
         /// <summary>
         /// Consulta el estado real de conexión al backend y actualiza la UI.
+        /// Entrada: ninguna (se ejecuta desde RefreshStatusCommand o InitializeAsync)
+        /// Efecto: actualiza IsConnected y StatusMessage.
         /// </summary>
         private async Task RefreshStatusAsync()
         {

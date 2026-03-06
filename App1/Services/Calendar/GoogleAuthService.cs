@@ -91,6 +91,8 @@ namespace Anfeta.UI.Services.Calendar
 
         /// <summary>
         /// Limpia el caché del userId (útil al cerrar sesión en la app).
+        /// Entrada: ninguna
+        /// Efecto: limpia memoria y LocalSettings.
         /// </summary>
         public void ClearUserIdCache()
         {
@@ -143,6 +145,8 @@ namespace Anfeta.UI.Services.Calendar
         /// <summary>
         /// Retorna el último estado de conexión guardado en LocalSettings sin llamar al backend.
         /// Útil para UI inicial rápida mientras se verifica en background.
+        /// Entrada: ninguna
+        /// Salida: bool con el último estado conocido.
         /// </summary>
         public bool GetCachedConnectionState()
         {
@@ -156,86 +160,10 @@ namespace Anfeta.UI.Services.Calendar
         // ─────────────────────────────────────────────
 
         /// <summary>
-        /// Inicia el flujo OAuth de Google Calendar abriendo el navegador del sistema.
-        /// El backend maneja el callback y guarda los tokens automáticamente.
-        /// Entrada: ninguna
-        /// Salida: (ok, message) — ok=true si se abrió el navegador correctamente.
-        /// </summary>
-        public async Task<(bool ok, string message)> StartOAuthAsync(CancellationToken ct = default)
-        {
-            try
-            {
-                var userId = await GetUserIdAsync(ct);
-                if (string.IsNullOrWhiteSpace(userId))
-                    return (false, "No se pudo identificar tu usuario. Asegúrate de estar autenticado.");
-
-                Debug.WriteLine($"[GAUTH] StartOAuthAsync para userId={userId}");
-
-                var (ok, authUrl, error) = await _calendarClient.GetAuthUrlAsync(userId, ct);
-
-                if (!ok || string.IsNullOrWhiteSpace(authUrl))
-                {
-                    var msg = error ?? "No se pudo obtener la URL de autorización.";
-                    Debug.WriteLine($"[GAUTH] GetAuthUrlAsync falló: {msg}");
-                    return (false, msg);
-                }
-
-                Debug.WriteLine($"[GAUTH] Abriendo navegador: {authUrl}");
-
-                // Abre la URL en el navegador predeterminado del sistema
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = authUrl,
-                    UseShellExecute = true
-                };
-                System.Diagnostics.Process.Start(psi);
-
-                return (true, "Se abrió el navegador para conectar tu cuenta de Google. " +
-                              "Autoriza el acceso y vuelve a la aplicación.");
-            }
-            catch (OperationCanceledException)
-            {
-                return (false, "Operación cancelada.");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[GAUTH] StartOAuthAsync ERROR: {ex}");
-                return (false, $"Error al iniciar autorización: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Cierra sesión de Google Calendar revocando tokens en el backend.
-        /// Entrada: ninguna
-        /// Salida: (ok, message)
-        /// </summary>
-        public async Task<(bool ok, string message)> DisconnectAsync(CancellationToken ct = default)
-        {
-            try
-            {
-                var userId = await GetUserIdAsync(ct);
-                if (string.IsNullOrWhiteSpace(userId))
-                    return (false, "No se pudo identificar tu usuario.");
-
-                var (ok, message) = await _calendarClient.LogoutAsync(userId, ct);
-
-                // Limpiar estado local independientemente del resultado
-                var settings = ApplicationData.Current.LocalSettings;
-                settings.Values[SettingsKeyConnected] = false;
-
-                Debug.WriteLine($"[GAUTH] DisconnectAsync: ok={ok}, msg={message}");
-                return (ok, message);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[GAUTH] DisconnectAsync ERROR: {ex}");
-                return (false, ex.Message);
-            }
-        }
-        /// <summary>
-        /// Inicia el flujo OAuth. Si openBrowser=true abre el navegador del sistema,
-        /// si false copia la URL al portapapeles.
-        /// Entrada: openBrowser (bool)
+        /// Inicia el flujo OAuth de Google Calendar.
+        /// Si openBrowser=true abre el navegador del sistema.
+        /// Si openBrowser=false copia la URL al portapapeles.
+        /// Entrada: openBrowser (bool, default=true)
         /// Salida: (ok, message)
         /// </summary>
         public async Task<(bool ok, string message)> StartOAuthAsync(
@@ -283,5 +211,33 @@ namespace Anfeta.UI.Services.Calendar
             }
         }
 
+        /// <summary>
+        /// Cierra sesión de Google Calendar revocando tokens en el backend.
+        /// Entrada: ninguna
+        /// Salida: (ok, message)
+        /// </summary>
+        public async Task<(bool ok, string message)> DisconnectAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var userId = await GetUserIdAsync(ct);
+                if (string.IsNullOrWhiteSpace(userId))
+                    return (false, "No se pudo identificar tu usuario.");
+
+                var (ok, message) = await _calendarClient.LogoutAsync(userId, ct);
+
+                // Limpiar estado local independientemente del resultado
+                var settings = ApplicationData.Current.LocalSettings;
+                settings.Values[SettingsKeyConnected] = false;
+
+                Debug.WriteLine($"[GAUTH] DisconnectAsync: ok={ok}, msg={message}");
+                return (ok, message);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GAUTH] DisconnectAsync ERROR: {ex}");
+                return (false, ex.Message);
+            }
+        }
     }
 }

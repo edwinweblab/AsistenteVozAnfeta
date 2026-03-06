@@ -73,7 +73,6 @@ namespace Anfeta.UI.Services.Interpretation
                 return (false, $"Provider no soportado: '{provider}'. Disponibles: weblab, google.");
             }
 
-            // Para weblab, resource y action son obligatorios
             if (provider == "weblab")
             {
                 if (string.IsNullOrWhiteSpace(resource))
@@ -172,6 +171,38 @@ namespace Anfeta.UI.Services.Interpretation
                 // ── REPORTES ─────────────────────────────────────────────────
                 if (resource == "reportes")
                 {
+                    // Últimos eventos de auditoría del equipo.
+                    // Sin params — devuelve las últimas N acciones registradas.
+                    if (action == "ultimos")
+                    {
+                        var r = await _reportes.GetUltimosAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    // Comprobatoria del usuario en sesión (FTF + actividades + cuadrated).
+                    if (action == "comprobatoria")
+                    {
+                        var r = await _reportes.GetComprobatoriaAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    // Tareas rezagadas del usuario en sesión a partir de la hora actual.
+                    if (action == "rezagadas")
+                    {
+                        var r = await _reportes.GetRezagadasAsync(ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    // Revisiones por fecha. El param "date" viene del FastCommandClassifier
+                    // (ya resuelto para hoy/ayer) o de IA para otras fechas.
+                    if (action == "revisiones-por-fecha")
+                    {
+                        var date = TryGetString(paramsJson, "date");
+                        var r = await _reportes.GetMyRevisionsReportAsync(date, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    // Alias legacy — mantenidos para no romper flujos existentes.
                     if (action == "list")
                     {
                         var date = TryGetString(paramsJson, "date");
@@ -186,10 +217,10 @@ namespace Anfeta.UI.Services.Interpretation
                         return (r.Ok, r.PlainText);
                     }
 
-                    return (false, $"Acción '{action}' no soportada para reportes. Disponibles: list, today.");
+                    return (false, $"Acción '{action}' no soportada para reportes. Disponibles: ultimos, comprobatoria, rezagadas, revisiones-por-fecha.");
                 }
 
-                // ── RECORDATORIOS ─────────────────────────────────────────────
+                // ── RECORDATORIOS ────────────────────────────────────────────
                 if (resource == "recordatorios")
                 {
                     if (action == "list")
@@ -225,10 +256,34 @@ namespace Anfeta.UI.Services.Interpretation
                             return (false, "Falta el mensaje del recordatorio.");
 
                         if (string.IsNullOrWhiteSpace(fechaHora))
-                            return (false, "Falta la fecha/hora del recordatorio.");
+                            return (false, "Falta la fecha y hora del recordatorio.");
 
                         var duracion = TryGetInt(paramsJson, "duracionMinutos") ?? 30;
                         var r = await _recordatorios.CreateRecordatorioAsync(mensaje!, fechaHora!, duracion, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "update")
+                    {
+                        var id = TryGetString(paramsJson, "id");
+                        if (string.IsNullOrWhiteSpace(id))
+                            return (false, "Falta el ID del recordatorio a actualizar.");
+
+                        var mensaje = TryGetString(paramsJson, "mensaje");
+                        var fechaHora = TryGetString(paramsJson, "fechaHora");
+                        var duracion = TryGetInt(paramsJson, "duracionMinutos");
+
+                        var r = await _recordatorios.UpdateRecordatorioAsync(id!, mensaje, fechaHora, duracion, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+
+                    if (action == "delete")
+                    {
+                        var id = TryGetString(paramsJson, "id");
+                        if (string.IsNullOrWhiteSpace(id))
+                            return (false, "Falta el ID del recordatorio a eliminar.");
+
+                        var r = await _recordatorios.DeleteRecordatorioAsync(id!, ct);
                         return (r.Ok, r.PlainText);
                     }
 
@@ -242,7 +297,7 @@ namespace Anfeta.UI.Services.Interpretation
                         return (r.Ok, r.PlainText);
                     }
 
-                    return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, complete.");
+                    return (false, $"Acción '{action}' no soportada para recordatorios. Disponibles: list, pending, today, tomorrow, create, update, delete, complete.");
                 }
 
                 return (false, $"Resource '{resource}' no soportado. Disponibles: actividades, revisiones, reportes, recordatorios.");
@@ -259,7 +314,6 @@ namespace Anfeta.UI.Services.Interpretation
                 if (string.IsNullOrWhiteSpace(action))
                     return (false, "Falta especificar la action para Google Calendar.");
 
-                // ── STATUS ───────────────────────────────────────────────────
                 if (action == "status")
                 {
                     var connected = await _googleAuth.IsConnectedAsync(ct);
@@ -268,21 +322,18 @@ namespace Anfeta.UI.Services.Interpretation
                         : (false, "Tu Google Calendar no está conectado. Di 'conectar Google Calendar' para vincularlo.");
                 }
 
-                // ── CONNECT ──────────────────────────────────────────────────
                 if (action == "connect")
                 {
-                    var (ok, msg) = await _googleAuth.StartOAuthAsync(ct);
+                    var (ok, msg) = await _googleAuth.StartOAuthAsync(openBrowser: true, ct: ct);
                     return (ok, msg);
                 }
 
-                // ── DISCONNECT ───────────────────────────────────────────────
                 if (action == "disconnect")
                 {
                     var (ok, msg) = await _googleAuth.DisconnectAsync(ct);
                     return (ok, msg);
                 }
 
-                // ── CREATE EVENT ─────────────────────────────────────────────
                 if (action == "create")
                 {
                     var connected = await _googleAuth.IsConnectedAsync(ct);
@@ -297,14 +348,9 @@ namespace Anfeta.UI.Services.Interpretation
                     var start = TryGetString(paramsJson, "start");
                     var end = TryGetString(paramsJson, "end");
 
-                    if (string.IsNullOrWhiteSpace(summary))
-                        return (false, "Falta el título del evento.");
-
-                    if (string.IsNullOrWhiteSpace(start))
-                        return (false, "Falta la fecha de inicio del evento.");
-
-                    if (string.IsNullOrWhiteSpace(end))
-                        return (false, "Falta la fecha de fin del evento.");
+                    if (string.IsNullOrWhiteSpace(summary)) return (false, "Falta el título del evento.");
+                    if (string.IsNullOrWhiteSpace(start)) return (false, "Falta la fecha de inicio del evento.");
+                    if (string.IsNullOrWhiteSpace(end)) return (false, "Falta la fecha de fin del evento.");
 
                     var description = TryGetString(paramsJson, "description");
                     var location = TryGetString(paramsJson, "location");
@@ -314,14 +360,13 @@ namespace Anfeta.UI.Services.Interpretation
 
                     if (result.AuthNeeded)
                     {
-                        await _googleAuth.StartOAuthAsync(ct);
+                        await _googleAuth.StartOAuthAsync(openBrowser: true, ct: ct);
                         return (false, "Tu sesión de Google expiró. Se abrió el navegador para reconectar.");
                     }
 
                     return (result.Ok, result.Message);
                 }
 
-                // ── LIST EVENTS ──────────────────────────────────────────────
                 if (action == "list")
                 {
                     var connected = await _googleAuth.IsConnectedAsync(ct);
@@ -335,7 +380,6 @@ namespace Anfeta.UI.Services.Interpretation
                     var timeMin = TryGetString(paramsJson, "timeMin");
                     var timeMax = TryGetString(paramsJson, "timeMax");
 
-                    // Si no vienen rangos en params → asumir hoy por defecto
                     if (string.IsNullOrWhiteSpace(timeMin))
                     {
                         timeMin = DateTime.Today.ToString("yyyy-MM-dd'T'00:00:00'-06:00'");
@@ -353,7 +397,6 @@ namespace Anfeta.UI.Services.Interpretation
                     return (true, BuildCalendarVoiceResponse(items, timeMin, timeMax));
                 }
 
-                // ── DELETE EVENT ─────────────────────────────────────────────
                 if (action == "delete")
                 {
                     var connected = await _googleAuth.IsConnectedAsync(ct);
@@ -428,15 +471,12 @@ namespace Anfeta.UI.Services.Interpretation
             catch { return null; }
         }
 
-        /// Construye respuesta de voz legible a partir de la lista de eventos.
-        /// Entrada: lista de eventos, rango de consulta (para inferir si es "hoy" o "semana").
-        /// Salida: texto para TTS.
+        /// Construye respuesta de voz legible a partir de la lista de eventos de Google Calendar.
         private static string BuildCalendarVoiceResponse(
             List<GoogleCalendarEventItem> items,
             string? timeMin,
             string? timeMax)
         {
-            // Detectar si el rango es solo hoy
             var isOnlyToday =
                 timeMin != null &&
                 DateTime.TryParse(timeMin, out var rangeMin) &&

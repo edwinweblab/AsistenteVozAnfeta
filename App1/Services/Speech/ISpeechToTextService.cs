@@ -8,7 +8,7 @@ namespace Anfeta.UI.Services.Speech
     public interface ISpeechToTextService : IDisposable
     {
         Task InitializeAsync(string languageTag = "es-MX");
-        Task<string?> RecognizeOnceAsync(CancellationToken ct = default);
+        Task<string?> RecognizeOnceAsync(CancellationToken ct = default, Action? onReady = null);
 
         // NUEVO:
         Task CancelAsync();
