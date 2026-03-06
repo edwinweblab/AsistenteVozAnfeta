@@ -196,7 +196,46 @@ namespace Anfeta.UI.Services.Weblab
                 return new ApiPlainResponse { Ok = false, PlainText = $"Error: {ex.Message}" };
             }
         }
+        public async Task<List<CachedActivityItem>> GetMyActivitiesForCacheAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var result = new List<CachedActivityItem>();
 
+                var (ok, assignee, _, _) = await _auth.GetCurrentUserAsync(ct);
+                if (!ok || string.IsNullOrWhiteSpace(assignee))
+                    return result;
+
+                var url = $"/api/actividades/assignee/{Uri.EscapeDataString(assignee)}";
+
+                using var resp = await _httpLocal.GetAsync(url, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                    return result;
+
+                var items = ExtractActivitiesDetailed(json);
+
+                foreach (var a in items)
+                {
+                    result.Add(new CachedActivityItem
+                    {
+                        Id = a.Id,
+                        Title = a.Title,
+                        Status = a.Status,
+                        Priority = a.Priority,
+                        DueStart = a.DueStart,
+                        DueEnd = a.DueEnd
+                    });
+                }
+
+                return result;
+            }
+            catch
+            {
+                return new List<CachedActivityItem>();
+            }
+        }
         /// <summary>
         /// Mis actividades de HOY (sin pasar assignee)
         /// </summary>
@@ -450,7 +489,7 @@ namespace Anfeta.UI.Services.Weblab
 
             return list;
         }
-
+        
         private static List<(string titulo, string status)> ExtractActivitiesWithStatus(string json, int limit)
         {
             var list = new List<(string, string)>();

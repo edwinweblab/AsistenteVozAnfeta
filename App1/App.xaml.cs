@@ -79,6 +79,7 @@ namespace Anfeta.UI
                     services.AddSingleton<ActivityFieldExtractor>();
                     services.AddSingleton<ActivityFieldValidator>();
                     services.AddSingleton<CorrectionCommandDetector>();
+                    services.AddSingleton<ActivitiesCacheService>();
 
                     // =========================
                     // GROQ

@@ -7,6 +7,7 @@ using Anfeta.UI.Services.Activity;
 using Anfeta.UI.Services.Groq;
 using Anfeta.UI.Services.Interpretation;
 using Anfeta.UI.Services.Speech;
+using Anfeta.UI.Services.Weblab;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
@@ -33,6 +34,8 @@ namespace Anfeta.UI.ViewModels
         private readonly FastCommandClassifier _fastClassifier;
         private readonly InterpretationCache _interpretationCache;
         private readonly ApiKeyService _apiKeyService;
+        private readonly WeblabActividadesClient _actividadesClient;
+        private readonly ActivitiesCacheService _activitiesCache;
         private readonly SemaphoreSlim _warmupLock = new(1, 1);
 
         private CancellationTokenSource? _currentRecognitionCts;
@@ -136,7 +139,9 @@ namespace Anfeta.UI.ViewModels
             ActivityFieldValidator activityValidator,
             CorrectionCommandDetector correctionDetector,
             WeblabUsersClient usersClient,
-            ApiKeyService apiKeyService)
+            ApiKeyService apiKeyService,
+            ActivitiesCacheService activitiesCache,
+            WeblabActividadesClient actividadesClient)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -154,6 +159,8 @@ namespace Anfeta.UI.ViewModels
             _usersClient = usersClient;
 
             _apiKeyService = apiKeyService;
+            _activitiesCache = activitiesCache;
+            _actividadesClient = actividadesClient;
 
             // Suscripción segura (para poder desuscribir en Dispose)
             _apiKeyService.KeysChanged += OnKeysChanged;
@@ -206,6 +213,34 @@ namespace Anfeta.UI.ViewModels
             _backgroundMode = true;
             try { await ListenOnceAsync(); }
             finally { _backgroundMode = false; }
+        }
+
+        /// <summary>Refresca el cache de actividades del usuario actual</summary>
+        private async Task RefreshActivitiesCacheAsync(CancellationToken ct)
+        {
+            try
+            {
+                var items = await _actividadesClient.GetMyActivitiesForCacheAsync(ct);
+
+                if (items.Count > 0)
+                {
+                    _activitiesCache.SetActivities(items);
+
+                    Debug.WriteLine($"[CACHE_ACTIVIDADES] Guardadas {items.Count} actividades.");
+                    foreach (var a in items)
+                    {
+                        Debug.WriteLine($" - {a.Title} ({a.Id})");
+                    }
+                }
+                else
+                {
+                    Debug.WriteLine("[CACHE_ACTIVIDADES] No se guardó nada.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[CACHE_ACTIVIDADES] Error: " + ex.Message);
+            }
         }
 
         /// <summary>Limpiar acción pendiente</summary>
@@ -656,8 +691,11 @@ namespace Anfeta.UI.ViewModels
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
-                    await ResetAfterActionAsync("No se detectó voz. Intenta otra vez.", "No se entendió",
-                        speak: "No detecté voz. Intenta de nuevo.");
+                    await ResetAfterActionAsync(
+                        "No se detectó voz. Intenta otra vez.",
+                        "No se entendió",
+                        speak: "No detecté voz. Intenta de nuevo."
+                    );
                     return;
                 }
 
@@ -780,7 +818,6 @@ namespace Anfeta.UI.ViewModels
                     }
 
                     // ── FAST CLASSIFIER: routing por scope ──────────────────────────
-                    // Cambio: acción = fastResult.Action (antes pasaba null → bug)
                     var fastRequiresConfirmation = RequiresConfirmation(fastResult.Scope, fastResult.Action);
                     Debug.WriteLine($"[FAST] requires_confirmation={fastRequiresConfirmation}");
 
@@ -831,7 +868,6 @@ namespace Anfeta.UI.ViewModels
                     // API: ejecutar a través del executor
                     if (string.Equals(fastResult.Scope, "API", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Serializar params si existen
                         string? fastParamsJson = null;
                         if (fastResult.Params?.Count > 0)
                             fastParamsJson = JsonSerializer.Serialize(fastResult.Params);
@@ -842,6 +878,14 @@ namespace Anfeta.UI.ViewModels
                             fastResult.Action,
                             fastParamsJson,
                             ct);
+
+                        if (fastOk &&
+                            string.Equals(fastResult.Provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(fastResult.Resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(fastResult.Action, "list", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await RefreshActivitiesCacheAsync(ct);
+                        }
 
                         _contextManager.AddToHistory($"API:{fastResult.Resource}:{fastResult.Action}", null);
                         await ResetAfterActionAsync(fastMsg, fastOk ? "Listo." : "Error", speak: fastMsg);
@@ -1046,6 +1090,13 @@ namespace Anfeta.UI.ViewModels
                     {
                         await ResetAfterActionAsync(msg, "API no disponible", speak: msg);
                         return;
+                    }
+
+                    if (string.Equals(provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(action, "list", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await RefreshActivitiesCacheAsync(ct);
                     }
 
                     _contextManager.AddToHistory($"API:{resource}:{action}", null);
