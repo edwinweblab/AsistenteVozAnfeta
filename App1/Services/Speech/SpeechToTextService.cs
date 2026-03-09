@@ -2,6 +2,7 @@
 using NAudio.CoreAudioApi;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -73,7 +74,7 @@ namespace Anfeta.UI.Services
                 }
 
                 _initialized = true;
-                System.Diagnostics.Debug.WriteLine("[STT] Inicialización OK. Lang=" + _currentLanguage);
+                Debug.WriteLine("[STT] Inicialización OK. Lang=" + _currentLanguage);
             }
             finally
             {
@@ -94,14 +95,14 @@ namespace Anfeta.UI.Services
                 if (naudioId >= 0 && naudioId < captureDevices.Count)
                 {
                     var target = captureDevices[naudioId];
-                    System.Diagnostics.Debug.WriteLine($"[STT] Cambiando a device: {target.FriendlyName}");
+                    Debug.WriteLine($"[STT] Cambiando a device: {target.FriendlyName}");
                     var policyConfig = new PolicyConfigClient();
                     policyConfig.SetDefaultEndpoint(target.ID, 2);
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[STT] Error al cambiar device: {ex.Message}");
+                Debug.WriteLine($"[STT] Error al cambiar device: {ex.Message}");
             }
         }
 
@@ -116,7 +117,7 @@ namespace Anfeta.UI.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[STT] Error al restaurar device: {ex.Message}");
+                Debug.WriteLine($"[STT] Error al restaurar device: {ex.Message}");
             }
             finally
             {
@@ -124,10 +125,12 @@ namespace Anfeta.UI.Services
             }
         }
 
-        /// Crea un SpeechRecognizer nuevo por cada escucha.
+        /// Crea un SpeechRecognizer nuevo, lo compila y ejecuta el reconocimiento.
+        /// onReady: callback invocado justo antes de RecognizeAsync.
+        /// Usar para actualizar la UI a "Escuchando" en el momento exacto en que
+        /// el micrófono empieza a capturar — no antes.
         /// SpeechRecognizer NO es reutilizable después de RecognizeAsync().
-        /// El delay se reduce bajando InitialSilenceTimeout a 1.5s.
-        public async Task<string?> RecognizeOnceAsync(CancellationToken ct = default)
+        public async Task<string?> RecognizeOnceAsync(CancellationToken ct = default, Action? onReady = null)
         {
             if (!_initialized)
                 throw new InvalidOperationException("Llama InitializeAsync() primero.");
@@ -161,9 +164,16 @@ namespace Anfeta.UI.Services
                     var compile = await recognizer.CompileConstraintsAsync();
                     if (compile.Status != SpeechRecognitionResultStatus.Success)
                     {
-                        System.Diagnostics.Debug.WriteLine($"[STT] Compile falló: {compile.Status}");
+                        Debug.WriteLine($"[STT] Compile falló: {compile.Status}");
                         return null;
                     }
+
+                    if (ct.IsCancellationRequested) return null;
+
+                    // Compilación lista. El recognizer está a punto de capturar audio.
+                    // Notificar al llamador para sincronizar el estado de la UI.
+                    onReady?.Invoke();
+                    Debug.WriteLine("[STT] RecognizeAsync iniciando (micrófono activo).");
 
                     using var reg = ct.Register(() => _ = CancelAsync());
 
@@ -176,15 +186,18 @@ namespace Anfeta.UI.Services
                     {
                         if (ex.HResult == unchecked((int)0x80045509))
                             throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
-                        System.Diagnostics.Debug.WriteLine($"[STT] COMException en RecognizeAsync: {ex.HResult}");
+                        Debug.WriteLine($"[STT] COMException en RecognizeAsync: {ex.HResult:X8}");
                         return null;
                     }
 
                     if (ct.IsCancellationRequested) return null;
 
-                    return result?.Status == SpeechRecognitionResultStatus.Success
+                    var text = result?.Status == SpeechRecognitionResultStatus.Success
                         ? result.Text
                         : null;
+
+                    Debug.WriteLine($"[STT] Resultado: '{text ?? "<null>"}' | Status={result?.Status}");
+                    return text;
                 }
                 catch (System.Runtime.InteropServices.COMException ex)
                 {

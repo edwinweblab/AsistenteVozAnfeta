@@ -10,7 +10,35 @@ namespace Anfeta.UI.Services
         private string _inputDeviceName = "No configurado";
         private string _outputDeviceName = "No configurado";
         private uint _hotkeyModifiers = 0x0003; // Ctrl+Alt
-        private uint _hotkeyKey = 0x56; // V
+        private uint _hotkeyKey = 0x56;   // V
+
+        // Email del usuario autenticado. Poblado desde el JWT al arranque.
+        private string? _currentUserEmail;
+        public string? CurrentUserEmail
+        {
+            get => _currentUserEmail;
+            set => SetField(ref _currentUserEmail, value);
+        }
+
+        // Nombre visible del usuario autenticado (firstName + lastName).
+        // Poblado desde /api/users/search al arranque, junto a CollaboratorId.
+        // Usado por WeblabReportesClient para evitar llamar a /api/auth/me en cada comando.
+        private string? _currentUserName;
+        public string? CurrentUserName
+        {
+            get => _currentUserName;
+            set => SetField(ref _currentUserName, value);
+        }
+
+        // ID de colaborador Notion. Corresponde a collaboratorId en /api/users/search
+        // y a idAsignee / assignees[].id en /api/reportes/revisiones-por-fecha.
+        // Poblado desde /api/users/search al arranque, junto a CurrentUserName.
+        private string? _collaboratorId;
+        public string? CollaboratorId
+        {
+            get => _collaboratorId;
+            set => SetField(ref _collaboratorId, value);
+        }
 
         public int? InputDeviceId
         {
@@ -55,10 +83,8 @@ namespace Anfeta.UI.Services
             if ((_hotkeyModifiers & 0x0001) != 0) parts.Add("Alt");
             if ((_hotkeyModifiers & 0x0004) != 0) parts.Add("Shift");
             if ((_hotkeyModifiers & 0x0008) != 0) parts.Add("Win");
-
             var keyName = ((System.Windows.Forms.Keys)_hotkeyKey).ToString();
             parts.Add(keyName);
-
             return string.Join(" + ", parts);
         }
 

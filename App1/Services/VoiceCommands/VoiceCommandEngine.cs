@@ -19,7 +19,17 @@ public sealed class VoiceCommandEngine
     {
         _repo = repo;
     }
-
+    
+    private readonly List<VoiceCommand> _builtIns = new()
+    {
+        new VoiceCommand
+        {
+            Name = "Abrir",
+            Token = "__open__",           // token interno (no va al SearchBox)
+            IsEnabled = true,
+            Synonyms = new List<string> { "abrir", "abre", "ábreme", "abreme", "open" }
+        }
+    };
     public async Task ReloadAsync()
     {
         _items = await _repo.LoadAsync();
@@ -94,21 +104,11 @@ public sealed class VoiceCommandEngine
     private void RebuildIndex()
     {
         _synIndex.Clear();
+        // 1) built-ins primero (prioridad)
+        IndexCommands(_builtIns);
 
-        foreach (var cmd in _items)
-        {
-            if (!cmd.IsEnabled) continue;
-
-            foreach (var syn in cmd.Synonyms ?? new List<string>())
-            {
-                var key = Normalize(syn);
-                if (string.IsNullOrWhiteSpace(key)) continue;
-
-                // si hay conflicto, nos quedamos con el primero (luego metemos prioridad)
-                if (!_synIndex.ContainsKey(key))
-                    _synIndex[key] = cmd;
-            }
-        }
+        // 2) luego user commands
+        IndexCommands(_items);
     }
 
     private static bool IsPrefixMatch(string phraseNorm, string synNorm)
@@ -143,5 +143,21 @@ public sealed class VoiceCommandEngine
         s = string.Join(" ", s.Split(' ', StringSplitOptions.RemoveEmptyEntries));
 
         return s.Trim();
+    }
+    private void IndexCommands(IEnumerable<VoiceCommand> cmds)
+    {
+        foreach (var cmd in cmds)
+        {
+            if (!cmd.IsEnabled) continue;
+
+            foreach (var syn in cmd.Synonyms ?? new List<string>())
+            {
+                var key = Normalize(syn);
+                if (string.IsNullOrWhiteSpace(key)) continue;
+
+                if (!_synIndex.ContainsKey(key))
+                    _synIndex[key] = cmd;
+            }
+        }
     }
 }

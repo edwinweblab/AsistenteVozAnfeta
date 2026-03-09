@@ -16,6 +16,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -37,13 +38,13 @@ namespace Anfeta.UI
         public static HomeViewModel HomeVM => AppHost.Services.GetRequiredService<HomeViewModel>();
         //Nefta
         public static LocalIndexService LocalIndex { get; } = new LocalIndexService();
-
+        private readonly List<Microsoft.UI.Xaml.Window> _openWindows = new();
         // URL base actualizada
         private const string WeblabBaseUrl = "https://wlserver-production.up.railway.app";
 
         public App()
         {
-            InitializeComponent();
+            InitializeComponent(); 
 
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
@@ -64,6 +65,7 @@ namespace Anfeta.UI
                     services.AddSingleton<VoiceCommandEngine>();
                     services.AddSingleton<VoiceSearchOrchestrator>();
                     services.AddSingleton<IVoicePostActionService, VoicePostActionService>();
+                    services.AddSingleton<VoiceCommandsTextImportService>();
 
                     // Context system (ORDEN IMPORTA)
                     services.AddSingleton<CapabilityRegistry>();
@@ -189,8 +191,8 @@ namespace Anfeta.UI
                     services.AddSingleton<WeblabReportesClient>(sp =>
                     {
                         var factory = sp.GetRequiredService<IHttpClientFactory>();
-                        var auth = sp.GetRequiredService<Anfeta.UI.Services.Auth.WeblabAuthClient>();
-                        return new WeblabReportesClient(factory.CreateClient("WeblabAuthed"), auth);
+                        var appState = sp.GetRequiredService<AppStateService>();
+                        return new WeblabReportesClient(factory.CreateClient("WeblabAuthed"), appState);
                     });
 
                     // WeblabUsersClient
@@ -275,7 +277,24 @@ namespace Anfeta.UI
                     // =========================
                     // ViewModels
                     // =========================
-                    services.AddSingleton<HomeViewModel>();
+                    services.AddSingleton<HomeViewModel>(sp => new HomeViewModel(
+                        sp.GetRequiredService<ISpeechToTextService>(),
+                        sp.GetRequiredService<ICommandInterpretationService>(),
+                        sp.GetRequiredService<ITextToSpeechService>(),
+                        sp.GetRequiredService<LocalActionExecutor>(),
+                        sp.GetRequiredService<ApiActionExecutor>(),
+                        sp.GetRequiredService<ContextManager>(),
+                        sp.GetRequiredService<IntentValidator>(),
+                        sp.GetRequiredService<FastCommandClassifier>(),
+                        sp.GetRequiredService<InterpretationCache>(),
+                        sp.GetRequiredService<ActivityFieldExtractor>(),
+                        sp.GetRequiredService<ActivityFieldValidator>(),
+                        sp.GetRequiredService<CorrectionCommandDetector>(),
+                        sp.GetRequiredService<WeblabUsersClient>(),
+                        sp.GetRequiredService<WeblabRecordatoriosClient>(),
+                        sp.GetRequiredService<WeblabReportesClient>(),
+                        sp.GetRequiredService<ApiKeyService>()
+                    ));
                 })
                 .Build();
         }
@@ -369,7 +388,15 @@ namespace Anfeta.UI
                 if (auth.IsAuthenticated)
                 {
                     Debug.WriteLine("AUTH: token local válido -> usuario autenticado");
+
+                    // INSERTAR AQUÍ:
+                    var tokenLocal2 = await tokenStore.GetTokenAsync();
+                    var appState = AppHost.Services.GetRequiredService<AppStateService>();
+                    appState.CurrentUserEmail = Anfeta.UI.Helpers.JwtHelper.GetEmail(tokenLocal2);
+                    Debug.WriteLine($"[AUTH] CurrentUserEmail={appState.CurrentUserEmail}");
+                    await ResolveCollaboratorIdAsync(appState);
                     return;
+
                 }
 
                 // 2) Verificar logout manual
@@ -387,6 +414,12 @@ namespace Anfeta.UI
                 {
                     await auth.SetSignedInAsync(check.Token!);
                     Debug.WriteLine("AUTH: device vinculado -> token OK (auto-login)");
+
+                    // INSERTAR AQUÍ:
+                    var appState2 = AppHost.Services.GetRequiredService<AppStateService>();
+                    appState2.CurrentUserEmail = Anfeta.UI.Helpers.JwtHelper.GetEmail(check.Token);
+                    Debug.WriteLine($"[AUTH] CurrentUserEmail={appState2.CurrentUserEmail}");
+                    await ResolveCollaboratorIdAsync(appState2);
                     return;
                 }
 
@@ -646,6 +679,30 @@ namespace Anfeta.UI
             catch (Exception ex)
             {
                 Debug.WriteLine("DEVICE DUMP ERROR: " + ex.Message);
+            }
+        }
+        private async Task ResolveCollaboratorIdAsync(AppStateService appState)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(appState.CurrentUserEmail)) return;
+
+                var usersClient = AppHost.Services.GetRequiredService<WeblabUsersClient>();
+                var result = await usersClient.SearchByEmailAsync(appState.CurrentUserEmail);
+
+                if (result.Ok)
+                {
+                    appState.CollaboratorId = result.CollaboratorId;
+                    Debug.WriteLine($"[AUTH] CollaboratorId={appState.CollaboratorId}");
+                }
+                else
+                {
+                    Debug.WriteLine($"[AUTH] No se pudo resolver CollaboratorId: {result.RawError}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AUTH] ResolveCollaboratorIdAsync error: {ex.Message}");
             }
         }
 #endif

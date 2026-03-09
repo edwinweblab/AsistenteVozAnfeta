@@ -101,6 +101,65 @@
                     Grid.Row="5"
                     IsReadOnly="True" />
             </Grid>
+            <!--  ===== IMPORT (INLINE) =====  -->
+            <Grid
+                x:Name="ImportPanel"
+                RowSpacing="10"
+                Visibility="Collapsed">
+
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!--  👇 Texto de ayuda: su propia fila  -->
+                <TextBlock
+                    Grid.Row="0"
+                    Margin="0,0,0,6"
+                    Opacity="0.75"
+                    Text="Pega texto (formato: palabra == token). Se agrupa por token."
+                    TextWrapping="Wrap" />
+
+                <!--  👇 Radios: otra fila  -->
+                <StackPanel
+                    Grid.Row="1"
+                    Orientation="Horizontal"
+                    Spacing="12">
+                    <RadioButton
+                        x:Name="ImportMerge"
+                        Content="Merge"
+                        IsChecked="True" />
+                    <RadioButton x:Name="ImportReplace" Content="Replace" />
+                </StackPanel>
+
+                <!--  👇 TextBox: otra fila  -->
+                <TextBox
+                    x:Name="ImportBox"
+                    Grid.Row="2"
+                    Height="220"
+                    AcceptsReturn="True"
+                    TextWrapping="Wrap" />
+
+                <!--  👇 Preview: otra fila  -->
+                <TextBlock
+                    x:Name="ImportPreviewText"
+                    Grid.Row="3"
+                    Opacity="0.85"
+                    TextWrapping="Wrap" />
+
+                <!--  👇 Botones: otra fila  -->
+                <StackPanel
+                    Grid.Row="4"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button Click="BtnImportAnalyze_Click" Content="Analizar" />
+                    <Button Click="BtnImportApply_Click" Content="Importar" />
+                    <Button Click="BtnImportCancel_Click" Content="Cancelar" />
+                </StackPanel>
+            </Grid>
         </Grid>
 
         <!--  ====== BOTONERA INFERIOR ======  -->
@@ -114,7 +173,10 @@
                 x:Name="BtnAdd"
                 Click="BtnAdd_Click"
                 Content="+ Agregar comando" />
-
+            <Button
+                x:Name="BtnImport"
+                Click="BtnImport_Click"
+                Content="Importar desde texto..." />
             <Button
                 x:Name="BtnSaveEdit"
                 Click="BtnSaveEdit_Click"

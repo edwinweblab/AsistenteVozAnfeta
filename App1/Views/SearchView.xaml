@@ -44,8 +44,6 @@
                         <ColumnDefinition Width="Auto" />
                         <!--  Voz  -->
                         <ColumnDefinition Width="Auto" />
-                        <!--  Notion  -->
-                        <ColumnDefinition Width="Auto" />
                         <!--  Detalles  -->
                     </Grid.ColumnDefinitions>
                     <!--  Carpetas  -->
@@ -109,15 +107,11 @@
                         FontWeight="SemiBold"
                         ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
                     <!--  Notion  -->
-                    <ToggleButton
-                        x:Name="ToggleNotion"
-                        Grid.Column="4"
-                        Content="Notion"
-                        ToolTipService.ToolTip="Incluir páginas Notion relacionadas" />
+                    
                     <!--  Detalles  -->
                     <ToggleButton
                         x:Name="ToggleDetailsPane"
-                        Grid.Column="5"
+                        Grid.Column="4"
                         Click="ToggleDetailsPane_Click"
                         Content="Detalles"
                         IsChecked="False"
@@ -572,7 +566,7 @@
                             DoubleTapped="ResultsList_DoubleTapped"
                             RightTapped="ResultsList_RightTapped"
                             SelectionChanged="ResultsList_SelectionChanged"
-                            SelectionMode="Single">
+                            SelectionMode="Extended">
 
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="models:SearchResultRow">
@@ -612,16 +606,26 @@
                             </ListView.ItemTemplate>
                             <ListView.ContextFlyout>
                                 <MenuFlyout>
-                                    <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir" />
-                                    <MenuFlyoutItem Click="CtxOpenWeb_Click" Text="Abrir en Dropbox Web" />
+
+                                    <!-- Navegar dentro del buscador -->
+                                    <MenuFlyoutItem Click="CtxOpenInApp_Click" Text="Abrir en ANFETA" />
+
+                                    <!-- Abrir con Windows -->
+                                    <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir en Windows" />
+
+                                    <!-- Abrir carpeta en Explorer -->
+                                    <MenuFlyoutItem Click="CtxOpenPath_Click" Text="Abrir Ubicación (PC)" />
+
                                     <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar ruta" />
-                                    <MenuFlyoutItem Click="CtxCopyLink_Click" Text="Copiar link" />
+
+                                    <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar Nombre" />
+                                    <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar Ruta" />
+
                                     <MenuFlyoutSeparator />
+
                                     <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
                                     <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
-                                    <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Click="CtxBookmark_Click" Text="Agregar a bookmarks" />
+
                                 </MenuFlyout>
                             </ListView.ContextFlyout>
                         </ListView>
@@ -735,44 +739,6 @@
                             </StackPanel>
                         </Border>
                     </StackPanel>
-
-                    <Grid Grid.Row="3" ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <TextBlock
-                            x:Name="DetailsHint"
-                            Grid.Column="0"
-                            VerticalAlignment="Center"
-                            Opacity="0.6"
-                            Text="Acciones disponibles" />
-
-                        <Button
-                            Grid.Column="1"
-                            Click="CtxOpen_Click"
-                            Content="Abrir Web" />
-
-                        <Button
-                            Grid.Column="2"
-                            Click="BtnDetailsLink_Click"
-                            Content="Abrir Ubicacion" />
-
-                        <Button Grid.Column="3" Content="⋯">
-                            <Button.Flyout>
-                                <MenuFlyout>
-                                    <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
-                                    <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
-                                    <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
-                                    <MenuFlyoutSeparator />
-                                </MenuFlyout>
-                            </Button.Flyout>
-                        </Button>
-                    </Grid>
                 </Grid>
             </Border>
         </Grid>
@@ -788,7 +754,7 @@
                 x:Name="StatusText"
                 Grid.Column="0"
                 Opacity="0.7"
-                Text="Estado: Dropbox (API)" />
+                Text="Estado: Dropbox Local" />
             <TextBlock
                 x:Name="VoiceDebugText"
                 Grid.Column="0"
