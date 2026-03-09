@@ -110,7 +110,105 @@ public sealed class VoiceCommandEngine
         // 2) luego user commands
         IndexCommands(_items);
     }
+    public sealed record VoiceMultiParseResult(
+    string SearchText,
+    List<string> Tokens,
+    List<string> MatchedSynonyms
+    );
 
+    public VoiceMultiParseResult? TryParseToSearchText(string phrase)
+    {
+        var p = Normalize(phrase);
+        if (string.IsNullOrWhiteSpace(p)) return null;
+        if (_synIndex.Count == 0) return null;
+
+        var words = p.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return null;
+
+        var outTokens = new List<string>();
+        var matchedSynonyms = new List<string>();
+
+        int i = 0;
+        while (i < words.Length)
+        {
+            VoiceCommand? bestCmd = null;
+            string? bestSyn = null;
+            int bestLen = 0;
+
+            // 1) intentar match exacto por segmento más largo
+            for (int len = words.Length - i; len >= 1; len--)
+            {
+                var segment = string.Join(" ", words.Skip(i).Take(len));
+
+                if (_synIndex.TryGetValue(segment, out var cmd))
+                {
+                    // ignorar built-in abrir en modo multi-token
+                    if (string.Equals(cmd.Token, "__open__", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    bestCmd = cmd;
+                    bestSyn = segment;
+                    bestLen = len;
+                    break;
+                }
+            }
+
+            // 2) fallback suave solo para una palabra
+            if (bestCmd is null)
+            {
+                var soft = TryResolveSingleWordSoft(words[i]);
+                if (soft is not null &&
+                    !string.Equals(soft.Token, "__open__", StringComparison.OrdinalIgnoreCase))
+                {
+                    bestCmd = soft;
+                    bestSyn = words[i];
+                    bestLen = 1;
+                }
+            }
+
+            // 3) si no matcheó, deja la palabra tal cual
+            if (bestCmd is null)
+            {
+                outTokens.Add(words[i]);
+                i++;
+                continue;
+            }
+
+            outTokens.Add((bestCmd.Token ?? "").Trim());
+            matchedSynonyms.Add(bestSyn!);
+            i += bestLen;
+        }
+
+        // si no matcheó ningún comando, no lo consideres parse válido
+        if (matchedSynonyms.Count == 0)
+            return null;
+
+        var finalText = string.Join(" ", outTokens.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+        if (string.IsNullOrWhiteSpace(finalText))
+            return null;
+
+        return new VoiceMultiParseResult(
+            finalText,
+            outTokens.Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
+            matchedSynonyms
+        );
+    }
+
+    private VoiceCommand? TryResolveSingleWordSoft(string word)
+    {
+        var w = Normalize(word);
+        if (string.IsNullOrWhiteSpace(w) || w.Length < 4) return null;
+
+        var hit = _synIndex.Keys
+            .OrderByDescending(k => k.Length)
+            .FirstOrDefault(k =>
+                !k.Contains(' ') &&
+                (k.StartsWith(w, StringComparison.OrdinalIgnoreCase) ||
+                 w.StartsWith(k, StringComparison.OrdinalIgnoreCase)));
+
+        if (hit is null) return null;
+        return _synIndex[hit];
+    }
     private static bool IsPrefixMatch(string phraseNorm, string synNorm)
     {
         if (phraseNorm.Equals(synNorm, StringComparison.OrdinalIgnoreCase))

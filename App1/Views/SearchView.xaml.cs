@@ -32,6 +32,10 @@ using Windows.Storage.Pickers;
 using Windows.UI;
 using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
+using Windows.Media.SpeechSynthesis;
+using Windows.Media.Playback;
+using Windows.Media.Core;
+using System.Text.RegularExpressions;
 
 
 
@@ -115,6 +119,19 @@ namespace Anfeta.UI.Views
         //Cambio de Pestaña Buscador
         public event EventHandler<string>? TabTitleChanged;
         public event EventHandler? WorkspaceChanged;
+        //Dictado de Resultados 1 x 1 
+        private readonly SpeechSynthesizer _dictSynth = new();
+        private MediaPlayer? _dictPlayer;
+        private IReadOnlyList<SearchResultRow> _dictList = Array.Empty<SearchResultRow>();
+        private int _dictIndex = 0;
+        private bool _dictPlaying = false;
+        private CancellationTokenSource? _dictCts;
+        //Sugerencias TextBox
+        private bool _suppressSuggest; // evita loops cuando seteas Text desde SuggestionChosen 
+        private const string LS_BATCH_RENAME_HISTORY = "BatchRename.FormatHistory.v1";
+        private const int BATCH_RENAME_HISTORY_MAX = 8;
+
+       
 
         #endregion
 
@@ -960,6 +977,21 @@ namespace Anfeta.UI.Views
         {
             if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput && !_allowProgrammaticSearch)
                 return;
+            // ✅ Solo sugerir cuando el usuario escribe (no cuando seteamos texto por código)
+            if (_suppressSuggest) return;
+
+            if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+            {
+                var suggestions = GenerateStutterSuggestions(sender.Text, max: 8);
+
+                sender.ItemsSource = suggestions;
+                sender.IsSuggestionListOpen = suggestions.Count > 0;
+            }
+            else
+            {
+                sender.ItemsSource = null;
+                sender.IsSuggestionListOpen = false;
+            }
 
 
             EnsureSearchDebounce();
@@ -1018,10 +1050,25 @@ namespace Anfeta.UI.Views
         }
         private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
         {
-            await RunSearchAsync(sender.Text ?? "");
+            var ui = (sender.Text ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(ui))
+            {
+                await RunSearchAsync("");
+                return;
+            }
 
+            // Genera variantes (ej: vvent, vent, ventas)
+            var variants = ExpandStutterQuery(ui);
+
+            // Si hay variantes, usa OR con pipe. Si no, usa el texto tal cual.
+            var effective = (variants != null && variants.Count > 0)
+                ? string.Join(" | ", variants.Select(v => $"\"{v}\""))
+                : ui;
+
+            // UI muestra "Buscar: vvent" pero internamente busca con OR
+            await RunSearchAsync(ui, effective);
         }
-        private async Task RunSearchAsync(string query)
+        private async Task RunSearchAsync(string uiQuery, string? effectiveQuery = null)
         {
             if (DropboxIndexCoordinator.IsIndexing)
             {
@@ -1034,14 +1081,17 @@ namespace Anfeta.UI.Views
                 StatusText.Text = "Estado: “No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                 return;
             }
+
             LoadingRing.IsActive = true;
             LoadingRing.Visibility = Visibility.Visible;
 
             try
             {
-                BreadcrumbText.Text = string.IsNullOrWhiteSpace(query) ? DROPBOX_ROOT : $"Buscar: {query}";
+                BreadcrumbText.Text = string.IsNullOrWhiteSpace(uiQuery) ? DROPBOX_ROOT : $"Buscar: {uiQuery}";
                 ModeText.Text = "Modo: Buscar (Local)";
-                await RunLocalSearchAsync(query);
+
+                await RunLocalSearchAsync(effectiveQuery ?? uiQuery);
+
                 StatusText.Text = "Estado: Búsqueda local ✅";
             }
             finally
@@ -1161,6 +1211,7 @@ namespace Anfeta.UI.Views
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             _voicePost.NotifySearchResults(Results);
+            Dictation_SetResults(Results);
             await Task.CompletedTask;
 
         }
@@ -1271,6 +1322,7 @@ namespace Anfeta.UI.Views
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             _voicePost.NotifySearchResults(Results);
+            Dictation_SetResults(Results);
             await Task.CompletedTask;
         }
         #endregion
@@ -1514,6 +1566,8 @@ namespace Anfeta.UI.Views
         {
             if (ResultsList.SelectedItem is not SearchResultRow row)
                 return;
+            if (ResultsList.SelectedIndex >= 0)
+                _dictIndex = ResultsList.SelectedIndex;
 
             DetailsTitle.Text = row.Name;
             DetailsPath.Text = row.Target;
@@ -3426,6 +3480,746 @@ namespace Anfeta.UI.Views
         }
         #endregion
 
+        #region ===== Reproduccion Resultados  =====
+        private void Dictation_SetResults(IReadOnlyList<SearchResultRow> rows)
+        {
+            _dictList = rows ?? Array.Empty<SearchResultRow>();
+            _dictIndex = 0;
+            _dictPlaying = false;
+
+            // si estaba reproduciendo, detenlo
+            _dictCts?.Cancel();
+        }
+        private async Task Dictation_SpeakCurrentAsync(CancellationToken ct)
+        {
+            if (_dictList.Count == 0) return;
+
+            if (_dictIndex < 0) _dictIndex = 0;
+            if (_dictIndex >= _dictList.Count) _dictIndex = _dictList.Count - 1;
+
+            var row = _dictList[_dictIndex];
+            var text = (row?.Name ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(text)) text = "Elemento sin nombre";
+
+            // opcional: “carpeta”/“archivo”
+            // if (row.IsFolder) text = "Carpeta: " + text;
+
+            ct.ThrowIfCancellationRequested();
+
+            var stream = await _dictSynth.SynthesizeTextToStreamAsync(text);
+
+            ct.ThrowIfCancellationRequested();
+
+            _dictPlayer ??= new MediaPlayer();
+            _dictPlayer.Source = MediaSource.CreateFromStream(stream, stream.ContentType);
+            _dictPlayer.Play();
+        }
+        private async Task WaitForMediaEndAsync(CancellationToken ct)
+        {
+            if (_dictPlayer == null) return;
+
+            var tcs = new TaskCompletionSource<object?>();
+
+            void OnEnded(MediaPlayer s, object a) => tcs.TrySetResult(null);
+            void OnFailed(MediaPlayer s, MediaPlayerFailedEventArgs a) => tcs.TrySetResult(null);
+
+            _dictPlayer.MediaEnded += OnEnded;
+            _dictPlayer.MediaFailed += OnFailed;
+
+            using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
+
+            try
+            {
+                await tcs.Task;
+            }
+            finally
+            {
+                _dictPlayer.MediaEnded -= OnEnded;
+                _dictPlayer.MediaFailed -= OnFailed;
+            }
+        }
+        private async Task Dictation_PlayAsync()
+        {
+            if (_dictList.Count == 0) { StatusText.Text = "Estado: No hay resultados para dictar"; return; }
+
+            // corta cualquier reproducción anterior
+            _dictCts?.Cancel();
+            _dictCts = new CancellationTokenSource();
+            var ct = _dictCts.Token;
+
+            _dictPlaying = true;
+
+            try
+            {
+                // si el mic estaba usando TTS/sonidos, detén lo que puedas (tú ya tienes esto)
+                try { await _voicePost.StopAllAsync(); } catch { }
+
+                while (_dictPlaying && !ct.IsCancellationRequested)
+                {
+                    await Dictation_SpeakCurrentAsync(ct);
+
+                    // espera a que termine
+                    // (simple y suficiente: polling del estado)
+                    while (_dictPlayer != null && _dictPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        await Task.Delay(80, ct);
+                    }
+
+                    await Dictation_SpeakCurrentAsync(ct);
+
+                    // ✅ Espera real a que termine el audio
+                    await WaitForMediaEndAsync(ct);
+
+                    // siguiente
+                    _dictIndex++;
+
+                    if (_dictIndex >= _dictList.Count)
+                    {
+                        _dictPlaying = false;
+                        _dictIndex = _dictList.Count - 1;
+                        break;
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+        }
+        private void Dictation_Pause()
+        {
+            _dictPlaying = false;
+            _dictCts?.Cancel();
+
+            try { _dictPlayer?.Pause(); } catch { }
+        }
+        private async void BtnDictPlay_Click(object sender, RoutedEventArgs e)
+        {
+            await Dictation_PlayAsync();
+        }
+
+        private void BtnDictPause_Click(object sender, RoutedEventArgs e)
+        {
+            Dictation_Pause();
+        }
+
+        private async void BtnDictNext_Click(object sender, RoutedEventArgs e)
+        {
+            if (_dictList.Count == 0) return;
+
+            Dictation_Pause();
+            _dictIndex = Math.Min(_dictIndex + 1, _dictList.Count - 1);
+
+            _dictCts?.Cancel();
+            _dictCts = new CancellationTokenSource();
+
+            await Dictation_SpeakCurrentAsync(_dictCts.Token);
+        }
+
+        private async void BtnDictPrev_Click(object sender, RoutedEventArgs e)
+        {
+            if (_dictList.Count == 0) return;
+
+            Dictation_Pause();
+            _dictIndex = Math.Max(_dictIndex - 1, 0);
+
+            _dictCts?.Cancel();
+            _dictCts = new CancellationTokenSource();
+
+            await Dictation_SpeakCurrentAsync(_dictCts.Token);
+        }
+        #endregion
+
+
+        #region ==== RENOMBRAR MULTIPLES =====
+        private async void CtxRename_Click(object sender, RoutedEventArgs e)
+        {
+            // 1) Multi selección primero
+            var selected = ResultsList.SelectedItems?
+                .OfType<SearchResultRow>()
+                .ToList() ?? new List<SearchResultRow>();
+
+            // 2) Si no hay multi, intenta ctx row (flyout) o SelectedItem
+            if (selected.Count == 0)
+            {
+                var row = GetCtxRowFromFlyout(sender) ?? ResultsList.SelectedItem as SearchResultRow;
+                if (row == null) return;
+                selected.Add(row);
+            }
+
+            // 3) Caso 1 elemento: rename normal (tu flujo)
+            if (selected.Count == 1)
+            {
+                var row = selected[0];
+
+                var newName = await PromptRenameAsync(row.Name);
+                if (string.IsNullOrWhiteSpace(newName) ||
+                    string.Equals(newName, row.Name, StringComparison.Ordinal))
+                    return;
+
+                var dir = Path.GetDirectoryName(row.Target) ?? DROPBOX_ROOT;
+                var newFullPath = Path.Combine(dir, newName.Trim());
+
+                try
+                {
+                    await ApplyFileChangeAsync(FileChangeKind.Rename, row, newFullPath);
+                    StatusText.Text = "Estado: Renombrado ✅";
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Error al renombrar: {ex.Message}";
+                }
+
+                return;
+            }
+
+            // 4) Caso 2+ elementos: Batch Rename (preview + aplicar)
+            try
+            {
+                await ShowBatchRenameDialogAsync(selected);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error en renombrado múltiple: {ex.Message}";
+            }
+        }
+        private async Task ShowBatchRenameDialogAsync(List<SearchResultRow> rows)
+        {
+            // ===== Controles =====
+            var oldBox = new TextBox
+            {
+                IsReadOnly = true,
+                TextWrapping = TextWrapping.NoWrap,
+                AcceptsReturn = true,
+                Height = 140,
+                Text = string.Join(Environment.NewLine, rows.Select(r => r.Name))
+            };
+
+            var fmtBox = new TextBox
+            {
+                PlaceholderText = "Ej: {name} ({n}){ext}",
+                Text = "{name} ({n}){ext}",
+                MinWidth = 260
+            };
+
+            // Cargar último formato usado si existe
+            var history = LoadBatchRenameHistory();
+            if (history.Count > 0)
+                fmtBox.Text = history[0];
+
+            // Botón ▼ para presets/historial
+            var presetsBtn = new Button
+            {
+                Content = "▼",
+                Width = 38,
+                Height = 32
+            };
+
+            var fly = new MenuFlyout();
+
+            void RebuildFlyout()
+            {
+                fly.Items.Clear();
+
+                // Presets
+                fly.Items.Add(new MenuFlyoutItem { Text = "Presets", IsEnabled = false });
+                foreach (var p in BatchRenamePresets)
+                {
+                    var item = new MenuFlyoutItem { Text = p.Title };
+                    item.Click += (_, __) => fmtBox.Text = p.Format;
+                    fly.Items.Add(item);
+                }
+
+                fly.Items.Add(new MenuFlyoutSeparator());
+
+                // Historial
+                var freshHistory = LoadBatchRenameHistory();
+                if (freshHistory.Count == 0)
+                {
+                    fly.Items.Add(new MenuFlyoutItem { Text = "Historial vacío", IsEnabled = false });
+                }
+                else
+                {
+                    fly.Items.Add(new MenuFlyoutItem { Text = "Historial", IsEnabled = false });
+
+                    foreach (var h in freshHistory)
+                    {
+                        var label = h.Length > 42 ? h.Substring(0, 42) + "…" : h;
+
+                        var item = new MenuFlyoutItem { Text = label };
+                        item.Click += (_, __) => fmtBox.Text = h;
+                        fly.Items.Add(item);
+                    }
+
+                    fly.Items.Add(new MenuFlyoutSeparator());
+                    var clear = new MenuFlyoutItem { Text = "Limpiar historial" };
+                    clear.Click += (_, __) =>
+                    {
+                        SaveBatchRenameHistory(new List<string>());
+                        RebuildFlyout();
+                    };
+                    fly.Items.Add(clear);
+                }
+            }
+
+            RebuildFlyout();
+            presetsBtn.Flyout = fly;
+            presetsBtn.Click += (_, __) => RebuildFlyout();
+
+            var keepExt = new CheckBox
+            {
+                Content = "Mantener extensión original (ignorar extensión en el formato)",
+                IsChecked = true
+            };
+
+            var startNumber = new NumberBox
+            {
+                Minimum = 1,
+                Value = 1,
+                SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+                Width = 120
+            };
+
+            var previewBox = new TextBox
+            {
+                IsReadOnly = true,
+                TextWrapping = TextWrapping.NoWrap,
+                AcceptsReturn = true,
+                Height = 140
+            };
+
+            var errorText = new TextBlock
+            {
+                Opacity = 0.85,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            // ===== Preview refresco =====
+            void RefreshPreview()
+            {
+                var (preview, error) = BatchRename_Preview(
+                    rows,
+                    fmtBox.Text,
+                    (int)startNumber.Value,
+                    keepExt.IsChecked == true);
+
+                previewBox.Text = string.Join(Environment.NewLine, preview);
+
+                errorText.Text = error ?? "";
+                errorText.Visibility = string.IsNullOrWhiteSpace(error)
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+            }
+
+            fmtBox.TextChanged += (_, __) => RefreshPreview();
+            keepExt.Checked += (_, __) => RefreshPreview();
+            keepExt.Unchecked += (_, __) => RefreshPreview();
+            startNumber.ValueChanged += (_, __) => RefreshPreview();
+
+            RefreshPreview();
+
+            // ===== Layout =====
+            var root = new StackPanel { Spacing = 10 };
+
+            root.Children.Add(new TextBlock
+            {
+                Text = "Old filenames:",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            });
+            root.Children.Add(oldBox);
+
+            var row1 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            row1.Children.Add(new TextBlock { Text = "New format:", VerticalAlignment = VerticalAlignment.Center });
+            row1.Children.Add(fmtBox);
+            row1.Children.Add(presetsBtn);
+            root.Children.Add(row1);
+
+            var row2 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
+            row2.Children.Add(keepExt);
+            row2.Children.Add(new TextBlock { Text = "Start:", VerticalAlignment = VerticalAlignment.Center });
+            row2.Children.Add(startNumber);
+            root.Children.Add(row2);
+
+            root.Children.Add(new TextBlock
+            {
+                Text = "New filenames (preview):",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            });
+            root.Children.Add(previewBox);
+            root.Children.Add(errorText);
+
+            var dlg = new ContentDialog
+            {
+                Title = $"Renombrar ({rows.Count})",
+                Content = root,
+                PrimaryButtonText = "Aplicar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            // habilitar/deshabilitar Apply según error
+            void SyncApplyEnabled()
+            {
+                dlg.IsPrimaryButtonEnabled = string.IsNullOrWhiteSpace(errorText.Text);
+            }
+
+            dlg.Opened += (_, __) => { RefreshPreview(); SyncApplyEnabled(); };
+
+            fmtBox.TextChanged += (_, __) => SyncApplyEnabled();
+            keepExt.Checked += (_, __) => SyncApplyEnabled();
+            keepExt.Unchecked += (_, __) => SyncApplyEnabled();
+            startNumber.ValueChanged += (_, __) => SyncApplyEnabled();
+
+            var result = await dlg.ShowAsync();
+            if (result != ContentDialogResult.Primary) return;
+            AddFormatToHistory(fmtBox.Text);
+            await ApplyBatchRenameAsync(rows, fmtBox.Text, (int)startNumber.Value, keepExt.IsChecked == true);
+        }
+        private (List<string> Preview, string? Error) BatchRename_Preview(
+            List<SearchResultRow> rows,
+            string format,
+            int start,
+            bool keepOriginalExtension)
+        {
+            format = format ?? "";
+            if (string.IsNullOrWhiteSpace(format))
+                return (new List<string>(), "El formato está vacío.");
+
+            var preview = new List<string>(rows.Count);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                var oldName = r.Name ?? "";
+
+                var (name, ext) = SplitNameExt(oldName);
+
+                var n = start + i;
+                var newName = ExpandFormat(format, oldName, name, ext, n, rows.Count);
+
+                // Mantener extensión original si se marca
+                if (keepOriginalExtension)
+                {
+                    var (nn, _) = SplitNameExt(newName);
+                    newName = nn + ext;
+                }
+
+                // Validaciones básicas
+                if (string.IsNullOrWhiteSpace(newName))
+                    return (preview, "El formato produce nombres vacíos.");
+
+                if (newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                    return (preview, $"Nombre inválido generado: {newName}");
+
+                if (!seen.Add(newName))
+                    return (preview, $"Duplicado en el lote: {newName}");
+
+                preview.Add(newName);
+            }
+
+            return (preview, null);
+        }
+
+        private static (string Name, string Ext) SplitNameExt(string filename)
+        {
+            var ext = Path.GetExtension(filename) ?? "";
+            var name = Path.GetFileNameWithoutExtension(filename) ?? filename;
+            return (name, ext);
+        }
+        private static string ExpandFormat(string format, string full, string name, string ext, int n, int N)
+        {
+            var s = (format ?? "")
+                .Replace("{full}", full)
+                .Replace("{name}", name)
+                .Replace("{ext}", ext)
+                .Replace("{N}", N.ToString());
+
+            // {n} o {n:000}
+            s = Regex.Replace(
+                s,
+                @"\{n(?::(?<fmt>0+))?\}",
+                m =>
+                {
+                    var fmt = m.Groups["fmt"].Value;
+                    if (!string.IsNullOrEmpty(fmt))
+                        return n.ToString(new string('0', fmt.Length));
+                    return n.ToString();
+                });
+
+            return s;
+        }
+        private async Task ApplyBatchRenameAsync(
+         List<SearchResultRow> rows,
+         string format,
+         int start,
+         bool keepOriginalExtension)
+        {
+            var (preview, error) = BatchRename_Preview(rows, format, start, keepOriginalExtension);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                StatusText.Text = $"Estado: Rename cancelado ❌ ({error})";
+                return;
+            }
+
+            int ok = 0, fail = 0;
+            string? lastError = null;
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+
+                try
+                {
+                    // Path completo actual
+                    var oldPath = row.Target;
+                    if (string.IsNullOrWhiteSpace(oldPath))
+                        throw new Exception("Target vacío");
+
+                    var dir = Path.GetDirectoryName(oldPath) ?? DROPBOX_ROOT;
+                    var newFullPath = Path.Combine(dir, preview[i]);
+
+                    // Si queda igual, skip
+                    if (string.Equals(oldPath, newFullPath, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    // ✅ Usa tu pipeline real (renombra + actualiza índice/cache)
+                    await ApplyFileChangeAsync(FileChangeKind.Rename, row, newFullPath);
+                    ok++;
+                }
+                catch (Exception ex)
+                {
+                    fail++;
+                    lastError = ex.Message;
+                }
+            }
+
+            // Refresca resultados (para que se vea inmediato)
+            try
+            {
+                await RunLocalSearchAsync(SearchBox.Text, CancellationToken.None);
+            }
+            catch { }
+
+            if (fail == 0)
+                StatusText.Text = $"Estado: Renombrados ✅ ({ok})";
+            else
+                StatusText.Text = $"Estado: Renombrados ✅ ({ok}) | Fallaron ❌ ({fail})" + (lastError != null ? $" | Último: {lastError}" : "");
+        }
+        private async Task RefreshAfterFileOpsAsync()
+        {
+            // Si tu flujo principal es búsqueda:
+            await RunLocalSearchAsync(SearchBox.Text, CancellationToken.None);
+
+            // Si prefieres explorar carpeta actual, cambia por tu método de browse:
+            // await BrowseFolderAsync(_currentFolderPath);
+        }
+
+        
+        private List<string> LoadBatchRenameHistory()
+        {
+            try
+            {
+                var ls = ApplicationData.Current.LocalSettings;
+                if (ls.Values.TryGetValue(LS_BATCH_RENAME_HISTORY, out var obj) && obj is string json && !string.IsNullOrWhiteSpace(json))
+                {
+                    var list = JsonSerializer.Deserialize<List<string>>(json);
+                    return list?.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList() ?? new List<string>();
+                }
+            }
+            catch { }
+            return new List<string>();
+        }
+
+        private void SaveBatchRenameHistory(List<string> items)
+        {
+            try
+            {
+                items = items
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s.Trim())
+                    .Distinct()
+                    .Take(BATCH_RENAME_HISTORY_MAX)
+                    .ToList();
+
+                var json = JsonSerializer.Serialize(items);
+                ApplicationData.Current.LocalSettings.Values[LS_BATCH_RENAME_HISTORY] = json;
+            }
+            catch { }
+        }
+
+        private void AddFormatToHistory(string format)
+        {
+            format = (format ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(format)) return;
+
+            var list = LoadBatchRenameHistory();
+
+            // mover al top si ya existía
+            list.RemoveAll(x => string.Equals(x, format, StringComparison.Ordinal));
+            list.Insert(0, format);
+
+            SaveBatchRenameHistory(list);
+        }
+        private static readonly (string Title, string Format)[] BatchRenamePresets = new[]
+       {
+            ("Numerar al final", "{name} ({n}){ext}"),
+            ("Numerar al inicio", "{n:00} - {name}{ext}"),
+            ("Reporte fijo", "Reporte_{n:000}{ext}"),
+            ("Solo número", "{n:000}{ext}"),
+            ("Nombre + total", "{name} {n} de {N}{ext}")
+        };
+
+        #endregion
+
+        #region ==== SUGERENCIAS DE BUSQUEDA === 
+        private static List<string> GenerateStutterSuggestions(string input, int max = 8)
+        {
+            input = (input ?? "").Trim();
+            if (input.Length < 2) return new List<string>();
+
+            var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var first = parts.Length > 0 ? parts[0] : input;
+
+            // Normalizar “para sugerir” sin destruir acentos
+            var lower = first.ToLowerInvariant();
+            char c0 = lower[0];
+
+            // helper: crea sugerencia y evita duplicados
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void add(string s)
+            {
+                s = (s ?? "").Trim();
+                if (s.Length == 0) return;
+                if (parts.Length > 1)
+                {
+                    var rest = string.Join(" ", parts.Skip(1));
+                    s = $"{s} {rest}";
+                }
+
+                if (set.Count < max) set.Add(s);
+            }
+
+            // ===== Variantes tipo tartamudo =====
+            // 1) duplicar primera letra: ventas -> vventas
+            add($"{c0}{first}");
+
+            // 2) duplicar primeras 2 letras: ventas -> veventas
+            if (first.Length >= 2)
+                add($"{first.Substring(0, 2)}{first}");
+
+            // 3) duplicar primera sílaba “simple” (primeros 2–3 chars)
+            if (first.Length >= 3)
+                add($"{first.Substring(0, 3)}{first}");
+
+            // 4) “v-ventas”
+            add($"{c0}-{first}");
+
+            // 5) “vv-ventas”
+            add($"{c0}{c0}-{first}");
+
+            // 6) “vvent” (abreviado: repetir primera letra + siguientes 3)
+            // ventas -> v + vent = vvent
+            if (first.Length >= 4)
+                add($"{c0}{first.Substring(0, 4)}");
+
+            // 7) repetir vocal después de la primera consonante (ventas -> veentas)
+            // heuristic simple: si 2da letra es vocal, la repetimos
+            if (first.Length >= 2)
+            {
+                var second = first[1];
+                if ("aeiouáéíóúAEIOUÁÉÍÓÚ".IndexOf(second) >= 0)
+                    add($"{first[0]}{second}{first.Substring(1)}"); // v + e + entas -> veentas
+            }
+
+            // 8) uppercase estilo “clave”
+            // Ventas -> VVENT / V-VENTAS
+            add($"{first.Substring(0, 1).ToUpperInvariant()}{first.Substring(0, Math.Min(4, first.Length)).ToUpperInvariant()}");
+            add($"{first.Substring(0, 1).ToUpperInvariant()}-{first.ToUpperInvariant()}");
+
+            return set.Take(max).ToList();
+        }
+        private void SearchBox_SuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+        {
+            if (args.SelectedItem is string s && !string.IsNullOrWhiteSpace(s))
+            {
+                // esto evita que el TextChanged vuelva a abrir sugerencias por set programático
+                _suppressSuggest = true;
+                sender.Text = s;
+                _suppressSuggest = false;
+
+                sender.IsSuggestionListOpen = false;
+            }
+        }
+        private static string CanonicalizeStutterToken(string token)
+        {
+            token = (token ?? "").Trim();
+            if (token.Length == 0) return token;
+
+            // 1) quitar guiones: v-ventas -> vventas
+            token = token.Replace("-", "").Replace("_", "");
+
+            // 2) si empieza con letras repetidas: vventas -> ventas
+            // reduce repeticiones al inicio: vvventas -> ventas
+            while (token.Length >= 2 && char.ToLowerInvariant(token[0]) == char.ToLowerInvariant(token[1]))
+                token = token.Substring(1);
+            return token;
+        }
+        private static List<string> ExpandStutterQuery(string raw)
+        {
+            raw = (raw ?? "").Trim();
+            if (raw.Length == 0) return new List<string>();
+
+            // separar por espacios para trabajar por palabra
+            var parts = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var expandedParts = new List<List<string>>();
+
+            foreach (var p in parts)
+            {
+                var baseTok = CanonicalizeStutterToken(p);
+
+                var variants = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    p,         
+                    baseTok    
+                };
+
+                // Heurística extra: si parece abreviación tipo vvent -> vent
+                if (baseTok.Length >= 4)
+                {
+                    // quitar primera letra si queda repetida con siguiente (ej: vvent -> vent)
+                    if (char.ToLowerInvariant(baseTok[0]) == char.ToLowerInvariant(baseTok[1]))
+                        variants.Add(baseTok.Substring(1));
+                    else
+                    {
+                        // también intenta quitar la primera letra si es "prefijo"
+                        variants.Add(baseTok.Substring(1));
+                    }
+                }
+
+                // limpiar vacíos
+                var list = variants.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                expandedParts.Add(list);
+            }
+
+            var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // raw tal cual
+            results.Add(raw);
+
+            // frase canonical (todas canonical)
+            var canonicalPhrase = string.Join(' ', parts.Select(CanonicalizeStutterToken));
+            results.Add(canonicalPhrase);
+
+            // cada palabra individual también sirve para encontrar coincidencias
+            foreach (var list in expandedParts)
+                foreach (var v in list)
+                    results.Add(v);
+
+            return results.Where(x => !string.IsNullOrWhiteSpace(x)).Take(6).ToList();
+        }
+        #endregion
+
         #region ===== XAML handlers pendientes (stubs) =====
 
         private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
@@ -3603,28 +4397,7 @@ namespace Anfeta.UI.Views
 
             StatusText.Text = "Copiado ✅";
         }
-        private async void CtxRename_Click(object sender, RoutedEventArgs e)
-        {
-            var row = GetCtxRowFromFlyout(sender) ?? ResultsList.SelectedItem as SearchResultRow;
-            if (row == null) return;
-
-            var newName = await PromptRenameAsync(row.Name);
-            if (string.IsNullOrWhiteSpace(newName) || string.Equals(newName, row.Name, StringComparison.Ordinal))
-                return;
-
-            var dir = Path.GetDirectoryName(row.Target) ?? DROPBOX_ROOT;
-            var newFullPath = Path.Combine(dir, newName.Trim());
-
-            try
-            {
-                await ApplyFileChangeAsync(FileChangeKind.Rename, row, newFullPath);
-                StatusText.Text = "Estado: Renombrado ✅";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Error al renombrar: {ex.Message}";
-            }
-        }
+        
         private async void CtxDelete_Click(object sender, RoutedEventArgs e)
         {
             var rows = GetSelectedRowsOrCtx(sender);
@@ -3650,7 +4423,8 @@ namespace Anfeta.UI.Views
             }
         }
         private void CtxBookmark_Click(object sender, RoutedEventArgs e) { }
-        private void BtnDetailsInfo_Click(object sender, RoutedEventArgs e) { }
+        private void BtnDetailsInfo_Click(object sender, RoutedEventArgs e) { } 
+
         #endregion
     }
 }

@@ -61,6 +61,7 @@
                         PlaceholderText="Buscar en Dropbox… (AND / OR / NOT, ext:pdf)"
                         QueryIcon="Find"
                         QuerySubmitted="SearchBox_QuerySubmitted"
+                        SuggestionChosen="SearchBox_SuggestionChosen"
                         TextChanged="SearchBox_TextChanged" />
                     <!--  VOZ  -->
                     <Grid Grid.Column="2" Height="36">
@@ -107,7 +108,7 @@
                         FontWeight="SemiBold"
                         ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
                     <!--  Notion  -->
-                    
+
                     <!--  Detalles  -->
                     <ToggleButton
                         x:Name="ToggleDetailsPane"
@@ -284,17 +285,9 @@
                                             <SymbolIcon Symbol="Add" />
                                         </Viewbox>
                                     </Button>
-
-                                    <!--
-                                        Flecha del Expander: NO la ponemos manual, WinUI la dibuja solo.
-                                        Esta columna extra es solo para que el botón no invada el área de la flecha.
-                                    -->
                                     <Grid Grid.Column="2" Width="1" />
                                 </Grid>
                             </muxc:Expander.Header>
-
-
-
                             <StackPanel Padding="8" Spacing="6">
 
                                 <ListView
@@ -551,6 +544,66 @@
                             Grid.Column="0"
                             FontWeight="SemiBold"
                             Text="Nombre" />
+
+                        <!--  Dictado  -->
+                        <StackPanel
+                            Grid.Column="1"
+                            Orientation="Vertical"
+                            Spacing="4">
+
+                            <!--  Texto descriptivo  -->
+                            <TextBlock
+                                FontSize="15"
+                                Opacity="1.9"
+                                TextAlignment="Center"
+                                Text="Lectura de resultados" />
+
+                            <!--  Botones  -->
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+
+                                <Button
+                                    x:Name="BtnDictPrev"
+                                    Width="30"
+                                    Height="26"
+                                    Padding="0"
+                                    ToolTipService.ToolTip="Resultado anterior"
+                                    Click="BtnDictPrev_Click">
+                                    <SymbolIcon  Symbol="Back" />
+                                </Button>
+
+                                <Button
+                                    x:Name="BtnDictPlay"
+                                    Width="30"
+                                    Height="26"
+                                    Padding="0"
+                                    ToolTipService.ToolTip="Reproducir lectura Resultados"
+                                    Click="BtnDictPlay_Click">
+                                    <SymbolIcon  Symbol="Play" />
+                                </Button>
+
+                                <Button
+                                    x:Name="BtnDictPause"
+                                    Width="30"
+                                    Height="26"
+                                    Padding="0"
+                                    ToolTipService.ToolTip="Pausar lectura Resultados"
+                                    Click="BtnDictPause_Click">
+                                    <SymbolIcon  Symbol="Pause" />
+                                </Button>
+
+                                <Button
+                                    x:Name="BtnDictNext"
+                                    Width="30"
+                                    Height="26"
+                                    Padding="0"
+                                    ToolTipService.ToolTip="Siguiente Resultado" 
+                                    Click="BtnDictNext_Click">
+                                    <SymbolIcon  Symbol="Forward" />
+                                </Button>
+
+                            </StackPanel>
+
+                        </StackPanel>
                     </Grid>
                     <!--  Results list  -->
                     <Grid Grid.Row="2">
@@ -607,13 +660,13 @@
                             <ListView.ContextFlyout>
                                 <MenuFlyout>
 
-                                    <!-- Navegar dentro del buscador -->
+                                    <!--  Navegar dentro del buscador  -->
                                     <MenuFlyoutItem Click="CtxOpenInApp_Click" Text="Abrir en ANFETA" />
 
-                                    <!-- Abrir con Windows -->
+                                    <!--  Abrir con Windows  -->
                                     <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir en Windows" />
 
-                                    <!-- Abrir carpeta en Explorer -->
+                                    <!--  Abrir carpeta en Explorer  -->
                                     <MenuFlyoutItem Click="CtxOpenPath_Click" Text="Abrir Ubicación (PC)" />
 
                                     <MenuFlyoutSeparator />
