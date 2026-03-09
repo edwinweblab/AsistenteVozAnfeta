@@ -24,6 +24,8 @@ namespace Anfeta.UI.Services.Speech
 
         public static async Task SaveAsync(string rootPath, List<SearchResultRow> items, CancellationToken ct)
         {
+            if (items == null || items.Count == 0)
+                throw new InvalidOperationException("Refusing to persist empty index.");
             ct.ThrowIfCancellationRequested();
 
             var folder = ApplicationData.Current.LocalFolder;
@@ -44,7 +46,7 @@ namespace Anfeta.UI.Services.Speech
             await FileIO.WriteTextAsync(manifestFile, JsonSerializer.Serialize(manifest));
         }
 
-        public static async Task<(bool ok, string root, List<SearchResultRow> items)> TryLoadAsync(CancellationToken ct)
+        public static async Task<(bool ok, string root, List<SearchResultRow>? items)> TryLoadAsync(CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -56,13 +58,13 @@ namespace Anfeta.UI.Services.Speech
                 var idx = await folder.TryGetItemAsync(INDEX_FILE) as StorageFile;
 
                 if (mf == null || idx == null)
-                    return (false, "", new List<SearchResultRow>());
+                    return (false, "", null);
 
                 var mfJson = await FileIO.ReadTextAsync(mf);
                 var manifest = JsonSerializer.Deserialize<IndexManifest>(mfJson);
 
                 if (manifest == null || manifest.Version != INDEX_VERSION)
-                    return (false, "", new List<SearchResultRow>());
+                    return (false, "", null);
 
                 var idxJson = await FileIO.ReadTextAsync(idx);
                 var items = JsonSerializer.Deserialize<List<SearchResultRow>>(idxJson) ?? new List<SearchResultRow>();
@@ -71,7 +73,7 @@ namespace Anfeta.UI.Services.Speech
             }
             catch
             {
-                return (false, "", new List<SearchResultRow>());
+                return (false, "", null);
             }
         }
 

@@ -6,212 +6,251 @@
 
     <Grid x:Name="Root">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- ═══════════ BARRA SUPERIOR ═══════════ -->
-        <Border Grid.Row="0"
-                Background="{ThemeResource AnfetaNeutral900}"
-                BorderBrush="#12FFFFFF"
-                BorderThickness="0,0,0,1"
-                Padding="20,0">
+        <!--  ═══════════ BARRA SUPERIOR ═══════════  -->
+        <Border
+            Grid.Row="0"
+            Padding="20,0"
+            Background="{ThemeResource AnfetaNeutral900}"
+            BorderBrush="#12FFFFFF"
+            BorderThickness="0,0,0,1">
             <Grid MinHeight="52">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!-- Brand -->
-                <StackPanel x:Name="BrandPanel"
-                            Grid.Column="0"
-                            Orientation="Horizontal"
-                            Spacing="10"
+                <!--  Brand  -->
+                <StackPanel
+                    x:Name="BrandPanel"
+                    Grid.Column="0"
+                    Margin="0,0,20,0"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="10">
+                    <Border
+                        Width="28"
+                        Height="28"
+                        Background="{StaticResource AnfetaAccentBrush}"
+                        CornerRadius="6">
+                        <FontIcon
+                            HorizontalAlignment="Center"
                             VerticalAlignment="Center"
-                            Margin="0,0,20,0">
-                    <Border Width="28" Height="28"
-                            CornerRadius="6"
-                            Background="{StaticResource AnfetaAccentBrush}">
-                        <FontIcon Glyph="&#xE720;"
-                                  FontSize="15"
-                                  Foreground="White"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"/>
+                            FontSize="15"
+                            Foreground="White"
+                            Glyph="&#xE720;" />
                     </Border>
-                    <TextBlock Text="ANFETA"
-                               FontSize="12"
-                               FontWeight="SemiBold"
-                               Foreground="#8C8075"
-                               CharacterSpacing="80"
-                               VerticalAlignment="Center"/>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        CharacterSpacing="80"
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Foreground="#8C8075"
+                        Text="ANFETA" />
                 </StackPanel>
 
-                <Border Grid.Column="1"/>
+                <Border Grid.Column="1" />
 
-                <!-- Indicadores de estado -->
-                <StackPanel Grid.Column="2"
-                            Orientation="Horizontal"
-                            Spacing="4"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center">
+                <!--  Indicadores de estado  -->
+                <StackPanel
+                    Grid.Column="2"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="4">
 
-                    <!-- Internet -->
-                    <Button Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            ToolTipService.ToolTip="Conexión a internet activa">
+                    <!--  Internet  -->
+                    <Button
+                        Padding="10,6"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        ToolTipService.ToolTip="Conexión a internet activa">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF" />
                         </Button.Resources>
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="IconInternet"
-                                      Glyph="&#xE968;"
-                                      FontSize="14"
-                                      Foreground="{StaticResource AnfetaSuccessBrush}"/>
-                            <TextBlock x:Name="TxtInternet"
-                                       Text="Internet"
-                                       FontSize="12"
-                                       Foreground="#8C8075"
-                                       VerticalAlignment="Center"/>
+                            <FontIcon
+                                x:Name="IconInternet"
+                                FontSize="14"
+                                Foreground="{StaticResource AnfetaSuccessBrush}"
+                                Glyph="&#xE968;" />
+                            <TextBlock
+                                x:Name="TxtInternet"
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="#8C8075"
+                                Text="Internet" />
                         </StackPanel>
                     </Button>
 
-                    <Border Width="1" Height="16" Background="#14FFFFFF" VerticalAlignment="Center" Margin="4,0"/>
+                    <Border
+                        Width="1"
+                        Height="16"
+                        Margin="4,0"
+                        VerticalAlignment="Center"
+                        Background="#14FFFFFF" />
 
-                    <!-- Login Anfeta (Shared) -->
-                    <Button Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            Command="{Binding LinkSharedIconCommand}"
-                            ToolTipService.ToolTip="Login Anfeta - Click para iniciar sesión">
+                    <!--  Login Anfeta (Shared)  -->
+                    <Button
+                        Padding="10,6"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="1"
+                        Command="{Binding LinkSharedIconCommand}"
+                        CornerRadius="8"
+                        ToolTipService.ToolTip="Login Anfeta - Click para iniciar sesión">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF" />
                         </Button.Resources>
                         <StackPanel Orientation="Horizontal" Spacing="7">
-                            <FontIcon Glyph="&#xE8FA;"
-                                      FontSize="14"
-                                      Foreground="{Binding SharedLinkForeground}"/>
-                            <TextBlock Text="{Binding SharedLinkText}"
-                                       FontSize="12"
-                                       Foreground="{Binding SharedLinkForeground}"
-                                       FontWeight="SemiBold"
-                                       VerticalAlignment="Center"/>
+                            <FontIcon
+                                FontSize="14"
+                                Foreground="{Binding SharedLinkForeground}"
+                                Glyph="&#xE8FA;" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{Binding SharedLinkForeground}"
+                                Text="{Binding SharedLinkText}" />
                         </StackPanel>
                     </Button>
 
-                    <!-- Link / Perfil -->
-                    <Button Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            Command="{Binding LinkIconCommand}"
-                            ToolTipService.ToolTip="Estado de vinculación - Click para ver tu perfil o vincular cuenta">
+                    <!--  Link / Perfil  -->
+                    <Button
+                        Padding="10,6"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="1"
+                        Command="{Binding LinkIconCommand}"
+                        CornerRadius="8"
+                        ToolTipService.ToolTip="Estado de vinculación - Click para ver tu perfil o vincular cuenta">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF" />
                         </Button.Resources>
                         <StackPanel Orientation="Horizontal" Spacing="7">
-                            <FontIcon Glyph="&#xE72E;"
-                                      FontSize="14"
-                                      Foreground="{Binding LinkForeground}"/>
-                            <TextBlock Text="{Binding LinkText}"
-                                       FontSize="12"
-                                       Foreground="{Binding LinkForeground}"
-                                       FontWeight="SemiBold"
-                                       VerticalAlignment="Center"/>
+                            <FontIcon
+                                FontSize="14"
+                                Foreground="{Binding LinkForeground}"
+                                Glyph="&#xE72E;" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{Binding LinkForeground}"
+                                Text="{Binding LinkText}" />
                         </StackPanel>
                     </Button>
 
-                    <Border Width="1" Height="16" Background="#14FFFFFF" VerticalAlignment="Center" Margin="4,0"/>
+                    <Border
+                        Width="1"
+                        Height="16"
+                        Margin="4,0"
+                        VerticalAlignment="Center"
+                        Background="#14FFFFFF" />
 
-                    <!-- Micrófono -->
-                    <Button Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            ToolTipService.ToolTip="Estado del micrófono - Configurar en Configuración">
+                    <!--  Micrófono  -->
+                    <Button
+                        Padding="10,6"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        ToolTipService.ToolTip="Estado del micrófono - Configurar en Configuración">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF" />
                         </Button.Resources>
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon x:Name="IconMic"
-                                      Glyph="&#xE720;"
-                                      FontSize="14"
-                                      Foreground="#6B5F56"/>
-                            <TextBlock x:Name="TxtMic"
-                                       Text="Micrófono"
-                                       FontSize="12"
-                                       Foreground="#8C8075"
-                                       VerticalAlignment="Center"/>
+                            <FontIcon
+                                x:Name="IconMic"
+                                FontSize="14"
+                                Foreground="#6B5F56"
+                                Glyph="&#xE720;" />
+                            <TextBlock
+                                x:Name="TxtMic"
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="#8C8075"
+                                Text="Micrófono" />
                         </StackPanel>
                     </Button>
 
-                    <!-- Dropbox -->
-                    <Button x:Name="DropboxIndicator"
-                            Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            Click="DropboxIndicator_Click"
-                            ToolTipService.ToolTip="Dropbox">
+                    <!--  Dropbox  -->
+                    <Button
+                        x:Name="DropboxIndicator"
+                        Padding="10,6"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="1"
+                        Click="DropboxIndicator_Click"
+                        CornerRadius="8"
+                        ToolTipService.ToolTip="Dropbox">
                         <Button.Resources>
-                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
-                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF" />
                         </Button.Resources>
                         <StackPanel Orientation="Horizontal" Spacing="7">
-                            <Ellipse x:Name="DotDropbox"
-                                     Width="7" Height="7"
-                                     Fill="#4A3E36"
-                                     VerticalAlignment="Center"/>
-                            <FontIcon x:Name="IconDropbox"
-                                      Glyph="&#xEC50;"
-                                      FontSize="14"
-                                      Foreground="#4A3E36"/>
-                            <TextBlock x:Name="TxtDropbox"
-                                       Text="Dropbox"
-                                       FontSize="12"
-                                       Foreground="#6B5F56"
-                                       VerticalAlignment="Center"/>
+                            <Ellipse
+                                x:Name="DotDropbox"
+                                Width="7"
+                                Height="7"
+                                VerticalAlignment="Center"
+                                Fill="#4A3E36" />
+                            <FontIcon
+                                x:Name="IconDropbox"
+                                FontSize="14"
+                                Foreground="#4A3E36"
+                                Glyph="&#xEC50;" />
+                            <TextBlock
+                                x:Name="TxtDropbox"
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="#6B5F56"
+                                Text="Dropbox" />
                         </StackPanel>
                     </Button>
-                    <!-- Google Calendar -->
-                    <Button x:Name="GoogleCalendarIndicator"
-                            Background="Transparent"
-                            BorderThickness="1"
-                            BorderBrush="Transparent"
-                            Padding="10,6"
-                            CornerRadius="8"
-                            Click="GoogleCalendarIndicator_Click"
-                            ToolTipService.ToolTip="Google Calendar">
-                                            <Button.Resources>
-                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF"/>
-                                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF"/>
-                                            </Button.Resources>
-                                            <StackPanel Orientation="Horizontal" Spacing="7">
-                                                <Ellipse x:Name="DotGoogleCal"
-                                     Width="7" Height="7"
-                                     Fill="#4A3E36"
-                                     VerticalAlignment="Center"/>
-                                                <FontIcon x:Name="IconGoogleCal"
-                                      Glyph="&#xE787;"
-                                      FontSize="14"
-                                      Foreground="#4A3E36"/>
-                                                <TextBlock x:Name="TxtGoogleCal"
-                                       Text="Calendar"
-                                       FontSize="12"
-                                       Foreground="#6B5F56"
-                                       VerticalAlignment="Center"/>
+                    <!--  Google Calendar  -->
+                    <Button
+                        x:Name="GoogleCalendarIndicator"
+                        Padding="10,6"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="1"
+                        Click="GoogleCalendarIndicator_Click"
+                        CornerRadius="8"
+                        ToolTipService.ToolTip="Google Calendar">
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF" />
+                            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF" />
+                        </Button.Resources>
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Ellipse
+                                x:Name="DotGoogleCal"
+                                Width="7"
+                                Height="7"
+                                VerticalAlignment="Center"
+                                Fill="#4A3E36" />
+                            <FontIcon
+                                x:Name="IconGoogleCal"
+                                FontSize="14"
+                                Foreground="#4A3E36"
+                                Glyph="&#xE787;" />
+                            <TextBlock
+                                x:Name="TxtGoogleCal"
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="#6B5F56"
+                                Text="Calendar" />
                         </StackPanel>
                     </Button>
 
@@ -219,179 +258,200 @@
             </Grid>
         </Border>
 
-        <!-- ═══════════ NAVEGACIÓN PRINCIPAL ═══════════ -->
-        <NavigationView Grid.Row="1"
-                        x:Name="AppNav"
-                        PaneDisplayMode="Left"
-                        IsPaneOpen="True"
-                        OpenPaneLength="220"
-                        CompactPaneLength="52"
-                        IsBackButtonVisible="Collapsed"
-                        IsSettingsVisible="False"
-                        SelectionChanged="AppNav_SelectionChanged">
-
+        <!--  ═══════════ NAVEGACIÓN PRINCIPAL ═══════════  -->
+        <NavigationView
+            x:Name="AppNav"
+            Grid.Row="1"
+            CompactPaneLength="52"
+            IsBackButtonVisible="Collapsed"
+            IsPaneOpen="True"
+            IsSettingsVisible="False"
+            OpenPaneLength="220"
+            PaneDisplayMode="Left"
+            SelectionChanged="AppNav_SelectionChanged">
             <NavigationView.PaneHeader>
                 <Grid Height="60" Padding="16,0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
-                        <Border Width="34" Height="34"
-                                CornerRadius="8"
-                                Background="{StaticResource AnfetaAccentBrush}">
-                            <FontIcon Glyph="&#xE720;"
-                                      FontSize="18"
-                                      Foreground="White"
-                                      HorizontalAlignment="Center"
-                                      VerticalAlignment="Center"/>
+                    <StackPanel
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="10">
+                        <Border
+                            Width="34"
+                            Height="34"
+                            Background="{StaticResource AnfetaAccentBrush}"
+                            CornerRadius="8">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="18"
+                                Foreground="White"
+                                Glyph="&#xE720;" />
                         </Border>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="ANFETA"
-                                       FontSize="15"
-                                       FontWeight="SemiBold"
-                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                       CharacterSpacing="40"/>
-                            <TextBlock Text="Asistente de Voz"
-                                       FontSize="10"
-                                       Foreground="#6B5F56"
-                                       Margin="0,1,0,0"/>
+                            <TextBlock
+                                CharacterSpacing="40"
+                                FontSize="15"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="ANFETA" />
+                            <TextBlock
+                                Margin="0,1,0,0"
+                                FontSize="10"
+                                Foreground="#6B5F56"
+                                Text="Asistente de Voz" />
                         </StackPanel>
                     </StackPanel>
                 </Grid>
             </NavigationView.PaneHeader>
 
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Panel Principal"
-                                    Tag="Home"
-                                    ToolTipService.ToolTip="Panel principal del asistente">
+                <NavigationViewItem
+                    Content="Panel Principal"
+                    Tag="Home"
+                    ToolTipService.ToolTip="Panel principal del asistente">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE80F;"/>
+                        <FontIcon Glyph="&#xE80F;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Comandos Disponibles"
-                                    Tag="Commands"
-                                    ToolTipService.ToolTip="Lista de comandos disponibles">
+                <NavigationViewItem
+                    Content="Comandos Disponibles"
+                    Tag="Commands"
+                    ToolTipService.ToolTip="Lista de comandos disponibles">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE8F1;"/>
+                        <FontIcon Glyph="&#xE8F1;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Aplicaciones Permitidas" Tag="AllowedApps"
+                <NavigationViewItem
+                    Content="Aplicaciones Permitidas"
+                    Tag="AllowedApps"
                     ToolTipService.ToolTip="Gestionar apps locales permitidas y sinónimos">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE8A7;"/>
-                        <!-- icono tipo app/grid -->
+                        <FontIcon Glyph="&#xE8A7;" />
+                        <!--  icono tipo app/grid  -->
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Buscador" Tag="Search"
-                                    ToolTipService.ToolTip="Buscar en actividades y proyectos">
+                <NavigationViewItem
+                    Content="Buscador"
+                    Tag="Search"
+                    ToolTipService.ToolTip="Buscar en actividades y proyectos">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE721;"/>
+                        <FontIcon Glyph="&#xE721;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItemSeparator/>
+                <NavigationViewItemSeparator />
 
-                <NavigationViewItem Content="Configuración"
-                                    Tag="Settings"
-                                    ToolTipService.ToolTip="Ajustes y configuración del sistema">
+                <NavigationViewItem
+                    Content="Configuración"
+                    Tag="Settings"
+                    ToolTipService.ToolTip="Ajustes y configuración del sistema">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE713;"/>
+                        <FontIcon Glyph="&#xE713;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Google Calendar"
+                <NavigationViewItem
+                    Content="Google Calendar"
                     Tag="GoogleCalendar"
                     ToolTipService.ToolTip="Conectar y gestionar Google Calendar">
-                <NavigationViewItem.Icon>
-                    <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE787;"/>
-                </NavigationViewItem.Icon>
+                    <NavigationViewItem.Icon>
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE787;" />
+                    </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
-                <NavigationViewItem Content="Pruebas de Sistema"
-                                    Tag="Tests"
-                                    ToolTipService.ToolTip="Ejecutar pruebas de diagnóstico">
+                <NavigationViewItem
+                    Content="Pruebas de Sistema"
+                    Tag="Tests"
+                    ToolTipService.ToolTip="Ejecutar pruebas de diagnóstico">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE7C1;"/>
+                        <FontIcon Glyph="&#xE7C1;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <NavigationView.PaneFooter>
-                <Border Padding="16,12"
-                        BorderBrush="#10FFFFFF"
-                        BorderThickness="0,1,0,0">
+                <Border
+                    Padding="16,12"
+                    BorderBrush="#10FFFFFF"
+                    BorderThickness="0,1,0,0">
                     <Grid>
                         <StackPanel Spacing="3">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <!-- Punto cambiado a naranja para unificar con el acento -->
-                                <Ellipse Width="5" Height="5"
-                                         Fill="#F97316"
-                                         VerticalAlignment="Center"/>
-                                <TextBlock Text="Versión 1.0.0"
-                                           FontSize="11"
-                                           Foreground="#8C8075"/>
+                                <!--  Punto cambiado a naranja para unificar con el acento  -->
+                                <Ellipse
+                                    Width="5"
+                                    Height="5"
+                                    VerticalAlignment="Center"
+                                    Fill="#F97316" />
+                                <TextBlock
+                                    FontSize="11"
+                                    Foreground="#8C8075"
+                                    Text="Versión 1.0.0" />
                             </StackPanel>
-                            <TextBlock x:Name="TxtVersionSubtitle"
-                                       Text="Asistente de Voz Empresarial"
-                                       FontSize="10"
-                                       Foreground="#4A3E36"
-                                       Margin="11,0,0,0"/>
+                            <TextBlock
+                                x:Name="TxtVersionSubtitle"
+                                Margin="11,0,0,0"
+                                FontSize="10"
+                                Foreground="#4A3E36"
+                                Text="Asistente de Voz Empresarial" />
                         </StackPanel>
                     </Grid>
                 </Border>
             </NavigationView.PaneFooter>
 
-            <Frame x:Name="ContentFrame"/>
+            <Frame x:Name="ContentFrame" />
 
             <VisualStateManager.VisualStateGroups>
                 <VisualStateGroup>
                     <VisualState x:Name="Compact">
                         <VisualState.StateTriggers>
-                            <AdaptiveTrigger MinWindowWidth="0"/>
+                            <AdaptiveTrigger MinWindowWidth="0" />
                         </VisualState.StateTriggers>
                         <VisualState.Setters>
-                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Collapsed"/>
-                            <Setter Target="BrandPanel.Visibility" Value="Collapsed"/>
-                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed"/>
-                            <Setter Target="TxtInternet.Visibility" Value="Collapsed"/>
-                            <Setter Target="TxtMic.Visibility" Value="Collapsed"/>
-                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
-                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed"/>
+                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Collapsed" />
+                            <Setter Target="BrandPanel.Visibility" Value="Collapsed" />
+                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtInternet.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtMic.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed" />
                         </VisualState.Setters>
                     </VisualState>
 
                     <VisualState x:Name="Medium">
                         <VisualState.StateTriggers>
-                            <AdaptiveTrigger MinWindowWidth="720"/>
+                            <AdaptiveTrigger MinWindowWidth="720" />
                         </VisualState.StateTriggers>
                         <VisualState.Setters>
-                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible"/>
-                            <Setter Target="BrandPanel.Visibility" Value="Collapsed"/>
-                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed"/>
-                            <Setter Target="TxtInternet.Visibility" Value="Visible"/>
-                            <Setter Target="TxtMic.Visibility" Value="Visible"/>
-                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
-                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed"/>
+                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible" />
+                            <Setter Target="BrandPanel.Visibility" Value="Collapsed" />
+                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtInternet.Visibility" Value="Visible" />
+                            <Setter Target="TxtMic.Visibility" Value="Visible" />
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed" />
                         </VisualState.Setters>
                     </VisualState>
 
                     <VisualState x:Name="Wide">
                         <VisualState.StateTriggers>
-                            <AdaptiveTrigger MinWindowWidth="1024"/>
+                            <AdaptiveTrigger MinWindowWidth="1024" />
                         </VisualState.StateTriggers>
                         <VisualState.Setters>
-                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible"/>
-                            <Setter Target="BrandPanel.Visibility" Value="Visible"/>
-                            <Setter Target="DropboxIndicator.Visibility" Value="Visible"/>
-                            <Setter Target="TxtInternet.Visibility" Value="Visible"/>
-                            <Setter Target="TxtMic.Visibility" Value="Visible"/>
-                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed"/>
-                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Visible"/>
+                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible" />
+                            <Setter Target="BrandPanel.Visibility" Value="Visible" />
+                            <Setter Target="DropboxIndicator.Visibility" Value="Visible" />
+                            <Setter Target="TxtInternet.Visibility" Value="Visible" />
+                            <Setter Target="TxtMic.Visibility" Value="Visible" />
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="GoogleCalendarIndicator.Visibility" Value="Visible" />
                         </VisualState.Setters>
                     </VisualState>
                 </VisualStateGroup>
             </VisualStateManager.VisualStateGroups>
-
         </NavigationView>
     </Grid>
 </Window>

@@ -67,7 +67,7 @@ namespace Anfeta.UI
                 "Home" => typeof(HomeView),
                 "Commands" => typeof(CommandsView),
                 "AllowedApps" => typeof(AllowedAppsView),
-                "Search" => typeof(SearchView),
+                "Search" => typeof(SearchTabsView),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
                 "GoogleCalendar" => typeof(GoogleCalendarView), 

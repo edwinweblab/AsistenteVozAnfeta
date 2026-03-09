@@ -17,10 +17,12 @@
     <None Remove="Resources\Styles.xaml" />
     <None Remove="Views\AllowedAppsView.xaml" />
     <None Remove="Views\ApiKeysView.xaml" />
+    <None Remove="Views\Dialogs\ImportVoiceCommandsDialog.xaml" />
     <None Remove="Views\Dialogs\VoiceCommandEditDialog.xaml" />
     <None Remove="Views\Dialogs\VoiceCommandsDialog.xaml" />
     <None Remove="Views\GoogleCalendarView.xaml" />
     <None Remove="Views\LinkSharedAccountView.xaml" />
+    <None Remove="Views\SearchTabsView.xaml" />
     <None Remove="Views\SearchView.xaml" />
     <None Remove="Views\TroubleshootView.xaml" />
   </ItemGroup>
@@ -67,6 +69,16 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Folder Include="Assets\vosk-model-es\" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Page Update="Views\SearchTabsView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </Page>
+	</ItemGroup>
+	<ItemGroup>
+	  <Page Update="Views\Dialogs\ImportVoiceCommandsDialog.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </Page>
 	</ItemGroup>
 	<ItemGroup>
 	  <Page Update="Views\Dialogs\VoiceCommandEditDialog.xaml">

@@ -16,6 +16,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -37,13 +38,13 @@ namespace Anfeta.UI
         public static HomeViewModel HomeVM => AppHost.Services.GetRequiredService<HomeViewModel>();
         //Nefta
         public static LocalIndexService LocalIndex { get; } = new LocalIndexService();
-
+        private readonly List<Microsoft.UI.Xaml.Window> _openWindows = new();
         // URL base actualizada
         private const string WeblabBaseUrl = "https://wlserver-production.up.railway.app";
 
         public App()
         {
-            InitializeComponent();
+            InitializeComponent(); 
 
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
@@ -64,6 +65,7 @@ namespace Anfeta.UI
                     services.AddSingleton<VoiceCommandEngine>();
                     services.AddSingleton<VoiceSearchOrchestrator>();
                     services.AddSingleton<IVoicePostActionService, VoicePostActionService>();
+                    services.AddSingleton<VoiceCommandsTextImportService>();
 
                     // Context system (ORDEN IMPORTA)
                     services.AddSingleton<CapabilityRegistry>();
