@@ -94,6 +94,7 @@ namespace Anfeta.UI.Services.Interpretation
                     {
                         var limit = TryGetInt(paramsJson, "limit") ?? 10;
                         var r = await _actividades.GetMyActivitiesAsync(limit, ct);
+
                         return (r.Ok, r.PlainText);
                     }
 

@@ -35,6 +35,8 @@ namespace Anfeta.UI.ViewModels
         private readonly FastCommandClassifier _fastClassifier;
         private readonly InterpretationCache _interpretationCache;
         private readonly ApiKeyService _apiKeyService;
+        private readonly WeblabActividadesClient _actividadesClient;
+        private readonly ActivitiesCacheService _activitiesCache;
         private readonly WeblabRecordatoriosClient _recordatoriosClient;
         private readonly WeblabReportesClient _reportesClient;
         private readonly SemaphoreSlim _warmupLock = new(1, 1);
@@ -151,9 +153,11 @@ namespace Anfeta.UI.ViewModels
             ActivityFieldValidator activityValidator,
             CorrectionCommandDetector correctionDetector,
             WeblabUsersClient usersClient,
+            ApiKeyService apiKeyService,
+            ActivitiesCacheService activitiesCache,
+            WeblabActividadesClient actividadesClient)
             WeblabRecordatoriosClient recordatoriosClient,
-            WeblabReportesClient reportesClient,
-            ApiKeyService apiKeyService)
+            WeblabReportesClient reportesClient)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -173,6 +177,10 @@ namespace Anfeta.UI.ViewModels
             _reportesClient = reportesClient;
 
             _apiKeyService = apiKeyService;
+            _activitiesCache = activitiesCache;
+            _actividadesClient = actividadesClient;
+
+            // Suscripción segura (para poder desuscribir en Dispose)
             _apiKeyService.KeysChanged += OnKeysChanged;
 
             _activityFlow = new ActivityCreationFlow(
@@ -224,6 +232,35 @@ namespace Anfeta.UI.ViewModels
             finally { _backgroundMode = false; }
         }
 
+        /// <summary>Refresca el cache de actividades del usuario actual</summary>
+        private async Task RefreshActivitiesCacheAsync(CancellationToken ct)
+        {
+            try
+            {
+                var items = await _actividadesClient.GetMyActivitiesForCacheAsync(ct);
+
+                if (items.Count > 0)
+                {
+                    _activitiesCache.SetActivities(items);
+
+                    Debug.WriteLine($"[CACHE_ACTIVIDADES] Guardadas {items.Count} actividades.");
+                    foreach (var a in items)
+                    {
+                        Debug.WriteLine($" - {a.Title} ({a.Id})");
+                    }
+                }
+                else
+                {
+                    Debug.WriteLine("[CACHE_ACTIVIDADES] No se guardó nada.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[CACHE_ACTIVIDADES] Error: " + ex.Message);
+            }
+        }
+
+        /// <summary>Limpiar acción pendiente</summary>
         /// <summary>
         /// Limpiar acción pendiente y estado de edición de recordatorio.
         /// Se llama en todo reset después de ejecutar o cancelar una acción.
@@ -1052,6 +1089,7 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
+                    // ── FAST CLASSIFIER: routing por scope ──────────────────────────
                     var fastRequiresConfirmation = RequiresConfirmation(fastResult.Scope, fastResult.Action);
                     Debug.WriteLine($"[FAST] requires_confirmation={fastRequiresConfirmation}");
 
@@ -1129,6 +1167,14 @@ namespace Anfeta.UI.ViewModels
                             fastParamsJson = JsonSerializer.Serialize(fastResult.Params);
 
                         var (fastOk, fastMsg) = await _apiExecutor.ExecuteAsync(fastResult.Provider, fastResult.Resource, fastResult.Action, fastParamsJson, ct);
+
+                        if (fastOk &&
+                            string.Equals(fastResult.Provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(fastResult.Resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(fastResult.Action, "list", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await RefreshActivitiesCacheAsync(ct);
+                        }
 
                         _contextManager.AddToHistory($"API:{fastResult.Resource}:{fastResult.Action}", null);
                         await ResetAfterActionAsync(fastMsg, fastOk ? "Listo." : "Error", speak: fastMsg);
@@ -1322,6 +1368,12 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
+                    if (string.Equals(provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(action, "list", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await RefreshActivitiesCacheAsync(ct);
+                    }
                     // Invalidar cache tras mutación de recordatorios
                     if (string.Equals(resource, "recordatorios", StringComparison.OrdinalIgnoreCase) &&
                         action is "create" or "update" or "delete" or "complete")
