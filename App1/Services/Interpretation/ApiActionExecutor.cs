@@ -147,8 +147,45 @@ namespace Anfeta.UI.Services.Interpretation
                         var r = await _actividades.CreateActivityAsync(request, ct);
                         return (r.Ok, r.PlainText);
                     }
+                    if (action == "update")
+                    {
+                        var id = TryGetString(paramsJson, "id");
+                        if (string.IsNullOrWhiteSpace(id))
+                            return (false, "Falta el ID de la actividad.");
 
-                    return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get, create.");
+                        UpdateActividadRequest? request = null;
+                        try
+                        {
+                            request = JsonSerializer.Deserialize<UpdateActividadRequest>(
+
+                                paramsJson,
+                                new JsonSerializerOptions
+                                {
+                                    PropertyNameCaseInsensitive = true
+                                });
+                            System.Diagnostics.Debug.WriteLine("===== API EXECUTOR DTO UPDATE =====");
+                            System.Diagnostics.Debug.WriteLine($"Id extraído: {id}");
+                            System.Diagnostics.Debug.WriteLine($"Titulo DTO: {request?.Titulo}");
+                            System.Diagnostics.Debug.WriteLine($"Status DTO: {request?.Status}");
+                            System.Diagnostics.Debug.WriteLine($"Prioridad DTO: {request?.Prioridad}");
+                            System.Diagnostics.Debug.WriteLine($"DueStart DTO: {request?.DueStart}");
+                            System.Diagnostics.Debug.WriteLine($"DueEnd DTO: {request?.DueEnd}");
+                            System.Diagnostics.Debug.WriteLine($"Anotaciones DTO: {request?.Anotaciones}");
+                            System.Diagnostics.Debug.WriteLine($"PasosYLinks DTO: {request?.PasosYLinks}");
+                            System.Diagnostics.Debug.WriteLine("===================================");
+                        }
+                        catch (Exception ex)
+                        {
+                            return (false, $"Error parseando datos de edición: {ex.Message}");
+                        }
+
+                        if (request == null)
+                            return (false, "No se recibieron datos para actualizar.");
+
+                        var r = await _actividades.UpdateActivityAsync(id!, request, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+                    return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get, create, update.");
                 }
 
                 // ── REVISIONES ───────────────────────────────────────────────

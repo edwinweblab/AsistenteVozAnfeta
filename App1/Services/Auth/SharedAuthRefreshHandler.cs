@@ -7,8 +7,6 @@ using System.Threading.Tasks;
 
 namespace Anfeta.UI.Services.Auth
 {
-    /// Handler HTTP que intercepta 401 y renueva el token shared automáticamente.
-    /// Si el refresh falla, la sesión se cierra y el usuario debe re-autenticarse.
     public sealed class SharedAuthRefreshHandler : DelegatingHandler
     {
         private readonly SharedAuthStateService _sharedAuth;
@@ -22,16 +20,10 @@ namespace Anfeta.UI.Services.Auth
             HttpRequestMessage request,
             CancellationToken ct)
         {
-            // Inyectar token actual si existe
-            if (!string.IsNullOrWhiteSpace(_sharedAuth.Token))
-            {
-                request.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", _sharedAuth.Token);
-            }
+            InjectSharedHeaders(request);
 
             var response = await base.SendAsync(request, ct);
 
-            // Si el servidor devuelve 401, intentar refresh una vez
             if (response.StatusCode == HttpStatusCode.Unauthorized && _sharedAuth.IsAuthenticated)
             {
                 Debug.WriteLine("[SharedAuthHandler] 401 recibido → intentando refresh...");
@@ -43,10 +35,8 @@ namespace Anfeta.UI.Services.Auth
                     return response;
                 }
 
-                // Reintentar la request original con el nuevo token
                 var retryRequest = await CloneRequestAsync(request);
-                retryRequest.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", _sharedAuth.Token);
+                InjectSharedHeaders(retryRequest);
 
                 response.Dispose();
                 response = await base.SendAsync(retryRequest, ct);
@@ -57,7 +47,20 @@ namespace Anfeta.UI.Services.Auth
             return response;
         }
 
-        /// Clona la request para poder reenviarla (HttpRequestMessage no es reutilizable).
+        private void InjectSharedHeaders(HttpRequestMessage request)
+        {
+            if (!string.IsNullOrWhiteSpace(_sharedAuth.Token))
+            {
+                request.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", _sharedAuth.Token);
+
+                request.Headers.Remove("x-shared-token");
+                request.Headers.TryAddWithoutValidation("x-shared-token", _sharedAuth.Token);
+
+                Debug.WriteLine("[SharedAuthHandler] x-shared-token inyectado");
+            }
+        }
+
         private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage original)
         {
             var clone = new HttpRequestMessage(original.Method, original.RequestUri);

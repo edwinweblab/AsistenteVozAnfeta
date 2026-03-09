@@ -727,5 +727,55 @@ namespace Anfeta.UI.Services.Weblab
 
             return string.Join("\n\n", parts);
         }
+        public async Task<ApiPlainResponse> UpdateActivityAsync(string id, UpdateActividadRequest req, CancellationToken ct = default)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(id))
+                    return new ApiPlainResponse { Ok = false, PlainText = "Falta el ID de la actividad." };
+
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                };
+
+                var json = JsonSerializer.Serialize(req, options);
+
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine("===== UPDATE ACTIVITY DEBUG =====");
+                System.Diagnostics.Debug.WriteLine($"PUT {_http.BaseAddress}api/actividades/{id}");
+                System.Diagnostics.Debug.WriteLine(json);
+                System.Diagnostics.Debug.WriteLine("=================================");
+#endif
+
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                using var resp = await _http.PutAsync($"/api/actividades/{Uri.EscapeDataString(id)}", content, ct);
+                var body = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    return new ApiPlainResponse
+                    {
+                        Ok = false,
+                        PlainText = $"No pude actualizar la actividad. HTTP {(int)resp.StatusCode}: {body}"
+                    };
+                }
+
+                return new ApiPlainResponse
+                {
+                    Ok = true,
+                    PlainText = "Actividad actualizada correctamente."
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = "Operación cancelada." };
+            }
+            catch (Exception ex)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = $"Error: {ex.Message}" };
+            }
+        }
     }
 }

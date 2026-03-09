@@ -83,6 +83,9 @@ namespace Anfeta.UI
                     services.AddSingleton<CorrectionCommandDetector>();
                     services.AddSingleton<ActivitiesCacheService>();
 
+                    services.AddSingleton<ActivityEditFieldExtractor>();
+                    services.AddSingleton<ActivityEditFieldValidator>();
+                    services.AddSingleton<ActivityEditFlow>();
                     // =========================
                     // GROQ
                     // =========================
@@ -295,7 +298,8 @@ namespace Anfeta.UI
                         sp.GetRequiredService<ActivitiesCacheService>(),
                         sp.GetRequiredService<WeblabActividadesClient>(),
                         sp.GetRequiredService<WeblabRecordatoriosClient>(),
-                        sp.GetRequiredService<WeblabReportesClient>()
+                        sp.GetRequiredService<WeblabReportesClient>(),
+                        sp.GetRequiredService<ActivityEditFlow>()
                     ));
                 })
                 .Build();

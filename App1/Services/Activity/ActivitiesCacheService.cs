@@ -25,14 +25,31 @@ namespace Anfeta.UI.Services.Activity
         {
             return _activities.Count > 0;
         }
+        private static string Normalize(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
 
+            text = text.ToLowerInvariant().Trim();
+
+            var normalized = text.Normalize(System.Text.NormalizationForm.FormD);
+            var chars = normalized
+                .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c)
+                            != System.Globalization.UnicodeCategory.NonSpacingMark)
+                .ToArray();
+
+            return new string(chars).Normalize(System.Text.NormalizationForm.FormC);
+        }
         public List<CachedActivityItem> SearchByTitle(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
                 return new List<CachedActivityItem>();
 
+            var query = Normalize(text);
+
             return _activities
-                .Where(a => a.Title.Contains(text, StringComparison.OrdinalIgnoreCase))
+                .Where(a => Normalize(a.Title).Contains(query))
+                .OrderBy(a => a.Title.Length)
                 .ToList();
         }
 

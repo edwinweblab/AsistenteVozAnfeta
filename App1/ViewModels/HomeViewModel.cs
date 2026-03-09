@@ -41,6 +41,9 @@ namespace Anfeta.UI.ViewModels
         private readonly WeblabReportesClient _reportesClient;
         private readonly SemaphoreSlim _warmupLock = new(1, 1);
 
+        // ===== NUEVO: FLUJO DE EDICIÓN DE ACTIVIDADES =====
+        private readonly ActivityEditFlow _activityEditFlow;
+
         private CancellationTokenSource? _currentRecognitionCts;
 
         // Control de sesiones para ignorar resultados tardíos
@@ -157,7 +160,8 @@ namespace Anfeta.UI.ViewModels
             ActivitiesCacheService activitiesCache,
             WeblabActividadesClient actividadesClient,
             WeblabRecordatoriosClient recordatoriosClient,
-            WeblabReportesClient reportesClient)
+            WeblabReportesClient reportesClient,
+            ActivityEditFlow activityEditFlow)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -179,6 +183,8 @@ namespace Anfeta.UI.ViewModels
             _apiKeyService = apiKeyService;
             _activitiesCache = activitiesCache;
             _actividadesClient = actividadesClient;
+
+            _activityEditFlow = activityEditFlow;
 
             // Suscripción segura (para poder desuscribir en Dispose)
             _apiKeyService.KeysChanged += OnKeysChanged;
@@ -252,6 +258,7 @@ namespace Anfeta.UI.ViewModels
                 else
                 {
                     Debug.WriteLine("[CACHE_ACTIVIDADES] No se guardó nada.");
+                    _activitiesCache.Clear();
                 }
             }
             catch (Exception ex)
@@ -260,7 +267,6 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        /// <summary>Limpiar acción pendiente</summary>
         /// <summary>
         /// Limpiar acción pendiente y estado de edición de recordatorio.
         /// Se llama en todo reset después de ejecutar o cancelar una acción.
@@ -384,6 +390,21 @@ namespace Anfeta.UI.ViewModels
                    t == "nueva tarea";
         }
 
+        /// <summary>Verificar si es inicio de edición de actividad</summary>
+        private static bool IsEditActivityCommand(string text)
+        {
+            var t = (text ?? "").Trim().ToLowerInvariant();
+
+            return t.Contains("editar actividad") ||
+                   t.Contains("edita actividad") ||
+                   t.StartsWith("editar ") ||
+                   t.StartsWith("edita ") ||
+                   t.Contains("cambiar actividad") ||
+                   t.Contains("cambia actividad") ||
+                   t.Contains("modificar actividad") ||
+                   t.Contains("modifica actividad");
+        }
+
         /// <summary>
         /// Detecta si el texto es un comando de selección sobre la lista cacheada de recordatorios.
         /// Reconoce: "elimina el 2", "borra el primero", "completa el 3", "edita el segundo", etc.
@@ -397,11 +418,9 @@ namespace Anfeta.UI.ViewModels
 
             var t = (text ?? "").Trim().ToLowerInvariant();
 
-            // Requiere la palabra "recordatorio" para evitar falsos positivos
             if (!t.Contains("recordatorio"))
                 return false;
 
-            // Detectar acción
             string action;
             if (t.Contains("elimina") || t.Contains("borra") || t.Contains("eliminar") || t.Contains("borrar"))
                 action = "delete";
@@ -412,7 +431,6 @@ namespace Anfeta.UI.ViewModels
             else
                 return false;
 
-            // Mapa de ordinales en español a índice base 1
             var ordinals = new Dictionary<string, int>
             {
                 ["primero"] = 1,
@@ -459,7 +477,6 @@ namespace Anfeta.UI.ViewModels
                 }
             }
 
-            // Intentar número: "el 1", "el 2", "número 3"
             var match = System.Text.RegularExpressions.Regex.Match(t, @"\b(\d+)\b");
             if (match.Success && int.TryParse(match.Groups[1].Value, out var num) && num >= 1 && num <= 10)
             {
@@ -704,11 +721,9 @@ namespace Anfeta.UI.ViewModels
 
             if (string.Equals(scope, "API", StringComparison.OrdinalIgnoreCase))
             {
-                // Interceptar lista de recordatorios para cachear
                 if (string.Equals(resource, "recordatorios", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(action, "list", StringComparison.OrdinalIgnoreCase))
                 {
-                    // FIX: variable local correcta es listData, no list
                     (ApiPlainResponse listResp, List<Recordatorio> listData) = await Task.Run(() =>
                         _recordatoriosClient.GetMyRecordatoriosWithListAsync("all", CancellationToken.None));
 
@@ -727,10 +742,16 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Invalidar cache tras mutación de recordatorios
                 if (string.Equals(resource, "recordatorios", StringComparison.OrdinalIgnoreCase) &&
                     action is "create" or "update" or "delete" or "complete")
                     InvalidateRecordatoriosCache();
+
+                if (string.Equals(provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
+                    action is "list" or "update" or "create")
+                {
+                    await RefreshActivitiesCacheAsync(CancellationToken.None);
+                }
 
                 _contextManager.AddToHistory($"API:{resource}:{action}", null);
                 await ResetAfterActionAsync(msg, "Listo.", speak: msg);
@@ -854,6 +875,10 @@ namespace Anfeta.UI.ViewModels
                             };
 
                             var (ok, apiMsg) = await _apiExecutor.ExecuteAsync("weblab", "actividades", "create", JsonSerializer.Serialize(request), ct);
+
+                            if (ok)
+                                await RefreshActivitiesCacheAsync(ct);
+
                             await ResetAfterActionAsync(apiMsg, ok ? "Actividad creada" : "Error", speak: apiMsg);
                             return;
                         }
@@ -883,8 +908,89 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
+                // ===== FLUJO DE EDICIÓN DE ACTIVIDADES =====
+                // Va ANTES del confirm/cancel global para que "confirmar" y "cancelar"
+                // se consuman dentro del flujo de edición cuando está activo.
+                if (_activityEditFlow.IsActive)
+                {
+                    Debug.WriteLine("[ACTIVITY_EDIT_FLOW] Procesando respuesta");
+                    var editResult = _activityEditFlow.ProcessResponse(text);
+                    Debug.WriteLine("===== PATCH DEBUG =====");
+                    Debug.WriteLine($"Titulo: {editResult.Patch?.Titulo}");
+                    Debug.WriteLine($"Status: {editResult.Patch?.Status}");
+                    Debug.WriteLine($"Prioridad: {editResult.Patch?.Prioridad}");
+                    Debug.WriteLine($"DueStart: {editResult.Patch?.DueStart}");
+                    Debug.WriteLine($"DueEnd: {editResult.Patch?.DueEnd}");
+                    Debug.WriteLine($"Anotaciones: {editResult.Patch?.Anotaciones}");
+                    Debug.WriteLine($"PasosYLinks: {editResult.Patch?.PasosYLinks}");
+                    Debug.WriteLine("=======================");
+                    if (editResult.Continue)
+                    {
+                        IsListening = false;
+                        ListenOnceCommand.NotifyCanExecuteChanged();
+                        UpdateUiSafe(editResult.Message, "Editando actividad...");
+                        await SpeakSafeAsync(editResult.Message);
+                        return;
+                    }
+
+                    if (editResult.Activity != null && editResult.Patch != null)
+                    {
+
+                        var payload = new
+                        {
+                            id = editResult.Activity.Id,
+                            titulo = editResult.Patch.Titulo,
+                            status = editResult.Patch.Status,
+                            prioridad = editResult.Patch.Prioridad,
+                            dueStart = editResult.Patch.DueStart,
+                            dueEnd = editResult.Patch.DueEnd,
+                            anotaciones = editResult.Patch.Anotaciones,
+                            pasosYLinks = editResult.Patch.PasosYLinks
+                        };
+
+                        var updateParamsJson = JsonSerializer.Serialize(payload);
+                        Debug.WriteLine("===== UPDATE JSON FINAL =====");
+                        Debug.WriteLine(updateParamsJson);
+                        Debug.WriteLine("=============================");
+                        if (updateParamsJson == "{}")
+                        {
+                            await ResetAfterActionAsync(
+                                "No detecté ningún cambio para actualizar.",
+                                "Sin cambios",
+                                speak: "No detecté ningún cambio para actualizar.");
+                            return;
+                        }
+
+                        var (ok, msg) = await _apiExecutor.ExecuteAsync("weblab", "actividades", "update", updateParamsJson, ct);
+
+                        if (ok)
+                            await RefreshActivitiesCacheAsync(ct);
+
+                        await ResetAfterActionAsync(msg, ok ? "Actividad actualizada" : "Error", speak: msg);
+                        return;
+                    }
+
+                    await ResetAfterActionAsync(editResult.Message, "Edición cancelada", speak: editResult.Message);
+                    return;
+                }
+
+                if (IsEditActivityCommand(text))
+                {
+                    Debug.WriteLine("[ACTIVITY_EDIT_FLOW] Iniciando flujo de edición");
+
+                    if (!_activitiesCache.HasData())
+                        await RefreshActivitiesCacheAsync(ct);
+
+                    var startEditMessage = _activityEditFlow.Start(text);
+
+                    IsListening = false;
+                    ListenOnceCommand.NotifyCanExecuteChanged();
+                    UpdateUiSafe(startEditMessage, "Editando actividad...");
+                    await SpeakSafeAsync(startEditMessage);
+                    return;
+                }
+
                 // ===== CONFIRMAR / CANCELAR GLOBAL =====
-                // Interceptado antes de FastClassifier e IA para evitar que caigan al modelo.
                 if (IsConfirmationPhrase(text))
                 {
                     if (HasPending())
@@ -898,7 +1004,6 @@ namespace Anfeta.UI.ViewModels
 
                 if (IsCancelPhrase(text))
                 {
-                    // FIX: cancelar también cubre el flujo de edición (_editingRecordatorio)
                     if (HasPending() || _editingRecordatorio != null)
                     {
                         _editingRecordatorio = null;
@@ -918,14 +1023,13 @@ namespace Anfeta.UI.ViewModels
                 }
 
                 // ===== FLUJO DE EDICIÓN DE RECORDATORIO =====
-                // El siguiente turno después de "editar el recordatorio X" captura el nuevo valor.
                 if (_editingRecordatorio != null)
                 {
                     Debug.WriteLine($"[REC-SEL] Capturando nuevo valor para edición. Recordatorio: '{_editingRecordatorio.Mensaje}'");
 
                     var editId = _editingRecordatorio.Id;
                     var editMensaje = _editingRecordatorio.Mensaje;
-                    _editingRecordatorio = null; // limpiar estado antes de armar el pending
+                    _editingRecordatorio = null;
 
                     var (parsedDate, cleanMensaje) = SpanishDateParser.TryParse(text);
 
@@ -956,8 +1060,6 @@ namespace Anfeta.UI.ViewModels
                 }
 
                 // ===== DRILL-DOWN DE REVISIONES (desde caché) =====
-                // Si hay caché activa de revisiones y el texto pide un bucket,
-                // responder sin llamar al API — igual que la selección de recordatorios.
                 if (TryParseRevisionesDetail(text, out var revBucket))
                 {
                     Debug.WriteLine($"[REV-DETAIL] Drill-down detectado: bucket={revBucket}");
@@ -966,7 +1068,6 @@ namespace Anfeta.UI.ViewModels
 
                     if (!detail.Ok)
                     {
-                        // Caché vacía o expirada — informar al usuario con mensaje claro
                         await ResetAfterActionAsync(detail.PlainText, "Sin datos", speak: detail.PlainText);
                         return;
                     }
@@ -990,7 +1091,6 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // FIX: usar SetRecordatoriosCache para no omitir el timestamp
                     SetRecordatoriosCache(autoList);
                 }
 
@@ -1006,7 +1106,7 @@ namespace Anfeta.UI.ViewModels
                 {
                     Debug.WriteLine($"[REC-SEL] Selección detectada: {selAction} índice {selIndex} de {_lastRecordatoriosList.Count}");
 
-                    var idx = selIndex - 1; // convertir a 0-based
+                    var idx = selIndex - 1;
                     if (idx < 0 || idx >= _lastRecordatoriosList.Count)
                     {
                         await SpeakWithoutResetAsync(
@@ -1037,7 +1137,6 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // delete o complete: guardar como pending con confirmación
                     _pendingIntent = "ApiCall";
                     _pendingScope = "API";
                     _pendingProvider = "weblab";
@@ -1058,7 +1157,6 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // Reparación/anti-sustitución local
                 var requestedFromSpeech = ExtractRequestedAppFromSpeech(text);
                 Debug.WriteLine("[STT] requestedFromSpeech=" + (requestedFromSpeech ?? "<null>"));
 
@@ -1068,7 +1166,6 @@ namespace Anfeta.UI.ViewModels
                 {
                     Debug.WriteLine($"[FAST] Clasificado sin IA: {fastResult.Intent} → {fastResult.AppKey}");
 
-                    // CreateRecordatorio: delegar a IA para extraer fecha y mensaje
                     if (fastResult.Intent == "CreateRecordatorio")
                     {
                         Debug.WriteLine("[FAST] CreateRecordatorio → delegando a IA");
@@ -1089,7 +1186,6 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // ── FAST CLASSIFIER: routing por scope ──────────────────────────
                     var fastRequiresConfirmation = RequiresConfirmation(fastResult.Scope, fastResult.Action);
                     Debug.WriteLine($"[FAST] requires_confirmation={fastRequiresConfirmation}");
 
@@ -1114,7 +1210,6 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // LOCAL: ejecutar directamente
                     if (string.Equals(fastResult.Scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
                     {
                         if (!_localExecutor.TryExecute(fastResult.Intent, fastResult.Scope, fastResult.AppKey, out var fastExecMsg))
@@ -1133,10 +1228,8 @@ namespace Anfeta.UI.ViewModels
                         return;
                     }
 
-                    // API desde FastClassifier
                     if (string.Equals(fastResult.Scope, "API", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Interceptar lista de recordatorios para cachear
                         if (string.Equals(fastResult.Resource, "recordatorios", StringComparison.OrdinalIgnoreCase) &&
                             fastResult.Action is "list" or "today" or "tomorrow" or "pending")
                         {
@@ -1150,7 +1243,6 @@ namespace Anfeta.UI.ViewModels
 
                             Debug.WriteLine($"[REC-SEL] Interceptando lista recordatorios (filter={filter})");
 
-                            // FIX: variable local correcta es list, no listData
                             var (listResponse, list) = await Task.Run(() =>
                                 _recordatoriosClient.GetMyRecordatoriosWithListAsync(filter, ct));
 
@@ -1161,7 +1253,6 @@ namespace Anfeta.UI.ViewModels
                             return;
                         }
 
-                        // Cualquier otra acción API del FastClassifier
                         string? fastParamsJson = null;
                         if (fastResult.Params?.Count > 0)
                             fastParamsJson = JsonSerializer.Serialize(fastResult.Params);
@@ -1171,7 +1262,7 @@ namespace Anfeta.UI.ViewModels
                         if (fastOk &&
                             string.Equals(fastResult.Provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
                             string.Equals(fastResult.Resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(fastResult.Action, "list", StringComparison.OrdinalIgnoreCase))
+                            fastResult.Action is "list" or "update" or "create")
                         {
                             await RefreshActivitiesCacheAsync(ct);
                         }
@@ -1252,7 +1343,6 @@ namespace Anfeta.UI.ViewModels
                         Confidence = root.TryGetProperty("confidence", out var confEl) ? confEl.GetDouble() : 0.5
                     };
 
-                    // No cachear respuestas API — los params varían (fechas, IDs)
                     if (!string.Equals(scope, "API", StringComparison.OrdinalIgnoreCase))
                         _interpretationCache.Set(text, parsedResult);
                 }
@@ -1346,7 +1436,6 @@ namespace Anfeta.UI.ViewModels
 
                 if (string.Equals(scope, "API", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Interceptar lista de recordatorios via IA para cachear
                     if (string.Equals(resource, "recordatorios", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(action, "list", StringComparison.OrdinalIgnoreCase))
                     {
@@ -1370,11 +1459,11 @@ namespace Anfeta.UI.ViewModels
 
                     if (string.Equals(provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(action, "list", StringComparison.OrdinalIgnoreCase))
+                        action is "list" or "update" or "create")
                     {
                         await RefreshActivitiesCacheAsync(ct);
                     }
-                    // Invalidar cache tras mutación de recordatorios
+
                     if (string.Equals(resource, "recordatorios", StringComparison.OrdinalIgnoreCase) &&
                         action is "create" or "update" or "delete" or "complete")
                         InvalidateRecordatoriosCache();
@@ -1411,18 +1500,18 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
+        /// <summary>
         /// Detecta si el texto es un comando de drill-down sobre revisiones cacheadas.
         /// Requiere palabra de acción + bucket — sin "recordatorio".
         /// Salida: bucket = "pendientes" | "terminadas" | "confirmadas" | "todas"
+        /// </summary>
         private static bool TryParseRevisionesDetail(string text, out string bucket)
         {
             bucket = "";
             var t = (text ?? "").Trim().ToLowerInvariant();
 
-            // Exclusión explícita: si menciona recordatorio, no es drill-down de revisiones
             if (t.Contains("recordatorio")) return false;
 
-            // Palabras de acción requeridas
             var actionWords = new[] { "muéstrame", "muestrame", "ver", "dame",
                                       "cuáles", "cuales", "lista", "muestra", "dime" };
             bool hasAction = false;
@@ -1431,12 +1520,10 @@ namespace Anfeta.UI.ViewModels
 
             if (!hasAction) return false;
 
-            // Detectar bucket
             if (t.Contains("pendiente")) { bucket = "pendientes"; return true; }
             if (t.Contains("terminada")) { bucket = "terminadas"; return true; }
             if (t.Contains("confirmada")) { bucket = "confirmadas"; return true; }
 
-            // "todas" solo si hay contexto explícito de revisiones
             if ((t.Contains("todas") || t.Contains("todo")) &&
                 (t.Contains("revision") || t.Contains("revisión")))
             {
