@@ -139,15 +139,19 @@ namespace Anfeta.UI.Services.Weblab
         private static string BuildRevisionesPlainText(string header, List<(string titulo, string hora)> revisiones)
         {
             var max = Math.Min(revisiones.Count, 10);
+            var blocks = new List<string> { header };
 
-            var parts = new List<string> { header };
             for (var i = 0; i < max; i++)
             {
                 var (titulo, hora) = revisiones[i];
-                parts.Add($"{i + 1}) {titulo} - {hora}");
+                blocks.Add(
+                    $"Revision {i + 1}.\n" +
+                    $"{titulo}.\n" +
+                    $"Hora: {hora}."
+                );
             }
 
-            return string.Join(". ", parts);
+            return string.Join("\n\n", blocks);
         }
     }
 }
