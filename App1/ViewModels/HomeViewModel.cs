@@ -155,7 +155,7 @@ namespace Anfeta.UI.ViewModels
             WeblabUsersClient usersClient,
             ApiKeyService apiKeyService,
             ActivitiesCacheService activitiesCache,
-            WeblabActividadesClient actividadesClient)
+            WeblabActividadesClient actividadesClient,
             WeblabRecordatoriosClient recordatoriosClient,
             WeblabReportesClient reportesClient)
         {

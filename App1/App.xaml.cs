@@ -291,9 +291,11 @@ namespace Anfeta.UI
                         sp.GetRequiredService<ActivityFieldValidator>(),
                         sp.GetRequiredService<CorrectionCommandDetector>(),
                         sp.GetRequiredService<WeblabUsersClient>(),
+                        sp.GetRequiredService<ApiKeyService>(),
+                        sp.GetRequiredService<ActivitiesCacheService>(),
+                        sp.GetRequiredService<WeblabActividadesClient>(),
                         sp.GetRequiredService<WeblabRecordatoriosClient>(),
-                        sp.GetRequiredService<WeblabReportesClient>(),
-                        sp.GetRequiredService<ApiKeyService>()
+                        sp.GetRequiredService<WeblabReportesClient>()
                     ));
                 })
                 .Build();
