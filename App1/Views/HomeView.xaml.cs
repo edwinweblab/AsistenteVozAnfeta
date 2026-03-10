@@ -79,10 +79,108 @@ namespace Anfeta.UI.Views
         // NOTIFICACIONES — LISTA VERTICAL
         // ─────────────────────────────────────────────────────────
 
-        private sealed record ActivityItem(
-            string Titulo, string Horario, string Estado, string Prioridad);
+        // ── Records por tipo de recurso ────────────────────────────────────────────
+        private sealed record ActivityItem(string Titulo, string Horario, string Estado, string Prioridad);
+        private sealed record RecordatorioItem(string Mensaje, string Fecha, string Estado, bool TieneCalendar);
+        private sealed record RevisionItem(string Titulo, string Hora);
+        private sealed record DrillDownRevisionItem(int Index, string Titulo);
+        private sealed record ComprobatoriaSeccion(string Label, bool Ok, string Detalle);
+        private sealed record RezagadaItem(string Titulo, string Desde);
+        private sealed record UltimaAccionItem(string Actor, string Accion, string Titulo);
 
-        /// Decide si renderizar lista de actividades o mensaje simple.
+        private sealed record RevisionesResumen(string Nombre, string Fecha, int Total, int Terminadas, int Confirmadas, int Pendientes);
+
+        // ── Tipo de mensaje detectado para routing y paleta ────────────────────────
+        private enum NotifType
+        {
+            Actividades, Recordatorios, Revisiones, ReporteResumen,
+            DrillDownRevisiones, Comprobatoria, Rezagadas, UltimasAcciones,
+            Pregunta, Error, Sistema
+        }
+
+        // ── Paleta oscura por tipo — acento, fondo (7%), borde (9%), glyph ──────────
+        // Static para que los builders de fila puedan llamarla sin instancia.
+        private static (Color accent, Color bg, Color border, string glyph) GetTypeStyle(NotifType type) =>
+            type switch
+            {
+                NotifType.Actividades => (ColorHelper.FromArgb(0xFF, 0x4A, 0x7F, 0xA5),
+                                            ColorHelper.FromArgb(0x12, 0x4A, 0x7F, 0xA5),
+                                            ColorHelper.FromArgb(0x18, 0x4A, 0x7F, 0xA5),
+                                            "\uE823"),
+                NotifType.Recordatorios => (ColorHelper.FromArgb(0xFF, 0xA5, 0x8B, 0x4A),
+                                            ColorHelper.FromArgb(0x12, 0xA5, 0x8B, 0x4A),
+                                            ColorHelper.FromArgb(0x18, 0xA5, 0x8B, 0x4A),
+                                            "\uE787"),
+                NotifType.Revisiones => (ColorHelper.FromArgb(0xFF, 0x7A, 0x6F, 0xA5),
+                                            ColorHelper.FromArgb(0x12, 0x7A, 0x6F, 0xA5),
+                                            ColorHelper.FromArgb(0x18, 0x7A, 0x6F, 0xA5),
+                                            "\uE946"),
+                NotifType.Pregunta => (ColorHelper.FromArgb(0xFF, 0xA5, 0x72, 0x4A),
+                                            ColorHelper.FromArgb(0x12, 0xA5, 0x72, 0x4A),
+                                            ColorHelper.FromArgb(0x18, 0xA5, 0x72, 0x4A),
+                                            "\uE946"),
+                NotifType.Error => (ColorHelper.FromArgb(0xFF, 0xA5, 0x4A, 0x4A),
+                                            ColorHelper.FromArgb(0x14, 0xA5, 0x4A, 0x4A),
+                                            ColorHelper.FromArgb(0x20, 0xA5, 0x4A, 0x4A),
+                                            "\uEA39"),
+                NotifType.ReporteResumen => (ColorHelper.FromArgb(0xFF, 0x7A, 0x6F, 0xA5),
+                                             ColorHelper.FromArgb(0x12, 0x7A, 0x6F, 0xA5),
+                                             ColorHelper.FromArgb(0x18, 0x7A, 0x6F, 0xA5),
+                                             "\uE9D9"),
+                NotifType.DrillDownRevisiones => (ColorHelper.FromArgb(0xFF, 0x7A, 0x6F, 0xA5),
+                                           ColorHelper.FromArgb(0x12, 0x7A, 0x6F, 0xA5),
+                                           ColorHelper.FromArgb(0x18, 0x7A, 0x6F, 0xA5),
+                                           "\uE946"),
+                NotifType.Comprobatoria => (ColorHelper.FromArgb(0xFF, 0x4A, 0x9A, 0x8A),
+                                                   ColorHelper.FromArgb(0x12, 0x4A, 0x9A, 0x8A),
+                                                   ColorHelper.FromArgb(0x18, 0x4A, 0x9A, 0x8A),
+                                                   "\uE930"),
+                NotifType.Rezagadas => (ColorHelper.FromArgb(0xFF, 0xA5, 0x4A, 0x4A),
+                                                   ColorHelper.FromArgb(0x12, 0xA5, 0x4A, 0x4A),
+                                                   ColorHelper.FromArgb(0x18, 0xA5, 0x4A, 0x4A),
+                                                   "\uE7BA"),
+                NotifType.UltimasAcciones => (ColorHelper.FromArgb(0xFF, 0x6A, 0x7A, 0x9A),
+                                                   ColorHelper.FromArgb(0x12, 0x6A, 0x7A, 0x9A),
+                                                   ColorHelper.FromArgb(0x18, 0x6A, 0x7A, 0x9A),
+                                                   "\uE823"),
+                _ => (ColorHelper.FromArgb(0xFF, 0x34, 0xD3, 0x99),
+                                            ColorHelper.FromArgb(0x12, 0x34, 0xD3, 0x99),
+                                            ColorHelper.FromArgb(0x18, 0x34, 0xD3, 0x99),
+                                            "\uE946"),
+            };
+
+        // Actualiza dot, label y badge del header strip.
+        private void SetNotifHeader(NotifType type, int count = -1)
+        {
+            var (accent, _, _, _) = GetTypeStyle(type);
+            NotifDot.Fill = new SolidColorBrush(accent);
+            NotifHeaderText.Text = type switch
+            {
+                NotifType.Actividades => "ACTIVIDADES",
+                NotifType.Recordatorios => "RECORDATORIOS",
+                NotifType.Revisiones => "REVISIONES",
+                NotifType.ReporteResumen => "REVISIONES",
+                NotifType.DrillDownRevisiones => "REVISIONES",
+                NotifType.Comprobatoria => "COMPROBATORIA",
+                NotifType.Rezagadas => "REZAGADAS",
+                NotifType.UltimasAcciones => "ACCIONES",
+                NotifType.Pregunta => "ACCION",
+                NotifType.Error => "SISTEMA",
+                _ => "SISTEMA"
+            };
+
+            if (count >= 0)
+            {
+                NotifCountBadge.Visibility = Visibility.Visible;
+                NotifCountText.Text = count.ToString();
+            }
+            else
+            {
+                NotifCountBadge.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        // Punto de entrada — limpia el panel y decide qué renderizar.
         private void RenderNotifications(string message, bool showInfo)
         {
             NotificationsPanel.Children.Clear();
@@ -95,19 +193,131 @@ namespace Anfeta.UI.Views
             }
 
             NotifStrip.Visibility = Visibility.Visible;
+            var type = DetectType(message);
 
-            if (message.TrimStart().StartsWith("Actividades de", StringComparison.OrdinalIgnoreCase))
+            switch (type)
             {
-                var items = ParseActivityList(message);
-                RenderActivityList(items, message);
-            }
-            else
-            {
-                RenderSimpleCard(message);
+                case NotifType.Actividades:
+                    var actItems = ParseActivityList(message);
+                    if (actItems.Count > 0) RenderActivityList(actItems, message);
+                    else RenderSimpleCard(message, NotifType.Actividades);
+                    break;
+
+                case NotifType.Recordatorios:
+                    var recItems = ParseRecordatorioList(message);
+                    if (recItems.Count > 0) RenderRecordatorioList(recItems, message);
+                    else RenderSimpleCard(message, NotifType.Recordatorios);
+                    break;
+
+                case NotifType.Revisiones:
+                    var revItems = ParseRevisionesList(message);
+                    if (revItems.Count > 0) RenderRevisionesList(revItems, message);
+                    else RenderSimpleCard(message, NotifType.Revisiones);
+                    break;
+
+                case NotifType.ReporteResumen:
+                    var resumen = ParseRevisionesResumen(message);
+                    if (resumen != null) RenderRevisionesResumen(resumen);
+                    else RenderSimpleCard(message, NotifType.ReporteResumen);
+                    break;
+
+                case NotifType.DrillDownRevisiones:
+                    var drillItems = ParseDrillDownList(message);
+                    if (drillItems.items.Count > 0)
+                        RenderDrillDownList(drillItems.header, drillItems.items);
+                    else
+                        RenderSimpleCard(message, NotifType.DrillDownRevisiones);
+                    break;
+
+                case NotifType.Comprobatoria:
+                    var compItems = ParseComprobatoria(message);
+                    if (compItems.nombre != null)
+                        RenderComprobatoriaCard(compItems.nombre, compItems.secciones);
+                    else
+                        RenderSimpleCard(message, NotifType.Comprobatoria);
+                    break;
+
+                case NotifType.Rezagadas:
+                    var rezData = ParseRezagadas(message);
+                    if (rezData.items.Count > 0)
+                        RenderRezagadasList(rezData.header, rezData.items);
+                    else
+                        RenderSimpleCard(message, NotifType.Rezagadas);
+                    break;
+
+                case NotifType.UltimasAcciones:
+                    var accionItems = ParseUltimasAcciones(message);
+                    if (accionItems.items.Count > 0)
+                        RenderUltimasAccionesList(accionItems.header, accionItems.items);
+                    else
+                        RenderSimpleCard(message, NotifType.UltimasAcciones);
+                    break;
+
+                case NotifType.Pregunta:
+                    RenderPreguntaCard(message);
+                    break;
+
+                default:
+                    RenderSimpleCard(message, type);
+                    break;
             }
         }
 
-        /// Parsea el texto plano en lista de ActivityItem.
+        // Detecta tipo por prefijo de la primera línea.
+        // Sin accent-insensitive — los builders usan keywords sin tilde.
+        private static NotifType DetectType(string message)
+        {
+            var first = message.Split('\n')[0].Trim().ToUpperInvariant();
+            var upper = message.ToUpperInvariant();
+
+            if (first.StartsWith("ACTIVIDADES DE"))
+                return NotifType.Actividades;
+
+            if (first.Contains("RECORDATORIO"))
+                return NotifType.Recordatorios;
+
+            // "Últimas N acciones del equipo:"
+            if (first.StartsWith("LTIMAS") || first.StartsWith("ÚLTIMAS") || first.StartsWith("ULTIMAS"))
+                return NotifType.UltimasAcciones;
+
+            // "nombre: FTF pendiente. Actividades en orden..."
+            if (upper.Contains("FTF"))
+                return NotifType.Comprobatoria;
+
+            // "nombre, tienes N tareas rezagadas: ..."
+            if (upper.Contains("REZAGADAS") || upper.Contains("REZAGADA"))
+                return NotifType.Rezagadas;
+
+            if (first.Contains("REVISIONES") || first.Contains("REVISION"))
+            {
+                // ReporteResumen: una línea con los tres conteos
+                if (upper.Contains("TERMINADAS") && upper.Contains("CONFIRMADAS") && upper.Contains("PENDIENTES")
+                    && !message.Contains('\n'))
+                    return NotifType.ReporteResumen;
+
+                // Lista estructurada — bloques separados por \n\n (BuildRevisionesPlainText)
+                if (message.Contains("\n\n"))
+                    return NotifType.Revisiones;
+
+                // DrillDown — lista numerada con \n simples
+                if (message.Contains('\n'))
+                    return NotifType.DrillDownRevisiones;
+
+                return NotifType.Revisiones;
+            }
+
+            if (message.TrimStart().StartsWith("¿"))
+                return NotifType.Pregunta;
+
+            if (upper.Contains("ERROR") || upper.Contains("NO PUDE"))
+                return NotifType.Error;
+
+            return NotifType.Sistema;
+        }
+
+        // ─── ACTIVIDADES ──────────────────────────────────────────────────────────────
+
+        // Parsea bloques \n\n del formato de BuildActivitiesDetailedPlainText.
         private static List<ActivityItem> ParseActivityList(string message)
         {
             var result = new List<ActivityItem>();
@@ -117,8 +327,7 @@ namespace Anfeta.UI.Views
             {
                 var lines = block
                     .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(l => l.Trim())
-                    .ToArray();
+                    .Select(l => l.Trim()).ToArray();
 
                 if (lines.Length == 0 ||
                     !lines[0].StartsWith("Actividad ", StringComparison.OrdinalIgnoreCase))
@@ -147,95 +356,83 @@ namespace Anfeta.UI.Views
             return result;
         }
 
-        private static string ExtractField(string[] lines, string prefix)
-        {
-            foreach (var l in lines)
-                if (l.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    return l.Substring(prefix.Length).Trim();
-            return "";
-        }
-
-        private static string TrimDot(string s) => s.TrimEnd().TrimEnd('.').Trim();
-
-        /// Renderiza las actividades como filas en lista vertical.
         private void RenderActivityList(List<ActivityItem> items, string rawMessage)
         {
-            // Header resumen
             var firstLine = rawMessage.Split('\n')[0].Trim();
-            NotificationsPanel.Children.Add(BuildSummaryRow(firstLine, items.Count));
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.Actividades);
 
+            NotificationsPanel.Children.Add(BuildSummaryRow(firstLine, accent, bg, border, glyph));
             foreach (var item in items)
                 NotificationsPanel.Children.Add(BuildActivityRow(item));
 
-            NotifCountBadge.Visibility = Visibility.Visible;
-            NotifCountText.Text = items.Count.ToString();
-            NotifHeaderText.Text = "ACTIVIDADES";
-            NotifDot.Fill = new SolidColorBrush(
-                ColorHelper.FromArgb(0xFF, 0x60, 0xA5, 0xFA));
+            SetNotifHeader(NotifType.Actividades, items.Count);
         }
 
-        /// Fila de resumen con ícono + texto total.
-        private static Border BuildSummaryRow(string text, int count)
+        // ─── RECORDATORIOS ────────────────────────────────────────────────────────────
+
+        // Parsea bloques \n\n del nuevo formato de BuildRecordatoriosText.
+        private static List<RecordatorioItem> ParseRecordatorioList(string message)
         {
+            var result = new List<RecordatorioItem>();
+            var blocks = message.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var block in blocks)
+            {
+                var lines = block
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(l => l.Trim()).ToArray();
+
+                if (lines.Length == 0 ||
+                    !lines[0].StartsWith("Recordatorio ", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var mensaje = lines.Length > 1 ? TrimDot(lines[1]) : "Sin mensaje";
+                var fecha = ExtractField(lines, "Fecha:");
+                var estado = ExtractField(lines, "Estado:");
+                var calendarStr = ExtractField(lines, "Calendar:");
+                var tieneCalendar = calendarStr.Equals("Sí", StringComparison.OrdinalIgnoreCase);
+
+                result.Add(new RecordatorioItem(mensaje, fecha, estado, tieneCalendar));
+            }
+
+            return result;
+        }
+
+        private void RenderRecordatorioList(List<RecordatorioItem> items, string rawMessage)
+        {
+            var firstLine = rawMessage.Split('\n')[0].Trim();
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.Recordatorios);
+
+            NotificationsPanel.Children.Add(BuildSummaryRow(firstLine, accent, bg, border, glyph));
+            foreach (var item in items)
+                NotificationsPanel.Children.Add(BuildRecordatorioRow(item));
+
+            SetNotifHeader(NotifType.Recordatorios, items.Count);
+        }
+
+        // Fila individual de recordatorio: [dot] [mensaje + fecha] → [badge estado]
+        private static Border BuildRecordatorioRow(RecordatorioItem item)
+        {
+            var isCompleted = item.Estado.Equals("completado", StringComparison.OrdinalIgnoreCase);
+            var (accent, _, _, _) = GetTypeStyle(NotifType.Recordatorios);
+            var dotColor = isCompleted
+                ? ColorHelper.FromArgb(0xFF, 0x3A, 0xB0, 0x85)
+                : accent;
+
             var border = new Border
             {
                 CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(12, 10, 12, 10),
-                Background = new SolidColorBrush(
-                    ColorHelper.FromArgb(0x14, 0x60, 0xA5, 0xFA)),
-                BorderBrush = new SolidColorBrush(
-                    ColorHelper.FromArgb(0x20, 0x60, 0xA5, 0xFA)),
+                Background = new SolidColorBrush(ColorHelper.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+                BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
                 BorderThickness = new Thickness(1)
             };
 
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            row.Children.Add(new FontIcon
-            {
-                Glyph = "\uE823",
-                FontSize = 13,
-                Foreground = new SolidColorBrush(
-                    ColorHelper.FromArgb(0xFF, 0x60, 0xA5, 0xFA)),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-            row.Children.Add(new TextBlock
-            {
-                Text = text,
-                FontSize = 12,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(
-                    ColorHelper.FromArgb(0xFF, 0x93, 0xC5, 0xFD)),
-                VerticalAlignment = VerticalAlignment.Center,
-                TextWrapping = TextWrapping.Wrap
-            });
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
 
-            border.Child = row;
-            return border;
-        }
-
-        /// Fila individual de actividad: título + horario + badges en una línea compacta.
-        private static Border BuildActivityRow(ActivityItem item)
-        {
-            var (statusColor, statusBg) = GetStatusColors(item.Estado);
-
-            var border = new Border
-            {
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(12, 10, 12, 10),
-                Background = new SolidColorBrush(
-                    ColorHelper.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
-                BorderBrush = new SolidColorBrush(
-                    ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
-                BorderThickness = new Thickness(1)
-            };
-
-            // Layout: [dot] [título + horario] → [badges]
-            var outerRow = new Grid();
-            outerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
-            outerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            outerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
-
-            // Dot indicador de prioridad
-            var (dotColor, _) = GetStatusColors(item.Estado);
             var dot = new Ellipse
             {
                 Width = 7,
@@ -246,15 +443,783 @@ namespace Anfeta.UI.Views
             };
             Grid.SetColumn(dot, 0);
 
-            // Centro: título + horario apilados
+            var center = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            center.Children.Add(new TextBlock
+            {
+                Text = item.Mensaje,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 1,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            if (!string.IsNullOrWhiteSpace(item.Fecha))
+            {
+                var fechaRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+                fechaRow.Children.Add(new FontIcon
+                {
+                    Glyph = "\uE787",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x47, 0x55, 0x69)),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                fechaRow.Children.Add(new TextBlock
+                {
+                    Text = item.Fecha,
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x4B, 0x55, 0x63)),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                // Indicador de Google Calendar si está sincronizado
+                if (item.TieneCalendar)
+                    fechaRow.Children.Add(new FontIcon
+                    {
+                        Glyph = "\uE7BA",
+                        FontSize = 9,
+                        Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x4A, 0x7F, 0xA5)),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                center.Children.Add(fechaRow);
+            }
+            Grid.SetColumn(center, 1);
+
+            var badges = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 5,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 0, 0)
+            };
+            if (!string.IsNullOrWhiteSpace(item.Estado))
+            {
+                var tc = isCompleted
+                    ? ColorHelper.FromArgb(0xFF, 0x3A, 0xB0, 0x85)
+                    : accent;
+                var bc = isCompleted
+                    ? ColorHelper.FromArgb(0x1A, 0x3A, 0xB0, 0x85)
+                    : ColorHelper.FromArgb(0x1A, accent.R, accent.G, accent.B);
+                badges.Children.Add(BuildBadge(item.Estado, tc, bc));
+            }
+            Grid.SetColumn(badges, 2);
+
+            grid.Children.Add(dot);
+            grid.Children.Add(center);
+            grid.Children.Add(badges);
+            border.Child = grid;
+            return border;
+        }
+
+        // ─── REVISIONES ───────────────────────────────────────────────────────────────
+
+        // Parsea bloques \n\n del nuevo formato de BuildRevisionesPlainText.
+        private static List<RevisionItem> ParseRevisionesList(string message)
+        {
+            var result = new List<RevisionItem>();
+            var blocks = message.Split(new[] { "\n\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var block in blocks)
+            {
+                var lines = block
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(l => l.Trim()).ToArray();
+
+                if (lines.Length == 0 ||
+                    !lines[0].StartsWith("Revision ", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var titulo = lines.Length > 1 ? TrimDot(lines[1]) : "Sin título";
+                var hora = ExtractField(lines, "Hora:");
+
+                result.Add(new RevisionItem(titulo, hora));
+            }
+
+            return result;
+        }
+
+        private void RenderRevisionesList(List<RevisionItem> items, string rawMessage)
+        {
+            var firstLine = rawMessage.Split('\n')[0].Trim();
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.Revisiones);
+
+            NotificationsPanel.Children.Add(BuildSummaryRow(firstLine, accent, bg, border, glyph));
+            foreach (var item in items)
+                NotificationsPanel.Children.Add(BuildRevisionRow(item));
+
+            SetNotifHeader(NotifType.Revisiones, items.Count);
+        }
+
+        // ─── DRILL-DOWN REVISIONES ────────────────────────────────────────────────────
+
+        // Parsea: "nombre, tienes N revisiones pendientes:\n1. Título\n2. ..."
+        private static (string header, List<DrillDownRevisionItem> items) ParseDrillDownList(string message)
+        {
+            var lines = message.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                                .Select(l => l.Trim()).ToArray();
+            var header = lines.Length > 0 ? lines[0].TrimEnd(':') : "";
+            var items = new List<DrillDownRevisionItem>();
+
+            for (var i = 1; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                var dotIdx = line.IndexOf('.');
+                if (dotIdx < 0) continue;
+
+                if (!int.TryParse(line[..dotIdx].Trim(), out var idx)) continue;
+
+                var titulo = TrimDot(line[(dotIdx + 1)..].Trim());
+                if (!string.IsNullOrWhiteSpace(titulo))
+                    items.Add(new DrillDownRevisionItem(idx, titulo));
+            }
+
+            return (header, items);
+        }
+
+        private void RenderDrillDownList(string header, List<DrillDownRevisionItem> items)
+        {
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.DrillDownRevisiones);
+            NotificationsPanel.Children.Add(BuildSummaryRow(header, accent, bg, border, glyph));
+
+            foreach (var item in items)
+            {
+                var rowBorder = new Border
+                {
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Background = new SolidColorBrush(ColorHelper.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+                    BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
+                    BorderThickness = new Thickness(1)
+                };
+
+                var row = new Grid();
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                // Índice como badge
+                var idxBadge = new Border
+                {
+                    CornerRadius = new CornerRadius(999),
+                    Padding = new Thickness(7, 3, 7, 3),
+                    Background = new SolidColorBrush(ColorHelper.FromArgb(0x18, 0x7A, 0x6F, 0xA5)),
+                    Margin = new Thickness(0, 0, 10, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = item.Index.ToString(),
+                        FontSize = 10,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground = new SolidColorBrush(accent)
+                    }
+                };
+                Grid.SetColumn(idxBadge, 0);
+
+                var titulo = new TextBlock
+                {
+                    Text = item.Titulo,
+                    FontSize = 13,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(titulo, 1);
+
+                row.Children.Add(idxBadge);
+                row.Children.Add(titulo);
+                rowBorder.Child = row;
+                NotificationsPanel.Children.Add(rowBorder);
+            }
+
+            SetNotifHeader(NotifType.DrillDownRevisiones, items.Count);
+        }
+
+        // ─── COMPROBATORIA ────────────────────────────────────────────────────────────
+
+        // Parsea: "nombre: FTF pendiente. Actividades en orden. Cuadrated en orden."
+        private static (string? nombre, List<ComprobatoriaSeccion> secciones) ParseComprobatoria(string message)
+        {
+            var colonIdx = message.IndexOf(':');
+            if (colonIdx < 0) return (null, new List<ComprobatoriaSeccion>());
+
+            var nombre = message[..colonIdx].Trim();
+            var resto = message[(colonIdx + 1)..].Trim();
+            var partes = resto.Split('.', StringSplitOptions.RemoveEmptyEntries)
+                                .Select(p => p.Trim())
+                                .Where(p => !string.IsNullOrWhiteSpace(p))
+                                .ToList();
+
+            var secciones = new List<ComprobatoriaSeccion>();
+
+            foreach (var parte in partes)
+            {
+                var upper = parte.ToUpperInvariant();
+
+                string label;
+                if (upper.Contains("FTF")) label = "FTF";
+                else if (upper.Contains("ACTIVIDAD")) label = "Actividades";
+                else if (upper.Contains("CUADRATED")) label = "Cuadrated";
+                else label = parte.Length > 30 ? parte[..30] + "…" : parte;
+
+                var ok = upper.Contains("EN ORDEN") || upper.Contains("COMPLETADO") || upper.Contains("OK");
+                var detalle = parte;
+
+                secciones.Add(new ComprobatoriaSeccion(label, ok, detalle));
+            }
+
+            return (nombre, secciones);
+        }
+
+        private void RenderComprobatoriaCard(string nombre, List<ComprobatoriaSeccion> secciones)
+        {
+            SetNotifHeader(NotifType.Comprobatoria);
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.Comprobatoria);
+
+            var outerBorder = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(16, 14, 16, 14),
+                Background = new SolidColorBrush(bg),
+                BorderBrush = new SolidColorBrush(border),
+                BorderThickness = new Thickness(1)
+            };
+
+            var root = new StackPanel { Spacing = 12 };
+
+            // Header
+            var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            headerRow.Children.Add(new FontIcon
+            {
+                Glyph = glyph,
+                FontSize = 13,
+                Foreground = new SolidColorBrush(accent),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            headerRow.Children.Add(new TextBlock
+            {
+                Text = nombre,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xA0, 0xD4, 0xC8)),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            root.Children.Add(headerRow);
+
+            root.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(ColorHelper.FromArgb(0x18, 0x4A, 0x9A, 0x8A)),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            });
+
+            // Secciones
+            foreach (var sec in secciones)
+            {
+                var secRow = new Grid();
+                secRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+                secRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                secRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+
+                // Dot
+                var dot = new Ellipse
+                {
+                    Width = 7,
+                    Height = 7,
+                    Fill = new SolidColorBrush(sec.Ok
+                        ? ColorHelper.FromArgb(0xFF, 0x3A, 0xB0, 0x85)
+                        : ColorHelper.FromArgb(0xFF, 0xA5, 0x8B, 0x4A)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 10, 0)
+                };
+                Grid.SetColumn(dot, 0);
+
+                // Detalle
+                var txt = new TextBlock
+                {
+                    Text = sec.Detalle,
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xCB, 0xD5, 0xE1)),
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(txt, 1);
+
+                // Ícono ok/pendiente
+                var ico = new FontIcon
+                {
+                    Glyph = sec.Ok ? "\uE73E" : "\uE783",
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush(sec.Ok
+                        ? ColorHelper.FromArgb(0xFF, 0x3A, 0xB0, 0x85)
+                        : ColorHelper.FromArgb(0xFF, 0xA5, 0x8B, 0x4A)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(10, 0, 0, 0)
+                };
+                Grid.SetColumn(ico, 2);
+
+                secRow.Children.Add(dot);
+                secRow.Children.Add(txt);
+                secRow.Children.Add(ico);
+                root.Children.Add(secRow);
+            }
+
+            outerBorder.Child = root;
+            NotificationsPanel.Children.Add(outerBorder);
+        }
+
+        // ─── REZAGADAS ────────────────────────────────────────────────────────────────
+
+        // Parsea: "nombre, tienes N tareas rezagadas: 1. Título (desde las HH:mm). 2. ..."
+        private static (string header, List<RezagadaItem> items) ParseRezagadas(string message)
+        {
+            var items = new List<RezagadaItem>();
+            var colonIdx = message.IndexOf(':');
+            if (colonIdx < 0) return ("", items);
+
+            var header = message[..colonIdx].Trim();
+            var resto = message[(colonIdx + 1)..].Trim();
+
+            // Separar por patrón "N. " para aislar cada item
+            var partes = System.Text.RegularExpressions.Regex
+                .Split(resto, @"\d+\.\s")
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .ToArray();
+
+            foreach (var parte in partes)
+            {
+                var p = parte.Trim().TrimEnd('.');
+
+                // Extraer "(desde las HH:mm)"
+                var desdeMatch = System.Text.RegularExpressions.Regex
+                    .Match(p, @"\(desde las (\d{2}:\d{2})\)");
+
+                var desde = desdeMatch.Success ? desdeMatch.Groups[1].Value : "";
+                var titulo = desdeMatch.Success
+                    ? p[..desdeMatch.Index].Trim().TrimEnd('.')
+                    : p;
+
+                if (!string.IsNullOrWhiteSpace(titulo))
+                    items.Add(new RezagadaItem(titulo, desde));
+            }
+
+            return (header, items);
+        }
+
+        private void RenderRezagadasList(string header, List<RezagadaItem> items)
+        {
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.Rezagadas);
+            NotificationsPanel.Children.Add(BuildSummaryRow(header, accent, bg, border, glyph));
+
+            foreach (var item in items)
+            {
+                var rowBorder = new Border
+                {
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Background = new SolidColorBrush(ColorHelper.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+                    BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
+                    BorderThickness = new Thickness(1)
+                };
+
+                var grid = new Grid();
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+
+                var dot = new Ellipse
+                {
+                    Width = 7,
+                    Height = 7,
+                    Fill = new SolidColorBrush(accent),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 10, 0)
+                };
+                Grid.SetColumn(dot, 0);
+
+                var center = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+                center.Children.Add(new TextBlock
+                {
+                    Text = item.Titulo,
+                    FontSize = 13,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                });
+                Grid.SetColumn(center, 1);
+
+                // Badge hora "desde las HH:mm"
+                var right = new StackPanel
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(10, 0, 0, 0)
+                };
+                if (!string.IsNullOrWhiteSpace(item.Desde))
+                    right.Children.Add(BuildBadge(
+                        $"Desde {item.Desde}",
+                        ColorHelper.FromArgb(0xFF, 0xA5, 0x4A, 0x4A),
+                        ColorHelper.FromArgb(0x18, 0xA5, 0x4A, 0x4A)));
+                Grid.SetColumn(right, 2);
+
+                grid.Children.Add(dot);
+                grid.Children.Add(center);
+                grid.Children.Add(right);
+                rowBorder.Child = grid;
+                NotificationsPanel.Children.Add(rowBorder);
+            }
+
+            SetNotifHeader(NotifType.Rezagadas, items.Count);
+        }
+
+        // ─── ÚLTIMAS ACCIONES ─────────────────────────────────────────────────────────
+
+        // Parsea: "Últimas N acciones del equipo:\n1. actor acción: título\n2. ..."
+        private static (string header, List<UltimaAccionItem> items) ParseUltimasAcciones(string message)
+        {
+            var lines = message.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                                .Select(l => l.Trim()).ToArray();
+            var header = lines.Length > 0 ? lines[0].TrimEnd(':') : "";
+            var items = new List<UltimaAccionItem>();
+
+            for (var i = 1; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                var dotIdx = line.IndexOf('.');
+                if (dotIdx < 0) continue;
+                if (!int.TryParse(line[..dotIdx].Trim(), out _)) continue;
+
+                var content = line[(dotIdx + 1)..].Trim();
+
+                // Formato: "actor acción: título"
+                var colonIdx = content.IndexOf(':');
+                string actor, accion, titulo;
+
+                if (colonIdx >= 0)
+                {
+                    var beforeColon = content[..colonIdx].Trim();
+                    titulo = TrimDot(content[(colonIdx + 1)..].Trim());
+
+                    // "actor acción" → separar último token como acción
+                    var actorParts = beforeColon.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (actorParts.Length >= 2)
+                    {
+                        actor = actorParts[0];
+                        accion = string.Join(" ", actorParts[1..]);
+                    }
+                    else
+                    {
+                        actor = beforeColon;
+                        accion = "";
+                    }
+                }
+                else
+                {
+                    actor = "";
+                    accion = "";
+                    titulo = TrimDot(content);
+                }
+
+                if (!string.IsNullOrWhiteSpace(titulo))
+                    items.Add(new UltimaAccionItem(actor, accion, titulo));
+            }
+
+            return (header, items);
+        }
+
+        private void RenderUltimasAccionesList(string header, List<UltimaAccionItem> items)
+        {
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.UltimasAcciones);
+            NotificationsPanel.Children.Add(BuildSummaryRow(header, accent, bg, border, glyph));
+
+            foreach (var item in items)
+            {
+                var rowBorder = new Border
+                {
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Background = new SolidColorBrush(ColorHelper.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+                    BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
+                    BorderThickness = new Thickness(1)
+                };
+
+                var grid = new Grid();
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+
+                var dot = new Ellipse
+                {
+                    Width = 7,
+                    Height = 7,
+                    Fill = new SolidColorBrush(accent),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 10, 0)
+                };
+                Grid.SetColumn(dot, 0);
+
+                var center = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+                center.Children.Add(new TextBlock
+                {
+                    Text = item.Titulo,
+                    FontSize = 13,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                });
+
+                // Actor + acción como subtexto
+                if (!string.IsNullOrWhiteSpace(item.Actor))
+                {
+                    var subRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+                    subRow.Children.Add(new TextBlock
+                    {
+                        Text = item.Actor,
+                        FontSize = 11,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x6A, 0x7A, 0x9A))
+                    });
+                    if (!string.IsNullOrWhiteSpace(item.Accion))
+                        subRow.Children.Add(new TextBlock
+                        {
+                            Text = item.Accion,
+                            FontSize = 11,
+                            Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x47, 0x55, 0x69))
+                        });
+                    center.Children.Add(subRow);
+                }
+                Grid.SetColumn(center, 1);
+
+                Grid.SetColumn(new StackPanel(), 2); // placeholder columna derecha
+                grid.Children.Add(dot);
+                grid.Children.Add(center);
+                rowBorder.Child = grid;
+                NotificationsPanel.Children.Add(rowBorder);
+            }
+
+            SetNotifHeader(NotifType.UltimasAcciones, items.Count);
+        }
+
+        // Fila individual de revisión: [dot] [título + hora] → [badge tipo]
+        private static Border BuildRevisionRow(RevisionItem item)
+        {
+            var (accent, _, _, _) = GetTypeStyle(NotifType.Revisiones);
+
+            var border = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12, 10, 12, 10),
+                Background = new SolidColorBrush(ColorHelper.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+                BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
+                BorderThickness = new Thickness(1)
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+
+            var dot = new Ellipse
+            {
+                Width = 7,
+                Height = 7,
+                Fill = new SolidColorBrush(accent),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+            Grid.SetColumn(dot, 0);
+
             var center = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
             center.Children.Add(new TextBlock
             {
                 Text = item.Titulo,
                 FontSize = 13,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(
-                    ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 1,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            if (!string.IsNullOrWhiteSpace(item.Hora) &&
+                !item.Hora.Equals("Sin hora", StringComparison.OrdinalIgnoreCase))
+            {
+                var horaRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+                horaRow.Children.Add(new FontIcon
+                {
+                    Glyph = "\uE787",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x47, 0x55, 0x69)),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                horaRow.Children.Add(new TextBlock
+                {
+                    Text = item.Hora,
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x4B, 0x55, 0x63)),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                center.Children.Add(horaRow);
+            }
+            Grid.SetColumn(center, 1);
+
+            var badge = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 0, 0)
+            };
+            badge.Children.Add(BuildBadge(
+                "Revisión",
+                accent,
+                ColorHelper.FromArgb(0x18, accent.R, accent.G, accent.B)));
+            Grid.SetColumn(badge, 2);
+
+            grid.Children.Add(dot);
+            grid.Children.Add(center);
+            grid.Children.Add(badge);
+            border.Child = grid;
+            return border;
+        }
+
+        /// Parsea: "nombre, hoy tienes 10 revisiones: 0 terminadas, 0 confirmadas y 10 pendientes."
+        /// Salida: RevisionesResumen o null si no coincide.
+        private static RevisionesResumen? ParseRevisionesResumen(string message)
+        {
+            try
+            {
+                // "nombre, hoy tienes 10 revisiones: 0 terminadas, 0 confirmadas y 10 pendientes."
+                var colonIdx = message.IndexOf(':');
+                if (colonIdx < 0) return null;
+
+                var before = message[..colonIdx].Trim(); // "nombre, hoy tienes 10 revisiones"
+                var after = message[(colonIdx + 1)..].Trim(); // "0 terminadas, 0 confirmadas y 10 pendientes."
+
+                // Extraer nombre y fecha del segmento antes del ':'
+                var commaIdx = before.IndexOf(',');
+                if (commaIdx < 0) return null;
+
+                var nombre = before[..commaIdx].Trim();
+                var resto = before[(commaIdx + 1)..].Trim(); // "hoy tienes 10 revisiones"
+
+                // Extraer total — número antes de "revisiones"
+                var total = ExtractNumber(resto, "revisiones");
+                if (total < 0) return null;
+
+                // Extraer fecha: "hoy" | "ayer" | "el YYYY-MM-DD"
+                var fecha = resto.ToLowerInvariant().Contains("hoy") ? "hoy"
+                          : resto.ToLowerInvariant().Contains("ayer") ? "ayer"
+                          : "este periodo";
+
+                // Extraer conteos del segmento después del ':'
+                var terminadas = ExtractNumber(after, "terminadas");
+                var confirmadas = ExtractNumber(after, "confirmadas");
+                var pendientes = ExtractNumber(after, "pendientes");
+
+                if (terminadas < 0 || confirmadas < 0 || pendientes < 0)
+                    return null;
+
+                return new RevisionesResumen(nombre, fecha, total, terminadas, confirmadas, pendientes);
+            }
+            catch { return null; }
+        }
+
+        /// Extrae el número entero que precede a la palabra clave en el string.
+        /// Ejemplo: "10 revisiones" con keyword "revisiones" → 10
+        private static int ExtractNumber(string text, string keyword)
+        {
+            var idx = text.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return -1;
+
+            var before = text[..idx].TrimEnd();
+            var parts = before.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            return parts.Length > 0 && int.TryParse(parts[^1], out var n) ? n : -1;
+        }
+
+        // ─── SHARED BUILDERS ──────────────────────────────────────────────────────────
+
+        // Fila de resumen: ícono + texto de encabezado con la paleta del tipo.
+        private static Border BuildSummaryRow(string text, Color accent, Color bg, Color border, string glyph)
+        {
+            // Texto ligeramente más claro que el acento para legibilidad
+            var textColor = ColorHelper.FromArgb(0xFF,
+                (byte)Math.Min(255, accent.R + 40),
+                (byte)Math.Min(255, accent.G + 40),
+                (byte)Math.Min(255, accent.B + 40));
+
+            var borderEl = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12, 10, 12, 10),
+                Background = new SolidColorBrush(bg),
+                BorderBrush = new SolidColorBrush(border),
+                BorderThickness = new Thickness(1)
+            };
+
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            row.Children.Add(new FontIcon
+            {
+                Glyph = glyph,
+                FontSize = 13,
+                Foreground = new SolidColorBrush(accent),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            row.Children.Add(new TextBlock
+            {
+                Text = text,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(textColor),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            borderEl.Child = row;
+            return borderEl;
+        }
+
+        // Fila individual de actividad (sin cambios en lógica, paleta actualizada).
+        private static Border BuildActivityRow(ActivityItem item)
+        {
+            var (statusColor, statusBg) = GetStatusColors(item.Estado);
+            var (dotColor, _) = GetStatusColors(item.Estado);
+
+            var border = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12, 10, 12, 10),
+                Background = new SolidColorBrush(ColorHelper.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+                BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
+                BorderThickness = new Thickness(1)
+            };
+
+            var outerRow = new Grid();
+            outerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            outerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            outerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+
+            var dot = new Ellipse
+            {
+                Width = 7,
+                Height = 7,
+                Fill = new SolidColorBrush(dotColor),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+            Grid.SetColumn(dot, 0);
+
+            var center = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+            center.Children.Add(new TextBlock
+            {
+                Text = item.Titulo,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
                 TextWrapping = TextWrapping.Wrap,
                 MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -267,23 +1232,20 @@ namespace Anfeta.UI.Views
                 {
                     Glyph = "\uE787",
                     FontSize = 10,
-                    Foreground = new SolidColorBrush(
-                        ColorHelper.FromArgb(0xFF, 0x47, 0x55, 0x69)),
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x47, 0x55, 0x69)),
                     VerticalAlignment = VerticalAlignment.Center
                 });
                 horarioRow.Children.Add(new TextBlock
                 {
                     Text = item.Horario,
                     FontSize = 11,
-                    Foreground = new SolidColorBrush(
-                        ColorHelper.FromArgb(0xFF, 0x4B, 0x55, 0x63)),
+                    Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x4B, 0x55, 0x63)),
                     VerticalAlignment = VerticalAlignment.Center
                 });
                 center.Children.Add(horarioRow);
             }
             Grid.SetColumn(center, 1);
 
-            // Derecha: badges estado + prioridad
             var badges = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -291,7 +1253,6 @@ namespace Anfeta.UI.Views
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(10, 0, 0, 0)
             };
-
             if (!string.IsNullOrWhiteSpace(item.Estado))
                 badges.Children.Add(BuildBadge(item.Estado, statusColor, statusBg));
 
@@ -307,7 +1268,6 @@ namespace Anfeta.UI.Views
             outerRow.Children.Add(dot);
             outerRow.Children.Add(center);
             outerRow.Children.Add(badges);
-
             border.Child = outerRow;
             return border;
         }
@@ -327,81 +1287,208 @@ namespace Anfeta.UI.Views
                 }
             };
 
+        // Paleta oscura de estados — colores apagados, menos llamativos.
         private static (Color text, Color bg) GetStatusColors(string estado)
         {
             var s = estado.ToUpperInvariant();
             if (s.Contains("HECHO") || s.Contains("COMPLETADO"))
-                return (ColorHelper.FromArgb(0xFF, 0x34, 0xD3, 0x99),
-                        ColorHelper.FromArgb(0x1A, 0x34, 0xD3, 0x99));
+                return (ColorHelper.FromArgb(0xFF, 0x3A, 0xB0, 0x85),
+                        ColorHelper.FromArgb(0x18, 0x3A, 0xB0, 0x85));
             if (s.Contains("POR HACER"))
-                return (ColorHelper.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
-                        ColorHelper.FromArgb(0x1A, 0xFB, 0xBF, 0x24));
-            if (s.Contains("ARRANCAR") || s.Contains("P. HACER"))
-                return (ColorHelper.FromArgb(0xFF, 0xFF, 0x8A, 0x4A),
-                        ColorHelper.FromArgb(0x1A, 0xFF, 0x6B, 0x35));
+                return (ColorHelper.FromArgb(0xFF, 0x9A, 0x80, 0x40),
+                        ColorHelper.FromArgb(0x18, 0x9A, 0x80, 0x40));
+            if (s.Contains("ARRANCAR") || s.Contains("P. HACER") || s.Contains("P.HACER"))
+                return (ColorHelper.FromArgb(0xFF, 0x9A, 0x68, 0x40),
+                        ColorHelper.FromArgb(0x18, 0x9A, 0x68, 0x40));
             if (s.Contains("EN CURSO") || s.Contains("PROGRESO"))
-                return (ColorHelper.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
-                        ColorHelper.FromArgb(0x1A, 0x60, 0xA5, 0xFA));
-            return (ColorHelper.FromArgb(0xFF, 0x94, 0xA3, 0xB8),
-                    ColorHelper.FromArgb(0x14, 0x94, 0xA3, 0xB8));
+                return (ColorHelper.FromArgb(0xFF, 0x4A, 0x7F, 0xA5),
+                        ColorHelper.FromArgb(0x18, 0x4A, 0x7F, 0xA5));
+            return (ColorHelper.FromArgb(0xFF, 0x64, 0x7A, 0x8A),
+                    ColorHelper.FromArgb(0x14, 0x64, 0x7A, 0x8A));
         }
 
+        // Paleta oscura de prioridades.
         private static (Color text, Color bg) GetPriorityColors(string prioridad) =>
             prioridad.ToUpperInvariant() switch
             {
-                "ALTA" => (ColorHelper.FromArgb(0xFF, 0xF8, 0x71, 0x71),
-                            ColorHelper.FromArgb(0x1A, 0xEF, 0x44, 0x44)),
-                "MEDIA" => (ColorHelper.FromArgb(0xFF, 0xFB, 0xBF, 0x24),
-                            ColorHelper.FromArgb(0x1A, 0xFB, 0xBF, 0x24)),
-                "BAJA" => (ColorHelper.FromArgb(0xFF, 0x60, 0xA5, 0xFA),
-                            ColorHelper.FromArgb(0x1A, 0x60, 0xA5, 0xFA)),
-                _ => (ColorHelper.FromArgb(0xFF, 0x94, 0xA3, 0xB8),
-                            ColorHelper.FromArgb(0x12, 0x94, 0xA3, 0xB8))
+                "ALTA" => (ColorHelper.FromArgb(0xFF, 0xA5, 0x4A, 0x4A),
+                            ColorHelper.FromArgb(0x18, 0xA5, 0x4A, 0x4A)),
+                "MEDIA" => (ColorHelper.FromArgb(0xFF, 0x9A, 0x80, 0x40),
+                            ColorHelper.FromArgb(0x18, 0x9A, 0x80, 0x40)),
+                "BAJA" => (ColorHelper.FromArgb(0xFF, 0x4A, 0x7F, 0xA5),
+                            ColorHelper.FromArgb(0x18, 0x4A, 0x7F, 0xA5)),
+                _ => (ColorHelper.FromArgb(0xFF, 0x64, 0x7A, 0x8A),
+                            ColorHelper.FromArgb(0x12, 0x64, 0x7A, 0x8A))
             };
 
-        /// Card de mensaje simple para estados del sistema, errores, etc.
-        private void RenderSimpleCard(string message)
+        // ─── PREGUNTA ─────────────────────────────────────────────────────────────────
+
+        // Card para preguntas del flujo de creación (¿Cuál es el título?).
+        private void RenderPreguntaCard(string message)
         {
-            NotifCountBadge.Visibility = Visibility.Collapsed;
-            NotifHeaderText.Text = "NOTIFICACIONES";
+            SetNotifHeader(NotifType.Pregunta);
+            var (accent, bg, border, glyph) = GetTypeStyle(NotifType.Pregunta);
+            var textColor = ColorHelper.FromArgb(0xFF,
+                (byte)Math.Min(255, accent.R + 60),
+                (byte)Math.Min(255, accent.G + 60),
+                (byte)Math.Min(255, accent.B + 60));
 
-            var isError = message.Contains("Error", StringComparison.OrdinalIgnoreCase) ||
-                          message.Contains("no pude", StringComparison.OrdinalIgnoreCase);
-
-            Color dotColor, bgColor, borderColor, textColor;
-            if (isError)
-            {
-                dotColor = ColorHelper.FromArgb(0xFF, 0xEF, 0x44, 0x44);
-                bgColor = ColorHelper.FromArgb(0x14, 0xEF, 0x44, 0x44);
-                borderColor = ColorHelper.FromArgb(0x25, 0xEF, 0x44, 0x44);
-                textColor = ColorHelper.FromArgb(0xFF, 0xFC, 0xA5, 0xA5);
-            }
-            else
-            {
-                dotColor = ColorHelper.FromArgb(0xFF, 0x34, 0xD3, 0x99);
-                bgColor = ColorHelper.FromArgb(0x12, 0x34, 0xD3, 0x99);
-                borderColor = ColorHelper.FromArgb(0x20, 0x34, 0xD3, 0x99);
-                textColor = ColorHelper.FromArgb(0xFF, 0xA7, 0xF3, 0xD0);
-            }
-
-            NotifDot.Fill = new SolidColorBrush(dotColor);
-
-            var border = new Border
+            var borderEl = new Border
             {
                 CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(14, 12, 14, 12),
-                Background = new SolidColorBrush(bgColor),
-                BorderBrush = new SolidColorBrush(borderColor),
+                Background = new SolidColorBrush(bg),
+                BorderBrush = new SolidColorBrush(border),
                 BorderThickness = new Thickness(1)
             };
 
             var sp = new StackPanel { Spacing = 8 };
+
             var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             headerRow.Children.Add(new FontIcon
             {
-                Glyph = isError ? "\uE7BA" : "\uE946",
+                Glyph = glyph,
                 FontSize = 12,
-                Foreground = new SolidColorBrush(dotColor),
+                Foreground = new SolidColorBrush(accent),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            headerRow.Children.Add(new TextBlock
+            {
+                Text = "Esperando respuesta",
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(accent),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            sp.Children.Add(headerRow);
+
+            sp.Children.Add(new TextBlock
+            {
+                Text = message,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF1, 0xF5, 0xF9)),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+
+            borderEl.Child = sp;
+            NotificationsPanel.Children.Add(borderEl);
+        }
+
+        // ─── SIMPLE CARD ──────────────────────────────────────────────────────────────
+
+        /// Card de resumen con tres contadores: terminadas, confirmadas, pendientes.
+        private void RenderRevisionesResumen(RevisionesResumen resumen)
+        {
+            SetNotifHeader(NotifType.ReporteResumen, resumen.Total);
+
+            var (accent, bg, border, _) = GetTypeStyle(NotifType.ReporteResumen);
+            var labelColor = ColorHelper.FromArgb(0xFF, 0x64, 0x5A, 0x8A);
+
+            var outerBorder = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(16, 14, 16, 14),
+                Background = new SolidColorBrush(bg),
+                BorderBrush = new SolidColorBrush(border),
+                BorderThickness = new Thickness(1)
+            };
+
+            var root = new StackPanel { Spacing = 14 };
+
+            // ── Header: nombre + fecha ─────────────────────────────────────
+            var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            headerRow.Children.Add(new FontIcon
+            {
+                Glyph = "\uE9D9",
+                FontSize = 13,
+                Foreground = new SolidColorBrush(accent),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            var headerText = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            headerText.Children.Add(new TextBlock
+            {
+                Text = resumen.Nombre,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xC4, 0xB8, 0xE8))
+            });
+            headerText.Children.Add(new TextBlock
+            {
+                Text = $"Revisiones de {resumen.Fecha} · {resumen.Total} en total",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x64, 0x5A, 0x8A))
+            });
+            headerRow.Children.Add(headerText);
+            root.Children.Add(headerRow);
+
+            // ── Separador ─────────────────────────────────────────────────
+            root.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(ColorHelper.FromArgb(0x18, 0x7A, 0x6F, 0xA5)),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            });
+
+            // ── Tres contadores ────────────────────────────────────────────
+            // ── Tres contadores ────────────────────────────────────────────
+            var countersGrid = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+            countersGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            countersGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            countersGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var colTerminadas = BuildCounterBlock(resumen.Terminadas.ToString(), "Terminadas",
+                ColorHelper.FromArgb(0xFF, 0x3A, 0xB0, 0x85),
+                ColorHelper.FromArgb(0x14, 0x3A, 0xB0, 0x85));
+            var colConfirmadas = BuildCounterBlock(resumen.Confirmadas.ToString(), "Confirmadas",
+                ColorHelper.FromArgb(0xFF, 0x4A, 0x7F, 0xA5),
+                ColorHelper.FromArgb(0x14, 0x4A, 0x7F, 0xA5));
+            var colPendientes = BuildCounterBlock(resumen.Pendientes.ToString(), "Pendientes",
+                ColorHelper.FromArgb(0xFF, 0xA5, 0x8B, 0x4A),
+                ColorHelper.FromArgb(0x14, 0xA5, 0x8B, 0x4A));
+
+            Grid.SetColumn(colTerminadas, 0);
+            Grid.SetColumn(colConfirmadas, 1);
+            Grid.SetColumn(colPendientes, 2);
+
+            countersGrid.Children.Add(colTerminadas);
+            countersGrid.Children.Add(colConfirmadas);
+            countersGrid.Children.Add(colPendientes);
+
+            root.Children.Add(countersGrid);
+            outerBorder.Child = root;
+            NotificationsPanel.Children.Add(outerBorder);
+        }
+
+        // Card de texto plano: errores, estados vacíos, sistema.
+        private void RenderSimpleCard(string message, NotifType type = NotifType.Sistema)
+        {
+            SetNotifHeader(type);
+            var (accent, bg, border, glyph) = GetTypeStyle(type);
+            var textColor = ColorHelper.FromArgb(0xFF,
+                (byte)Math.Min(255, accent.R + 60),
+                (byte)Math.Min(255, accent.G + 60),
+                (byte)Math.Min(255, accent.B + 60));
+
+            var borderEl = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14, 12, 14, 12),
+                Background = new SolidColorBrush(bg),
+                BorderBrush = new SolidColorBrush(border),
+                BorderThickness = new Thickness(1)
+            };
+
+            var sp = new StackPanel { Spacing = 8 };
+
+            var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            headerRow.Children.Add(new FontIcon
+            {
+                Glyph = glyph,
+                FontSize = 12,
+                Foreground = new SolidColorBrush(accent),
                 VerticalAlignment = VerticalAlignment.Center
             });
             headerRow.Children.Add(new TextBlock
@@ -409,10 +1496,11 @@ namespace Anfeta.UI.Views
                 Text = "Sistema",
                 FontSize = 11,
                 FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                Foreground = new SolidColorBrush(dotColor),
+                Foreground = new SolidColorBrush(accent),
                 VerticalAlignment = VerticalAlignment.Center
             });
             sp.Children.Add(headerRow);
+
             sp.Children.Add(new TextBlock
             {
                 Text = message,
@@ -422,9 +1510,68 @@ namespace Anfeta.UI.Views
                 LineHeight = 19
             });
 
-            border.Child = sp;
-            NotificationsPanel.Children.Add(border);
+            borderEl.Child = sp;
+            NotificationsPanel.Children.Add(borderEl);
         }
+
+        // ─── HELPERS COMPARTIDOS ──────────────────────────────────────────────────────
+
+        /// Bloque vertical: número grande + label abajo, con fondo sutil del color del estado.
+        private static StackPanel BuildCounterBlock(string number, string label, Color numColor, Color bgColor)
+        {
+            var container = new StackPanel
+            {
+                Spacing = 4,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Padding = new Thickness(8, 10, 8, 10),
+                Background = new SolidColorBrush(bgColor)
+            };
+
+            // Forzar CornerRadius requiere Border wrapper
+            var wrapper = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Margin = new Thickness(4, 0, 4, 0),
+                Background = new SolidColorBrush(bgColor)
+            };
+
+            var inner = new StackPanel
+            {
+                Spacing = 3,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Padding = new Thickness(8, 10, 8, 10)
+            };
+
+            inner.Children.Add(new TextBlock
+            {
+                Text = number,
+                FontSize = 28,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(numColor),
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+            inner.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x7A, 0x8A, 0x9A)),
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+
+            wrapper.Child = inner;
+            return new StackPanel { Children = { wrapper } };
+        }
+
+        private static string ExtractField(string[] lines, string prefix)
+        {
+            foreach (var l in lines)
+                if (l.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return l.Substring(prefix.Length).Trim();
+            return "";
+        }
+
+        private static string TrimDot(string s) => s.TrimEnd().TrimEnd('.').Trim();
 
         // ─────────────────────────────────────────────────────────
         // ESTADO VISUAL DEL MICRÓFONO

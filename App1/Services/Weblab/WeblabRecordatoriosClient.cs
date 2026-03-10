@@ -516,34 +516,36 @@ namespace Anfeta.UI.Services.Weblab
             return list;
         }
 
-        /// <summary>
-        /// Construye texto legible para TTS a partir de una lista de recordatorios.
+        /// Construye bloques \n\n estructurados para UI (parseables) y TTS (pausas naturales).
         /// Entrada: encabezado, lista (máximo 10).
-        /// Salida: string numerado para lectura en voz.
-        /// </summary>
+        /// Salida: bloques separados por \n\n.
         private static string BuildRecordatoriosText(string header, List<Recordatorio> recordatorios)
         {
             var max = Math.Min(recordatorios.Count, 10);
-            var parts = new List<string> { header };
+            var blocks = new List<string> { header };
 
             for (var i = 0; i < max; i++)
             {
                 var r = recordatorios[i];
                 var localTime = r.FechaHora.ToLocalTime();
                 var hora = localTime.ToString("HH:mm");
-                var fecha = localTime.Date == DateTime.Today
-                    ? "hoy"
-                    : localTime.Date == DateTime.Today.AddDays(1)
-                        ? "mañana"
-                        : localTime.ToString("dd/MM/yyyy");
+                var fecha = localTime.Date == DateTime.Today ? "hoy"
+                              : localTime.Date == DateTime.Today.AddDays(1) ? "mañana"
+                              : localTime.ToString("dd/MM/yyyy");
 
                 var estado = r.Enviado ? "completado" : "pendiente";
-                var google = !string.IsNullOrWhiteSpace(r.GoogleEventId) ? " (en Calendar)" : "";
+                var calendar = !string.IsNullOrWhiteSpace(r.GoogleEventId) ? "Sí" : "No";
 
-                parts.Add($"{i + 1}) {r.Mensaje} — {fecha} a las {hora} ({estado}{google})");
+                blocks.Add(
+                    $"Recordatorio {i + 1}.\n" +
+                    $"{r.Mensaje}.\n" +
+                    $"Fecha: {fecha} a las {hora}.\n" +
+                    $"Estado: {estado}.\n" +
+                    $"Calendar: {calendar}."
+                );
             }
 
-            return string.Join(". ", parts);
+            return string.Join("\n\n", blocks);
         }
     }
 }
