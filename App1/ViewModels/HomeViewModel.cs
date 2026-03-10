@@ -1,4 +1,5 @@
 ﻿// ViewModels/HomeViewModel.cs
+using Anfeta.UI.Data;
 using Anfeta.UI.Models;
 using Anfeta.UI.Models.Interpretation;
 using Anfeta.UI.Models.Weblab;
@@ -12,6 +13,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Threading;
@@ -19,12 +21,12 @@ using System.Threading.Tasks;
 
 namespace Anfeta.UI.ViewModels
 {
-    /// <summary>
-    /// ViewModel principal para la vista Home.
-    /// Maneja reconocimiento de voz, interpretación de comandos y ejecución de acciones LOCAL y API.
-    /// </summary>
     public class HomeViewModel : ObservableObject, IDisposable
     {
+        // =====================================================================
+        // FIELDS — Core services
+        // =====================================================================
+
         private readonly ISpeechToTextService _speechService;
         private readonly ICommandInterpretationService _interpreter;
         private readonly ITextToSpeechService _tts;
@@ -35,23 +37,43 @@ namespace Anfeta.UI.ViewModels
         private readonly FastCommandClassifier _fastClassifier;
         private readonly InterpretationCache _interpretationCache;
         private readonly ApiKeyService _apiKeyService;
+        private readonly WeblabUsersClient _usersClient;
         private readonly WeblabActividadesClient _actividadesClient;
         private readonly ActivitiesCacheService _activitiesCache;
         private readonly WeblabRecordatoriosClient _recordatoriosClient;
         private readonly WeblabReportesClient _reportesClient;
-        private readonly SemaphoreSlim _warmupLock = new(1, 1);
 
-        // ===== NUEVO: FLUJO DE EDICIÓN DE ACTIVIDADES =====
+        // =====================================================================
+        // FIELDS — Activity flows
+        // =====================================================================
+
+        private readonly ActivityFieldExtractor _activityExtractor;
+        private readonly ActivityFieldValidator _activityValidator;
+        private readonly CorrectionCommandDetector _correctionDetector;
         private readonly ActivityEditFlow _activityEditFlow;
 
-        private CancellationTokenSource? _currentRecognitionCts;
+        private ActivityCreationFlow? _activityFlow;
+        private bool _isInActivityCreation;
 
-        // Control de sesiones para ignorar resultados tardíos
-        private int _listenSessionId = 0;
-        private volatile bool _cancelRequested = false;
+        // =====================================================================
+        // FIELDS — History
+        // =====================================================================
 
-        // Modo ejecución (Home UI vs Segundo plano)
-        private bool _backgroundMode = false;
+        private readonly CommandHistoryRepository _historyRepo;
+
+        // =====================================================================
+        // FIELDS — Recordatorios cache
+        // =====================================================================
+
+        private List<Recordatorio> _lastRecordatoriosList = new();
+        private DateTime _lastRecordatoriosCacheTime = DateTime.MinValue;
+        private Recordatorio? _editingRecordatorio;
+
+        private static readonly TimeSpan RecordatoriosCacheTtl = TimeSpan.FromMinutes(5);
+
+        // =====================================================================
+        // FIELDS — Pending action state
+        // =====================================================================
 
         private string? _pendingIntent;
         private string? _pendingScope;
@@ -62,36 +84,33 @@ namespace Anfeta.UI.ViewModels
         private string? _pendingParamsJson;
         private string _pendingRawJson = "";
 
-        // ===== FLUJO DE CREACIÓN DE ACTIVIDADES =====
-        private readonly ActivityFieldExtractor _activityExtractor;
-        private readonly ActivityFieldValidator _activityValidator;
-        private readonly CorrectionCommandDetector _correctionDetector;
-        private readonly WeblabUsersClient _usersClient;
-        private ActivityCreationFlow? _activityFlow;
-        private bool _isInActivityCreation;
+        // =====================================================================
+        // FIELDS — Session & cancellation control
+        // =====================================================================
 
-        // ===== CACHÉ DE SELECCIÓN DE RECORDATORIOS =====
-        // Se llena cuando el usuario lista sus recordatorios.
-        // Se invalida tras cualquier mutación (create/update/delete/complete) y expira a los 5 min.
-        private List<Recordatorio> _lastRecordatoriosList = new();
-        private DateTime _lastRecordatoriosCacheTime = DateTime.MinValue;
-        private static readonly TimeSpan RecordatoriosCacheTtl = TimeSpan.FromMinutes(5);
+        private CancellationTokenSource? _currentRecognitionCts;
+        private int _listenSessionId = 0;
+        private volatile bool _cancelRequested = false;
+        private bool _backgroundMode = false;
 
-        // Estado para el flujo de edición: guarda el recordatorio seleccionado
-        // mientras se espera el nuevo valor del usuario.
-        private Recordatorio? _editingRecordatorio;
+        // =====================================================================
+        // FIELDS — Locks & initialization flags
+        // =====================================================================
 
-        // Gate "modelo listo"
+        private bool _speechInitialized;
         private bool _isModelReady;
+        private readonly SemaphoreSlim _warmupLock = new(1, 1);
+        private readonly SemaphoreSlim _speechInitLock = new(1, 1);
+
+        // =====================================================================
+        // PROPERTIES — Model state
+        // =====================================================================
+
         public bool IsModelReady
         {
             get => _isModelReady;
             private set => SetProperty(ref _isModelReady, value);
         }
-
-        // Speech init LAZY
-        private bool _speechInitialized;
-        private readonly SemaphoreSlim _speechInitLock = new(1, 1);
 
         private string _statusText = "Cargando modelo...";
         public string StatusText
@@ -106,6 +125,10 @@ namespace Anfeta.UI.ViewModels
             get => _recognizedText;
             set => SetProperty(ref _recognizedText, value);
         }
+
+        // =====================================================================
+        // PROPERTIES — Listening & UI state
+        // =====================================================================
 
         private bool _isListening;
         public bool IsListening
@@ -139,8 +162,66 @@ namespace Anfeta.UI.ViewModels
             set => SetProperty(ref _currentLanguageInfo, value);
         }
 
+        // =====================================================================
+        // PROPERTIES — Command history
+        // =====================================================================
+
+        private ObservableCollection<VoiceHistoryEntry> _recentCommands = new();
+        public ObservableCollection<VoiceHistoryEntry> RecentCommands
+        {
+            get => _recentCommands;
+            private set => SetProperty(ref _recentCommands, value);
+        }
+
+        private int _todayCommandCount;
+        public int TodayCommandCount
+        {
+            get => _todayCommandCount;
+            private set => SetProperty(ref _todayCommandCount, value);
+        }
+
+        // =====================================================================
+        // PROPERTIES — TTS
+        // =====================================================================
+
+        // Velocidad actual. Se sincroniza con _tts.SetRate() en cada cambio.
+        private double _speakingRate = 1.0;
+        public double SpeakingRate
+        {
+            get => _speakingRate;
+            set
+            {
+                if (Math.Abs(_speakingRate - value) < 0.01) return;
+                _speakingRate = value;
+                _tts.SetRate(value);
+                OnPropertyChanged();
+            }
+        }
+
+        // Computed — indica qué chip está activo. Binding OneWay desde ToggleButton.IsChecked.
+
+        // Etiqueta del botón de pausa — cambia según estado del TTS.
+        public string PauseTtsLabel => _tts.IsPaused ? "Reanudar" : "Pausar";
+
+        // Glifo Segoe MDL2: E769 = Pause, E768 = Play (reanudar).
+        public string PauseTtsGlyph => _tts.IsPaused ? "\uE768" : "\uE769";
+
+        // =====================================================================
+        // COMMANDS
+        // =====================================================================
+
         public IAsyncRelayCommand InitializeSpeechCommand { get; }
         public IAsyncRelayCommand ListenOnceCommand { get; }
+
+        // Detiene la reproducción TTS inmediatamente.
+        public IRelayCommand StopTtsCommand { get; }
+
+        // Pausa o reanuda la reproducción TTS según estado actual.
+        public IRelayCommand PauseTtsCommand { get; }
+
+        // =====================================================================
+        // CONSTRUCTOR
+        // =====================================================================
 
         public HomeViewModel(
             ISpeechToTextService speechService,
@@ -161,7 +242,8 @@ namespace Anfeta.UI.ViewModels
             WeblabActividadesClient actividadesClient,
             WeblabRecordatoriosClient recordatoriosClient,
             WeblabReportesClient reportesClient,
-            ActivityEditFlow activityEditFlow)
+            ActivityEditFlow activityEditFlow,
+            CommandHistoryRepository historyRepo)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -172,41 +254,45 @@ namespace Anfeta.UI.ViewModels
             _validator = validator;
             _fastClassifier = fastClassifier;
             _interpretationCache = interpretationCache;
-
             _activityExtractor = activityExtractor;
             _activityValidator = activityValidator;
             _correctionDetector = correctionDetector;
             _usersClient = usersClient;
-            _recordatoriosClient = recordatoriosClient;
-            _reportesClient = reportesClient;
-
             _apiKeyService = apiKeyService;
             _activitiesCache = activitiesCache;
             _actividadesClient = actividadesClient;
-
+            _recordatoriosClient = recordatoriosClient;
+            _reportesClient = reportesClient;
             _activityEditFlow = activityEditFlow;
+            _historyRepo = historyRepo;
 
-            // Suscripción segura (para poder desuscribir en Dispose)
             _apiKeyService.KeysChanged += OnKeysChanged;
 
-            _activityFlow = new ActivityCreationFlow(
-                _activityExtractor,
-                _activityValidator,
-                _correctionDetector,
-                _usersClient);
+            _activityFlow = new ActivityCreationFlow(_activityExtractor, _activityValidator, _correctionDetector, _usersClient);
             _isInActivityCreation = false;
 
             InitializeSpeechCommand = new AsyncRelayCommand(InitializeSpeechAsync);
             ListenOnceCommand = new AsyncRelayCommand(ListenOnceAsync, CanListenOnce);
-
+            StopTtsCommand = new RelayCommand(() => _tts.Stop());
+            PauseTtsCommand = new RelayCommand(() =>
+            {
+                if (_tts.IsPaused) _tts.Resume(); else _tts.Pause();
+                OnPropertyChanged(nameof(PauseTtsLabel));
+                OnPropertyChanged(nameof(PauseTtsGlyph));
+            });
             ShowInfo = true;
             InfoMessage = "Cargando modelo... espera un momento.";
             StatusText = "Cargando modelo...";
             IsModelReady = false;
 
             Debug.WriteLine("[VM] HomeViewModel creado. Iniciando warmup IA en background...");
+            _ = LoadHistoryAsync();
             _ = WarmupModelAsync();
         }
+
+        // =====================================================================
+        // LIFECYCLE
+        // =====================================================================
 
         public void Dispose()
         {
@@ -216,61 +302,92 @@ namespace Anfeta.UI.ViewModels
             _currentRecognitionCts = null;
         }
 
+        // Handler del evento KeysChanged
+        private async void OnKeysChanged(object? sender, EventArgs e) => await RecheckModelAsync();
+
+        // =====================================================================
+        // GUARD HELPERS
+        // =====================================================================
+
         private bool CanListenOnce() => !IsListening && IsModelReady;
 
-        /// <summary>Handler del evento KeysChanged</summary>
-        private async void OnKeysChanged(object? sender, EventArgs e)
+        // Devuelve true si hay una acción pendiente de confirmación.
+        private bool HasPending() =>
+            !string.IsNullOrWhiteSpace(_pendingIntent) &&
+            !string.IsNullOrWhiteSpace(_pendingScope);
+
+        private static bool IsConfirmationPhrase(string text)
         {
-            await RecheckModelAsync();
+            var t = (text ?? "").Trim().ToLowerInvariant();
+            return t == "sí" || t == "si" || t == "confirmar" || t == "confirmo" || t == "ok" || t == "dale";
         }
 
-        /// <summary>Entrypoint para segundo plano (hotkey)</summary>
-        public async Task TriggerVoiceFromHotkeyAsync()
+        private static bool IsCancelPhrase(string text)
         {
-            if (!IsModelReady)
-            {
-                await SpeakSafeAsync("Aún estoy cargando el modelo.");
-                return;
-            }
-
-            _backgroundMode = true;
-            try { await ListenOnceAsync(); }
-            finally { _backgroundMode = false; }
+            var t = (text ?? "").Trim().ToLowerInvariant();
+            return t == "no" || t == "cancelar" || t == "cancela" || t == "negativo";
         }
 
-        /// <summary>Refresca el cache de actividades del usuario actual</summary>
-        private async Task RefreshActivitiesCacheAsync(CancellationToken ct)
+        private static bool IsCreateActivityCommand(string text)
         {
-            try
-            {
-                var items = await _actividadesClient.GetMyActivitiesForCacheAsync(ct);
-
-                if (items.Count > 0)
-                {
-                    _activitiesCache.SetActivities(items);
-
-                    Debug.WriteLine($"[CACHE_ACTIVIDADES] Guardadas {items.Count} actividades.");
-                    foreach (var a in items)
-                    {
-                        Debug.WriteLine($" - {a.Title} ({a.Id})");
-                    }
-                }
-                else
-                {
-                    Debug.WriteLine("[CACHE_ACTIVIDADES] No se guardó nada.");
-                    _activitiesCache.Clear();
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("[CACHE_ACTIVIDADES] Error: " + ex.Message);
-            }
+            var t = (text ?? "").Trim().ToLowerInvariant();
+            return t.Contains("crear actividad") ||
+                   t.Contains("crea actividad") ||
+                   t.Contains("nueva actividad") ||
+                   t == "crear tarea" ||
+                   t == "nueva tarea";
         }
 
-        /// <summary>
-        /// Limpiar acción pendiente y estado de edición de recordatorio.
-        /// Se llama en todo reset después de ejecutar o cancelar una acción.
-        /// </summary>
+        private static bool IsEditActivityCommand(string text)
+        {
+            var t = (text ?? "").Trim().ToLowerInvariant();
+            return t.Contains("editar actividad") ||
+                   t.Contains("edita actividad") ||
+                   t.StartsWith("editar ") ||
+                   t.StartsWith("edita ") ||
+                   t.Contains("cambiar actividad") ||
+                   t.Contains("cambia actividad") ||
+                   t.Contains("modificar actividad") ||
+                   t.Contains("modifica actividad");
+        }
+
+        // LOCAL y BROWSER: sin confirmación. API: solo create/update/delete.
+        private static bool RequiresConfirmation(string scope, string? action)
+        {
+            if (string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(scope, "BROWSER", StringComparison.OrdinalIgnoreCase)) return false;
+
+            if (string.Equals(scope, "API", StringComparison.OrdinalIgnoreCase))
+            {
+                var a = (action ?? "").Trim().ToLowerInvariant();
+                return a == "create" || a == "update" || a == "delete";
+            }
+
+            return true;
+        }
+
+        // Extrae la app solicitada en el texto hablado para validación anti-sustitución.
+        private string? ExtractRequestedAppFromSpeech(string speech)
+        {
+            if (string.IsNullOrWhiteSpace(speech)) return null;
+            var t = speech.Trim().ToLowerInvariant();
+
+            if (t.Contains("chrome")) return "chrome";
+            if (t.Contains("navegador")) return "chrome";
+            if (t.Contains("calculadora")) return "calculadora";
+            if (t.Contains("bloc de notas") || t.Contains("bloc") || t.Contains("notepad")) return "bloc";
+            if (t.Contains("explorador") || t.Contains("archivos") || t.Contains("file explorer")) return "explorador";
+
+            return null;
+        }
+
+        private string AllowedAppsMessage() => _localExecutor.GetAllowedAppsMessage();
+
+        // =====================================================================
+        // CACHE HELPERS
+        // =====================================================================
+
+        // Limpia todos los campos de acción pendiente y edición de recordatorio.
         private void ClearPending()
         {
             _pendingIntent = null;
@@ -284,10 +401,7 @@ namespace Anfeta.UI.ViewModels
             _editingRecordatorio = null;
         }
 
-        /// <summary>
-        /// Invalida el cache de recordatorios.
-        /// Llamar después de cualquier mutación (create, update, delete, complete).
-        /// </summary>
+        // Invalidar el cache de recordatorios tras cualquier mutación (create/update/delete/complete).
         private void InvalidateRecordatoriosCache()
         {
             _lastRecordatoriosList = new();
@@ -295,11 +409,8 @@ namespace Anfeta.UI.ViewModels
             Debug.WriteLine("[REC-SEL] Cache invalidado");
         }
 
-        /// <summary>
-        /// Actualiza el cache de recordatorios con una lista fresca.
-        /// Centraliza la asignación para garantizar consistencia entre lista y timestamp.
-        /// Entrada: lista de recordatorios obtenida del servidor.
-        /// </summary>
+        // Actualiza el cache de recordatorios con una lista fresca.
+        // Input: lista de recordatorios. Output: cache y timestamp actualizados.
         private void SetRecordatoriosCache(List<Recordatorio> list)
         {
             _lastRecordatoriosList = list;
@@ -307,19 +418,11 @@ namespace Anfeta.UI.ViewModels
             Debug.WriteLine($"[REC-SEL] Cache actualizado: {list.Count} recordatorios");
         }
 
-        /// <summary>Verificar si hay acción pendiente</summary>
-        private bool HasPending() =>
-            !string.IsNullOrWhiteSpace(_pendingIntent) &&
-            !string.IsNullOrWhiteSpace(_pendingScope);
+        // =====================================================================
+        // UI HELPERS
+        // =====================================================================
 
-        /// <summary>TTS con manejo de errores</summary>
-        private async Task SpeakSafeAsync(string text)
-        {
-            try { await _tts.SpeakAsync(text); }
-            catch (Exception ex) { Debug.WriteLine("[TTS] ERROR: " + ex); }
-        }
-
-        /// <summary>Actualizar UI (solo si NO está en background)</summary>
+        // Actualiza UI solo si no está en modo background.
         private void UpdateUiSafe(string infoMessage, string? statusText = null, string? recognized = null)
         {
             if (_backgroundMode) return;
@@ -332,7 +435,24 @@ namespace Anfeta.UI.ViewModels
                 RecognizedText = recognized;
         }
 
-        /// <summary>Reset después de acción (sin TTS). Siempre limpia pending.</summary>
+        // TTS con manejo de errores silencioso.
+        private async Task SpeakSafeAsync(string text)
+        {
+            try { await _tts.SpeakAsync(text); }
+            catch (Exception ex) { Debug.WriteLine("[TTS] ERROR: " + ex); }
+        }
+
+        // Actualiza UI y habla SIN limpiar la acción pendiente.
+        // Usar cuando hay pending esperando confirmación del usuario.
+        private async Task SpeakWithoutResetAsync(string uiMessage, string? statusText = null)
+        {
+            IsListening = false;
+            ListenOnceCommand.NotifyCanExecuteChanged();
+            UpdateUiSafe(uiMessage, statusText ?? StatusText);
+            await SpeakSafeAsync(uiMessage);
+        }
+
+        // Reset sin TTS. Siempre limpia pending.
         private void ResetAfterAction(string infoMessage, string? statusText = null)
         {
             ClearPending();
@@ -344,7 +464,7 @@ namespace Anfeta.UI.ViewModels
             Debug.WriteLine($"[VM] ResetAfterAction -> Status='{StatusText}' Info='{InfoMessage}'");
         }
 
-        /// <summary>Reset después de acción (con TTS). Siempre limpia pending.</summary>
+        // Reset con TTS opcional. Siempre limpia pending.
         private async Task ResetAfterActionAsync(string infoMessage, string? statusText = null, string? speak = null)
         {
             ResetAfterAction(infoMessage, statusText);
@@ -353,62 +473,12 @@ namespace Anfeta.UI.ViewModels
                 await SpeakSafeAsync(speak);
         }
 
-        /// <summary>
-        /// Actualiza UI y habla SIN limpiar la acción pendiente.
-        /// Usar cuando hay pending esperando confirmación del usuario.
-        /// </summary>
-        private async Task SpeakWithoutResetAsync(string uiMessage, string? statusText = null)
-        {
-            IsListening = false;
-            ListenOnceCommand.NotifyCanExecuteChanged();
-            UpdateUiSafe(uiMessage, statusText ?? StatusText);
-            await SpeakSafeAsync(uiMessage);
-        }
-
-        /// <summary>Verificar si es frase de confirmación</summary>
-        private static bool IsConfirmationPhrase(string text)
-        {
-            var t = (text ?? "").Trim().ToLowerInvariant();
-            return t == "sí" || t == "si" || t == "confirmar" || t == "confirmo" || t == "ok" || t == "dale";
-        }
-
-        /// <summary>Verificar si es frase de cancelación</summary>
-        private static bool IsCancelPhrase(string text)
-        {
-            var t = (text ?? "").Trim().ToLowerInvariant();
-            return t == "no" || t == "cancelar" || t == "cancela" || t == "negativo";
-        }
-
-        /// <summary>Verificar si es inicio de creación de actividad</summary>
-        private static bool IsCreateActivityCommand(string text)
-        {
-            var t = (text ?? "").Trim().ToLowerInvariant();
-            return t.Contains("crear actividad") ||
-                   t.Contains("crea actividad") ||
-                   t.Contains("nueva actividad") ||
-                   t == "crear tarea" ||
-                   t == "nueva tarea";
-        }
-
-        /// <summary>Verificar si es inicio de edición de actividad</summary>
-        private static bool IsEditActivityCommand(string text)
-        {
-            var t = (text ?? "").Trim().ToLowerInvariant();
-
-            return t.Contains("editar actividad") ||
-                   t.Contains("edita actividad") ||
-                   t.StartsWith("editar ") ||
-                   t.StartsWith("edita ") ||
-                   t.Contains("cambiar actividad") ||
-                   t.Contains("cambia actividad") ||
-                   t.Contains("modificar actividad") ||
-                   t.Contains("modifica actividad");
-        }
+        // =====================================================================
+        // PARSING HELPERS
+        // =====================================================================
 
         /// <summary>
         /// Detecta si el texto es un comando de selección sobre la lista cacheada de recordatorios.
-        /// Reconoce: "elimina el 2", "borra el primero", "completa el 3", "edita el segundo", etc.
-        /// Entrada: texto hablado.
         /// Salida: (oneBasedIndex, action = "delete" | "complete" | "update") — false si no coincide.
         /// </summary>
         private static bool TryParseRecordatorioSelection(string text, out int oneBasedIndex, out string selAction)
@@ -488,7 +558,43 @@ namespace Anfeta.UI.ViewModels
             return false;
         }
 
-        /// <summary>Warmup del modelo IA</summary>
+        /// <summary>
+        /// Detecta drill-down sobre revisiones cacheadas.
+        /// Requiere palabra de acción + bucket — sin "recordatorio".
+        /// Salida: bucket = "pendientes" | "terminadas" | "confirmadas" | "todas"
+        /// </summary>
+        private static bool TryParseRevisionesDetail(string text, out string bucket)
+        {
+            bucket = "";
+            var t = (text ?? "").Trim().ToLowerInvariant();
+
+            if (t.Contains("recordatorio")) return false;
+
+            var actionWords = new[] { "muéstrame", "muestrame", "ver", "dame", "cuáles", "cuales", "lista", "muestra", "dime" };
+            bool hasAction = false;
+            foreach (var w in actionWords)
+                if (t.Contains(w)) { hasAction = true; break; }
+
+            if (!hasAction) return false;
+
+            if (t.Contains("pendiente")) { bucket = "pendientes"; return true; }
+            if (t.Contains("terminada")) { bucket = "terminadas"; return true; }
+            if (t.Contains("confirmada")) { bucket = "confirmadas"; return true; }
+
+            if ((t.Contains("todas") || t.Contains("todo")) &&
+                (t.Contains("revision") || t.Contains("revisión")))
+            {
+                bucket = "todas";
+                return true;
+            }
+
+            return false;
+        }
+
+        // =====================================================================
+        // MODEL WARMUP
+        // =====================================================================
+
         private async Task WarmupModelAsync()
         {
             UpdateUiSafe("Revisando conexión con el modelo...", "Revisando...");
@@ -521,7 +627,12 @@ namespace Anfeta.UI.ViewModels
             finally { _warmupLock.Release(); }
         }
 
-        /// <summary>Inicialización lazy de speech recognition</summary>
+        // =====================================================================
+        // SPEECH INITIALIZATION
+        // =====================================================================
+
+        // Inicialización lazy de speech recognition con lock para evitar doble init.
+        // Salida: true si listo, false si falló.
         private async Task<bool> EnsureSpeechReadyAsync()
         {
             if (_speechInitialized)
@@ -562,7 +673,7 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        /// <summary>Inicialización de speech (botón en Home)</summary>
+        // Inicialización explícita de speech desde el botón en Home.
         private async Task InitializeSpeechAsync()
         {
             try
@@ -617,44 +728,85 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        /// <summary>
-        /// Determina si una acción requiere confirmación explícita.
-        /// LOCAL y BROWSER: sin confirmación.
-        /// API: solo create/update/delete requieren confirmación.
-        /// </summary>
-        private static bool RequiresConfirmation(string scope, string? action)
-        {
-            if (string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase)) return false;
-            if (string.Equals(scope, "BROWSER", StringComparison.OrdinalIgnoreCase)) return false;
+        // =====================================================================
+        // HISTORY
+        // =====================================================================
 
-            if (string.Equals(scope, "API", StringComparison.OrdinalIgnoreCase))
+        // Carga el historial reciente y el contador del día al iniciar el ViewModel.
+        private async Task LoadHistoryAsync()
+        {
+            var entries = await _historyRepo.GetRecentAsync(15);
+            var count = await _historyRepo.GetTodayCountAsync();
+
+            App.UIQueue?.TryEnqueue(() =>
             {
-                var a = (action ?? "").Trim().ToLowerInvariant();
-                return a == "create" || a == "update" || a == "delete";
-            }
-
-            return true;
+                RecentCommands.Clear();
+                foreach (var e in entries)
+                    RecentCommands.Add(e);
+                TodayCommandCount = count;
+            });
         }
 
-        /// <summary>Extrae app solicitada del texto hablado (anti-sustitución)</summary>
-        private string? ExtractRequestedAppFromSpeech(string speech)
+        // Registra un comando ejecutado y actualiza la colección en tiempo real.
+        // Input: texto reconocido, categoría. Output: colección y contador actualizados en UI.
+        private async Task RecordCommandAsync(string inputText, string category)
         {
-            if (string.IsNullOrWhiteSpace(speech)) return null;
-            var t = speech.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(inputText)) return;
 
-            if (t.Contains("chrome")) return "chrome";
-            if (t.Contains("navegador")) return "chrome";
-            if (t.Contains("calculadora")) return "calculadora";
-            if (t.Contains("bloc de notas") || t.Contains("bloc") || t.Contains("notepad")) return "bloc";
-            if (t.Contains("explorador") || t.Contains("archivos") || t.Contains("file explorer")) return "explorador";
+            var now = DateTime.Now;
+            await _historyRepo.InsertAsync(inputText, category, now);
 
-            return null;
+            var entry = new VoiceHistoryEntry
+            {
+                InputText = inputText,
+                Category = category,
+                Time = now.ToString("HH:mm")
+            };
+
+            App.UIQueue?.TryEnqueue(() =>
+            {
+                RecentCommands.Insert(0, entry);
+                if (RecentCommands.Count > 15)
+                    RecentCommands.RemoveAt(15);
+                TodayCommandCount++;
+            });
         }
 
-        /// <summary>Mensaje de apps permitidas</summary>
-        private string AllowedAppsMessage() => _localExecutor.GetAllowedAppsMessage();
+        // =====================================================================
+        // ACTIVIDADES CACHE
+        // =====================================================================
 
-        /// <summary>Cancelación centralizada</summary>
+        // Refresca el cache local de actividades del usuario después de cualquier mutación.
+        private async Task RefreshActivitiesCacheAsync(CancellationToken ct)
+        {
+            try
+            {
+                var items = await _actividadesClient.GetMyActivitiesForCacheAsync(ct);
+
+                if (items.Count > 0)
+                {
+                    _activitiesCache.SetActivities(items);
+                    Debug.WriteLine($"[CACHE_ACTIVIDADES] Guardadas {items.Count} actividades.");
+                    foreach (var a in items)
+                        Debug.WriteLine($" - {a.Title} ({a.Id})");
+                }
+                else
+                {
+                    Debug.WriteLine("[CACHE_ACTIVIDADES] No se guardó nada.");
+                    _activitiesCache.Clear();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[CACHE_ACTIVIDADES] Error: " + ex.Message);
+            }
+        }
+
+        // =====================================================================
+        // CANCELLATION
+        // =====================================================================
+
+        // Cancela el reconocimiento activo, resetea sesión y limpia el estado.
         private async Task CancelListeningAsync(string uiMessage, string uiStatus)
         {
             Debug.WriteLine("[STT] CancelListeningAsync");
@@ -678,10 +830,30 @@ namespace Anfeta.UI.ViewModels
             await ResetAfterActionAsync(uiMessage, uiStatus, speak: uiMessage);
         }
 
-        /// <summary>
-        /// Ejecutar acción pendiente (LOCAL o API).
-        /// Invalida el cache de recordatorios si la acción fue una mutación.
-        /// </summary>
+        // =====================================================================
+        // HOTKEY ENTRYPOINT
+        // =====================================================================
+
+        // Entrypoint para activación desde hotkey (segundo plano).
+        public async Task TriggerVoiceFromHotkeyAsync()
+        {
+            if (!IsModelReady)
+            {
+                await SpeakSafeAsync("Aún estoy cargando el modelo.");
+                return;
+            }
+
+            _backgroundMode = true;
+            try { await ListenOnceAsync(); }
+            finally { _backgroundMode = false; }
+        }
+
+        // =====================================================================
+        // EXECUTE PENDING ACTION
+        // =====================================================================
+
+        // Ejecuta la acción LOCAL o API que está esperando confirmación.
+        // Invalida cache de recordatorios si fue una mutación.
         private async Task ExecutePendingIfAnyAsync()
         {
             if (!HasPending())
@@ -710,6 +882,7 @@ namespace Anfeta.UI.ViewModels
                 }
 
                 _contextManager.AddToHistory(intent, appKey);
+
                 if (intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(appKey))
                     _contextManager.SetActiveApp(appKey);
                 else if (intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
@@ -728,7 +901,6 @@ namespace Anfeta.UI.ViewModels
                         _recordatoriosClient.GetMyRecordatoriosWithListAsync("all", CancellationToken.None));
 
                     SetRecordatoriosCache(listData);
-
                     _contextManager.AddToHistory("API:recordatorios:list", null);
                     await ResetAfterActionAsync(listResp.PlainText, listResp.Ok ? "Listo." : "Error", speak: listResp.PlainText);
                     return;
@@ -761,7 +933,10 @@ namespace Anfeta.UI.ViewModels
             await ResetAfterActionAsync("Acción pendiente no soportada.", "No soportado", speak: "Acción pendiente no soportada.");
         }
 
-        /// <summary>Escuchar comando de voz (Home y segundo plano)</summary>
+        // =====================================================================
+        // MAIN VOICE LOOP
+        // =====================================================================
+
         private async Task ListenOnceAsync()
         {
             Debug.WriteLine("[STT] ListenOnceAsync start");
@@ -818,6 +993,7 @@ namespace Anfeta.UI.ViewModels
                     if (_backgroundMode)
                         _ = SpeakSafeAsync("Te escucho.");
                 });
+
                 Debug.WriteLine("------------------------------------");
                 Debug.WriteLine("[STT] TEXTO: " + (text ?? "<null>"));
                 Debug.WriteLine("------------------------------------");
@@ -829,6 +1005,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
+                // ── Sin texto detectado ────────────────────────────────────────
                 if (string.IsNullOrWhiteSpace(text))
                 {
                     if (HasPending())
@@ -853,7 +1030,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // ===== FLUJO DE CREACIÓN DE ACTIVIDADES =====
+                // ── Flujo activo: creación de actividad ────────────────────────
                 if (_isInActivityCreation && _activityFlow != null)
                 {
                     Debug.WriteLine("[ACTIVITY_FLOW] Procesando respuesta en flujo de creación");
@@ -877,7 +1054,10 @@ namespace Anfeta.UI.ViewModels
                             var (ok, apiMsg) = await _apiExecutor.ExecuteAsync("weblab", "actividades", "create", JsonSerializer.Serialize(request), ct);
 
                             if (ok)
+                            {
                                 await RefreshActivitiesCacheAsync(ct);
+                                await RecordCommandAsync(text, "ACTIVIDAD");
+                            }
 
                             await ResetAfterActionAsync(apiMsg, ok ? "Actividad creada" : "Error", speak: apiMsg);
                             return;
@@ -894,6 +1074,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
+                // ── Inicio: creación de actividad ──────────────────────────────
                 if (IsCreateActivityCommand(text))
                 {
                     Debug.WriteLine("[ACTIVITY_FLOW] Iniciando flujo de creación");
@@ -908,22 +1089,23 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // ===== FLUJO DE EDICIÓN DE ACTIVIDADES =====
-                // Va ANTES del confirm/cancel global para que "confirmar" y "cancelar"
-                // se consuman dentro del flujo de edición cuando está activo.
+                // ── Flujo activo: edición de actividad ─────────────────────────
+                // Va ANTES del confirm/cancel global para consumirlos dentro del flujo.
                 if (_activityEditFlow.IsActive)
                 {
                     Debug.WriteLine("[ACTIVITY_EDIT_FLOW] Procesando respuesta");
                     var editResult = _activityEditFlow.ProcessResponse(text);
+
                     Debug.WriteLine("===== PATCH DEBUG =====");
-                    Debug.WriteLine($"Titulo: {editResult.Patch?.Titulo}");
-                    Debug.WriteLine($"Status: {editResult.Patch?.Status}");
-                    Debug.WriteLine($"Prioridad: {editResult.Patch?.Prioridad}");
-                    Debug.WriteLine($"DueStart: {editResult.Patch?.DueStart}");
-                    Debug.WriteLine($"DueEnd: {editResult.Patch?.DueEnd}");
+                    Debug.WriteLine($"Titulo:      {editResult.Patch?.Titulo}");
+                    Debug.WriteLine($"Status:      {editResult.Patch?.Status}");
+                    Debug.WriteLine($"Prioridad:   {editResult.Patch?.Prioridad}");
+                    Debug.WriteLine($"DueStart:    {editResult.Patch?.DueStart}");
+                    Debug.WriteLine($"DueEnd:      {editResult.Patch?.DueEnd}");
                     Debug.WriteLine($"Anotaciones: {editResult.Patch?.Anotaciones}");
                     Debug.WriteLine($"PasosYLinks: {editResult.Patch?.PasosYLinks}");
                     Debug.WriteLine("=======================");
+
                     if (editResult.Continue)
                     {
                         IsListening = false;
@@ -935,7 +1117,6 @@ namespace Anfeta.UI.ViewModels
 
                     if (editResult.Activity != null && editResult.Patch != null)
                     {
-
                         var payload = new
                         {
                             id = editResult.Activity.Id,
@@ -949,22 +1130,24 @@ namespace Anfeta.UI.ViewModels
                         };
 
                         var updateParamsJson = JsonSerializer.Serialize(payload);
+
                         Debug.WriteLine("===== UPDATE JSON FINAL =====");
                         Debug.WriteLine(updateParamsJson);
                         Debug.WriteLine("=============================");
+
                         if (updateParamsJson == "{}")
                         {
-                            await ResetAfterActionAsync(
-                                "No detecté ningún cambio para actualizar.",
-                                "Sin cambios",
-                                speak: "No detecté ningún cambio para actualizar.");
+                            await ResetAfterActionAsync("No detecté ningún cambio para actualizar.", "Sin cambios", speak: "No detecté ningún cambio para actualizar.");
                             return;
                         }
 
                         var (ok, msg) = await _apiExecutor.ExecuteAsync("weblab", "actividades", "update", updateParamsJson, ct);
 
                         if (ok)
+                        {
                             await RefreshActivitiesCacheAsync(ct);
+                            await RecordCommandAsync(text, "ACTIVIDAD");
+                        }
 
                         await ResetAfterActionAsync(msg, ok ? "Actividad actualizada" : "Error", speak: msg);
                         return;
@@ -974,6 +1157,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
+                // ── Inicio: edición de actividad ───────────────────────────────
                 if (IsEditActivityCommand(text))
                 {
                     Debug.WriteLine("[ACTIVITY_EDIT_FLOW] Iniciando flujo de edición");
@@ -990,7 +1174,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // ===== CONFIRMAR / CANCELAR GLOBAL =====
+                // ── Confirmar / Cancelar global ────────────────────────────────
                 if (IsConfirmationPhrase(text))
                 {
                     if (HasPending())
@@ -1014,7 +1198,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // ===== PENDING NO RESUELTO — RECORDATORIO AL USUARIO =====
+                // ── Pending no resuelto ────────────────────────────────────────
                 if (HasPending())
                 {
                     Debug.WriteLine("[POLICY] Hay pending no resuelto. Texto: " + text);
@@ -1022,7 +1206,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // ===== FLUJO DE EDICIÓN DE RECORDATORIO =====
+                // ── Flujo de edición de recordatorio ───────────────────────────
                 if (_editingRecordatorio != null)
                 {
                     Debug.WriteLine($"[REC-SEL] Capturando nuevo valor para edición. Recordatorio: '{_editingRecordatorio.Mensaje}'");
@@ -1059,7 +1243,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // ===== DRILL-DOWN DE REVISIONES (desde caché) =====
+                // ── Drill-down de revisiones ───────────────────────────────────
                 if (TryParseRevisionesDetail(text, out var revBucket))
                 {
                     Debug.WriteLine($"[REV-DETAIL] Drill-down detectado: bucket={revBucket}");
@@ -1077,7 +1261,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
-                // ===== SELECCIÓN DE RECORDATORIO — AUTO-FETCH SI LA LISTA ESTÁ VACÍA =====
+                // ── Auto-fetch de recordatorios si lista vacía ─────────────────
                 if (_lastRecordatoriosList.Count == 0 && TryParseRecordatorioSelection(text, out _, out _))
                 {
                     Debug.WriteLine("[REC-SEL] Lista vacía pero hay selección → auto-fetch");
@@ -1094,14 +1278,14 @@ namespace Anfeta.UI.ViewModels
                     SetRecordatoriosCache(autoList);
                 }
 
-                // ===== EXPIRAR CACHE POR TTL =====
+                // ── Expirar cache por TTL ──────────────────────────────────────
                 if (_lastRecordatoriosList.Count > 0 && DateTime.Now - _lastRecordatoriosCacheTime > RecordatoriosCacheTtl)
                 {
                     Debug.WriteLine("[REC-SEL] Cache expirado por TTL, invalidando");
                     InvalidateRecordatoriosCache();
                 }
 
-                // ===== SELECCIÓN DE RECORDATORIO POR ÍNDICE =====
+                // ── Selección de recordatorio por índice ───────────────────────
                 if (_lastRecordatoriosList.Count > 0 && TryParseRecordatorioSelection(text, out var selIndex, out var selAction))
                 {
                     Debug.WriteLine($"[REC-SEL] Selección detectada: {selAction} índice {selIndex} de {_lastRecordatoriosList.Count}");
@@ -1109,9 +1293,7 @@ namespace Anfeta.UI.ViewModels
                     var idx = selIndex - 1;
                     if (idx < 0 || idx >= _lastRecordatoriosList.Count)
                     {
-                        await SpeakWithoutResetAsync(
-                            $"No existe el número {selIndex}. Tienes {_lastRecordatoriosList.Count} recordatorios.",
-                            "Índice inválido");
+                        await SpeakWithoutResetAsync($"No existe el número {selIndex}. Tienes {_lastRecordatoriosList.Count} recordatorios.", "Índice inválido");
                         return;
                     }
 
@@ -1160,7 +1342,7 @@ namespace Anfeta.UI.ViewModels
                 var requestedFromSpeech = ExtractRequestedAppFromSpeech(text);
                 Debug.WriteLine("[STT] requestedFromSpeech=" + (requestedFromSpeech ?? "<null>"));
 
-                // ===== CLASIFICACIÓN RÁPIDA (bypass IA) =====
+                // ── Clasificación rápida (bypass IA) ──────────────────────────
                 var (fastHandled, fastResult) = _fastClassifier.TryFastClassify(text);
                 if (fastHandled && fastResult != null)
                 {
@@ -1219,11 +1401,13 @@ namespace Anfeta.UI.ViewModels
                         }
 
                         _contextManager.AddToHistory(fastResult.Intent, fastResult.AppKey);
+
                         if (fastResult.Intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase))
                             _contextManager.SetActiveApp(fastResult.AppKey!);
                         else if (fastResult.Intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
                             _contextManager.ClearActiveApp();
 
+                        await RecordCommandAsync(text, "LOCAL");
                         await ResetAfterActionAsync(fastExecMsg, fastExecMsg, speak: fastExecMsg);
                         return;
                     }
@@ -1249,6 +1433,7 @@ namespace Anfeta.UI.ViewModels
                             SetRecordatoriosCache(list);
 
                             _contextManager.AddToHistory("API:recordatorios:list", null);
+                            await RecordCommandAsync(text, "RECORDATORIO");
                             await ResetAfterActionAsync(listResponse.PlainText, listResponse.Ok ? "Listo." : "Error", speak: listResponse.PlainText);
                             return;
                         }
@@ -1268,12 +1453,13 @@ namespace Anfeta.UI.ViewModels
                         }
 
                         _contextManager.AddToHistory($"API:{fastResult.Resource}:{fastResult.Action}", null);
+                        await RecordCommandAsync(text, fastResult.Resource?.ToUpperInvariant() ?? "API");
                         await ResetAfterActionAsync(fastMsg, fastOk ? "Listo." : "Error", speak: fastMsg);
                         return;
                     }
                 }
 
-            // ===== IA =====
+            // ── IA ────────────────────────────────────────────────────────────
             HandleWithAI:
                 Debug.WriteLine("[IA] Comando complejo → InterpretRawAsync...");
 
@@ -1416,6 +1602,7 @@ namespace Anfeta.UI.ViewModels
                     return;
                 }
 
+                // ── Ejecución LOCAL vía IA ─────────────────────────────────────
                 if (string.Equals(scope, "LOCAL", StringComparison.OrdinalIgnoreCase))
                 {
                     if (!_localExecutor.TryExecute(intent, scope, appKey, out var msg))
@@ -1425,15 +1612,18 @@ namespace Anfeta.UI.ViewModels
                     }
 
                     _contextManager.AddToHistory(intent, appKey);
+
                     if (intent.Equals("OpenApp", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(appKey))
                         _contextManager.SetActiveApp(appKey);
                     else if (intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
                         _contextManager.ClearActiveApp();
 
+                    await RecordCommandAsync(text, "LOCAL");
                     await ResetAfterActionAsync(msg, msg, speak: msg);
                     return;
                 }
 
+                // ── Ejecución API vía IA ───────────────────────────────────────
                 if (string.Equals(scope, "API", StringComparison.OrdinalIgnoreCase))
                 {
                     if (string.Equals(resource, "recordatorios", StringComparison.OrdinalIgnoreCase) &&
@@ -1443,8 +1633,8 @@ namespace Anfeta.UI.ViewModels
                             _recordatoriosClient.GetMyRecordatoriosWithListAsync("all", ct));
 
                         SetRecordatoriosCache(listData);
-
                         _contextManager.AddToHistory("API:recordatorios:list", null);
+                        await RecordCommandAsync(text, "RECORDATORIO");
                         await ResetAfterActionAsync(listResp.PlainText, listResp.Ok ? "Listo." : "Error", speak: listResp.PlainText);
                         return;
                     }
@@ -1469,6 +1659,7 @@ namespace Anfeta.UI.ViewModels
                         InvalidateRecordatoriosCache();
 
                     _contextManager.AddToHistory($"API:{resource}:{action}", null);
+                    await RecordCommandAsync(text, resource?.ToUpperInvariant() ?? "API");
                     await ResetAfterActionAsync(msg, "Listo.", speak: msg);
                     return;
                 }
@@ -1498,40 +1689,6 @@ namespace Anfeta.UI.ViewModels
                 ListenOnceCommand.NotifyCanExecuteChanged();
                 Debug.WriteLine("[STT] ListenOnceAsync end (cleanup OK)");
             }
-        }
-
-        /// <summary>
-        /// Detecta si el texto es un comando de drill-down sobre revisiones cacheadas.
-        /// Requiere palabra de acción + bucket — sin "recordatorio".
-        /// Salida: bucket = "pendientes" | "terminadas" | "confirmadas" | "todas"
-        /// </summary>
-        private static bool TryParseRevisionesDetail(string text, out string bucket)
-        {
-            bucket = "";
-            var t = (text ?? "").Trim().ToLowerInvariant();
-
-            if (t.Contains("recordatorio")) return false;
-
-            var actionWords = new[] { "muéstrame", "muestrame", "ver", "dame",
-                                      "cuáles", "cuales", "lista", "muestra", "dime" };
-            bool hasAction = false;
-            foreach (var w in actionWords)
-                if (t.Contains(w)) { hasAction = true; break; }
-
-            if (!hasAction) return false;
-
-            if (t.Contains("pendiente")) { bucket = "pendientes"; return true; }
-            if (t.Contains("terminada")) { bucket = "terminadas"; return true; }
-            if (t.Contains("confirmada")) { bucket = "confirmadas"; return true; }
-
-            if ((t.Contains("todas") || t.Contains("todo")) &&
-                (t.Contains("revision") || t.Contains("revisión")))
-            {
-                bucket = "todas";
-                return true;
-            }
-
-            return false;
         }
     }
 }

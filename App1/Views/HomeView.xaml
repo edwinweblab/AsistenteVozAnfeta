@@ -38,10 +38,136 @@
 
         <Style x:Key="ActivityRow" TargetType="Border">
             <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Padding" Value="16,13,16,13" />
+            <Setter Property="Padding" Value="12,10,12,10" />
             <Setter Property="Background" Value="#0CFFFFFF" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="BorderBrush" Value="#10FFFFFF" />
+        </Style>
+
+        <!--  Template reutilizable para cada item del historial de comandos  -->
+        <DataTemplate x:Key="HistoryItemTemplate">
+            <Border Style="{StaticResource ActivityRow}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!--  Hora  -->
+                    <TextBlock
+                        Grid.Column="0"
+                        Margin="0,0,10,0"
+                        VerticalAlignment="Center"
+                        FontSize="10"
+                        Foreground="#4A3E36"
+                        Text="{Binding Time}" />
+
+                    <!--  Texto del comando  -->
+                    <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="#D4C9C0"
+                        MaxLines="1"
+                        Text="{Binding InputText}"
+                        TextTrimming="CharacterEllipsis" />
+
+                    <!--  Chip categoría  -->
+                    <Border
+                        Grid.Column="2"
+                        Margin="8,0,0,0"
+                        Padding="7,3,7,3"
+                        VerticalAlignment="Center"
+                        Background="#14FB923C"
+                        BorderBrush="#25FB923C"
+                        BorderThickness="1"
+                        CornerRadius="999">
+                        <TextBlock
+                            FontSize="9"
+                            FontWeight="Bold"
+                            Foreground="#FB923C"
+                            Text="{Binding Category}" />
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+        <!--  Chip de velocidad TTS: RadioButton sin indicador circular, estilo píldora  -->
+        <Style x:Key="SpeedChipStyle" TargetType="RadioButton">
+            <Setter Property="Padding" Value="14,5,14,5" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border
+                            x:Name="RootBorder"
+                            Background="#12FFFFFF"
+                            BorderBrush="#18FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="{TemplateBinding Padding}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootBorder.Background" Value="#CCFF6B35" />
+                                            <Setter Target="RootBorder.BorderBrush" Value="#FFFF6B35" />
+                                            <Setter Target="ContentText.Foreground" Value="#FFFFFFFF" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Unchecked">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootBorder.Background" Value="#12FFFFFF" />
+                                            <Setter Target="RootBorder.BorderBrush" Value="#18FFFFFF" />
+                                            <Setter Target="ContentText.Foreground" Value="#55FFFFFF" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Indeterminate" />
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootBorder.Opacity" Value="0.80" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootBorder.Opacity" Value="0.60" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootBorder.Opacity" Value="0.35" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <TextBlock
+                                x:Name="ContentText"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="{TemplateBinding FontSize}"
+                                FontWeight="{TemplateBinding FontWeight}"
+                                Foreground="#55FFFFFF"
+                                Text="{TemplateBinding Content}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--  Botón ícono TTS: cuadrado compacto, sin borde  -->
+        <Style x:Key="TtsIconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="#12FFFFFF" />
+            <Setter Property="BorderBrush" Value="#18FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
         </Style>
     </Page.Resources>
 
@@ -75,7 +201,7 @@
                         Text="ANFETA" />
                 </StackPanel>
 
-                <!--  Badge idioma: azul → naranja  -->
+                <!--  Badge idioma  -->
                 <Border
                     Grid.Column="1"
                     VerticalAlignment="Center"
@@ -182,7 +308,6 @@
                                 Foreground="#8C7B6E"
                                 Text="NOTIFICACIONES" />
                         </StackPanel>
-                        <!--  Badge contador: azul → naranja  -->
                         <Border
                             x:Name="NotifCountBadge"
                             Padding="8,3,8,3"
@@ -238,58 +363,108 @@
                         <ColumnDefinition x:Name="RightCol" Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <!--  SECCIÓN IZQUIERDA: Detectado  -->
-                    <Grid Grid.Column="0">
+                    <!--  ══ COLUMNA IZQUIERDA: Actividad Reciente ══  -->
+                    <Grid x:Name="CardActivity" Grid.Column="0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
+                        <!--  Header con contador del día  -->
                         <Border
                             Grid.Row="0"
                             Padding="20,14,20,14"
                             BorderBrush="#0EFFFFFF"
                             BorderThickness="0,0,0,1">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon
-                                    FontSize="11"
-                                    Foreground="#FF8A4A"
-                                    Glyph="&#xE8BD;" />
-                                <TextBlock
+                            <Grid>
+                                <StackPanel
                                     VerticalAlignment="Center"
-                                    CharacterSpacing="180"
-                                    FontSize="10"
-                                    FontWeight="Bold"
-                                    Foreground="#FF8A4A"
-                                    Text="DETECTADO" />
-                            </StackPanel>
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <Ellipse
+                                        Width="7"
+                                        Height="7"
+                                        VerticalAlignment="Center"
+                                        Fill="#FB923C" />
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        CharacterSpacing="180"
+                                        FontSize="10"
+                                        FontWeight="Bold"
+                                        Foreground="#FB923C"
+                                        Text="ACTIVIDAD RECIENTE" />
+                                </StackPanel>
+
+                                <!--  Badge: N comandos hoy  -->
+                                <Border
+                                    Padding="8,3,8,3"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Background="#0EFB923C"
+                                    BorderBrush="#20FB923C"
+                                    BorderThickness="1"
+                                    CornerRadius="999">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock
+                                            FontSize="10"
+                                            FontWeight="Bold"
+                                            Foreground="#FB923C"
+                                            Text="{Binding TodayCommandCount}" />
+                                        <TextBlock
+                                            FontSize="10"
+                                            Foreground="#8C7B6E"
+                                            Text="hoy" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
                         </Border>
 
+                        <!--  Lista de comandos recientes  -->
                         <ScrollViewer
                             Grid.Row="1"
-                            Padding="20,16,20,20"
+                            Padding="12,12,12,12"
                             HorizontalScrollBarVisibility="Disabled"
                             VerticalScrollBarVisibility="Auto">
-                            <StackPanel Spacing="6">
-                                <TextBlock
-                                    MinHeight="24"
-                                    FontSize="16"
-                                    FontWeight="SemiBold"
-                                    Foreground="#F1F5F9"
-                                    Text="{Binding RecognizedText}"
-                                    TextWrapping="Wrap" />
-                                <!--  azul → naranja suave  -->
-                                <TextBlock
-                                    FontSize="11"
-                                    Foreground="#FB923C"
-                                    Text="Esperando comando de voz..." />
+                            <StackPanel Spacing="0">
+
+                                <!--  Estado vacío: se oculta cuando hay items  -->
+                                <Border
+                                    x:Name="EmptyHistoryState"
+                                    Padding="20,32,20,32"
+                                    HorizontalAlignment="Center"
+                                    Visibility="Visible">
+                                    <StackPanel HorizontalAlignment="Center" Spacing="8">
+                                        <FontIcon
+                                            HorizontalAlignment="Center"
+                                            FontSize="28"
+                                            Foreground="#2A2420"
+                                            Glyph="&#xE721;" />
+                                        <TextBlock
+                                            HorizontalAlignment="Center"
+                                            FontSize="11"
+                                            Foreground="#4A3E36"
+                                            Text="Sin actividad aún"
+                                            TextAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!--  ItemsRepeater bindeado a RecentCommands  -->
+                                <ItemsRepeater
+                                    x:Name="RecentCommandsList"
+                                    ItemTemplate="{StaticResource HistoryItemTemplate}"
+                                    ItemsSource="{Binding RecentCommands}">
+                                    <ItemsRepeater.Layout>
+                                        <StackLayout Spacing="6" />
+                                    </ItemsRepeater.Layout>
+                                </ItemsRepeater>
+
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>
 
                     <Border Grid.Column="1" Background="#0EFFFFFF" />
 
-                    <!--  SECCIÓN CENTRAL: Micrófono  -->
+                    <!--  ══ COLUMNA CENTRAL: Micrófono ══  -->
                     <Grid Grid.Column="2">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
@@ -406,7 +581,6 @@
                                 </Grid>
                             </Viewbox>
 
-                            <!--  azul → naranja suave  -->
                             <TextBlock
                                 Margin="0,12,0,0"
                                 HorizontalAlignment="Center"
@@ -431,7 +605,6 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
-                                <!--  Entrada  -->
                                 <StackPanel
                                     Grid.Column="0"
                                     Padding="14,10,14,10"
@@ -463,7 +636,6 @@
 
                                 <Border Grid.Column="1" Background="#14FFFFFF" />
 
-                                <!--  Salida: azul → naranja  -->
                                 <StackPanel
                                     Grid.Column="2"
                                     Padding="14,10,14,10"
@@ -494,193 +666,169 @@
                                 </StackPanel>
                             </Grid>
                         </Border>
+
                     </Grid>
 
                     <Border Grid.Column="3" Background="#0EFFFFFF" />
 
-                    <!--  SECCIÓN DERECHA: Actividad reciente  -->
-                    <Grid x:Name="CardActivity" Grid.Column="4">
+                    <!--  ══ COLUMNA DERECHA: Detectado ══  -->
+                    <Grid Grid.Column="4">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <!--  Header: azul → naranja  -->
                         <Border
                             Grid.Row="0"
                             Padding="20,14,20,14"
                             BorderBrush="#0EFFFFFF"
                             BorderThickness="0,0,0,1">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Ellipse
-                                    Width="7"
-                                    Height="7"
-                                    VerticalAlignment="Center"
-                                    Fill="#FB923C" />
+                                <FontIcon
+                                    FontSize="11"
+                                    Foreground="#FF8A4A"
+                                    Glyph="&#xE8BD;" />
                                 <TextBlock
                                     VerticalAlignment="Center"
                                     CharacterSpacing="180"
                                     FontSize="10"
                                     FontWeight="Bold"
-                                    Foreground="#FB923C"
-                                    Text="ACTIVIDAD RECIENTE" />
+                                    Foreground="#FF8A4A"
+                                    Text="DETECTADO" />
                             </StackPanel>
                         </Border>
 
                         <ScrollViewer
                             Grid.Row="1"
-                            Padding="12,12,12,12"
+                            Padding="20,16,20,20"
                             HorizontalScrollBarVisibility="Disabled"
                             VerticalScrollBarVisibility="Auto">
                             <StackPanel Spacing="6">
-
-                                <Border Style="{StaticResource ActivityRow}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Ellipse
-                                            Grid.Column="0"
-                                            Width="7"
-                                            Height="7"
-                                            Margin="0,0,10,0"
-                                            VerticalAlignment="Center"
-                                            Fill="#34D399" />
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            FontSize="13"
-                                            Foreground="#D4C9C0"
-                                            Text="Abrir navegador" />
-                                        <StackPanel
-                                            Grid.Column="2"
-                                            Orientation="Horizontal"
-                                            Spacing="6">
-                                            <TextBlock
-                                                VerticalAlignment="Center"
-                                                FontSize="11"
-                                                Foreground="#4A3E36"
-                                                Text="10:15" />
-                                            <FontIcon
-                                                FontSize="12"
-                                                Foreground="#34D399"
-                                                Glyph="&#xE73E;" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-
-                                <Border Style="{StaticResource ActivityRow}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Ellipse
-                                            Grid.Column="0"
-                                            Width="7"
-                                            Height="7"
-                                            Margin="0,0,10,0"
-                                            VerticalAlignment="Center"
-                                            Fill="#34D399" />
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            FontSize="13"
-                                            Foreground="#D4C9C0"
-                                            Text="Crear actividad" />
-                                        <StackPanel
-                                            Grid.Column="2"
-                                            Orientation="Horizontal"
-                                            Spacing="6">
-                                            <TextBlock
-                                                VerticalAlignment="Center"
-                                                FontSize="11"
-                                                Foreground="#4A3E36"
-                                                Text="09:45" />
-                                            <FontIcon
-                                                FontSize="12"
-                                                Foreground="#34D399"
-                                                Glyph="&#xE73E;" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-
-                                <Border Style="{StaticResource ActivityRow}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Ellipse
-                                            Grid.Column="0"
-                                            Width="7"
-                                            Height="7"
-                                            Margin="0,0,10,0"
-                                            VerticalAlignment="Center"
-                                            Fill="#EF4444" />
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            FontSize="13"
-                                            Foreground="#D4C9C0"
-                                            Text="Eliminar archivo" />
-                                        <StackPanel
-                                            Grid.Column="2"
-                                            Orientation="Horizontal"
-                                            Spacing="6">
-                                            <TextBlock
-                                                VerticalAlignment="Center"
-                                                FontSize="11"
-                                                Foreground="#4A3E36"
-                                                Text="08:30" />
-                                            <FontIcon
-                                                FontSize="12"
-                                                Foreground="#EF4444"
-                                                Glyph="&#xEA39;" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-
-                                <Border
-                                    x:Name="CardLastAction"
-                                    Background="#0C34D399"
-                                    BorderBrush="#1834D399"
-                                    Style="{StaticResource ActivityRow}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Ellipse
-                                            Grid.Column="0"
-                                            Width="7"
-                                            Height="7"
-                                            Margin="0,0,10,0"
-                                            VerticalAlignment="Center"
-                                            Fill="#34D399" />
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            FontSize="13"
-                                            Foreground="#A7F3D0"
-                                            Text="{Binding RecognizedText}"
-                                            TextWrapping="Wrap" />
-                                        <FontIcon
-                                            Grid.Column="2"
-                                            Margin="8,0,0,0"
-                                            FontSize="12"
-                                            Foreground="#34D399"
-                                            Glyph="&#xE73E;" />
-                                    </Grid>
-                                </Border>
-
+                                <TextBlock
+                                    MinHeight="24"
+                                    FontSize="16"
+                                    FontWeight="SemiBold"
+                                    Foreground="#F1F5F9"
+                                    Text="{Binding RecognizedText}"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    FontSize="11"
+                                    Foreground="#FB923C"
+                                    Text="Esperando comando de voz..." />
                             </StackPanel>
                         </ScrollViewer>
+
+                        <!--  Controles TTS: velocidad + pausa/detener  -->
+                        <Border
+                            Grid.Row="2"
+                            Padding="16,10,16,14"
+                            BorderBrush="#0EFFFFFF"
+                            BorderThickness="0,1,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <!--  Chips de velocidad — Border + Tapped, sin VisualStateManager  -->
+                                <StackPanel
+                                    Grid.Column="0"
+                                    Orientation="Horizontal"
+                                    Spacing="5"
+                                    VerticalAlignment="Center">
+                                    <Border
+                                        x:Name="SpeedChip1"
+                                        Tag="1"
+                                        Tapped="SpeedChip_Tapped"
+                                        CornerRadius="6"
+                                        Padding="14,5,14,5"
+                                        Background="#12FFFFFF"
+                                        BorderBrush="#18FFFFFF"
+                                        BorderThickness="1">
+                                        <TextBlock
+                                            x:Name="SpeedChip1Text"
+                                            Text="x1"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="#55FFFFFF" />
+                                        <ToolTipService.ToolTip>
+                                            <ToolTip Content="Velocidad normal" />
+                                        </ToolTipService.ToolTip>
+                                    </Border>
+                                    <Border
+                                        x:Name="SpeedChip2"
+                                        Tag="1.5"
+                                        Tapped="SpeedChip_Tapped"
+                                        CornerRadius="6"
+                                        Padding="14,5,14,5"
+                                        Background="#12FFFFFF"
+                                        BorderBrush="#18FFFFFF"
+                                        BorderThickness="1">
+                                        <TextBlock
+                                            x:Name="SpeedChip2Text"
+                                            Text="x1.5"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="#55FFFFFF" />
+                                        <ToolTipService.ToolTip>
+                                            <ToolTip Content="Velocidad 1.5x" />
+                                        </ToolTipService.ToolTip>
+                                    </Border>
+                                    <Border
+                                        x:Name="SpeedChip3"
+                                        Tag="2"
+                                        Tapped="SpeedChip_Tapped"
+                                        CornerRadius="6"
+                                        Padding="14,5,14,5"
+                                        Background="#12FFFFFF"
+                                        BorderBrush="#18FFFFFF"
+                                        BorderThickness="1">
+                                        <TextBlock
+                                            x:Name="SpeedChip3Text"
+                                            Text="x2"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="#55FFFFFF" />
+                                        <ToolTipService.ToolTip>
+                                            <ToolTip Content="Velocidad doble" />
+                                        </ToolTipService.ToolTip>
+                                    </Border>
+                                </StackPanel>
+
+                                <!--  Pausar / Detener como iconos  -->
+                                <StackPanel
+                                    Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    Spacing="6"
+                                    VerticalAlignment="Center">
+                                    <Button
+                                        Style="{StaticResource TtsIconButtonStyle}"
+                                        Command="{Binding PauseTtsCommand}">
+                                        <FontIcon
+                                            FontFamily="Segoe MDL2 Assets"
+                                            FontSize="13"
+                                            Glyph="{Binding PauseTtsGlyph}" />
+                                        <ToolTipService.ToolTip>
+                                            <ToolTip Content="{Binding PauseTtsLabel}" />
+                                        </ToolTipService.ToolTip>
+                                    </Button>
+                                    <Button
+                                        Style="{StaticResource TtsIconButtonStyle}"
+                                        Command="{Binding StopTtsCommand}">
+                                        <FontIcon
+                                            FontFamily="Segoe MDL2 Assets"
+                                            FontSize="13"
+                                            Glyph="&#xE8D8;" />
+                                        <ToolTipService.ToolTip>
+                                            <ToolTip Content="Detener voz" />
+                                        </ToolTipService.ToolTip>
+                                    </Button>
+                                </StackPanel>
+
+                            </Grid>
+                        </Border>
+
                     </Grid>
 
                 </Grid>

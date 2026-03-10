@@ -276,30 +276,24 @@ namespace Anfeta.UI.Views
             if (first.Contains("RECORDATORIO"))
                 return NotifType.Recordatorios;
 
-            // "Últimas N acciones del equipo:"
             if (first.StartsWith("LTIMAS") || first.StartsWith("ÚLTIMAS") || first.StartsWith("ULTIMAS"))
                 return NotifType.UltimasAcciones;
 
-            // "nombre: FTF pendiente. Actividades en orden..."
             if (upper.Contains("FTF"))
                 return NotifType.Comprobatoria;
 
-            // "nombre, tienes N tareas rezagadas: ..."
             if (upper.Contains("REZAGADAS") || upper.Contains("REZAGADA"))
                 return NotifType.Rezagadas;
 
             if (first.Contains("REVISIONES") || first.Contains("REVISION"))
             {
-                // ReporteResumen: una línea con los tres conteos
                 if (upper.Contains("TERMINADAS") && upper.Contains("CONFIRMADAS") && upper.Contains("PENDIENTES")
                     && !message.Contains('\n'))
                     return NotifType.ReporteResumen;
 
-                // Lista estructurada — bloques separados por \n\n (BuildRevisionesPlainText)
                 if (message.Contains("\n\n"))
                     return NotifType.Revisiones;
 
-                // DrillDown — lista numerada con \n simples
                 if (message.Contains('\n'))
                     return NotifType.DrillDownRevisiones;
 
@@ -317,7 +311,6 @@ namespace Anfeta.UI.Views
 
         // ─── ACTIVIDADES ──────────────────────────────────────────────────────────────
 
-        // Parsea bloques \n\n del formato de BuildActivitiesDetailedPlainText.
         private static List<ActivityItem> ParseActivityList(string message)
         {
             var result = new List<ActivityItem>();
@@ -370,7 +363,6 @@ namespace Anfeta.UI.Views
 
         // ─── RECORDATORIOS ────────────────────────────────────────────────────────────
 
-        // Parsea bloques \n\n del nuevo formato de BuildRecordatoriosText.
         private static List<RecordatorioItem> ParseRecordatorioList(string message)
         {
             var result = new List<RecordatorioItem>();
@@ -410,7 +402,6 @@ namespace Anfeta.UI.Views
             SetNotifHeader(NotifType.Recordatorios, items.Count);
         }
 
-        // Fila individual de recordatorio: [dot] [mensaje + fecha] → [badge estado]
         private static Border BuildRecordatorioRow(RecordatorioItem item)
         {
             var isCompleted = item.Estado.Equals("completado", StringComparison.OrdinalIgnoreCase);
@@ -472,7 +463,6 @@ namespace Anfeta.UI.Views
                     Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x4B, 0x55, 0x63)),
                     VerticalAlignment = VerticalAlignment.Center
                 });
-                // Indicador de Google Calendar si está sincronizado
                 if (item.TieneCalendar)
                     fechaRow.Children.Add(new FontIcon
                     {
@@ -513,7 +503,6 @@ namespace Anfeta.UI.Views
 
         // ─── REVISIONES ───────────────────────────────────────────────────────────────
 
-        // Parsea bloques \n\n del nuevo formato de BuildRevisionesPlainText.
         private static List<RevisionItem> ParseRevisionesList(string message)
         {
             var result = new List<RevisionItem>();
@@ -552,7 +541,6 @@ namespace Anfeta.UI.Views
 
         // ─── DRILL-DOWN REVISIONES ────────────────────────────────────────────────────
 
-        // Parsea: "nombre, tienes N revisiones pendientes:\n1. Título\n2. ..."
         private static (string header, List<DrillDownRevisionItem> items) ParseDrillDownList(string message)
         {
             var lines = message.Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -596,7 +584,6 @@ namespace Anfeta.UI.Views
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                // Índice como badge
                 var idxBadge = new Border
                 {
                     CornerRadius = new CornerRadius(999),
@@ -638,7 +625,6 @@ namespace Anfeta.UI.Views
 
         // ─── COMPROBATORIA ────────────────────────────────────────────────────────────
 
-        // Parsea: "nombre: FTF pendiente. Actividades en orden. Cuadrated en orden."
         private static (string? nombre, List<ComprobatoriaSeccion> secciones) ParseComprobatoria(string message)
         {
             var colonIdx = message.IndexOf(':');
@@ -688,7 +674,6 @@ namespace Anfeta.UI.Views
 
             var root = new StackPanel { Spacing = 12 };
 
-            // Header
             var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             headerRow.Children.Add(new FontIcon
             {
@@ -714,7 +699,6 @@ namespace Anfeta.UI.Views
                 HorizontalAlignment = HorizontalAlignment.Stretch
             });
 
-            // Secciones
             foreach (var sec in secciones)
             {
                 var secRow = new Grid();
@@ -722,7 +706,6 @@ namespace Anfeta.UI.Views
                 secRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 secRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
 
-                // Dot
                 var dot = new Ellipse
                 {
                     Width = 7,
@@ -735,7 +718,6 @@ namespace Anfeta.UI.Views
                 };
                 Grid.SetColumn(dot, 0);
 
-                // Detalle
                 var txt = new TextBlock
                 {
                     Text = sec.Detalle,
@@ -746,7 +728,6 @@ namespace Anfeta.UI.Views
                 };
                 Grid.SetColumn(txt, 1);
 
-                // Ícono ok/pendiente
                 var ico = new FontIcon
                 {
                     Glyph = sec.Ok ? "\uE73E" : "\uE783",
@@ -771,7 +752,6 @@ namespace Anfeta.UI.Views
 
         // ─── REZAGADAS ────────────────────────────────────────────────────────────────
 
-        // Parsea: "nombre, tienes N tareas rezagadas: 1. Título (desde las HH:mm). 2. ..."
         private static (string header, List<RezagadaItem> items) ParseRezagadas(string message)
         {
             var items = new List<RezagadaItem>();
@@ -781,7 +761,6 @@ namespace Anfeta.UI.Views
             var header = message[..colonIdx].Trim();
             var resto = message[(colonIdx + 1)..].Trim();
 
-            // Separar por patrón "N. " para aislar cada item
             var partes = System.Text.RegularExpressions.Regex
                 .Split(resto, @"\d+\.\s")
                 .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -791,7 +770,6 @@ namespace Anfeta.UI.Views
             {
                 var p = parte.Trim().TrimEnd('.');
 
-                // Extraer "(desde las HH:mm)"
                 var desdeMatch = System.Text.RegularExpressions.Regex
                     .Match(p, @"\(desde las (\d{2}:\d{2})\)");
 
@@ -851,7 +829,6 @@ namespace Anfeta.UI.Views
                 });
                 Grid.SetColumn(center, 1);
 
-                // Badge hora "desde las HH:mm"
                 var right = new StackPanel
                 {
                     VerticalAlignment = VerticalAlignment.Center,
@@ -876,7 +853,6 @@ namespace Anfeta.UI.Views
 
         // ─── ÚLTIMAS ACCIONES ─────────────────────────────────────────────────────────
 
-        // Parsea: "Últimas N acciones del equipo:\n1. actor acción: título\n2. ..."
         private static (string header, List<UltimaAccionItem> items) ParseUltimasAcciones(string message)
         {
             var lines = message.Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -893,7 +869,6 @@ namespace Anfeta.UI.Views
 
                 var content = line[(dotIdx + 1)..].Trim();
 
-                // Formato: "actor acción: título"
                 var colonIdx = content.IndexOf(':');
                 string actor, accion, titulo;
 
@@ -902,7 +877,6 @@ namespace Anfeta.UI.Views
                     var beforeColon = content[..colonIdx].Trim();
                     titulo = TrimDot(content[(colonIdx + 1)..].Trim());
 
-                    // "actor acción" → separar último token como acción
                     var actorParts = beforeColon.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                     if (actorParts.Length >= 2)
                     {
@@ -972,7 +946,6 @@ namespace Anfeta.UI.Views
                     TextTrimming = TextTrimming.CharacterEllipsis
                 });
 
-                // Actor + acción como subtexto
                 if (!string.IsNullOrWhiteSpace(item.Actor))
                 {
                     var subRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
@@ -994,7 +967,7 @@ namespace Anfeta.UI.Views
                 }
                 Grid.SetColumn(center, 1);
 
-                Grid.SetColumn(new StackPanel(), 2); // placeholder columna derecha
+                Grid.SetColumn(new StackPanel(), 2);
                 grid.Children.Add(dot);
                 grid.Children.Add(center);
                 rowBorder.Child = grid;
@@ -1004,7 +977,6 @@ namespace Anfeta.UI.Views
             SetNotifHeader(NotifType.UltimasAcciones, items.Count);
         }
 
-        // Fila individual de revisión: [dot] [título + hora] → [badge tipo]
         private static Border BuildRevisionRow(RevisionItem item)
         {
             var (accent, _, _, _) = GetTypeStyle(NotifType.Revisiones);
@@ -1086,36 +1058,29 @@ namespace Anfeta.UI.Views
             return border;
         }
 
-        /// Parsea: "nombre, hoy tienes 10 revisiones: 0 terminadas, 0 confirmadas y 10 pendientes."
-        /// Salida: RevisionesResumen o null si no coincide.
         private static RevisionesResumen? ParseRevisionesResumen(string message)
         {
             try
             {
-                // "nombre, hoy tienes 10 revisiones: 0 terminadas, 0 confirmadas y 10 pendientes."
                 var colonIdx = message.IndexOf(':');
                 if (colonIdx < 0) return null;
 
-                var before = message[..colonIdx].Trim(); // "nombre, hoy tienes 10 revisiones"
-                var after = message[(colonIdx + 1)..].Trim(); // "0 terminadas, 0 confirmadas y 10 pendientes."
+                var before = message[..colonIdx].Trim();
+                var after = message[(colonIdx + 1)..].Trim();
 
-                // Extraer nombre y fecha del segmento antes del ':'
                 var commaIdx = before.IndexOf(',');
                 if (commaIdx < 0) return null;
 
                 var nombre = before[..commaIdx].Trim();
-                var resto = before[(commaIdx + 1)..].Trim(); // "hoy tienes 10 revisiones"
+                var resto = before[(commaIdx + 1)..].Trim();
 
-                // Extraer total — número antes de "revisiones"
                 var total = ExtractNumber(resto, "revisiones");
                 if (total < 0) return null;
 
-                // Extraer fecha: "hoy" | "ayer" | "el YYYY-MM-DD"
                 var fecha = resto.ToLowerInvariant().Contains("hoy") ? "hoy"
                           : resto.ToLowerInvariant().Contains("ayer") ? "ayer"
                           : "este periodo";
 
-                // Extraer conteos del segmento después del ':'
                 var terminadas = ExtractNumber(after, "terminadas");
                 var confirmadas = ExtractNumber(after, "confirmadas");
                 var pendientes = ExtractNumber(after, "pendientes");
@@ -1128,8 +1093,6 @@ namespace Anfeta.UI.Views
             catch { return null; }
         }
 
-        /// Extrae el número entero que precede a la palabra clave en el string.
-        /// Ejemplo: "10 revisiones" con keyword "revisiones" → 10
         private static int ExtractNumber(string text, string keyword)
         {
             var idx = text.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
@@ -1143,10 +1106,8 @@ namespace Anfeta.UI.Views
 
         // ─── SHARED BUILDERS ──────────────────────────────────────────────────────────
 
-        // Fila de resumen: ícono + texto de encabezado con la paleta del tipo.
         private static Border BuildSummaryRow(string text, Color accent, Color bg, Color border, string glyph)
         {
-            // Texto ligeramente más claro que el acento para legibilidad
             var textColor = ColorHelper.FromArgb(0xFF,
                 (byte)Math.Min(255, accent.R + 40),
                 (byte)Math.Min(255, accent.G + 40),
@@ -1183,7 +1144,6 @@ namespace Anfeta.UI.Views
             return borderEl;
         }
 
-        // Fila individual de actividad (sin cambios en lógica, paleta actualizada).
         private static Border BuildActivityRow(ActivityItem item)
         {
             var (statusColor, statusBg) = GetStatusColors(item.Estado);
@@ -1287,7 +1247,6 @@ namespace Anfeta.UI.Views
                 }
             };
 
-        // Paleta oscura de estados — colores apagados, menos llamativos.
         private static (Color text, Color bg) GetStatusColors(string estado)
         {
             var s = estado.ToUpperInvariant();
@@ -1307,7 +1266,6 @@ namespace Anfeta.UI.Views
                     ColorHelper.FromArgb(0x14, 0x64, 0x7A, 0x8A));
         }
 
-        // Paleta oscura de prioridades.
         private static (Color text, Color bg) GetPriorityColors(string prioridad) =>
             prioridad.ToUpperInvariant() switch
             {
@@ -1323,15 +1281,10 @@ namespace Anfeta.UI.Views
 
         // ─── PREGUNTA ─────────────────────────────────────────────────────────────────
 
-        // Card para preguntas del flujo de creación (¿Cuál es el título?).
         private void RenderPreguntaCard(string message)
         {
             SetNotifHeader(NotifType.Pregunta);
             var (accent, bg, border, glyph) = GetTypeStyle(NotifType.Pregunta);
-            var textColor = ColorHelper.FromArgb(0xFF,
-                (byte)Math.Min(255, accent.R + 60),
-                (byte)Math.Min(255, accent.G + 60),
-                (byte)Math.Min(255, accent.B + 60));
 
             var borderEl = new Border
             {
@@ -1378,13 +1331,11 @@ namespace Anfeta.UI.Views
 
         // ─── SIMPLE CARD ──────────────────────────────────────────────────────────────
 
-        /// Card de resumen con tres contadores: terminadas, confirmadas, pendientes.
         private void RenderRevisionesResumen(RevisionesResumen resumen)
         {
             SetNotifHeader(NotifType.ReporteResumen, resumen.Total);
 
             var (accent, bg, border, _) = GetTypeStyle(NotifType.ReporteResumen);
-            var labelColor = ColorHelper.FromArgb(0xFF, 0x64, 0x5A, 0x8A);
 
             var outerBorder = new Border
             {
@@ -1397,7 +1348,6 @@ namespace Anfeta.UI.Views
 
             var root = new StackPanel { Spacing = 14 };
 
-            // ── Header: nombre + fecha ─────────────────────────────────────
             var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             headerRow.Children.Add(new FontIcon
             {
@@ -1424,7 +1374,6 @@ namespace Anfeta.UI.Views
             headerRow.Children.Add(headerText);
             root.Children.Add(headerRow);
 
-            // ── Separador ─────────────────────────────────────────────────
             root.Children.Add(new Border
             {
                 Height = 1,
@@ -1432,8 +1381,6 @@ namespace Anfeta.UI.Views
                 HorizontalAlignment = HorizontalAlignment.Stretch
             });
 
-            // ── Tres contadores ────────────────────────────────────────────
-            // ── Tres contadores ────────────────────────────────────────────
             var countersGrid = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
             countersGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             countersGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1462,7 +1409,6 @@ namespace Anfeta.UI.Views
             NotificationsPanel.Children.Add(outerBorder);
         }
 
-        // Card de texto plano: errores, estados vacíos, sistema.
         private void RenderSimpleCard(string message, NotifType type = NotifType.Sistema)
         {
             SetNotifHeader(type);
@@ -1516,18 +1462,8 @@ namespace Anfeta.UI.Views
 
         // ─── HELPERS COMPARTIDOS ──────────────────────────────────────────────────────
 
-        /// Bloque vertical: número grande + label abajo, con fondo sutil del color del estado.
         private static StackPanel BuildCounterBlock(string number, string label, Color numColor, Color bgColor)
         {
-            var container = new StackPanel
-            {
-                Spacing = 4,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Padding = new Thickness(8, 10, 8, 10),
-                Background = new SolidColorBrush(bgColor)
-            };
-
-            // Forzar CornerRadius requiere Border wrapper
             var wrapper = new Border
             {
                 CornerRadius = new CornerRadius(8),
@@ -1720,6 +1656,8 @@ namespace Anfeta.UI.Views
         {
             if (_viewModel != null) _ = _viewModel.InitializeSpeechCommand.ExecuteAsync(null);
             if (_viewModel != null) _viewModel.PropertyChanged += ViewModel_ModelReadyChanged;
+            SubscribeToHistory();
+            UpdateSpeedChipVisuals("1"); // x1 activo por defecto al cargar
         }
 
         private void ViewModel_ModelReadyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -1771,6 +1709,70 @@ namespace Anfeta.UI.Views
             Storyboard.SetTarget(sy, scale); Storyboard.SetTargetProperty(sy, "ScaleY"); sb.Children.Add(sy);
             var op = new DoubleAnimation { From = fromOpacity, To = toOpacity, Duration = TimeSpan.FromMilliseconds(durationMs), BeginTime = TimeSpan.FromMilliseconds(beginMs), EasingFunction = ease };
             Storyboard.SetTarget(op, ring); Storyboard.SetTargetProperty(op, "Opacity"); sb.Children.Add(op);
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // HISTORIAL DE COMANDOS
+        // ─────────────────────────────────────────────────────────
+
+        private void SubscribeToHistory()
+        {
+            var vm = DataContext as HomeViewModel;
+            if (vm == null) return;
+
+            vm.RecentCommands.CollectionChanged += (s, e) =>
+            {
+                EmptyHistoryState.Visibility = vm.RecentCommands.Count == 0
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            };
+
+            EmptyHistoryState.Visibility = vm.RecentCommands.Count == 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // CONTROLES TTS
+        // ─────────────────────────────────────────────────────────
+
+        // Aplica visual activo/inactivo a los tres chips según el tag seleccionado.
+        // Entrada: tag "1" | "2" | "3"  — sin framework de estado, 100% directo.
+        private void UpdateSpeedChipVisuals(string selectedTag)
+        {
+            var chips = new (Border border, TextBlock text)[]
+            {
+                (SpeedChip1, SpeedChip1Text),
+                (SpeedChip2, SpeedChip2Text),
+                (SpeedChip3, SpeedChip3Text),
+            };
+
+            foreach (var (border, text) in chips)
+            {
+                bool active = border.Tag?.ToString() == selectedTag;
+                border.Background = active
+                    ? new SolidColorBrush(ColorHelper.FromArgb(0xCC, 0xFF, 0x6B, 0x35))
+                    : new SolidColorBrush(ColorHelper.FromArgb(0x12, 0xFF, 0xFF, 0xFF));
+                border.BorderBrush = active
+                    ? new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xFF, 0x6B, 0x35))
+                    : new SolidColorBrush(ColorHelper.FromArgb(0x18, 0xFF, 0xFF, 0xFF));
+                text.Foreground = active
+                    ? new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF))
+                    : new SolidColorBrush(ColorHelper.FromArgb(0x55, 0xFF, 0xFF, 0xFF));
+            }
+        }
+
+        // Maneja tap en chip de velocidad.
+        // Entrada: Border con Tag "1" | "2" | "3" → velocidad 1.0 | 2.0 | 3.0
+        private void SpeedChip_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+        {
+            if (_viewModel == null) return;
+            if (sender is not Border border) return;
+            var tag = border.Tag?.ToString() ?? "1";
+            if (!double.TryParse(tag, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var speed)) return;
+            _viewModel.SpeakingRate = speed;
+            UpdateSpeedChipVisuals(tag);
         }
     }
 }

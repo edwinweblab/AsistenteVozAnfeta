@@ -86,6 +86,7 @@ namespace Anfeta.UI
                     services.AddSingleton<ActivityEditFieldExtractor>();
                     services.AddSingleton<ActivityEditFieldValidator>();
                     services.AddSingleton<ActivityEditFlow>();
+                    services.AddSingleton<CommandHistoryRepository>();
                     // =========================
                     // GROQ
                     // =========================
@@ -299,7 +300,8 @@ namespace Anfeta.UI
                         sp.GetRequiredService<WeblabActividadesClient>(),
                         sp.GetRequiredService<WeblabRecordatoriosClient>(),
                         sp.GetRequiredService<WeblabReportesClient>(),
-                        sp.GetRequiredService<ActivityEditFlow>()
+                        sp.GetRequiredService<ActivityEditFlow>(),
+                        sp.GetRequiredService<CommandHistoryRepository>()
                     ));
                 })
                 .Build();
