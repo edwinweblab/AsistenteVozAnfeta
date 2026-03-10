@@ -1,4 +1,5 @@
 ﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models.Search;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
@@ -25,17 +26,17 @@ using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.Media.SpeechSynthesis;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.UI;
 using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
-using Windows.Media.SpeechSynthesis;
-using Windows.Media.Playback;
-using Windows.Media.Core;
-using System.Text.RegularExpressions;
 
 
 
@@ -130,8 +131,15 @@ namespace Anfeta.UI.Views
         private bool _suppressSuggest; // evita loops cuando seteas Text desde SuggestionChosen 
         private const string LS_BATCH_RENAME_HISTORY = "BatchRename.FormatHistory.v1";
         private const int BATCH_RENAME_HISTORY_MAX = 8;
+        private bool _useExpandedQueryOnSubmit;
+        private bool _isIndexStateHooked;
+        //Filtros 
+        private readonly SavedSearchFiltersRepository _savedFiltersRepository = new();
+        private readonly SavedSearchFiltersService _savedFiltersService;
+        private readonly ObservableCollection<SavedSearchFilter> _savedFilters = new();
+        private QueryMatchOptions _currentMatchOptions = new();
 
-       
+
 
         #endregion
 
@@ -238,6 +246,7 @@ namespace Anfeta.UI.Views
         public SearchView()
         {
             InitializeComponent();
+            _savedFiltersService = new SavedSearchFiltersService(_savedFiltersRepository);
             DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
             Unloaded += (_, __) => DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
 
@@ -271,12 +280,24 @@ namespace Anfeta.UI.Views
 
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
+            
+            if (!_isIndexStateHooked)
+            {
+                DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
+                _isIndexStateHooked = true;
+            }
+
+            Unloaded -= SearchView_Unloaded;
+            Unloaded += SearchView_Unloaded;
+
             LoadExcludedFolders();
             RefreshExcludedFoldersUi();
             LoadSavedSearches();
             CommandsSidebarList.ItemsSource = _savedSearches;
             RefreshCommandsSidebarUi();
             LoadSidebarExpandedStates();
+            await LoadSavedFiltersAsync();
+
 
             if (!_voiceInitDone)
             {
@@ -284,11 +305,21 @@ namespace Anfeta.UI.Views
                 await _voiceEngine.ReloadAsync();
             }
 
-            // ✅ Bookmarks (no afecta tabs)
-            _ = LoadBookmarksAsync(); // fire-and-forget seguro
+            _ = LoadBookmarksAsync();
 
-            // ✅ Bootstrap índice/UI (una sola fuente de verdad)
+            // importante: al volver a cargar la vista, re-evalúa el estado actual
+            await ApplyIndexStateAsync();
+
+            // bootstrap normal
             await EnsureIndexBootstrappedAsync();
+        }
+        private void SearchView_Unloaded(object sender, RoutedEventArgs e)
+        {
+            if (_isIndexStateHooked)
+            {
+                DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
+                _isIndexStateHooked = false;
+            }
         }
         private async Task EnsureIndexBootstrappedAsync()
         {
@@ -301,14 +332,13 @@ namespace Anfeta.UI.Views
 
                 // 1) Leer ruta guardada
                 var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-                var hasValidDropboxRoot = !string.IsNullOrWhiteSpace(saved) && Directory.Exists(saved);
+                var savedRoot = (saved ?? "").Trim();
 
-                if (!hasValidDropboxRoot)
+                if (_bootstrappedOnce &&
+                    App.LocalIndex.HasData &&
+                    !string.IsNullOrWhiteSpace(savedRoot) &&
+                    string.Equals(DROPBOX_ROOT, savedRoot, StringComparison.OrdinalIgnoreCase))
                 {
-                    DROPBOX_ROOT = "";
-                    ResetSearchModuleState();
-                    StatusText.Text = $"Estado: Bookmarks ✅ ({_bookmarks.Count}) | Configura la ruta en Settings.";
-                    _bootstrappedOnce = true;
                     return;
                 }
 
@@ -423,7 +453,6 @@ namespace Anfeta.UI.Views
                 StatusText.Text = $"Estado: Error indexando → {DropboxIndexCoordinator.LastError}";
                 return;
             }
-
             // 3) Si está listo y hay índice
             if (DropboxIndexCoordinator.IsReady && App.LocalIndex.HasData)
             {
@@ -436,20 +465,19 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                // Actualiza root local del SearchView
-                DROPBOX_ROOT = root;
+                // ✅ limpia estado viejo
+                ResetSearchModuleState();
 
-                // Refresca árbol + navega a root
+                DROPBOX_ROOT = root;
+                _currentFolder = "";
+                _currentFolderPath = DROPBOX_ROOT;
+                _backStack.Clear();
+                _forwardStack.Clear();
+
                 LoadFoldersRoot();
                 BuildTreeRoot();
-                // antes: await BrowseFolderAsync(DROPBOX_ROOT, pushHistory:false);
 
-                var startFolder =
-                    (!string.IsNullOrWhiteSpace(_currentFolderPath) && Directory.Exists(_currentFolderPath))
-                        ? _currentFolderPath
-                        : DROPBOX_ROOT;
-
-                await BrowseFolderAsync(startFolder, pushHistory: false);
+                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
 
                 StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
             }
@@ -512,8 +540,10 @@ namespace Anfeta.UI.Views
             CancelPendingSearch();
 
             _currentFolder = "";
+            _currentFolderPath = "";
             _backStack.Clear();
             _forwardStack.Clear();
+            _treeRoots.Clear();
 
             Results.Clear();
             ResultsList.ItemsSource = Results;
@@ -526,7 +556,6 @@ namespace Anfeta.UI.Views
             CountText.Text = "0 resultados";
             EmptyResultsHint.Visibility = Visibility.Visible;
 
-            // opcional: limpiar detalles
             DetailsTitle.Text = "Selecciona un elemento";
             DetailsPath.Text = "—";
             DetailsMeta.Text = "—";
@@ -1053,19 +1082,30 @@ namespace Anfeta.UI.Views
             var ui = (sender.Text ?? "").Trim();
             if (string.IsNullOrWhiteSpace(ui))
             {
+                _useExpandedQueryOnSubmit = false;
                 await RunSearchAsync("");
                 return;
             }
 
-            // Genera variantes (ej: vvent, vent, ventas)
-            var variants = ExpandStutterQuery(ui);
+            string effective = ui;
 
-            // Si hay variantes, usa OR con pipe. Si no, usa el texto tal cual.
-            var effective = (variants != null && variants.Count > 0)
-                ? string.Join(" | ", variants.Select(v => $"\"{v}\""))
-                : ui;
+            // ✅ solo expandir si el texto vino de una sugerencia elegida
+            if (_useExpandedQueryOnSubmit)
+            {
+                var variants = ExpandStutterQuery(ui);
 
-            // UI muestra "Buscar: vvent" pero internamente busca con OR
+                variants = variants?
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList() ?? new List<string>();
+
+                // ⚠️ sin comillas
+                if (variants.Count > 0)
+                    effective = string.Join(" | ", variants);
+            }
+
+            _useExpandedQueryOnSubmit = false;
+
             await RunSearchAsync(ui, effective);
         }
         private async Task RunSearchAsync(string uiQuery, string? effectiveQuery = null)
@@ -4142,12 +4182,14 @@ namespace Anfeta.UI.Views
         {
             if (args.SelectedItem is string s && !string.IsNullOrWhiteSpace(s))
             {
-                // esto evita que el TextChanged vuelva a abrir sugerencias por set programático
                 _suppressSuggest = true;
                 sender.Text = s;
                 _suppressSuggest = false;
 
                 sender.IsSuggestionListOpen = false;
+
+                // ✅ solo si eligió una sugerencia, activamos expansión al enviar
+                _useExpandedQueryOnSubmit = true;
             }
         }
         private static string CanonicalizeStutterToken(string token)
@@ -4219,6 +4261,158 @@ namespace Anfeta.UI.Views
             return results.Where(x => !string.IsNullOrWhiteSpace(x)).Take(6).ToList();
         }
         #endregion
+
+        #region ========= Filtros Avanzados ======== 
+        private async Task LoadSavedFiltersAsync(CancellationToken ct = default)
+        {
+            var items = await _savedFiltersService.GetAllAsync(ct);
+
+            _savedFilters.Clear();
+            foreach (var item in items)
+                _savedFilters.Add(item);
+
+            RefreshSavedFiltersUi();
+        }
+        private async Task ApplySavedFilterAsync(SavedSearchFilter filter)
+        {
+            if (filter is null)
+                return;
+
+            var options = _savedFiltersService.ToExecutionOptions(filter);
+
+            _currentMatchOptions = options.Match ?? new QueryMatchOptions();
+
+            _sortKey = string.IsNullOrWhiteSpace(options.SortKey)
+                ? "name_asc"
+                : options.SortKey;
+
+            SearchBox.Text = options.Query ?? string.Empty;
+
+            await RunSearchAsync(options.Query ?? string.Empty);
+        }
+        private async Task ReloadSavedFiltersAsync()
+        {
+            await LoadSavedFiltersAsync();
+        }
+        private async Task ShowCreateSavedFilterDialogAsync()
+        {
+            var dialog = new SavedSearchFilterDialog
+            {
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+                return;
+
+            await _savedFiltersService.AddOrUpdateAsync(dialog.Filter);
+            await LoadSavedFiltersAsync();
+            RefreshSavedFiltersUi();
+        }
+        private async Task ShowEditSavedFilterDialogAsync(SavedSearchFilter filter)
+        {
+            if (filter is null)
+                return;
+
+            var dialog = new SavedSearchFilterDialog(filter)
+            {
+                XamlRoot = this.XamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+                return;
+
+            await _savedFiltersService.AddOrUpdateAsync(dialog.Filter);
+            await LoadSavedFiltersAsync();
+            RefreshSavedFiltersUi();
+        }
+        private async Task DeleteSavedFilterAsync(SavedSearchFilter filter)
+        {
+            if (filter is null)
+                return;
+
+            await _savedFiltersService.DeleteAsync(filter.Id);
+            await LoadSavedFiltersAsync();
+            RefreshSavedFiltersUi();
+        }
+        private async Task QuickCreateTestFilterAsync()
+        {
+            await ShowCreateSavedFilterDialogAsync();
+        }
+        private async void NewSavedFilter_Click(object sender, RoutedEventArgs e)
+        {
+            await ShowCreateSavedFilterDialogAsync();
+        }
+        private async void ApplySavedFilter_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn)
+                return;
+
+            if (btn.Tag is not string id)
+                return;
+
+            var filter = _savedFilters.FirstOrDefault(x => x.Id == id);
+            if (filter is null)
+                return;
+
+            await ApplySavedFilterAsync(filter);
+        }
+        private SavedSearchFilter? FindSavedFilterFromSender(object sender)
+        {
+            if (sender is not FrameworkElement fe)
+                return null;
+
+            if (fe.Tag is not string id || string.IsNullOrWhiteSpace(id))
+                return null;
+
+            return _savedFilters.FirstOrDefault(x =>
+                string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private async void EditSavedFilter_Click(object sender, RoutedEventArgs e)
+        {
+            var filter = FindSavedFilterFromSender(sender);
+            if (filter is null)
+                return;
+
+            await ShowEditSavedFilterDialogAsync(filter);
+        }
+
+        private async void DeleteSavedFilter_Click(object sender, RoutedEventArgs e)
+        {
+            var filter = FindSavedFilterFromSender(sender);
+            if (filter is null)
+                return;
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Eliminar filtro",
+                Content = $"¿Deseas eliminar el filtro \"{filter.Name}\"?",
+                PrimaryButtonText = "Eliminar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Close
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+                return;
+
+            await DeleteSavedFilterAsync(filter);
+        }
+        private void RefreshSavedFiltersUi()
+        {
+            if (SavedFiltersEmptyHint is null)
+                return;
+
+            SavedFiltersEmptyHint.Visibility =
+                _savedFilters.Count == 0
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+        }
+        #endregion
+
 
         #region ===== XAML handlers pendientes (stubs) =====
 

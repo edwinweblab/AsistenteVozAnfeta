@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:models="using:Anfeta.UI.Models.Weblab"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:searchModels="using:Anfeta.UI.Models.Search"
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
@@ -44,6 +45,8 @@
                         <ColumnDefinition Width="Auto" />
                         <!--  Voz  -->
                         <ColumnDefinition Width="Auto" />
+                        <!--  Notion  -->
+                        <ColumnDefinition Width="Auto" />
                         <!--  Detalles  -->
                     </Grid.ColumnDefinitions>
                     <!--  Carpetas  -->
@@ -61,7 +64,6 @@
                         PlaceholderText="Buscar en Dropbox… (AND / OR / NOT, ext:pdf)"
                         QueryIcon="Find"
                         QuerySubmitted="SearchBox_QuerySubmitted"
-                        SuggestionChosen="SearchBox_SuggestionChosen"
                         TextChanged="SearchBox_TextChanged" />
                     <!--  VOZ  -->
                     <Grid Grid.Column="2" Height="36">
@@ -108,11 +110,15 @@
                         FontWeight="SemiBold"
                         ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
                     <!--  Notion  -->
-
+                    <ToggleButton
+                        x:Name="ToggleNotion"
+                        Grid.Column="4"
+                        Content="Notion"
+                        ToolTipService.ToolTip="Incluir páginas Notion relacionadas" />
                     <!--  Detalles  -->
                     <ToggleButton
                         x:Name="ToggleDetailsPane"
-                        Grid.Column="4"
+                        Grid.Column="5"
                         Click="ToggleDetailsPane_Click"
                         Content="Detalles"
                         IsChecked="False"
@@ -162,7 +168,9 @@
                             x:Name="ChipFolders"
                             Click="ChipFilter_Click"
                             Content="Solo carpetas" />
+                        <Button Click="NewSavedFilter_Click" Content="Nuevo filtro" />
                     </StackPanel>
+
                     <ComboBox
                         x:Name="SortCombo"
                         Grid.Column="1"
@@ -201,6 +209,7 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <!--  Título  -->
@@ -237,10 +246,157 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
                     </Grid>
-
-                    <!--  ===== Row 2: Comandos (colapsable) =====  -->
+                    <!--  ===== Row 2: Filtros guardados (colapsable) =====  -->
                     <Border
                         Grid.Row="2"
+                        Padding="0"
+                        Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
+                        CornerRadius="10">
+
+                        <muxc:Expander x:Name="SavedFiltersExpander" IsExpanded="True">
+
+                            <muxc:Expander.Header>
+                                <Grid
+                                    Margin="2,4,2,4"
+                                    VerticalAlignment="Center"
+                                    ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        VerticalAlignment="Center"
+                                        FontWeight="SemiBold"
+                                        Text="Filtros Guardados" />
+
+                                    <Button
+                                        Grid.Column="1"
+                                        Width="36"
+                                        Height="32"
+                                        Margin="0,0,6,0"
+                                        Padding="0"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center"
+                                        Background="Transparent"
+                                        Click="NewSavedFilter_Click"
+                                        ToolTipService.ToolTip="Nuevo filtro guardado">
+
+                                        <Viewbox
+                                            Width="16"
+                                            Height="16"
+                                            Stretch="Uniform">
+                                            <SymbolIcon Symbol="Add" />
+                                        </Viewbox>
+                                    </Button>
+
+                                    <Grid Grid.Column="2" Width="1" />
+                                </Grid>
+                            </muxc:Expander.Header>
+
+                            <StackPanel Padding="8" Spacing="6">
+
+                                <ListView
+                                    x:Name="SavedFiltersList"
+                                    MaxHeight="160"
+                                    Padding="2"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    ItemsSource="{x:Bind _savedFilters, Mode=OneWay}"
+                                    SelectionMode="None">
+
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="searchModels:SavedSearchFilter">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel Grid.Column="0" Spacing="2">
+
+                                                    <Button
+                                                        Padding="0"
+                                                        HorizontalAlignment="Left"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Click="ApplySavedFilter_Click"
+                                                        Tag="{x:Bind Id}"
+                                                        ToolTipService.ToolTip="Aplicar filtro">
+
+                                                        <TextBlock
+                                                            FontWeight="SemiBold"
+                                                            Text="{x:Bind Name}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                    </Button>
+
+                                                    <TextBlock
+                                                        FontSize="12"
+                                                        Opacity="0.65"
+                                                        Text="{x:Bind Query}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+
+                                                <StackPanel
+                                                    Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    Orientation="Horizontal"
+                                                    Spacing="6">
+
+                                                    <Button
+                                                        Width="32"
+                                                        Height="32"
+                                                        Padding="0"
+                                                        HorizontalContentAlignment="Center"
+                                                        VerticalContentAlignment="Center"
+                                                        Click="EditSavedFilter_Click"
+                                                        Tag="{x:Bind Id}"
+                                                        ToolTipService.ToolTip="Editar">
+
+                                                        <Viewbox
+                                                            Width="16"
+                                                            Height="16"
+                                                            Stretch="Uniform">
+                                                            <SymbolIcon Symbol="Edit" />
+                                                        </Viewbox>
+                                                    </Button>
+
+                                                    <Button
+                                                        Width="32"
+                                                        Height="32"
+                                                        Padding="0"
+                                                        HorizontalContentAlignment="Center"
+                                                        VerticalContentAlignment="Center"
+                                                        Click="DeleteSavedFilter_Click"
+                                                        Tag="{x:Bind Id}"
+                                                        ToolTipService.ToolTip="Eliminar">
+
+                                                        <Viewbox
+                                                            Width="16"
+                                                            Height="16"
+                                                            Stretch="Uniform">
+                                                            <SymbolIcon Symbol="Delete" />
+                                                        </Viewbox>
+                                                    </Button>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+
+                                <TextBlock
+                                    x:Name="SavedFiltersEmptyHint"
+                                    Opacity="0.6"
+                                    Text="Aún no hay filtros guardados"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+                        </muxc:Expander>
+                    </Border>
+                    <!--  ===== Row 2: Comandos (colapsable) =====  -->
+                    <Border
+                        Grid.Row="3"
                         Padding="0"
                         Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
                         CornerRadius="10">
@@ -285,9 +441,17 @@
                                             <SymbolIcon Symbol="Add" />
                                         </Viewbox>
                                     </Button>
+
+                                    <!--
+                                        Flecha del Expander: NO la ponemos manual, WinUI la dibuja solo.
+                                        Esta columna extra es solo para que el botón no invada el área de la flecha.
+                                    -->
                                     <Grid Grid.Column="2" Width="1" />
                                 </Grid>
                             </muxc:Expander.Header>
+
+
+
                             <StackPanel Padding="8" Spacing="6">
 
                                 <ListView
@@ -382,7 +546,7 @@
 
                     <!--  ===== Zona inferior: Carpetas excluidas (colapsable) =====  -->
                     <Border
-                        Grid.Row="3"
+                        Grid.Row="4"
                         Padding="0"
                         HorizontalAlignment="Stretch"
                         Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
@@ -544,66 +708,6 @@
                             Grid.Column="0"
                             FontWeight="SemiBold"
                             Text="Nombre" />
-
-                        <!--  Dictado  -->
-                        <StackPanel
-                            Grid.Column="1"
-                            Orientation="Vertical"
-                            Spacing="4">
-
-                            <!--  Texto descriptivo  -->
-                            <TextBlock
-                                FontSize="15"
-                                Opacity="1.9"
-                                TextAlignment="Center"
-                                Text="Lectura de resultados" />
-
-                            <!--  Botones  -->
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-
-                                <Button
-                                    x:Name="BtnDictPrev"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Resultado anterior"
-                                    Click="BtnDictPrev_Click">
-                                    <SymbolIcon  Symbol="Back" />
-                                </Button>
-
-                                <Button
-                                    x:Name="BtnDictPlay"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Reproducir lectura Resultados"
-                                    Click="BtnDictPlay_Click">
-                                    <SymbolIcon  Symbol="Play" />
-                                </Button>
-
-                                <Button
-                                    x:Name="BtnDictPause"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Pausar lectura Resultados"
-                                    Click="BtnDictPause_Click">
-                                    <SymbolIcon  Symbol="Pause" />
-                                </Button>
-
-                                <Button
-                                    x:Name="BtnDictNext"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Siguiente Resultado" 
-                                    Click="BtnDictNext_Click">
-                                    <SymbolIcon  Symbol="Forward" />
-                                </Button>
-
-                            </StackPanel>
-
-                        </StackPanel>
                     </Grid>
                     <!--  Results list  -->
                     <Grid Grid.Row="2">
@@ -619,7 +723,7 @@
                             DoubleTapped="ResultsList_DoubleTapped"
                             RightTapped="ResultsList_RightTapped"
                             SelectionChanged="ResultsList_SelectionChanged"
-                            SelectionMode="Extended">
+                            SelectionMode="Single">
 
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="models:SearchResultRow">
@@ -659,26 +763,16 @@
                             </ListView.ItemTemplate>
                             <ListView.ContextFlyout>
                                 <MenuFlyout>
-
-                                    <!--  Navegar dentro del buscador  -->
-                                    <MenuFlyoutItem Click="CtxOpenInApp_Click" Text="Abrir en ANFETA" />
-
-                                    <!--  Abrir con Windows  -->
-                                    <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir en Windows" />
-
-                                    <!--  Abrir carpeta en Explorer  -->
-                                    <MenuFlyoutItem Click="CtxOpenPath_Click" Text="Abrir Ubicación (PC)" />
-
+                                    <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir" />
+                                    <MenuFlyoutItem Click="CtxOpenWeb_Click" Text="Abrir en Dropbox Web" />
                                     <MenuFlyoutSeparator />
-
-                                    <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar Nombre" />
-                                    <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar Ruta" />
-
+                                    <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar ruta" />
+                                    <MenuFlyoutItem Click="CtxCopyLink_Click" Text="Copiar link" />
                                     <MenuFlyoutSeparator />
-
                                     <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
                                     <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
-
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem Click="CtxBookmark_Click" Text="Agregar a bookmarks" />
                                 </MenuFlyout>
                             </ListView.ContextFlyout>
                         </ListView>
@@ -792,6 +886,44 @@
                             </StackPanel>
                         </Border>
                     </StackPanel>
+
+                    <Grid Grid.Row="3" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock
+                            x:Name="DetailsHint"
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            Opacity="0.6"
+                            Text="Acciones disponibles" />
+
+                        <Button
+                            Grid.Column="1"
+                            Click="CtxOpen_Click"
+                            Content="Abrir Web" />
+
+                        <Button
+                            Grid.Column="2"
+                            Click="BtnDetailsLink_Click"
+                            Content="Abrir Ubicacion" />
+
+                        <Button Grid.Column="3" Content="⋯">
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
+                                    <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
+                                    <MenuFlyoutSeparator />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>
@@ -807,7 +939,7 @@
                 x:Name="StatusText"
                 Grid.Column="0"
                 Opacity="0.7"
-                Text="Estado: Dropbox Local" />
+                Text="Estado: Dropbox (API)" />
             <TextBlock
                 x:Name="VoiceDebugText"
                 Grid.Column="0"
