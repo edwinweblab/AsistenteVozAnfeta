@@ -169,6 +169,7 @@
                             Click="ChipFilter_Click"
                             Content="Solo carpetas" />
                         <Button Click="NewSavedFilter_Click" Content="Nuevo filtro" />
+                        <Button Click="ImportFiltersCsv_Click" Content="Importar CSV" />
                     </StackPanel>
 
                     <ComboBox

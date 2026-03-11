@@ -138,8 +138,9 @@ namespace Anfeta.UI.Views
         private readonly SavedSearchFiltersService _savedFiltersService;
         private readonly ObservableCollection<SavedSearchFilter> _savedFilters = new();
         private QueryMatchOptions _currentMatchOptions = new();
-
-
+        //Importar Filtros 
+        private readonly EverythingCsvFilterImporter _csvFilterImporter = new();
+        private readonly FilePickerService _filePickerService = new();
 
         #endregion
 
@@ -4436,6 +4437,36 @@ namespace Anfeta.UI.Views
 
         #endregion
 
+        #region === IMPORTAR FILTROS ====
+        private async Task ImportSavedFiltersFromCsvAsync(string filePath)
+        {
+            var imported = await _csvFilterImporter.ImportFromFileAsync(filePath);
+
+            foreach (var filter in imported)
+                await _savedFiltersService.AddOrUpdateAsync(filter);
+
+            await LoadSavedFiltersAsync();
+            RefreshSavedFiltersUi();
+
+            StatusText.Text = $"Estado: {imported.Count} filtros importados";
+        }
+
+        private async void ImportFiltersCsv_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var path = await _filePickerService.PickCsvFileAsync();
+                if (path is null)
+                    return;
+
+                await ImportSavedFiltersFromCsvAsync(path);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al importar CSV: {ex.Message}";
+            }
+        }
+        #endregion
 
         #region ===== XAML handlers pendientes (stubs) =====
 
