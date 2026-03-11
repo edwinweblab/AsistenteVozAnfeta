@@ -30,15 +30,11 @@ namespace Anfeta.UI.Views.Dialogs
             QueryTextBox.Text = filter.Query ?? string.Empty;
 
             MatchCaseCheckBox.IsChecked = filter.MatchCase;
-            MatchWholeWordCheckBox.IsChecked = filter.MatchWholeWord;
+            
             MatchPathCheckBox.IsChecked = filter.MatchPath;
-            UseRegexCheckBox.IsChecked = filter.UseRegex;
+            
 
-            MatchPrefixCheckBox.IsChecked = filter.MatchPrefix;
-            MatchSuffixCheckBox.IsChecked = filter.MatchSuffix;
-            IgnorePunctuationCheckBox.IsChecked = filter.IgnorePunctuation;
-            IgnoreWhitespaceCheckBox.IsChecked = filter.IgnoreWhitespace;
-            MatchDiacriticsCheckBox.IsChecked = filter.MatchDiacritics;
+            
 
             SelectSortBy(filter.SortBy);
         }
@@ -59,15 +55,11 @@ namespace Anfeta.UI.Views.Dialogs
             Filter.Query = query;
 
             Filter.MatchCase = MatchCaseCheckBox.IsChecked == true;
-            Filter.MatchWholeWord = MatchWholeWordCheckBox.IsChecked == true;
+            
             Filter.MatchPath = MatchPathCheckBox.IsChecked == true;
-            Filter.UseRegex = UseRegexCheckBox.IsChecked == true;
+            
 
-            Filter.MatchPrefix = MatchPrefixCheckBox.IsChecked == true;
-            Filter.MatchSuffix = MatchSuffixCheckBox.IsChecked == true;
-            Filter.IgnorePunctuation = IgnorePunctuationCheckBox.IsChecked == true;
-            Filter.IgnoreWhitespace = IgnoreWhitespaceCheckBox.IsChecked == true;
-            Filter.MatchDiacritics = MatchDiacriticsCheckBox.IsChecked == true;
+            
 
             Filter.SortBy = GetSelectedSortByTag();
         }

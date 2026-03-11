@@ -39,7 +39,7 @@
                     x:Name="NameTextBox"
                     Grid.Row="0"
                     Grid.Column="1"
-                    PlaceholderText="Ej. Revisiones AAVEL" />
+                    PlaceholderText="Ej. Revisiones NNEFT" />
 
                 <TextBlock
                     Grid.Row="1"
@@ -93,11 +93,6 @@
                     Grid.Column="0"
                     Content="Match case" />
 
-                <CheckBox
-                    x:Name="MatchWholeWordCheckBox"
-                    Grid.Row="0"
-                    Grid.Column="1"
-                    Content="Match whole words" />
 
                 <CheckBox
                     x:Name="MatchPathCheckBox"
@@ -105,11 +100,6 @@
                     Grid.Column="0"
                     Content="Match path" />
 
-                <CheckBox
-                    x:Name="UseRegexCheckBox"
-                    Grid.Row="1"
-                    Grid.Column="1"
-                    Content="Regular expressions" />
             </Grid>
 
             <TextBlock

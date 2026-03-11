@@ -1079,7 +1079,9 @@ namespace Anfeta.UI.Views
         }
         private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
         {
-            var ui = (sender.Text ?? "").Trim();
+            ResetCurrentMatchOptions();
+            var ui = (sender.Text ?? "").Trim(); 
+
             if (string.IsNullOrWhiteSpace(ui))
             {
                 _useExpandedQueryOnSubmit = false;
@@ -1162,13 +1164,7 @@ namespace Anfeta.UI.Views
 
                 if (!LooksAdvanced(rawQuery))
                 {
-                    var q = rawQuery.ToLowerInvariant();
-                    items = items.Where(x =>
-                    {
-                        var name = (x.Name ?? "").ToLowerInvariant();
-                        var target = (x.Target ?? "").ToLowerInvariant();
-                        return name.Contains(q) || target.Contains(q);
-                    });
+                    items = items.Where(x => MatchesSavedFilterOnRow(x, rawQuery));
                 }
                 else
                 {
@@ -1277,13 +1273,7 @@ namespace Anfeta.UI.Views
 
                 if (!LooksAdvanced(rawQuery))
                 {
-                    var q = rawQuery.ToLowerInvariant();
-                    items = items.Where(x =>
-                    {
-                        var name = (x.Name ?? "").ToLowerInvariant();
-                        var target = (x.Target ?? "").ToLowerInvariant();
-                        return name.Contains(q) || target.Contains(q);
-                    });
+                    items = items.Where(x => MatchesSavedFilterOnRow(x, rawQuery));
                 }
                 else
                 {
@@ -4411,6 +4401,39 @@ namespace Anfeta.UI.Views
                     ? Visibility.Visible
                     : Visibility.Collapsed;
         }
+        
+        private void ResetCurrentMatchOptions()
+        {
+            _currentMatchOptions = new QueryMatchOptions();
+        }
+
+        private bool MatchesSavedFilterText(string source, string query)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return true;
+
+            if (string.IsNullOrWhiteSpace(source))
+                return false;
+
+            var comparison = _currentMatchOptions.MatchCase
+                ? StringComparison.Ordinal
+                : StringComparison.OrdinalIgnoreCase;
+
+            return source.Contains(query, comparison);
+        }
+
+        private bool MatchesSavedFilterOnRow(SearchResultRow row, string query)
+        {
+            if (row is null)
+                return false;
+
+            string target = _currentMatchOptions.MatchPath
+                ? (row.Target ?? string.Empty)
+                : (row.Name ?? string.Empty);
+
+            return MatchesSavedFilterText(target, query);
+        }
+
         #endregion
 
 
