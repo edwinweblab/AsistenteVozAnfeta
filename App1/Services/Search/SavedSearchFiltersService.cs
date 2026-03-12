@@ -108,5 +108,15 @@ namespace Anfeta.UI.Services.Search
                 }
             };
         }
+        public async Task DeleteAllAsync()
+        {
+            var all = await GetAllAsync();
+
+            foreach (var filter in all)
+            {
+                if (!string.IsNullOrWhiteSpace(filter.Id))
+                    await DeleteAsync(filter.Id);
+            }
+        }
     }
 }

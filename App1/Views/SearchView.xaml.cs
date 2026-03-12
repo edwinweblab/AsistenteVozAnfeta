@@ -1591,6 +1591,30 @@ namespace Anfeta.UI.Views
                 StatusText.Text = $"Estado: Error bookmark → {ex.Message}";
             }
         }
+        private async void BtnBookmarkPanelStar_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn) return;
+
+            var path = (btn.Tag as string ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(path)) return;
+
+            try
+            {
+                _bookmarksService.RemoveByPath(_bookmarks, path);
+                await _bookmarksService.SaveAsync(_bookmarks, CancellationToken.None);
+
+                StatusText.Text = "Estado: Bookmark eliminado ⭐❌";
+
+                if (_mode == ViewMode.Bookmarks)
+                    await ShowBookmarksAsync();
+
+                await LoadBookmarksAsync();
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error bookmark panel → {ex.Message}";
+            }
+        }
         #endregion
         #region ===== Results / Details / Open =====
         private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -3049,7 +3073,6 @@ namespace Anfeta.UI.Views
             ls[LS_CommandsExpanded] = CommandsExpander.IsExpanded;
             ls[LS_ExcludedExpanded] = ExcludedExpander.IsExpanded;
         }
-
         #endregion
         #region ===== Comandos de voz =====
 
@@ -4402,7 +4425,69 @@ namespace Anfeta.UI.Views
                     ? Visibility.Visible
                     : Visibility.Collapsed;
         }
-        
+        private async void SavedFiltersList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is SavedSearchFilter filter)
+            {
+                await ApplySavedFilterAsync(filter);
+            }
+        }
+        private async void SavedFilter_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe) return;
+            if (fe.DataContext is not SavedSearchFilter filter) return;
+
+            var flyout = new MenuFlyout();
+
+            var apply = new MenuFlyoutItem { Text = "Aplicar" };
+            apply.Click += async (_, __) => await ApplySavedFilterAsync(filter);
+
+            var edit = new MenuFlyoutItem { Text = "Editar" };
+            edit.Click += async (_, __) =>
+            {
+                await ShowEditSavedFilterDialogAsync(filter);
+            };
+
+            var delete = new MenuFlyoutItem { Text = "Eliminar" };
+            delete.Click += async (_, __) =>
+            {
+                await _savedFiltersService.DeleteAsync(filter.Id);
+                await LoadSavedFiltersAsync();
+                RefreshSavedFiltersUi();
+            };
+
+            flyout.Items.Add(apply);
+            flyout.Items.Add(edit);
+            flyout.Items.Add(delete);
+            flyout.Items.Add(new MenuFlyoutSeparator());
+
+            var deleteAll = new MenuFlyoutItem { Text = "Borrar todos los filtros" };
+            deleteAll.Click += async (_, __) =>
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "Borrar todos los filtros",
+                    Content = "¿Seguro que quieres eliminar todos los filtros guardados?",
+                    PrimaryButtonText = "Borrar",
+                    CloseButtonText = "Cancelar",
+                    XamlRoot = this.XamlRoot
+                };
+
+                var result = await dialog.ShowAsync();
+                if (result != ContentDialogResult.Primary)
+                    return;
+
+                await _savedFiltersService.DeleteAllAsync();
+                await LoadSavedFiltersAsync();
+                RefreshSavedFiltersUi();
+                StatusText.Text = "Estado: filtros eliminados";
+            };
+
+
+            flyout.Items.Add(deleteAll);
+
+            flyout.ShowAt(fe, e.GetPosition(fe));
+        }
         private void ResetCurrentMatchOptions()
         {
             _currentMatchOptions = new QueryMatchOptions();
@@ -4435,6 +4520,110 @@ namespace Anfeta.UI.Views
             return MatchesSavedFilterText(target, query);
         }
 
+        private async Task EditSavedFilterByIdAsync(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return;
+
+            var filter = _savedFilters.FirstOrDefault(f => f.Id == id);
+            if (filter is null) return;
+
+            await ShowEditSavedFilterDialogAsync(filter);
+        }
+
+        private async Task DeleteSavedFilterByIdAsync(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return;
+
+            var filter = _savedFilters.FirstOrDefault(f => f.Id == id);
+            if (filter is null) return;
+
+            await _savedFiltersService.DeleteAsync(id);
+            await LoadSavedFiltersAsync();
+            RefreshSavedFiltersUi();
+        }
+        private async void SavedFilterRow_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe) return;
+            if (fe.DataContext is not SavedSearchFilter filter) return;
+
+            var flyout = new MenuFlyout();
+
+            var edit = new MenuFlyoutItem { Text = "Editar" };
+            edit.Click += async (_, __) => await EditSavedFilterByIdAsync(filter.Id);
+
+            var delete = new MenuFlyoutItem { Text = "Eliminar" };
+            delete.Click += async (_, __) => await DeleteSavedFilterByIdAsync(filter.Id);
+
+            flyout.Items.Add(edit);
+            flyout.Items.Add(delete);
+
+            flyout.ShowAt(fe, e.GetPosition(fe));
+        }
+        private void CommandRow_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe) return;
+            var command = fe.DataContext;
+            if (command is null) return;
+
+            var flyout = new MenuFlyout();
+
+            var edit = new MenuFlyoutItem { Text = "Editar" };
+            edit.Click += (_, __) =>
+            {
+                BtnEditSidebarCommand_Click(command, new RoutedEventArgs());
+            };
+
+            var delete = new MenuFlyoutItem { Text = "Eliminar" };
+            delete.Click += (_, __) =>
+            {
+                BtnDeleteSidebarCommand_Click(command, new RoutedEventArgs());
+            };
+
+            flyout.Items.Add(edit);
+            flyout.Items.Add(delete);
+
+            flyout.ShowAt(fe, e.GetPosition(fe));
+        }
+        private void CommandsSidebarItemButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn) return;
+
+            var command = btn.Tag;
+            if (command is null) return;
+
+            CommandsSidebarList.SelectedItem = command;
+        }
+        private async void SavedFilterMenu_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn) return;
+
+            var id = btn.Tag as string;
+            if (string.IsNullOrWhiteSpace(id)) return;
+
+            var flyout = new MenuFlyout();
+
+            var edit = new MenuFlyoutItem { Text = "Editar" };
+            edit.Click += async (_, __) =>
+            {
+                var filter = _savedFilters.FirstOrDefault(f => f.Id == id);
+                if (filter is null) return;
+
+                await ShowEditSavedFilterDialogAsync(filter);
+            };
+
+            var delete = new MenuFlyoutItem { Text = "Eliminar" };
+            delete.Click += async (_, __) =>
+            {
+                await _savedFiltersService.DeleteAsync(id);
+                await LoadSavedFiltersAsync();
+                RefreshSavedFiltersUi();
+            };
+
+            flyout.Items.Add(edit);
+            flyout.Items.Add(delete);
+
+            flyout.ShowAt(btn);
+        }
         #endregion
 
         #region === IMPORTAR FILTROS ====

@@ -23,8 +23,8 @@ namespace Anfeta.UI.Services.VoiceCommands
             _post = post;
         }
         public async Task<VoiceListenResult> ListenAndExecuteAsync(
-       ISearchCommandSink sink,
-       CancellationToken ct = default)
+    ISearchCommandSink sink,
+    CancellationToken ct = default)
         {
             await _stt.InitializeAsync(_stt.GetCurrentLanguage());
             await _engine.EnsureLoadedAsync();
@@ -36,21 +36,19 @@ namespace Anfeta.UI.Services.VoiceCommands
                 return new VoiceListenResult
                 {
                     Phrase = phrase,
-                    Matched = false
+                    Matched = false,
+                    CommandName = "STT vacío",
+                    Token = ""
                 };
             }
 
-            // 1) primero intenta parse normal (para built-ins como Abrir)
             var parsed = _engine.TryParse(phrase);
 
-            // ✅ Detecta intent "Abrir" por token interno (built-in)
             var isAbrir = parsed is not null &&
                           string.Equals(parsed.Command.Token, "__open__", StringComparison.OrdinalIgnoreCase);
 
-            // ✅ Si es Abrir, conserva tu flujo actual
             if (isAbrir)
             {
-                // Si es Abrir sin args: no buscamos nada
                 if (string.IsNullOrWhiteSpace(parsed!.ArgsText))
                 {
                     return new VoiceListenResult
@@ -86,7 +84,6 @@ namespace Anfeta.UI.Services.VoiceCommands
                 };
             }
 
-            // 2) Para comandos del buscador: parse multi-token
             var multi = _engine.TryParseToSearchText(phrase);
 
             if (multi is null)
@@ -94,7 +91,9 @@ namespace Anfeta.UI.Services.VoiceCommands
                 return new VoiceListenResult
                 {
                     Phrase = phrase,
-                    Matched = false
+                    Matched = false,
+                    CommandName = "Sin match engine",
+                    Token = ""
                 };
             }
 
@@ -104,7 +103,9 @@ namespace Anfeta.UI.Services.VoiceCommands
                 return new VoiceListenResult
                 {
                     Phrase = phrase,
-                    Matched = false
+                    Matched = false,
+                    CommandName = "SearchText vacío",
+                    Token = ""
                 };
             }
 
