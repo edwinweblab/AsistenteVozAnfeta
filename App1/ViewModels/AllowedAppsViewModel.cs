@@ -1,18 +1,22 @@
-﻿using Anfeta.UI.Services;
-using Anfeta.UI.Data;
+﻿using Anfeta.UI.Data;
 using Anfeta.UI.Models;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Interpretation;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.UI;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using System.IO;
+using Windows.UI;
+
 namespace Anfeta.UI.ViewModels
 {
     public sealed partial class AllowedAppsViewModel : ObservableObject
@@ -22,23 +26,23 @@ namespace Anfeta.UI.ViewModels
         private readonly InstalledAppsScanner _scanner;
         private readonly IFilePickerService _filePicker;
 
-
         public ObservableCollection<LocalAppEntry> AllowedApps { get; } = new();
 
         [ObservableProperty] private bool isLoading;
         [ObservableProperty] private string status = "Listo.";
 
-        public AllowedAppsViewModel(LocalAppsRepository repo, CapabilityRegistry registry, InstalledAppsScanner scanner, IFilePickerService filePicker)
+        public AllowedAppsViewModel(
+            LocalAppsRepository repo,
+            CapabilityRegistry registry,
+            InstalledAppsScanner scanner,
+            IFilePickerService filePicker)
         {
             _repo = repo ?? throw new ArgumentNullException(nameof(repo));
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _scanner = scanner ?? throw new ArgumentNullException(nameof(scanner));
-            _filePicker = filePicker;
+            _filePicker = filePicker ?? throw new ArgumentNullException(nameof(filePicker));
         }
 
-        // ===============================
-        // LOAD (cargar desde BD)
-        // ===============================
         [RelayCommand]
         public async Task LoadAsync()
         {
@@ -66,9 +70,6 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // ===============================
-        // RESCAN (escaneo + upsert detected)
-        // ===============================
         [RelayCommand]
         public async Task RescanAsync()
         {
@@ -83,15 +84,10 @@ namespace Anfeta.UI.ViewModels
                 {
                     foreach (var app in detected)
                     {
-                        // IMPORTANTE:
-                        // Agrega este método en LocalAppsRepository:
-                        // UpsertDetectedAppSafe(LocalAppEntry app)
-                        // para NO pisar seeds y dejar enabled=0 al detectar.
                         _repo.UpsertDetectedAppSafe(app);
                     }
                 });
 
-                // recargar lista y registry
                 await LoadAsync();
                 _registry.Reload();
 
@@ -108,9 +104,6 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // ===============================
-        // TOGGLE (habilitar/deshabilitar)
-        // ===============================
         [RelayCommand]
         public void ToggleEnabled(LocalAppEntry app)
         {
@@ -119,10 +112,7 @@ namespace Anfeta.UI.ViewModels
             try
             {
                 _repo.SetEnabled(app.AppKey, app.Enabled);
-
-                // Recargar registry para reflejar cambios en runtime
                 _registry.Reload();
-
                 Status = $"{app.FriendlyName}: {(app.Enabled ? "habilitada" : "deshabilitada")}.";
             }
             catch (Exception ex)
@@ -132,9 +122,6 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // ===============================
-        // ADD MANUAL (pendiente)
-        // ===============================
         [RelayCommand]
         public async Task AddManualAsync()
         {
@@ -158,11 +145,7 @@ namespace Anfeta.UI.ViewModels
 
                 var exeName = Path.GetFileName(path);
                 var baseName = Path.GetFileNameWithoutExtension(path);
-
-                // FriendlyName por defecto (luego lo puedes editar si quieres)
                 var friendlyName = baseName;
-
-                // AppKey única (si ya existe, agrega sufijos -2, -3, etc.)
                 var appKey = MakeUniqueKey(baseName);
 
                 var entry = new LocalAppEntry
@@ -211,131 +194,215 @@ namespace Anfeta.UI.ViewModels
             return key;
         }
 
-        // ===============================
-        // DIALOG: EDITAR SINÓNIMOS
-        // ===============================
         public async Task OpenSynonymsDialogAsync(LocalAppEntry app, XamlRoot xamlRoot)
         {
             try
             {
-                if (app == null) return;
+                if (app == null || xamlRoot == null)
+                {
+                    Status = "No se pudo abrir el diálogo.";
+                    return;
+                }
 
                 var current = await Task.Run(() => _repo.GetSynonyms(app.AppKey));
+
                 var items = new ObservableCollection<string>(
-                    current.Select(s => (s ?? "").Trim())
+                    current.Select(s => (s ?? "").Trim().ToLowerInvariant())
                            .Where(s => !string.IsNullOrWhiteSpace(s))
+                           .Distinct(StringComparer.OrdinalIgnoreCase)
                 );
 
                 bool isEditing = false;
-                string? editingOriginal = null;
+                string editingOriginal = null;
+
+                var title = new TextBlock
+                {
+                    Text = "Editar sinónimos",
+                    FontSize = 20,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Colors.White)
+                };
+
+                var subtitle = new TextBlock
+                {
+                    Text = "Agrega palabras o frases que Anfeta reconocerá para abrir esta aplicación.",
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 148, 163, 184)),
+                    TextWrapping = TextWrapping.WrapWholeWords
+                };
+
+                var appCard = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(255, 11, 18, 32)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(255, 30, 41, 59)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(12),
+                    Padding = new Thickness(14)
+                };
+
+                var appRow = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10
+                };
+
+                var appIcon = new FontIcon
+                {
+                    Glyph = "\uE71D",
+                    FontSize = 16,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 59, 130, 246)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                var appIconBox = new Border
+                {
+                    Width = 36,
+                    Height = 36,
+                    CornerRadius = new CornerRadius(10),
+                    Background = new SolidColorBrush(Color.FromArgb(30, 255, 255, 255)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(45, 255, 255, 255)),
+                    BorderThickness = new Thickness(1),
+                    Child = appIcon
+                };
+
+                var appTextStack = new StackPanel
+                {
+                    Spacing = 2
+                };
+
+                appTextStack.Children.Add(new TextBlock
+                {
+                    Text = app.FriendlyName,
+                    FontSize = 13,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Colors.White)
+                });
+
+                appTextStack.Children.Add(new TextBlock
+                {
+                    Text = app.ExecutableName,
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 148, 163, 184))
+                });
+
+                appRow.Children.Add(appIconBox);
+                appRow.Children.Add(appTextStack);
+                appCard.Child = appRow;
+
+                var labelInput = new TextBlock
+                {
+                    Text = "Nuevo sinónimo",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 203, 213, 225))
+                };
 
                 var input = new TextBox
                 {
-                    PlaceholderText = "Escribe un sinónimo (ej: navegador, office, etc.)",
-                    MinWidth = 340
+                    PlaceholderText = "Ejemplo: abre chrome",
+                    MinWidth = 320
                 };
 
                 var btnAddOrSave = new Button
                 {
                     Content = "Agregar",
-                    Margin = new Thickness(8, 0, 0, 0)
-                };
-
-                var list = new ListView
-                {
-                    ItemsSource = items,
-                    SelectionMode = ListViewSelectionMode.Single,
-                    Margin = new Thickness(0, 10, 0, 0)
+                    MinWidth = 100
                 };
 
                 var btnEdit = new Button
                 {
                     Content = "Editar",
                     IsEnabled = false,
-                    Margin = new Thickness(0, 10, 8, 0)
+                    MinWidth = 90
                 };
 
-                var btnDel = new Button
+                var btnDelete = new Button
                 {
                     Content = "Eliminar",
                     IsEnabled = false,
-                    Margin = new Thickness(0, 10, 0, 0)
+                    MinWidth = 90
                 };
 
                 var btnCancelEdit = new Button
                 {
                     Content = "Cancelar edición",
                     IsEnabled = false,
-                    Margin = new Thickness(8, 10, 0, 0)
+                    MinWidth = 130
                 };
 
-                void SetEditMode(bool enabled, string? original = null)
+                var labelList = new TextBlock
+                {
+                    Text = "Sinónimos actuales",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 203, 213, 225))
+                };
+
+                var list = new ListView
+                {
+                    ItemsSource = items,
+                    SelectionMode = ListViewSelectionMode.Single,
+                    MaxHeight = 220
+                };
+
+                void SetEditMode(bool enabled, string original = null)
                 {
                     isEditing = enabled;
                     editingOriginal = original;
-
-                    btnAddOrSave.Content = enabled ? "Guardar" : "Agregar";
+                    btnAddOrSave.Content = enabled ? "Guardar cambio" : "Agregar";
                     btnCancelEdit.IsEnabled = enabled;
                 }
 
-                void NormalizeAndAddOrEdit()
+                void AddOrUpdateSynonym()
                 {
-                    var v = (input.Text ?? "").Trim().ToLowerInvariant();
-                    if (string.IsNullOrWhiteSpace(v)) return;
+                    var value = (input.Text ?? "").Trim().ToLowerInvariant();
+                    if (string.IsNullOrWhiteSpace(value))
+                        return;
 
                     if (!isEditing)
                     {
-                        if (items.Any(x => string.Equals(x, v, StringComparison.OrdinalIgnoreCase))) return;
-                        items.Add(v);
+                        if (items.Any(x => string.Equals(x, value, StringComparison.OrdinalIgnoreCase)))
+                            return;
+
+                        items.Add(value);
                         input.Text = "";
                         return;
                     }
 
-                    if (string.IsNullOrWhiteSpace(editingOriginal)) return;
+                    if (string.IsNullOrWhiteSpace(editingOriginal))
+                        return;
 
-                    if (items.Any(x => string.Equals(x, v, StringComparison.OrdinalIgnoreCase)) &&
-                        !string.Equals(editingOriginal, v, StringComparison.OrdinalIgnoreCase))
+                    if (items.Any(x => string.Equals(x, value, StringComparison.OrdinalIgnoreCase)) &&
+                        !string.Equals(editingOriginal, value, StringComparison.OrdinalIgnoreCase))
                         return;
 
                     var idx = items.IndexOf(editingOriginal);
-                    if (idx < 0) return;
+                    if (idx >= 0)
+                        items[idx] = value;
 
-                    items[idx] = v;
                     input.Text = "";
                     SetEditMode(false);
                 }
 
                 list.SelectionChanged += (_, __) =>
                 {
-                    var has = list.SelectedItem != null;
-                    btnEdit.IsEnabled = has;
-                    btnDel.IsEnabled = has;
+                    var hasSelection = list.SelectedItem is string;
+                    btnEdit.IsEnabled = hasSelection;
+                    btnDelete.IsEnabled = hasSelection;
                 };
 
-                btnAddOrSave.Click += (_, __) => NormalizeAndAddOrEdit();
-
-                input.KeyDown += (_, e) =>
-                {
-                    if (e.Key == Windows.System.VirtualKey.Enter)
-                        NormalizeAndAddOrEdit();
-                };
+                btnAddOrSave.Click += (_, __) => AddOrUpdateSynonym();
 
                 btnEdit.Click += (_, __) =>
                 {
                     if (list.SelectedItem is not string selected) return;
 
                     input.Text = selected;
+                    input.SelectAll();
                     input.Focus(FocusState.Programmatic);
                     SetEditMode(true, selected);
                 };
 
-                btnCancelEdit.Click += (_, __) =>
-                {
-                    input.Text = "";
-                    SetEditMode(false);
-                };
-
-                btnDel.Click += (_, __) =>
+                btnDelete.Click += (_, __) =>
                 {
                     if (list.SelectedItem is not string selected) return;
 
@@ -348,48 +415,77 @@ namespace Anfeta.UI.ViewModels
                     items.Remove(selected);
                 };
 
+                btnCancelEdit.Click += (_, __) =>
+                {
+                    input.Text = "";
+                    SetEditMode(false);
+                };
+
+                input.KeyDown += (_, e) =>
+                {
+                    if (e.Key == Windows.System.VirtualKey.Enter)
+                        AddOrUpdateSynonym();
+                };
+
                 list.DoubleTapped += (_, __) =>
                 {
                     if (list.SelectedItem is not string selected) return;
 
                     input.Text = selected;
+                    input.SelectAll();
                     input.Focus(FocusState.Programmatic);
                     SetEditMode(true, selected);
                 };
 
-                var header = new TextBlock
+                var inputRow = new Grid
                 {
-                    Text = "Sinónimos actuales",
-                    FontSize = 12
+                    ColumnSpacing = 8
                 };
 
-                var inputRow = new Grid { ColumnSpacing = 8 };
-                inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                inputRow.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
+                inputRow.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = GridLength.Auto
+                });
+
                 Grid.SetColumn(input, 0);
                 Grid.SetColumn(btnAddOrSave, 1);
+
                 inputRow.Children.Add(input);
                 inputRow.Children.Add(btnAddOrSave);
 
                 var actionRow = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
-                    HorizontalAlignment = HorizontalAlignment.Left
+                    Spacing = 8
                 };
+
                 actionRow.Children.Add(btnEdit);
-                actionRow.Children.Add(btnDel);
+                actionRow.Children.Add(btnDelete);
                 actionRow.Children.Add(btnCancelEdit);
 
-                var root = new StackPanel();
-                root.Children.Add(header);
-                root.Children.Add(inputRow);
-                root.Children.Add(actionRow);
-                root.Children.Add(list);
+                var rootPanel = new StackPanel
+                {
+                    Spacing = 14,
+                    Width = 430
+                };
+
+                rootPanel.Children.Add(title);
+                rootPanel.Children.Add(subtitle);
+                rootPanel.Children.Add(appCard);
+                rootPanel.Children.Add(labelInput);
+                rootPanel.Children.Add(inputRow);
+                rootPanel.Children.Add(actionRow);
+                rootPanel.Children.Add(labelList);
+                rootPanel.Children.Add(list);
 
                 var dialog = new ContentDialog
                 {
-                    Title = $"Sinónimos: {app.FriendlyName}",
-                    Content = root,
+                    Title = "",
+                    Content = rootPanel,
                     PrimaryButtonText = "Guardar",
                     CloseButtonText = "Cerrar",
                     DefaultButton = ContentDialogButton.Primary,

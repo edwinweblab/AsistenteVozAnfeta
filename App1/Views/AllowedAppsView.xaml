@@ -4,178 +4,305 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Background="{StaticResource BgGradient}">
 
-	<ScrollViewer>
-		<Grid Padding="24" RowSpacing="20">
-			<Grid.RowDefinitions>
-				<RowDefinition Height="Auto"/>
-				<RowDefinition Height="Auto"/>
-				<RowDefinition Height="*"/>
-			</Grid.RowDefinitions>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="24" Spacing="28">
 
-			<!-- ================= HEADER ================= -->
-			<StackPanel Grid.Row="0" Spacing="6">
-				<TextBlock Text="Aplicaciones Permitidas"
-                           FontSize="28"
-                           FontWeight="SemiBold"
-                           Foreground="#F7FAFC"/>
-				<TextBlock Text="Selecciona apps instaladas, habilítalas y define sinónimos para comandos de voz."
-                           FontSize="13"
-                           Foreground="#CBD5E1"/>
-			</StackPanel>
+            <!-- HEADER -->
+            <Grid>
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Aplicaciones Permitidas"
+                               FontSize="24"
+                               FontWeight="SemiBold"
+                               Foreground="#FFFFFF"/>
+                    <TextBlock Text="Selecciona aplicaciones instaladas, habilítalas y define sinónimos para comandos de voz."
+                               FontSize="12"
+                               Foreground="#CBD5E1"/>
+                </StackPanel>
+            </Grid>
 
-			<!-- ================= ACTIONS (TOP) ================= -->
-			<StackPanel Grid.Row="1"
-                        Orientation="Horizontal"
-                        Spacing="12">
-				<Button Content="Re-escanear apps instaladas"
-                        Padding="14,10"
-                        CornerRadius="10"
-                        Command="{Binding RescanCommand}"/>
+            <!-- SECCIÓN ACCIONES -->
+            <StackPanel Spacing="14">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Width="3"
+                            Height="18"
+                            CornerRadius="2"
+                            Background="{StaticResource AnfetaAccentBrush}"/>
+                    <FontIcon FontSize="14"
+                              Foreground="{StaticResource AnfetaAccentBrush}"
+                              Glyph="&#xE71D;"/>
+                    <TextBlock Text="GESTIÓN DE APLICACIONES"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="#FFFFFF"
+                               CharacterSpacing="100"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
 
-				<Button Content="Agregar manualmente (.exe)"
-                        Padding="14,10"
-                        CornerRadius="10"
-                        Command="{Binding AddManualCommand}"/>
-			</StackPanel>
+                <Border Style="{StaticResource CardStyle}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="4"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-			<!-- ================= LISTA ================= -->
-			<Border Grid.Row="2"
-                    Background="{ThemeResource AnfetaNeutral900}"
-                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="14"
-                    Padding="16">
+                        <Border Grid.Column="0"
+                                Background="{StaticResource AnfetaAccentBrush}"
+                                CornerRadius="12,0,0,12"
+                                Opacity="0.6"/>
 
-				<StackPanel Spacing="16">
+                        <StackPanel Grid.Column="1"
+                                    Spacing="14"
+                                    Padding="18,16">
 
-					<!-- Título sección -->
-					<StackPanel>
-						<TextBlock Text="Aplicaciones detectadas"
-                                   FontSize="16"
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="Escanear o agregar aplicaciones"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FFFFFF"/>
+                                <TextBlock Text="Detecta apps instaladas en el sistema o agrega manualmente un ejecutable permitido."
+                                           FontSize="11"
+                                           Foreground="#CBD5E1"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Content="Re-escanear apps instaladas"
+                                        Padding="14,10"
+                                        Click="Rescan_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"/>
+
+                                <Button Content="Agregar manualmente (.exe)"
+                                        Padding="14,10"
+                                        Click="AddManual_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!-- SECCIÓN LISTA -->
+            <StackPanel Spacing="14">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Width="3"
+                            Height="18"
+                            CornerRadius="2"
+                            Background="{StaticResource AnfetaAccentBrush}"/>
+                    <FontIcon FontSize="14"
+                              Foreground="{StaticResource AnfetaAccentBrush}"
+                              Glyph="&#xE8D7;"/>
+                    <TextBlock Text="APLICACIONES DETECTADAS"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="#FFFFFF"
+                               CharacterSpacing="100"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Encabezado -->
+                <Border Background="#080C14"
+                        BorderBrush="#14FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14,10">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" MinWidth="170"/>
+                            <ColumnDefinition Width="2.4*" MinWidth="220"/>
+                            <ColumnDefinition Width="1.1*" MinWidth="100"/>
+                            <ColumnDefinition Width="1.1*" MinWidth="110"/>
+                            <ColumnDefinition Width="Auto" MinWidth="70"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   Text="APLICACIÓN"
+                                   FontSize="10"
                                    FontWeight="SemiBold"
-                                   Foreground="#F7FAFC"/>
-						<TextBlock Text="Apps encontradas en el sistema. Activa solo las que el asistente puede abrir."
-                                   FontSize="12"
-                                   Foreground="#94A3B8"/>
-					</StackPanel>
+                                   Foreground="#64748B"
+                                   CharacterSpacing="80"/>
 
-					<!-- Encabezados tipo tabla -->
-					<Border Background="#0B1220"
-                            BorderBrush="#1E293B"
-                            BorderThickness="1"
-                            CornerRadius="10"
-                            Padding="12">
-						<Grid>
-							<Grid.ColumnDefinitions>
-								<ColumnDefinition Width="*"/>
-								<ColumnDefinition Width="240"/>
-							</Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="1"
+                                   Text="RUTA"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="#64748B"
+                                   CharacterSpacing="80"/>
 
-							<TextBlock Text="Aplicación"
-                                       Foreground="#CBD5E1"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="2"
+                                   Text="CATEGORÍA"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="#64748B"
+                                   CharacterSpacing="80"/>
 
-							<TextBlock Grid.Column="1"
-                                       Text="Acciones"
-                                       Foreground="#CBD5E1"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"
-                                       HorizontalAlignment="Right"/>
-						</Grid>
-					</Border>
+                        <TextBlock Grid.Column="3"
+                                   Text="ESTADO"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="#64748B"
+                                   CharacterSpacing="80"/>
 
-					<!-- LISTVIEW -->
-					<ListView ItemsSource="{Binding AllowedApps}"
-                              SelectionMode="None"
-                              Background="Transparent">
+                        <TextBlock Grid.Column="4"
+                                   Text="ACCIONES"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="#64748B"
+                                   CharacterSpacing="80"
+                                   HorizontalAlignment="Right"/>
+                    </Grid>
+                </Border>
 
-						<ListView.ItemContainerStyle>
-							<Style TargetType="ListViewItem">
-								<Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-								<Setter Property="Padding" Value="0"/>
-								<Setter Property="Margin" Value="0,0,0,10"/>
-								<Setter Property="Background" Value="Transparent"/>
-							</Style>
-						</ListView.ItemContainerStyle>
+                <!-- Lista -->
+                <ListView ItemsSource="{Binding AllowedApps}"
+                          SelectionMode="None"
+                          Background="Transparent"
+                          HorizontalContentAlignment="Stretch">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="Margin" Value="0,0,0,8"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                        </Style>
+                    </ListView.ItemContainerStyle>
 
-						<ListView.ItemTemplate>
-							<DataTemplate>
-								<Border Background="#0F172A"
-                                        BorderBrush="#1E293B"
-                                        BorderThickness="1"
-                                        CornerRadius="12"
-                                        Padding="14">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource CardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="4"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
 
-									<Grid ColumnSpacing="14">
-										<Grid.ColumnDefinitions>
-											<ColumnDefinition Width="*"/>
-											<ColumnDefinition Width="240"/>
-										</Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Background="{StaticResource AnfetaAccentBrush}"
+                                            CornerRadius="12,0,0,12"
+                                            Opacity="0.5"/>
 
-										<!-- INFO APP -->
-										<StackPanel Spacing="4">
-											<TextBlock Text="{Binding FriendlyName}"
-                                                       Foreground="#E2E8F0"
-                                                       FontWeight="SemiBold"
-                                                       FontSize="14"/>
+                                    <Grid Grid.Column="1"
+                                          Padding="14,12"
+                                          ColumnSpacing="10"
+                                          VerticalAlignment="Center">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="2*" MinWidth="170"/>
+                                            <ColumnDefinition Width="2.4*" MinWidth="220"/>
+                                            <ColumnDefinition Width="1.1*" MinWidth="100"/>
+                                            <ColumnDefinition Width="1.1*" MinWidth="110"/>
+                                            <ColumnDefinition Width="Auto" MinWidth="70"/>
+                                        </Grid.ColumnDefinitions>
 
-											<StackPanel Orientation="Horizontal" Spacing="10">
-												<TextBlock Text="{Binding ExecutableName}"
+                                        <!-- Aplicación -->
+                                        <StackPanel Grid.Column="0"
+                                                    Orientation="Horizontal"
+                                                    Spacing="10"
+                                                    VerticalAlignment="Center">
+                                            <Border Width="34"
+                                                    Height="34"
+                                                    CornerRadius="10"
+                                                    Background="#14FFFFFF"
+                                                    BorderBrush="#22FFFFFF"
+                                                    BorderThickness="1">
+                                                <FontIcon Glyph="&#xE71D;"
+                                                          Foreground="{StaticResource AnfetaAccentBrush}"
+                                                          FontSize="16"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                            </Border>
+
+                                            <StackPanel Spacing="3">
+                                                <TextBlock Text="{Binding FriendlyName}"
+                                                           Foreground="#FFFFFF"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="13"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding ExecutableName}"
                                                            Foreground="#94A3B8"
-                                                           FontSize="12"/>
-												<TextBlock Text="{Binding Category}"
-                                                           Foreground="#64748B"
-                                                           FontSize="12"/>
-											</StackPanel>
+                                                           FontSize="11"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </StackPanel>
 
-											<TextBlock Text="{Binding ExecutablePath}"
-                                                       Foreground="#64748B"
+                                        <!-- Ruta -->
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding ExecutablePath}"
+                                                   Foreground="#94A3B8"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxLines="2"/>
+
+                                        <!-- Categoría -->
+                                        <Border Grid.Column="2"
+                                                Padding="8,4"
+                                                CornerRadius="6"
+                                                Background="#14FFFFFF"
+                                                BorderBrush="#18FFFFFF"
+                                                BorderThickness="1"
+                                                VerticalAlignment="Center"
+                                                HorizontalAlignment="Left">
+                                            <TextBlock Text="{Binding Category}"
+                                                       Foreground="#CBD5E1"
                                                        FontSize="11"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       Opacity="0.9"/>
-										</StackPanel>
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </Border>
 
-										<!-- ACCIONES -->
-										<StackPanel Grid.Column="1"
-                                                    VerticalAlignment="Center"
+                                        <!-- Estado -->
+                                        <StackPanel Grid.Column="3"
+                                                    Spacing="6"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Permitida"
+                                                       Foreground="#CBD5E1"
+                                                       FontSize="11"/>
+
+                                            <ToggleSwitch IsOn="{Binding Enabled, Mode=TwoWay}"
+                                                          Toggled="AllowedToggle_Toggled"
+                                                          OnContent="Sí"
+                                                          OffContent="No"
+                                                          HorizontalAlignment="Left"/>
+                                        </StackPanel>
+
+                                        <!-- Acciones -->
+                                        <StackPanel Grid.Column="4"
+                                                    Orientation="Horizontal"
+                                                    Spacing="8"
                                                     HorizontalAlignment="Right"
-                                                    Spacing="10">
+                                                    VerticalAlignment="Center">
+                                            <Button Width="36"
+                                                    Height="36"
+                                                    Click="EditSynonyms_Click"
+                                                    Tag="{Binding}"
+                                                    Background="#14FFFFFF"
+                                                    BorderBrush="#22FFFFFF"
+                                                    BorderThickness="1"
+                                                    ToolTipService.ToolTip="Editar sinónimos">
+                                                <FontIcon Glyph="&#xE8D2;"
+                                                          FontSize="16"
+                                                          Foreground="{StaticResource AnfetaAccentBrush}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"/>
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
 
-											<StackPanel HorizontalAlignment="Right" Spacing="6">
-												<TextBlock Text="Permitida"
-                                                           Foreground="#CBD5E1"
-                                                           FontSize="12"
-                                                           HorizontalAlignment="Right"/>
-
-												<ToggleSwitch IsOn="{Binding Enabled, Mode=TwoWay}"
-                                                              Toggled="AllowedToggle_Toggled"/>
-											</StackPanel>
-
-											<StackPanel Orientation="Horizontal"
-                                                        HorizontalAlignment="Right"
-                                                        Spacing="10">
-
-												<Button Content="Sinónimos..."
-                                                        Padding="12,8"
-                                                        CornerRadius="10"
-                                                        Click="EditSynonyms_Click"/>
-
-											</StackPanel>
-										</StackPanel>
-									</Grid>
-								</Border>
-							</DataTemplate>
-						</ListView.ItemTemplate>
-
-					</ListView>
-
-					<!-- Estado -->
-					<TextBlock Text="{Binding Status}"
+                <!-- Estado -->
+                <Border Background="#080C14"
+                        BorderBrush="#14FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="12,10">
+                    <TextBlock Text="{Binding Status}"
                                Foreground="#94A3B8"
-                               FontSize="12"/>
-				</StackPanel>
-			</Border>
-		</Grid>
-	</ScrollViewer>
+                               FontSize="12"
+                               TextWrapping="Wrap"/>
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
 </Page>
