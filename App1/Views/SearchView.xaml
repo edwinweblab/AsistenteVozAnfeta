@@ -127,10 +127,8 @@
                         <Button.Flyout>
                             <MenuFlyout>
                                 <MenuFlyoutItem Click="NewSavedFilter_Click" Text="Nuevo filtro" />
+                                <MenuFlyoutSeparator/>
                                 <MenuFlyoutItem Click="ImportFiltersCsv_Click" Text="Importar CSV" />
-                                <MenuFlyoutItem Text="Exportar CSV" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Click="ToggleFoldersPane_Click" Text="Mostrar/Ocultar filtros" />
                             </MenuFlyout>
                         </Button.Flyout>
                     </Button>
@@ -151,57 +149,58 @@
                         Content="Filtros"
                         IsChecked="True"
                         ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
-
-                    <ScrollViewer
-                        Grid.Column="1"
-                        HorizontalScrollBarVisibility="Auto"
-                        VerticalScrollBarVisibility="Disabled"
-                        ZoomMode="Disabled">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ToggleButton
-                                x:Name="ChipPdf"
-                                Click="ChipFilter_Click"
-                                Content="PDF" />
-                            <ToggleButton
-                                x:Name="ChipDocx"
-                                Click="ChipFilter_Click"
-                                Content="DOCX" />
-                            <ToggleButton
-                                x:Name="ChipXlsx"
-                                Click="ChipFilter_Click"
-                                Content="XLSX" />
-                            <ToggleButton
-                                x:Name="ChipImg"
-                                Click="ChipFilter_Click"
-                                Content="IMG" />
-                            <ToggleButton
-                                x:Name="ChipUrl"
-                                Click="ChipFilter_Click"
-                                Content="URL" />
-                            <ToggleButton
-                                x:Name="ChipRecent"
-                                Click="ChipFilter_Click"
-                                Content="Recientes" />
-                            <ToggleButton
-                                x:Name="ChipBookmarks"
-                                Click="ChipFilter_Click"
-                                Content="⭐ Favoritos" />
-                            <ToggleButton
-                                x:Name="ChipFolders"
-                                Click="ChipFilter_Click"
-                                Content="Solo carpetas" />
-                        </StackPanel>
-                    </ScrollViewer>
-
                     <ComboBox
-                        x:Name="QuickFilterCombo"
-                        Grid.Column="2"
-                        Width="150"
-                        PlaceholderText="Acciones">
-                        <ComboBoxItem Content="Nuevo filtro" />
-                        <ComboBoxItem Content="Importar CSV" />
-                        <ComboBoxItem Content="Exportar CSV" />
+                        x:Name="FilterTypeCombo"
+                        Grid.Column="1"
+                        Width="180"
+                        PlaceholderText="Filtro"
+                        SelectionChanged="FilterTypeCombo_SelectionChanged">
+
+                        <ComboBoxItem Content="Todo" Tag="all" />
+                        <ComboBoxItem Content="PDF" Tag="pdf" />
+                        <ComboBoxItem Content="DOCX" Tag="docx" />
+                        <ComboBoxItem Content="XLSX" Tag="xlsx" />
+                        <ComboBoxItem Content="IMG" Tag="img" />
+                        <ComboBoxItem Content="URL" Tag="url" />
+                        <ComboBoxItem Content="Recientes" Tag="recent" />
+                        <ComboBoxItem Content="Favoritos" Tag="bookmarks" />
+                        <ComboBoxItem Content="Solo carpetas" Tag="folders" />
                     </ComboBox>
+                    <StackPanel Visibility="Collapsed">
+                        <ToggleButton
+                            x:Name="ChipPdf"
+                            Click="ChipFilter_Click"
+                            Content="PDF" />
+                        <ToggleButton
+                            x:Name="ChipDocx"
+                            Click="ChipFilter_Click"
+                            Content="DOCX" />
+                        <ToggleButton
+                            x:Name="ChipXlsx"
+                            Click="ChipFilter_Click"
+                            Content="XLSX" />
+                        <ToggleButton
+                            x:Name="ChipImg"
+                            Click="ChipFilter_Click"
+                            Content="IMG" />
+                        <ToggleButton
+                            x:Name="ChipUrl"
+                            Click="ChipFilter_Click"
+                            Content="URL" />
+                        <ToggleButton
+                            x:Name="ChipRecent"
+                            Click="ChipFilter_Click"
+                            Content="Recientes" />
+                        <ToggleButton
+                            x:Name="ChipBookmarks"
+                            Click="ChipFilter_Click"
+                            Content="⭐ Favoritos" />
+                        <ToggleButton
+                            x:Name="ChipFolders"
+                            Click="ChipFilter_Click"
+                            Content="Solo carpetas" />
+                    </StackPanel>
+
                 </Grid>
             </Grid>
         </Border>
@@ -415,7 +414,7 @@
                                                             Grid.Column="0"
                                                             VerticalAlignment="Center"
                                                             FontWeight="SemiBold"
-                                                            Text="Comandos Guardados" />
+                                                            Text="Comandos" />
 
                                                         <Button
                                                             Grid.Column="1"
@@ -652,8 +651,8 @@
 
                             <Button
                                 x:Name="BtnSpeechPrev"
-                                Width="30"
-                                Height="30"
+                                Width="27"
+                                Height="27"
                                 Padding="0"
                                 Click="BtnDictPrev_Click"
                                 ToolTipService.ToolTip="Anterior">
@@ -662,28 +661,17 @@
 
                             <Button
                                 x:Name="BtnSpeechPlay"
-                                Width="30"
-                                Height="30"
+                                Width="27"
+                                Height="27"
                                 Padding="0"
                                 Click="BtnDictPlay_Click"
                                 ToolTipService.ToolTip="Reproducir">
                                 <SymbolIcon Symbol="Play" />
                             </Button>
-
-                            <Button
-                                x:Name="BtnSpeechPause"
-                                Width="30"
-                                Height="30"
-                                Padding="0"
-                                Click="BtnDictPause_Click"
-                                ToolTipService.ToolTip="Pausar">
-                                <SymbolIcon Symbol="Pause" />
-                            </Button>
-
                             <Button
                                 x:Name="BtnSpeechNext"
-                                Width="30"
-                                Height="30"
+                                Width="27"
+                                Height="27"
                                 Padding="0"
                                 Click="BtnDictNext_Click"
                                 ToolTipService.ToolTip="Siguiente">
@@ -724,7 +712,7 @@
 
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="models:SearchResultRow">
-                                    <Grid Padding="10" ColumnSpacing="10">
+                                    <Grid Padding="6" ColumnSpacing="8">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -737,8 +725,8 @@
                                             Spacing="10">
 
                                             <IconSourceElement
-                                                Width="18"
-                                                Height="18"
+                                                Width="16"
+                                                Height="16"
                                                 IconSource="{x:Bind Icon, Mode=OneWay}" />
 
                                             <TextBlock
@@ -834,7 +822,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="180" />
+                        <RowDefinition Height="150" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
@@ -856,7 +844,7 @@
 
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid Padding="8" ColumnSpacing="8">
+                                <Grid Padding="6" ColumnSpacing="8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -920,19 +908,6 @@
                             </StackPanel>
                         </Border>
 
-                        <Border
-                            Padding="10"
-                            Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
-                            CornerRadius="10">
-                            <StackPanel Spacing="6">
-                                <TextBlock FontWeight="SemiBold" Text="Notion relacionado" />
-                                <TextBlock
-                                    x:Name="DetailsNotion"
-                                    Opacity="0.75"
-                                    Text="—"
-                                    TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
                     </StackPanel>
 
                     <Grid Grid.Row="5" ColumnSpacing="8">
@@ -942,18 +917,10 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-
-                        <TextBlock
-                            x:Name="DetailsHint"
-                            Grid.Column="0"
-                            VerticalAlignment="Center"
-                            Opacity="0.6"
-                            Text="Acciones disponibles" />
-
                         <Button
                             Grid.Column="1"
                             Click="CtxOpen_Click"
-                            Content="Abrir Web" />
+                            Content="Abrir" />
 
                         <Button
                             Grid.Column="2"

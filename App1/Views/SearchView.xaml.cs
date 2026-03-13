@@ -50,6 +50,7 @@ namespace Anfeta.UI.Views
         // enums
         private enum ViewMode { Explorer, Bookmarks }
         private ViewMode _mode = ViewMode.Explorer;
+        private bool _isUpdatingFilterCombo;
         // Win32 file attributes (Dropbox / OneDrive placeholders)
         private const int FILE_ATTRIBUTE_OFFLINE = 0x00001000;
         private const int FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000;
@@ -560,7 +561,7 @@ namespace Anfeta.UI.Views
             DetailsTitle.Text = "Selecciona un elemento";
             DetailsPath.Text = "—";
             DetailsMeta.Text = "—";
-            DetailsNotion.Text = "—";
+            
         }
         private void FinishUi()
         {
@@ -1423,6 +1424,125 @@ namespace Anfeta.UI.Views
 
             FinishUi();
         }
+        private async void FilterTypeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isUpdatingFilterCombo)
+                return;
+
+            if (FilterTypeCombo.SelectedItem is not ComboBoxItem item)
+                return;
+
+            var tag = (item.Tag as string ?? "").Trim().ToLowerInvariant();
+
+            _isUpdatingFilterCombo = true;
+            try
+            {
+                // 1) Limpia SIEMPRE el estado real
+                _onlyBookmarks = false;
+                _onlyFolders = false;
+                _extFilter = null;
+                _mode = ViewMode.Explorer;
+
+                // 2) Mantén sincronizados los chips ocultos
+                ChipPdf.IsChecked = false;
+                ChipDocx.IsChecked = false;
+                ChipXlsx.IsChecked = false;
+                ChipImg.IsChecked = false;
+                ChipUrl.IsChecked = false;
+                ChipRecent.IsChecked = false;
+                ChipBookmarks.IsChecked = false;
+                ChipFolders.IsChecked = false;
+
+                // 3) Aplica el filtro elegido
+                switch (tag)
+                {
+                    case "all":
+                        ModeText.Text = "Modo: Explorar";
+
+                        // si hay query, vuelve a buscar normal
+                        var qAll = (SearchBox.Text ?? "").Trim();
+                        if (!string.IsNullOrWhiteSpace(qAll))
+                        {
+                            await RunSearchAsync(qAll);
+                        }
+                        else
+                        {
+                            var folderToShow =
+                                (!string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
+                                    ? _currentFolder
+                                    : DROPBOX_ROOT;
+
+                            if (!string.IsNullOrWhiteSpace(folderToShow) && Directory.Exists(folderToShow))
+                                await BrowseFolderAsync(folderToShow, pushHistory: false);
+                        }
+                        return;
+
+                    case "pdf":
+                        ChipPdf.IsChecked = true;
+                        _extFilter = "pdf";
+                        break;
+
+                    case "docx":
+                        ChipDocx.IsChecked = true;
+                        _extFilter = "docx";
+                        break;
+
+                    case "xlsx":
+                        ChipXlsx.IsChecked = true;
+                        _extFilter = "xlsx";
+                        break;
+
+                    case "img":
+                        ChipImg.IsChecked = true;
+                        _extFilter = "img";
+                        break;
+
+                    case "url":
+                        ChipUrl.IsChecked = true;
+                        _extFilter = "url";
+                        break;
+
+                    case "bookmarks":
+                        ChipBookmarks.IsChecked = true;
+                        _onlyBookmarks = true;
+                        await ShowBookmarksAsync();
+                        FinishUi();
+                        return;
+
+                    case "folders":
+                        ChipFolders.IsChecked = true;
+                        _onlyFolders = true;
+                        break;
+
+                    case "recent":
+                        // Ahorita ChipRecent no tiene lógica real en tu code-behind.
+                        // Temporalmente lo dejamos como búsqueda normal.
+                        ChipRecent.IsChecked = true;
+                        StatusText.Text = "Estado: filtro 'Recientes' aún no tiene lógica implementada";
+                        break;
+
+                    default:
+                        return;
+                }
+
+                // 4) Refresca usando la lógica real
+                var q = (SearchBox.Text ?? "").Trim();
+
+                if (!string.IsNullOrWhiteSpace(q))
+                {
+                    await RunSearchAsync(q);
+                }
+                else
+                {
+                    await RunLocalSearchAsync("");
+                    FinishUi();
+                }
+            }
+            finally
+            {
+                _isUpdatingFilterCombo = false;
+            }
+        }
         #endregion
         #region ===== Bookmarks =====
         private async Task ShowBookmarksAsync()
@@ -1634,8 +1754,6 @@ namespace Anfeta.UI.Views
                 $"Estado: {(online ? "Online-only (se descarga al abrir)" : "Disponible local")}\n" +
                 $"Tamaño: {(row.Size > 0 ? $"{row.Size / 1024:N0} KB" : "—")}\n" +
                 $"Modificado: {(!string.IsNullOrWhiteSpace(row.ServerModified) ? row.ServerModified : "—")}";
-            // Notion relacionado (si no tienes aún, déjalo en —)
-            DetailsNotion.Text = "—";
 
             if ((row.Type ?? "").Equals("folder", StringComparison.OrdinalIgnoreCase))
                 StatusText.Text = "Estado: Es carpeta (usa acciones de navegación) 📁";
@@ -3066,12 +3184,67 @@ namespace Anfeta.UI.Views
             CommandsExpander.Expanding += (_, __) => SaveSidebarExpandedStates();
             ExcludedExpander.Collapsed += (_, __) => SaveSidebarExpandedStates();
         }
-
         private void SaveSidebarExpandedStates()
         {
             var ls = ApplicationData.Current.LocalSettings.Values;
             ls[LS_CommandsExpanded] = CommandsExpander.IsExpanded;
             ls[LS_ExcludedExpanded] = ExcludedExpander.IsExpanded;
+        }
+        private void CommandRow_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe) return;
+            if (fe.DataContext is not SavedSearch cmd) return;
+
+            var flyout = new MenuFlyout();
+
+            var edit = new MenuFlyoutItem { Text = "Editar" };
+            edit.Click += (_, __) =>
+            {
+                var fakeButton = new Button { Tag = cmd };
+                BtnEditSidebarCommand_Click(fakeButton, new RoutedEventArgs());
+            };
+
+            var delete = new MenuFlyoutItem { Text = "Eliminar" };
+            delete.Click += (_, __) =>
+            {
+                var fakeButton = new Button { Tag = cmd };
+                BtnDeleteSidebarCommand_Click(fakeButton, new RoutedEventArgs());
+            };
+
+            flyout.Items.Add(edit);
+            flyout.Items.Add(delete);
+            flyout.Items.Add(new MenuFlyoutSeparator());
+
+            var deleteAll = new MenuFlyoutItem { Text = "Borrar todos" };
+            deleteAll.Click += async (_, __) =>
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "Borrar todos los comandos",
+                    Content = "¿Seguro que quieres eliminar todos los comandos guardados?",
+                    PrimaryButtonText = "Borrar",
+                    CloseButtonText = "Cancelar",
+                    DefaultButton = ContentDialogButton.Close,
+                    XamlRoot = this.XamlRoot
+                };
+
+                var result = await dialog.ShowAsync();
+                if (result != ContentDialogResult.Primary)
+                    return;
+
+                _savedSearches.Clear();
+                SaveSavedSearches();
+
+                if (CommandsSidebarList != null)
+                    CommandsSidebarList.SelectedItem = null;
+
+                RefreshSavedSearchesUi();
+                StatusText.Text = "Estado: comandos eliminados";
+            };
+
+            flyout.Items.Add(deleteAll);
+
+            flyout.ShowAt(fe, e.GetPosition(fe));
         }
         #endregion
         #region ===== Comandos de voz =====
@@ -4559,7 +4732,7 @@ namespace Anfeta.UI.Views
 
             flyout.ShowAt(fe, e.GetPosition(fe));
         }
-        private void CommandRow_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
+        private void SavedCommandRow_RightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
         {
             if (sender is not FrameworkElement fe) return;
             var command = fe.DataContext;
