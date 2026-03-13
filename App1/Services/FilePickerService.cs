@@ -28,5 +28,24 @@ namespace Anfeta.UI.Services
             var file = await picker.PickSingleFileAsync();
             return file?.Path;
         }
+        public async Task<string?> PickCsvFileAsync()
+        {
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                ViewMode = PickerViewMode.List
+            };
+
+            picker.FileTypeFilter.Add(".csv");
+
+            var window = App.MainWindowInstance
+                ?? throw new InvalidOperationException("MainWindowInstance no está disponible.");
+
+            var hwnd = WindowNative.GetWindowHandle(window);
+            InitializeWithWindow.Initialize(picker, hwnd);
+
+            var file = await picker.PickSingleFileAsync();
+            return file?.Path;
+        }
     }
 }

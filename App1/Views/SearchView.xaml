@@ -4,837 +4,1226 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:models="using:Anfeta.UI.Models.Weblab"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:searchModels="using:Anfeta.UI.Models.Search"
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
-    <Grid
-        x:Name="RootLayout"
-        Padding="16"
-        RowSpacing="12">
+    <Grid x:Name="RootLayout" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="42" />
+            <!--  Row 0 TopBar  -->
+            <RowDefinition Height="32" />
+            <!--  Row 1 ChipStrip  -->
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
+            <!--  Row 2 Body  -->
+            <RowDefinition Height="22" />
+            <!--  Row 3 StatusBar  -->
         </Grid.RowDefinitions>
-        <!--  HEADER  -->
-        <Border
+
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            ROW 0 · TOP BAR
+            ═══════════════════════════════════════════════════════
+        -->
+        <Grid
             Grid.Row="0"
-            Padding="12"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            CornerRadius="12">
-            <Grid RowSpacing="10">
-                <Grid.RowDefinitions>
-                    <!--  Search controls  -->
-                    <RowDefinition Height="Auto" />
-                    <!--  Chips + sort  -->
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            Padding="8,0"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1"
+            ColumnSpacing="6">
 
-                <!--  ROW 0: Search + controls  -->
-                <Grid Grid.Row="0" ColumnSpacing="10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <!--  Carpetas  -->
-                        <ColumnDefinition Width="*" />
-                        <!--  Search  -->
-                        <ColumnDefinition Width="Auto" />
-                        <!--  VOZ  -->
-                        <ColumnDefinition Width="Auto" />
-                        <!--  Ayuda  -->
-                        <ColumnDefinition Width="Auto" />
-                        <!--  Voz  -->
-                        <ColumnDefinition Width="Auto" />
-                        <!--  Detalles  -->
-                    </Grid.ColumnDefinitions>
-                    <!--  Carpetas  -->
-                    <ToggleButton
-                        x:Name="ToggleFoldersPane"
-                        Grid.Column="0"
-                        Click="ToggleFoldersPane_Click"
-                        Content="Carpetas"
-                        IsChecked="True"
-                        ToolTipService.ToolTip="Mostrar/ocultar panel de carpetas" />
-                    <!--  Buscador  -->
-                    <AutoSuggestBox
-                        x:Name="SearchBox"
-                        Grid.Column="1"
-                        PlaceholderText="Buscar en Dropbox… (AND / OR / NOT, ext:pdf)"
-                        QueryIcon="Find"
-                        QuerySubmitted="SearchBox_QuerySubmitted"
-                        SuggestionChosen="SearchBox_SuggestionChosen"
-                        TextChanged="SearchBox_TextChanged" />
-                    <!--  VOZ  -->
-                    <Grid Grid.Column="2" Height="36">
-
-                        <muxc:SplitButton
-                            x:Name="VoiceSplit"
-                            Height="36"
-                            MinWidth="72"
-                            Padding="8,0"
-                            HorizontalContentAlignment="Center"
-                            Click="VoiceSplit_Click"
-                            ToolTipService.ToolTip="Voz">
-
-                            <muxc:SplitButton.Content>
-                                <SymbolIcon Symbol="Microphone" />
-                            </muxc:SplitButton.Content>
-
-                            <muxc:SplitButton.Flyout>
-                                <MenuFlyout>
-                                    <MenuFlyoutItem Click="VoiceMenu_Listen_Click" Text="Escuchar ahora" />
-                                    <MenuFlyoutItem Click="VoiceMenu_Config_Click" Text="Configurar comandos de voz…" />
-                                </MenuFlyout>
-                            </muxc:SplitButton.Flyout>
-                        </muxc:SplitButton>
-
-                        <ProgressRing
-                            x:Name="VoiceRing"
-                            Width="16"
-                            Height="16"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsActive="False"
-                            Visibility="Collapsed" />
-                    </Grid>
-                    <!--  AYUDA  -->
-                    <Button
-                        x:Name="BtnHelp"
-                        Grid.Column="3"
-                        Width="34"
-                        Height="34"
-                        Click="MenuHelp_Click"
-                        Content="?"
-                        CornerRadius="8"
-                        FontWeight="SemiBold"
-                        ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
-                    <!--  Notion  -->
-
-                    <!--  Detalles  -->
-                    <ToggleButton
-                        x:Name="ToggleDetailsPane"
-                        Grid.Column="4"
-                        Click="ToggleDetailsPane_Click"
-                        Content="Detalles"
-                        IsChecked="False"
-                        ToolTipService.ToolTip="Mostrar/ocultar panel de detalles" />
-                    <!--  Más  -->
-                </Grid>
-                <!--  ROW 1: Chips + sort  -->
-                <Grid Grid.Row="1" ColumnSpacing="10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <StackPanel
-                        Grid.Column="0"
-                        Orientation="Horizontal"
-                        Spacing="8">
-                        <ToggleButton
-                            x:Name="ChipPdf"
-                            Click="ChipFilter_Click"
-                            Content="PDF" />
-                        <ToggleButton
-                            x:Name="ChipDocx"
-                            Click="ChipFilter_Click"
-                            Content="DOCX" />
-                        <ToggleButton
-                            x:Name="ChipXlsx"
-                            Click="ChipFilter_Click"
-                            Content="XLSX" />
-                        <ToggleButton
-                            x:Name="ChipImg"
-                            Click="ChipFilter_Click"
-                            Content="IMG" />
-                        <ToggleButton
-                            x:Name="ChipUrl"
-                            Click="ChipFilter_Click"
-                            Content="URL" />
-                        <ToggleButton
-                            x:Name="ChipRecent"
-                            Click="ChipFilter_Click"
-                            Content="Recientes" />
-                        <ToggleButton
-                            x:Name="ChipBookmarks"
-                            Click="ChipFilter_Click"
-                            Content="⭐ Bookmarks" />
-                        <ToggleButton
-                            x:Name="ChipFolders"
-                            Click="ChipFilter_Click"
-                            Content="Solo carpetas" />
-                    </StackPanel>
-                    <ComboBox
-                        x:Name="SortCombo"
-                        Grid.Column="1"
-                        Width="190"
-                        PlaceholderText="Ordenar por"
-                        SelectionChanged="SortCombo_SelectionChanged">
-                        <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
-                        <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
-                        <ComboBoxItem Content="Modificado (nuevo)" Tag="mod_desc" />
-                        <ComboBoxItem Content="Modificado (antiguo)" Tag="mod_asc" />
-                        <ComboBoxItem Content="Tamaño (mayor)" Tag="size_desc" />
-                        <ComboBoxItem Content="Tamaño (menor)" Tag="size_asc" />
-                    </ComboBox>
-                </Grid>
-            </Grid>
-        </Border>
-        <!--  BODY  -->
-        <Grid Grid.Row="1" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="FoldersPaneCol" Width="320" />
                 <ColumnDefinition Width="*" />
-                <!--  NEW: Details col (colapsable)  -->
-                <ColumnDefinition x:Name="DetailsCol" Width="0" />
+                <!--  SearchBox  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Micrófono  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Ayuda ?  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Separador  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Toggle Filtros  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Toggle Detalles  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Separador  -->
+                <ColumnDefinition Width="160" />
+                <!--  SortCombo  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Menú ⋯  -->
             </Grid.ColumnDefinitions>
-            <!--  LEFT: Folders  -->
+
+            <!--  Búsqueda  -->
+            <AutoSuggestBox
+                x:Name="SearchBox"
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                PlaceholderText="Buscar en Dropbox... (AND / OR / NOT, ext:pdf)"
+                QueryIcon="Find"
+                QuerySubmitted="SearchBox_QuerySubmitted"
+                TextChanged="SearchBox_TextChanged" />
+
+            <!--  Micrófono  -->
+            <Grid
+                Grid.Column="1"
+                Width="42"
+                Height="32"
+                VerticalAlignment="Center">
+                <muxc:SplitButton
+                    x:Name="VoiceSplit"
+                    Height="32"
+                    Padding="6,0"
+                    HorizontalContentAlignment="Center"
+                    Click="VoiceSplit_Click"
+                    CornerRadius="6"
+                    ToolTipService.ToolTip="Voz">
+                    <muxc:SplitButton.Content>
+                        <SymbolIcon Symbol="Microphone" />
+                    </muxc:SplitButton.Content>
+                    <muxc:SplitButton.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Click="VoiceMenu_Listen_Click" Text="Escuchar ahora" />
+                            <MenuFlyoutItem Click="VoiceMenu_Config_Click" Text="Configurar comandos de voz..." />
+                        </MenuFlyout>
+                    </muxc:SplitButton.Flyout>
+                </muxc:SplitButton>
+                <ProgressRing
+                    x:Name="VoiceRing"
+                    Width="14"
+                    Height="14"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    IsActive="False"
+                    Visibility="Collapsed" />
+            </Grid>
+
+            <!--  Ayuda  -->
+            <Button
+                x:Name="BtnHelp"
+                Grid.Column="2"
+                Width="32"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="MenuHelp_Click"
+                Content="?"
+                CornerRadius="6"
+                FontWeight="SemiBold"
+                ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
+
+            <!--  Sep  -->
+            <Border
+                Grid.Column="3"
+                Width="1"
+                Height="18"
+                VerticalAlignment="Center"
+                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+            <!--  Toggle Filtros (panel izq)  -->
+            <ToggleButton
+                x:Name="ToggleFoldersPane"
+                Grid.Column="4"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="ToggleFoldersPane_Click"
+                Content="Filtros"
+                CornerRadius="6"
+                IsChecked="True"
+                ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
+
+            <!--  Toggle Detalles (panel der)  -->
+            <ToggleButton
+                x:Name="ToggleDetailsPane"
+                Grid.Column="5"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="ToggleDetailsPane_Click"
+                Content="Detalles"
+                CornerRadius="6"
+                IsChecked="True"
+                ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
+
+            <!--  Sep  -->
+            <Border
+                Grid.Column="6"
+                Width="1"
+                Height="18"
+                VerticalAlignment="Center"
+                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+            <!--  Ordenar por  -->
+            <ComboBox
+                x:Name="SortCombo"
+                Grid.Column="7"
+                Height="32"
+                VerticalAlignment="Center"
+                PlaceholderText="Ordenar por"
+                SelectionChanged="SortCombo_SelectionChanged">
+                <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
+                <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
+                <ComboBoxItem Content="Modificado (nuevo)" Tag="mod_desc" />
+                <ComboBoxItem Content="Modificado (antiguo)" Tag="mod_asc" />
+                <ComboBoxItem Content="Tamaño (mayor)" Tag="size_desc" />
+                <ComboBoxItem Content="Tamaño (menor)" Tag="size_asc" />
+            </ComboBox>
+
+            <!--  Menú ⋯  -->
+            <Button
+                Grid.Column="8"
+                Width="36"
+                Height="32"
+                VerticalAlignment="Center"
+                Content="⋯"
+                CornerRadius="6">
+                <Button.Flyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Click="NewSavedFilter_Click" Text="Nuevo filtro" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Click="ImportFiltersCsv_Click" Text="Importar CSV" />
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
+
+        </Grid>
+
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            ROW 1 · CHIP STRIP
+            Chips visibles. FilterTypeCombo eliminado (redundante).
+            Los chips ocultos (Visibility=Collapsed) se conservan
+            como fallback para el code-behind si los necesita.
+            ═══════════════════════════════════════════════════════
+        -->
+        <Grid
+            Grid.Row="1"
+            Padding="8,0"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1">
+
+            <!--  Chips visibles en una WrapPanel horizontal  -->
+            <StackPanel
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="4">
+
+                <ToggleButton
+                    x:Name="ChipPdf"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="PDF"
+                    CornerRadius="11" />
+
+                <ToggleButton
+                    x:Name="ChipDocx"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="DOCX"
+                    CornerRadius="11" />
+
+                <ToggleButton
+                    x:Name="ChipXlsx"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="XLSX"
+                    CornerRadius="11" />
+
+                <ToggleButton
+                    x:Name="ChipImg"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="IMG"
+                    CornerRadius="11" />
+
+                <ToggleButton
+                    x:Name="ChipUrl"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="URL"
+                    CornerRadius="11" />
+
+                <!--  Separador visual  -->
+                <Border
+                    Width="1"
+                    Height="14"
+                    Margin="4,0"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                <ToggleButton
+                    x:Name="ChipBookmarks"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="⭐ Favoritos"
+                    CornerRadius="11" />
+
+                <ToggleButton
+                    x:Name="ChipRecent"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="Recientes"
+                    CornerRadius="11" />
+
+                <ToggleButton
+                    x:Name="ChipFolders"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="Solo carpetas"
+                    CornerRadius="11" />
+
+            </StackPanel>
+
+            <!--
+                FilterTypeCombo se conserva con Visibility=Collapsed
+                para que el code-behind que lo referencia no rompa.
+                Ya no se muestra porque los chips lo reemplazan.
+            -->
+            <ComboBox
+                x:Name="FilterTypeCombo"
+                SelectionChanged="FilterTypeCombo_SelectionChanged"
+                Visibility="Collapsed">
+                <ComboBoxItem Content="Todo" Tag="all" />
+                <ComboBoxItem Content="PDF" Tag="pdf" />
+                <ComboBoxItem Content="DOCX" Tag="docx" />
+                <ComboBoxItem Content="XLSX" Tag="xlsx" />
+                <ComboBoxItem Content="IMG" Tag="img" />
+                <ComboBoxItem Content="URL" Tag="url" />
+                <ComboBoxItem Content="Recientes" Tag="recent" />
+                <ComboBoxItem Content="Favoritos" Tag="bookmarks" />
+                <ComboBoxItem Content="Solo carpetas" Tag="folders" />
+            </ComboBox>
+
+        </Grid>
+
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            ROW 2 · BODY   Left | div | Center | div | Right
+            ═══════════════════════════════════════════════════════
+        -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="FoldersPaneCol" Width="220" />
+                <ColumnDefinition Width="1" />
+                <!--  div izq-centro  -->
+                <ColumnDefinition Width="*" />
+                <!--  Centro  -->
+                <ColumnDefinition Width="1" />
+                <!--  div centro-der  -->
+                <ColumnDefinition x:Name="DetailsCol" Width="210" />
+            </Grid.ColumnDefinitions>
+
+            <!--  Divisores verticales  -->
+            <Border Grid.Column="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            <Border Grid.Column="3" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+
+            <!--  ── LEFT PANEL ───────────────────────────────────  -->
             <Border
                 x:Name="FoldersPane"
                 Grid.Column="0"
-                Padding="12"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                CornerRadius="12">
+                Background="{ThemeResource LayerFillColorDefaultBrush}">
 
-                <Grid RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
 
-                    <!--  Título  -->
-                    <TextBlock
-                        Grid.Row="0"
-                        FontWeight="SemiBold"
-                        Text="Carpetas" />
+                        <!--  FILTROS GUARDADOS  -->
+                        <Grid x:Name="SavedFiltersExpander">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                    <!--  Árbol  -->
-                    <Grid Grid.Row="1">
-                        <TreeView
-                            x:Name="FolderTree"
-                            Expanding="FolderTree_Expanding"
-                            ItemInvoked="FolderTree_ItemInvoked">
-                            <TreeView.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Name}" />
-                                </DataTemplate>
-                            </TreeView.ItemTemplate>
-                        </TreeView>
-
-                        <StackPanel
-                            x:Name="EmptyTreeHint"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsHitTestVisible="False"
-                            Opacity="0.65"
-                            Spacing="6">
-                            <TextBlock FontWeight="SemiBold" Text="Sin árbol cargado" />
-                            <TextBlock
-                                MaxWidth="220"
-                                Text="Pulsa “Actualizar” para cargar carpetas"
-                                TextAlignment="Center"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Grid>
-
-                    <!--  ===== Row 2: Comandos (colapsable) =====  -->
-                    <Border
-                        Grid.Row="2"
-                        Padding="0"
-                        Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
-                        CornerRadius="10">
-
-                        <muxc:Expander x:Name="CommandsExpander" IsExpanded="True">
-
-                            <muxc:Expander.Header>
-                                <Grid
-                                    Margin="2,4,2,4"
+                            <!--  Header  -->
+                            <Grid
+                                Grid.Row="0"
+                                Height="30"
+                                Padding="10,0"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                BorderThickness="0,0,0,1"
+                                ColumnSpacing="6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
                                     VerticalAlignment="Center"
-                                    ColumnSpacing="8">
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Opacity="0.55"
+                                    Text="FILTROS GUARDADOS" />
+                                <Button
+                                    Grid.Column="1"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    HorizontalContentAlignment="Center"
+                                    VerticalContentAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Click="NewSavedFilter_Click"
+                                    ToolTipService.ToolTip="Nuevo filtro guardado">
+                                    <Viewbox
+                                        Width="12"
+                                        Height="12"
+                                        Stretch="Uniform">
+                                        <SymbolIcon Symbol="Add" />
+                                    </Viewbox>
+                                </Button>
+                            </Grid>
+
+                            <!--  Lista — MaxHeight limita a ~7 items, el resto con scroll  -->
+                            <ListView
+                                x:Name="SavedFiltersList"
+                                Grid.Row="1"
+                                MaxHeight="200"
+                                Padding="0"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                BorderThickness="0"
+                                IsItemClickEnabled="True"
+                                ItemClick="SavedFiltersList_ItemClick"
+                                ItemsSource="{x:Bind _savedFilters, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="Padding" Value="10,0" />
+                                        <Setter Property="MinHeight" Value="28" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="searchModels:SavedSearchFilter">
+                                        <Grid
+                                            MinHeight="28"
+                                            HorizontalAlignment="Stretch"
+                                            RightTapped="SavedFilter_RightTapped">
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                FontSize="12"
+                                                MaxLines="1"
+                                                Text="{x:Bind Name}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <!--  Hint vacío  -->
+                            <TextBlock
+                                x:Name="SavedFiltersEmptyHint"
+                                Grid.Row="2"
+                                Margin="10,6,0,8"
+                                FontSize="11"
+                                Opacity="0.5"
+                                Text="Aún no hay filtros guardados"
+                                Visibility="Collapsed" />
+                        </Grid>
+
+                        <!--  MÁS OPCIONES  -->
+                        <muxc:Expander
+                            x:Name="MoreOptionsExpander"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            IsExpanded="False">
+                            <muxc:Expander.Header>
+                                <TextBlock
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Opacity="0.55"
+                                    Text="MÁS OPCIONES" />
+                            </muxc:Expander.Header>
+
+                            <StackPanel>
+
+                                <!--  CARPETAS  -->
+                                <muxc:Expander
+                                    x:Name="FoldersTreeExpander"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    IsExpanded="False">
+                                    <muxc:Expander.Header>
+                                        <TextBlock
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Text="Carpetas" />
+                                    </muxc:Expander.Header>
+                                    <StackPanel Padding="8" Spacing="6">
+                                        <Grid ColumnSpacing="6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="1*" />
+                                                <ColumnDefinition Width="1*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button
+                                                Grid.Column="0"
+                                                Height="30"
+                                                Click="BtnRefreshTree_Click"
+                                                Content="Actualizar"
+                                                CornerRadius="6"
+                                                FontSize="12" />
+                                            <Button
+                                                Grid.Column="1"
+                                                Height="30"
+                                                Click="BtnGoRoot_Click"
+                                                Content="Inicio (/)"
+                                                CornerRadius="6"
+                                                FontSize="12" />
+                                        </Grid>
+                                        <TreeView
+                                            x:Name="FolderTree"
+                                            Expanding="FolderTree_Expanding"
+                                            ItemInvoked="FolderTree_ItemInvoked">
+                                            <TreeView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock FontSize="12" Text="{Binding Name}" />
+                                                </DataTemplate>
+                                            </TreeView.ItemTemplate>
+                                        </TreeView>
+                                        <StackPanel
+                                            x:Name="EmptyTreeHint"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            IsHitTestVisible="False"
+                                            Opacity="0.55"
+                                            Spacing="4">
+                                            <TextBlock
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Text="Sin árbol cargado" />
+                                            <TextBlock
+                                                MaxWidth="180"
+                                                FontSize="11"
+                                                Text="Pulsa &quot;Actualizar&quot; para cargar carpetas"
+                                                TextAlignment="Center"
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </muxc:Expander>
+
+                                <!--  COMANDOS GUARDADOS  -->
+                                <muxc:Expander
+                                    x:Name="CommandsExpander"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    IsExpanded="False">
+                                    <muxc:Expander.Header>
+                                        <Grid ColumnSpacing="6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                VerticalAlignment="Center"
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Text="Comandos" />
+                                            <Button
+                                                Grid.Column="1"
+                                                Width="28"
+                                                Height="28"
+                                                Padding="0"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalContentAlignment="Center"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Click="BtnQuickSaveCommand_Click"
+                                                ToolTipService.ToolTip="Guardar búsqueda actual como comando">
+                                                <Viewbox
+                                                    Width="12"
+                                                    Height="12"
+                                                    Stretch="Uniform">
+                                                    <SymbolIcon Symbol="Add" />
+                                                </Viewbox>
+                                            </Button>
+                                        </Grid>
+                                    </muxc:Expander.Header>
+                                    <StackPanel>
+                                        <ListView
+                                            x:Name="CommandsSidebarList"
+                                            MaxHeight="180"
+                                            Padding="0"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            BorderThickness="0"
+                                            IsItemClickEnabled="True"
+                                            ItemClick="CommandsSidebarList_ItemClick"
+                                            SelectionChanged="CommandsSidebarList_SelectionChanged"
+                                            SelectionMode="Single">
+                                            <ListView.ItemContainerStyle>
+                                                <Style TargetType="ListViewItem">
+                                                    <Setter Property="Padding" Value="10,0" />
+                                                    <Setter Property="MinHeight" Value="32" />
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                </Style>
+                                            </ListView.ItemContainerStyle>
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid MinHeight="32" RightTapped="CommandRow_RightTapped">
+                                                        <StackPanel VerticalAlignment="Center" Spacing="1">
+                                                            <TextBlock
+                                                                FontSize="12"
+                                                                FontWeight="SemiBold"
+                                                                MaxLines="1"
+                                                                Text="{Binding Title}"
+                                                                TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock
+                                                                FontSize="11"
+                                                                MaxLines="1"
+                                                                Opacity="0.55"
+                                                                Text="{Binding Query}"
+                                                                TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+                                        <TextBlock
+                                            x:Name="CommandsSidebarEmptyHint"
+                                            Margin="10,4,0,6"
+                                            FontSize="11"
+                                            Opacity="0.5"
+                                            Text="Aún no hay comandos" />
+                                    </StackPanel>
+                                </muxc:Expander>
+
+                                <!--  CARPETAS EXCLUIDAS  -->
+                                <muxc:Expander
+                                    x:Name="ExcludedExpander"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    IsExpanded="False">
+                                    <muxc:Expander.Header>
+                                        <TextBlock
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Text="Carpetas excluidas" />
+                                    </muxc:Expander.Header>
+                                    <StackPanel Padding="8" Spacing="6">
+                                        <Grid ColumnSpacing="6" RowSpacing="6">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="1*" />
+                                                <ColumnDefinition Width="1*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button
+                                                Grid.Row="0"
+                                                Grid.Column="0"
+                                                Height="30"
+                                                HorizontalAlignment="Stretch"
+                                                Click="BtnRefreshTree_Click"
+                                                Content="Actualizar"
+                                                CornerRadius="6"
+                                                FontSize="12" />
+                                            <Button
+                                                Grid.Row="0"
+                                                Grid.Column="1"
+                                                Height="30"
+                                                HorizontalAlignment="Stretch"
+                                                Click="BtnGoRoot_Click"
+                                                Content="Inicio (/)"
+                                                CornerRadius="6"
+                                                FontSize="12" />
+                                            <Button
+                                                Grid.Row="1"
+                                                Grid.Column="0"
+                                                Grid.ColumnSpan="2"
+                                                Height="30"
+                                                HorizontalAlignment="Stretch"
+                                                Click="BtnAddExcludedFolder_Click"
+                                                Content="Excluir carpeta..."
+                                                CornerRadius="6"
+                                                FontSize="12" />
+                                        </Grid>
+                                        <ListView
+                                            x:Name="ExcludedFoldersList"
+                                            MaxHeight="100"
+                                            SelectionMode="None">
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Height="28" ColumnSpacing="6">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock
+                                                            Grid.Column="0"
+                                                            VerticalAlignment="Center"
+                                                            FontSize="11"
+                                                            Opacity="0.8"
+                                                            Text="{Binding}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                        <Button
+                                                            Grid.Column="1"
+                                                            Width="22"
+                                                            Height="22"
+                                                            Padding="0"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center"
+                                                            Click="BtnRemoveExcludedFolder_Click"
+                                                            Tag="{Binding}"
+                                                            ToolTipService.ToolTip="Quitar exclusión">
+                                                            <Viewbox
+                                                                Width="10"
+                                                                Height="10"
+                                                                Stretch="Uniform">
+                                                                <SymbolIcon Symbol="Cancel" />
+                                                            </Viewbox>
+                                                        </Button>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+                                        <TextBlock
+                                            x:Name="ExcludedHint"
+                                            FontSize="11"
+                                            Opacity="0.5"
+                                            Text="No hay carpetas excluidas" />
+                                    </StackPanel>
+                                </muxc:Expander>
+
+                            </StackPanel>
+                        </muxc:Expander>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+
+            <!--  ── CENTER PANEL ──────────────────────────────────  -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="30" />
+                    <!--  Cabecera: breadcrumb + voz  -->
+                    <RowDefinition Height="*" />
+                    <!--  Lista de resultados  -->
+                    <RowDefinition Height="30" />
+                    <!--  Paginación  -->
+                </Grid.RowDefinitions>
+
+                <!--  Cabecera: breadcrumb izq · controles voz der  -->
+                <Grid
+                    Grid.Row="0"
+                    Padding="10,0"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,0,1"
+                    ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!--  Ruta  -->
+                    <StackPanel
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="4">
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="11"
+                            Opacity="0.5"
+                            Text="Ruta:" />
+                        <TextBlock
+                            x:Name="BreadcrumbText"
+                            VerticalAlignment="Center"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Text="/" />
+                    </StackPanel>
+
+                    <!--  Controles lectura por voz  -->
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="4">
+                        <Button
+                            x:Name="BtnSpeechPrev"
+                            Width="24"
+                            Height="24"
+                            Padding="0"
+                            Click="BtnDictPrev_Click"
+                            CornerRadius="5"
+                            ToolTipService.ToolTip="Anterior">
+                            <SymbolIcon Symbol="Back" />
+                        </Button>
+                        <ToggleButton
+                            x:Name="BtnSpeechPlay"
+                            Width="24"
+                            Height="24"
+                            Padding="0"
+                            Click="BtnDictPlayPause_Click"
+                            CornerRadius="5"
+                            ToolTipService.ToolTip="Reproducir / Pausar">
+                            <SymbolIcon x:Name="BtnSpeechPlayIcon" Symbol="Play" />
+                        </ToggleButton>
+                        <Button
+                            x:Name="BtnSpeechNext"
+                            Width="24"
+                            Height="24"
+                            Padding="0"
+                            Click="BtnDictNext_Click"
+                            CornerRadius="5"
+                            ToolTipService.ToolTip="Siguiente">
+                            <SymbolIcon Symbol="Forward" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!--  Lista de resultados  -->
+                <Grid Grid.Row="1">
+                    <ProgressRing
+                        x:Name="LoadingRing"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        IsActive="False"
+                        Visibility="Collapsed" />
+
+                    <ListView
+                        x:Name="ResultsList"
+                        DoubleTapped="ResultsList_DoubleTapped"
+                        RightTapped="ResultsList_RightTapped"
+                        SelectionChanged="ResultsList_SelectionChanged"
+                        SelectionMode="Single">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="Padding" Value="10,0" />
+                                <Setter Property="MinHeight" Value="26" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="BorderBrush" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:SearchResultRow">
+                                <Grid Height="26" ColumnSpacing="6">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-
-                                    <!--  Título  -->
-                                    <TextBlock
+                                    <StackPanel
                                         Grid.Column="0"
                                         VerticalAlignment="Center"
-                                        FontWeight="SemiBold"
-                                        Text="Comandos Guardados" />
-
-                                    <!--  Botón agregar (separado del título)  -->
+                                        Orientation="Horizontal"
+                                        Spacing="7">
+                                        <IconSourceElement
+                                            Width="14"
+                                            Height="14"
+                                            IconSource="{x:Bind Icon, Mode=OneWay}" />
+                                        <TextBlock
+                                            x:Name="NameText"
+                                            VerticalAlignment="Center"
+                                            DataContextChanged="NameText_DataContextChanged"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
                                     <Button
                                         Grid.Column="1"
-                                        Width="36"
-                                        Height="32"
-                                        Margin="0,0,6,0"
+                                        Width="28"
+                                        Height="22"
                                         Padding="0"
                                         HorizontalContentAlignment="Center"
                                         VerticalContentAlignment="Center"
                                         Background="Transparent"
-                                        Click="BtnQuickSaveCommand_Click"
-                                        ToolTipService.ToolTip="Guardar la búsqueda actual como comando">
-
-                                        <Viewbox
-                                            Width="16"
-                                            Height="16"
-                                            Stretch="Uniform">
-                                            <SymbolIcon Symbol="Add" />
-                                        </Viewbox>
-                                    </Button>
-                                    <Grid Grid.Column="2" Width="1" />
+                                        BorderThickness="0"
+                                        Click="BtnStar_Click"
+                                        Content="{x:Bind StarGlyph, Mode=OneWay}"
+                                        FontSize="11"
+                                        Tag="{x:Bind}"
+                                        ToolTipService.ToolTip="Agregar / quitar Favorito" />
                                 </Grid>
-                            </muxc:Expander.Header>
-                            <StackPanel Padding="8" Spacing="6">
-
-                                <ListView
-                                    x:Name="CommandsSidebarList"
-                                    MaxHeight="160"
-                                    Padding="2"
-                                    BorderThickness="1"
-                                    CornerRadius="8"
-                                    IsItemClickEnabled="True"
-                                    ItemClick="CommandsSidebarList_ItemClick"
-                                    SelectionChanged="CommandsSidebarList_SelectionChanged"
-                                    SelectionMode="Single">
-
-                                    <ListView.ItemTemplate>
-                                        <DataTemplate>
-                                            <Grid ColumnSpacing="8">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-
-                                                <!--  Texto  -->
-                                                <StackPanel Grid.Column="0" Spacing="2">
-                                                    <TextBlock
-                                                        FontWeight="SemiBold"
-                                                        Text="{Binding Title}"
-                                                        TextTrimming="CharacterEllipsis" />
-
-                                                    <TextBlock
-                                                        FontSize="12"
-                                                        Opacity="0.65"
-                                                        Text="{Binding Query}"
-                                                        TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-
-                                                <!--  Acciones  -->
-                                                <StackPanel
-                                                    Grid.Column="1"
-                                                    Orientation="Horizontal"
-                                                    Spacing="7">
-
-                                                    <Button
-                                                        Width="38"
-                                                        Height="32"
-                                                        Padding="0"
-                                                        HorizontalContentAlignment="Center"
-                                                        VerticalContentAlignment="Center"
-                                                        Click="BtnEditSidebarCommand_Click"
-                                                        Tag="{Binding}"
-                                                        ToolTipService.ToolTip="Editar">
-
-                                                        <Viewbox
-                                                            Width="16"
-                                                            Height="16"
-                                                            Stretch="Uniform">
-                                                            <SymbolIcon Symbol="Edit" />
-                                                        </Viewbox>
-                                                    </Button>
-
-
-                                                    <Button
-                                                        Width="38"
-                                                        Height="32"
-                                                        Padding="0"
-                                                        HorizontalContentAlignment="Center"
-                                                        VerticalContentAlignment="Center"
-                                                        Click="BtnDeleteSidebarCommand_Click"
-                                                        Tag="{Binding}"
-                                                        ToolTipService.ToolTip="Eliminar">
-
-                                                        <Viewbox
-                                                            Width="16"
-                                                            Height="16"
-                                                            Stretch="Uniform">
-                                                            <SymbolIcon Symbol="Delete" />
-                                                        </Viewbox>
-                                                    </Button>
-
-                                                </StackPanel>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListView.ItemTemplate>
-                                </ListView>
-
-                                <TextBlock
-                                    x:Name="CommandsSidebarEmptyHint"
-                                    Opacity="0.6"
-                                    Text="Aún no hay comandos" />
-                            </StackPanel>
-                        </muxc:Expander>
-                    </Border>
-
-                    <!--  ===== Zona inferior: Carpetas excluidas (colapsable) =====  -->
-                    <Border
-                        Grid.Row="3"
-                        Padding="0"
-                        HorizontalAlignment="Stretch"
-                        Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
-                        CornerRadius="10">
-
-                        <muxc:Expander
-                            x:Name="ExcludedExpander"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            IsExpanded="True">
-
-                            <muxc:Expander.Header>
-                                <Grid Margin="2,4,2,4">
-                                    <TextBlock FontWeight="SemiBold" Text="Carpetas excluidas" />
-                                </Grid>
-                            </muxc:Expander.Header>
-
-
-                            <StackPanel
-                                Padding="8"
-                                HorizontalAlignment="Stretch"
-                                Spacing="6">
-
-                                <!--  Botones  -->
-                                <Grid
-                                    HorizontalAlignment="Stretch"
-                                    ColumnSpacing="8"
-                                    RowSpacing="8">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="1*" />
-                                        <ColumnDefinition Width="1*" />
-                                    </Grid.ColumnDefinitions>
-
-                                    <!--  Fila 0  -->
-                                    <Button
-                                        Grid.Row="0"
-                                        Grid.Column="0"
-                                        Height="36"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Center"
-                                        Click="BtnRefreshTree_Click"
-                                        Content="Actualizar" />
-
-                                    <Button
-                                        Grid.Row="0"
-                                        Grid.Column="1"
-                                        Height="36"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Center"
-                                        Click="BtnGoRoot_Click"
-                                        Content="Inicio (/)" />
-
-                                    <!--  Fila 1  -->
-                                    <Button
-                                        Grid.Row="1"
-                                        Grid.Column="0"
-                                        Grid.ColumnSpan="2"
-                                        Height="36"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Center"
-                                        Click="BtnAddExcludedFolder_Click"
-                                        Content="Excluir carpeta..." />
-
-                                </Grid>
-
-
-
-                                <!--  Lista exclusiones  -->
-                                <ListView
-                                    x:Name="ExcludedFoldersList"
-                                    MaxHeight="100"
-                                    SelectionMode="None">
-                                    <ListView.ItemTemplate>
-                                        <DataTemplate>
-                                            <Grid ColumnSpacing="6">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock
-                                                    VerticalAlignment="Center"
-                                                    Opacity="0.85"
-                                                    Text="{Binding}"
-                                                    TextTrimming="CharacterEllipsis" />
-                                                <Button
-                                                    Grid.Column="1"
-                                                    Width="26"
-                                                    Height="26"
-                                                    Padding="0"
-                                                    HorizontalContentAlignment="Center"
-                                                    VerticalContentAlignment="Center"
-                                                    Click="BtnRemoveExcludedFolder_Click"
-                                                    Tag="{Binding}"
-                                                    ToolTipService.ToolTip="Quitar exclusión">
-
-                                                    <Viewbox
-                                                        Width="12"
-                                                        Height="12"
-                                                        Stretch="Uniform">
-                                                        <SymbolIcon Symbol="Cancel" />
-                                                    </Viewbox>
-                                                </Button>
-
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListView.ItemTemplate>
-                                </ListView>
-                                <!--  Hint  -->
-                                <TextBlock
-                                    x:Name="ExcludedHint"
-                                    Opacity="0.6"
-                                    Text="No hay carpetas excluidas" />
-                            </StackPanel>
-                        </muxc:Expander>
-                    </Border>
-
-                </Grid>
-            </Border>
-
-            <!--  CENTER: Results  -->
-            <Border
-                Grid.Column="1"
-                Padding="12"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                CornerRadius="12">
-                <Grid RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <!--  Breadcrumbs  -->
-                    <StackPanel
-                        Grid.Row="0"
-                        Orientation="Horizontal"
-                        Spacing="6">
-                        <TextBlock Opacity="0.7" Text="Ruta:" />
-                        <TextBlock
-                            x:Name="BreadcrumbText"
-                            FontWeight="SemiBold"
-                            Text="/" />
-                    </StackPanel>
-                    <!--  Header row: SOLO NOMBRE  -->
-                    <Grid
-                        Grid.Row="1"
-                        Padding="6"
-                        Opacity="0.85">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <TextBlock
-                            Grid.Column="0"
-                            FontWeight="SemiBold"
-                            Text="Nombre" />
-
-                        <!--  Dictado  -->
-                        <StackPanel
-                            Grid.Column="1"
-                            Orientation="Vertical"
-                            Spacing="4">
-
-                            <!--  Texto descriptivo  -->
-                            <TextBlock
-                                FontSize="15"
-                                Opacity="1.9"
-                                TextAlignment="Center"
-                                Text="Lectura de resultados" />
-
-                            <!--  Botones  -->
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-
-                                <Button
-                                    x:Name="BtnDictPrev"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Resultado anterior"
-                                    Click="BtnDictPrev_Click">
-                                    <SymbolIcon  Symbol="Back" />
-                                </Button>
-
-                                <Button
-                                    x:Name="BtnDictPlay"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Reproducir lectura Resultados"
-                                    Click="BtnDictPlay_Click">
-                                    <SymbolIcon  Symbol="Play" />
-                                </Button>
-
-                                <Button
-                                    x:Name="BtnDictPause"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Pausar lectura Resultados"
-                                    Click="BtnDictPause_Click">
-                                    <SymbolIcon  Symbol="Pause" />
-                                </Button>
-
-                                <Button
-                                    x:Name="BtnDictNext"
-                                    Width="30"
-                                    Height="26"
-                                    Padding="0"
-                                    ToolTipService.ToolTip="Siguiente Resultado" 
-                                    Click="BtnDictNext_Click">
-                                    <SymbolIcon  Symbol="Forward" />
-                                </Button>
-
-                            </StackPanel>
-
-                        </StackPanel>
-                    </Grid>
-                    <!--  Results list  -->
-                    <Grid Grid.Row="2">
-                        <ProgressRing
-                            x:Name="LoadingRing"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsActive="False"
-                            Visibility="Collapsed" />
-
-                        <ListView
-                            x:Name="ResultsList"
-                            DoubleTapped="ResultsList_DoubleTapped"
-                            RightTapped="ResultsList_RightTapped"
-                            SelectionChanged="ResultsList_SelectionChanged"
-                            SelectionMode="Extended">
-
-                            <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="models:SearchResultRow">
-                                    <Grid Padding="10" ColumnSpacing="10">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <StackPanel
-                                            Grid.Column="0"
-                                            VerticalAlignment="Center"
-                                            Orientation="Horizontal"
-                                            Spacing="10">
-
-                                            <IconSourceElement
-                                                Width="18"
-                                                Height="18"
-                                                IconSource="{x:Bind Icon, Mode=OneWay}" />
-
-                                            <TextBlock
-                                                x:Name="NameText"
-                                                DataContextChanged="NameText_DataContextChanged"
-                                                FontWeight="SemiBold"
-                                                TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                        <!--  ⭐  -->
-                                        <Button
-                                            Grid.Column="1"
-                                            MinWidth="38"
-                                            Click="BtnStar_Click"
-                                            Content="{x:Bind StarGlyph, Mode=OneWay}"
-                                            Tag="{x:Bind}"
-                                            ToolTipService.ToolTip="Agregar / quitar bookmark" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                            <ListView.ContextFlyout>
-                                <MenuFlyout>
-
-                                    <!--  Navegar dentro del buscador  -->
-                                    <MenuFlyoutItem Click="CtxOpenInApp_Click" Text="Abrir en ANFETA" />
-
-                                    <!--  Abrir con Windows  -->
-                                    <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir en Windows" />
-
-                                    <!--  Abrir carpeta en Explorer  -->
-                                    <MenuFlyoutItem Click="CtxOpenPath_Click" Text="Abrir Ubicación (PC)" />
-
-                                    <MenuFlyoutSeparator />
-
-                                    <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar Nombre" />
-                                    <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar Ruta" />
-
-                                    <MenuFlyoutSeparator />
-
-                                    <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
-                                    <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
-
-                                </MenuFlyout>
-                            </ListView.ContextFlyout>
-                        </ListView>
-                        <TextBlock
-                            x:Name="EmptyResultsHint"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsHitTestVisible="False"
-                            Opacity="0.6"
-                            Text="No hay resultados" />
-                    </Grid>
-
-                    <!--  Paging  -->
-                    <Grid Grid.Row="3" ColumnSpacing="10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Button
-                            Grid.Column="0"
-                            Click="BtnPrevPage_Click"
-                            Content="⟨" />
-                        <Button
-                            Grid.Column="1"
-                            Click="BtnNextPage_Click"
-                            Content="⟩" />
-
-                        <TextBlock
-                            x:Name="PageInfoText"
-                            Grid.Column="3"
-                            VerticalAlignment="Center"
-                            Opacity="0.75"
-                            Text="Página 1" />
-
-                        <ComboBox
-                            x:Name="PageSizeCombo"
-                            Grid.Column="4"
-                            Width="110"
-                            PlaceholderText="Tamaño"
-                            SelectionChanged="PageSizeCombo_SelectionChanged">
-                            <ComboBoxItem Content="25" Tag="25" />
-                            <ComboBoxItem Content="50" Tag="50" />
-                            <ComboBoxItem Content="100" Tag="100" />
-                        </ComboBox>
-                    </Grid>
-                </Grid>
-            </Border>
-            <!--  RIGHT: Details panel (COLAPSABLE)  -->
-            <Border
-                x:Name="DetailsPane"
-                Grid.Column="2"
-                Padding="12"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                CornerRadius="12"
-                Visibility="Collapsed">
-
-                <Grid RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                        <ListView.ContextFlyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir" />
+                                <MenuFlyoutItem Click="CtxOpenWeb_Click" Text="Abrir en Explorador Local" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar ruta" />
+                                <MenuFlyoutItem Click="CtxCopyLink_Click" Text="Copiar link" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
+                                <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Click="CtxBookmark_Click" Text="Agregar a Favoritos" />
+                            </MenuFlyout>
+                        </ListView.ContextFlyout>
+                    </ListView>
 
                     <TextBlock
+                        x:Name="EmptyResultsHint"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        IsHitTestVisible="False"
+                        Opacity="0.5"
+                        Text="No hay resultados" />
+                </Grid>
+
+                <!--  Paginación — altura fija 30px para que nunca se corte  -->
+                <Grid
+                    Grid.Row="2"
+                    Padding="8,0"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="0,1,0,0"
+                    ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <!--  Prev  -->
+                        <ColumnDefinition Width="Auto" />
+                        <!--  Next  -->
+                        <ColumnDefinition Width="*" />
+                        <!--  Spacer  -->
+                        <ColumnDefinition Width="Auto" />
+                        <!--  PageInfo  -->
+                        <ColumnDefinition Width="Auto" />
+                        <!--  PageSize  -->
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        Grid.Column="0"
+                        Width="26"
+                        Height="24"
+                        Padding="0"
+                        VerticalAlignment="Center"
+                        Click="BtnPrevPage_Click"
+                        Content="⟨"
+                        CornerRadius="5"
+                        FontSize="13" />
+                    <Button
+                        Grid.Column="1"
+                        Width="26"
+                        Height="24"
+                        Padding="0"
+                        VerticalAlignment="Center"
+                        Click="BtnNextPage_Click"
+                        Content="⟩"
+                        CornerRadius="5"
+                        FontSize="13" />
+
+                    <TextBlock
+                        x:Name="PageInfoText"
+                        Grid.Column="3"
+                        VerticalAlignment="Center"
+                        FontSize="11"
+                        Opacity="0.65"
+                        Text="Página 1" />
+
+                    <ComboBox
+                        x:Name="PageSizeCombo"
+                        Grid.Column="4"
+                        Height="24"
+                        VerticalAlignment="Center"
+                        PlaceholderText="Tamaño"
+                        SelectionChanged="PageSizeCombo_SelectionChanged">
+                        <ComboBoxItem Content="25" Tag="25" />
+                        <ComboBoxItem Content="50" Tag="50" />
+                        <ComboBoxItem Content="100" Tag="100" />
+                    </ComboBox>
+                </Grid>
+
+            </Grid>
+
+
+            <!--  ── RIGHT PANEL ──────────────────────────────────  -->
+            <Border
+                x:Name="DetailsPane"
+                Grid.Column="4"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                Visibility="Visible">
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="30" />
+                        <!--  Header Favoritos  -->
+                        <RowDefinition Height="Auto" />
+                        <!--  Search Favoritos  -->
+                        <RowDefinition Height="140" />
+                        <!--  Lista Favoritos  -->
+                        <RowDefinition Height="30" />
+                        <!--  Header Detalles  -->
+                        <RowDefinition Height="*" />
+                        <!--  Detalles  -->
+                        <RowDefinition Height="38" />
+                        <!--  Acciones  -->
+                    </Grid.RowDefinitions>
+
+                    <!--  Header Favoritos  -->
+                    <Grid
                         Grid.Row="0"
-                        FontWeight="SemiBold"
-                        Text="Detalles" />
-
-                    <StackPanel Grid.Row="1" Spacing="4">
+                        Padding="10,0"
+                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        BorderThickness="0,0,0,1">
                         <TextBlock
-                            x:Name="DetailsTitle"
+                            VerticalAlignment="Center"
+                            FontSize="11"
                             FontWeight="SemiBold"
-                            Text="Selecciona un elemento" />
+                            Opacity="0.55"
+                            Text="FAVORITOS" />
+                    </Grid>
+
+                    <!--  Search Favoritos  -->
+                    <AutoSuggestBox
+                        Grid.Row="1"
+                        Margin="8,5,8,4"
+                        FontSize="12"
+                        PlaceholderText="Search Favoritos" />
+
+                    <!--  Lista Favoritos  -->
+                    <ListView
+                        x:Name="BookmarksList"
+                        Grid.Row="2"
+                        Padding="0"
+                        IsItemClickEnabled="True"
+                        ItemClick="BookmarksList_ItemClick"
+                        ItemsSource="{x:Bind _bookmarks, Mode=OneWay}"
+                        SelectionMode="Single">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="Padding" Value="10,0" />
+                                <Setter Property="MinHeight" Value="32" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Height="32" ColumnSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel
+                                        Grid.Column="0"
+                                        VerticalAlignment="Center"
+                                        Spacing="1">
+                                        <TextBlock
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Text="{Binding Title}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            FontSize="10"
+                                            MaxLines="1"
+                                            Opacity="0.5"
+                                            Text="{Binding LocalPath}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <Button
+                                        Grid.Column="1"
+                                        Width="24"
+                                        Height="24"
+                                        Padding="0"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Click="BtnBookmarkPanelStar_Click"
+                                        Content="★"
+                                        FontSize="11"
+                                        Tag="{Binding LocalPath}"
+                                        ToolTipService.ToolTip="Quitar Favorito" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <!--  Header Detalles  -->
+                    <Grid
+                        Grid.Row="3"
+                        Padding="10,0"
+                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        BorderThickness="0,1,0,1">
                         <TextBlock
-                            x:Name="DetailsPath"
-                            Opacity="0.75"
-                            Text="—"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
+                            VerticalAlignment="Center"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Opacity="0.55"
+                            Text="DETALLES" />
+                    </Grid>
 
-                    <StackPanel Grid.Row="2" Spacing="8">
-                        <Border
-                            Padding="10"
-                            Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
-                            CornerRadius="10">
-                            <StackPanel Spacing="6">
-                                <TextBlock FontWeight="SemiBold" Text="Metadata" />
+                    <!--  Detalles  -->
+                    <ScrollViewer
+                        Grid.Row="4"
+                        Padding="10,8"
+                        VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="8">
+                            <StackPanel Spacing="3">
                                 <TextBlock
-                                    x:Name="DetailsMeta"
-                                    Opacity="0.75"
+                                    x:Name="DetailsTitle"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    Text="Selecciona un elemento"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    x:Name="DetailsPath"
+                                    FontSize="11"
+                                    Opacity="0.6"
                                     Text="—"
                                     TextWrapping="Wrap" />
                             </StackPanel>
-                        </Border>
+                            <Border
+                                Padding="8"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="6">
+                                <StackPanel Spacing="4">
+                                    <TextBlock
+                                        FontSize="11"
+                                        FontWeight="SemiBold"
+                                        Opacity="0.55"
+                                        Text="Metadata" />
+                                    <TextBlock
+                                        x:Name="DetailsMeta"
+                                        FontSize="11"
+                                        Opacity="0.65"
+                                        Text="—"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
 
-                        <Border
-                            Padding="10"
-                            Background="{ThemeResource SystemFillColorNeutralBackgroundBrush}"
-                            CornerRadius="10">
-                            <StackPanel Spacing="6">
-                                <TextBlock FontWeight="SemiBold" Text="Notion relacionado" />
-                                <TextBlock
-                                    x:Name="DetailsNotion"
-                                    Opacity="0.75"
-                                    Text="—"
-                                    TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
+                    <!--  Acciones — altura fija 38px, nunca se corta  -->
+                    <Grid
+                        Grid.Row="5"
+                        Padding="8,0"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        BorderThickness="0,1,0,0"
+                        ColumnSpacing="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            Grid.Column="0"
+                            Height="26"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            Click="CtxOpen_Click"
+                            Content="Abrir"
+                            CornerRadius="6"
+                            FontSize="11" />
+                        <Button
+                            Grid.Column="1"
+                            Height="26"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            Click="BtnDetailsLink_Click"
+                            Content="Ubicación"
+                            CornerRadius="6"
+                            FontSize="11" />
+                        <Button
+                            Grid.Column="2"
+                            Width="28"
+                            Height="26"
+                            Padding="0"
+                            VerticalAlignment="Center"
+                            Content="⋯"
+                            CornerRadius="6"
+                            FontSize="13">
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar..." />
+                                    <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                    </Grid>
+
                 </Grid>
             </Border>
+
         </Grid>
 
-        <!--  FOOTER  -->
-        <Grid Grid.Row="2" ColumnSpacing="12">
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            ROW 3 · STATUS BAR  — altura fija 22px, siempre visible
+            ═══════════════════════════════════════════════════════
+        -->
+        <Grid
+            Grid.Row="3"
+            Padding="10,0"
+            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="0,1,0,0"
+            ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock
-                x:Name="StatusText"
+
+            <StackPanel
                 Grid.Column="0"
-                Opacity="0.7"
-                Text="Estado: Dropbox Local" />
-            <TextBlock
-                x:Name="VoiceDebugText"
-                Grid.Column="0"
-                Margin="0,18,0,0"
-                FontSize="12"
-                Opacity="0.65"
-                Text=""
-                TextTrimming="CharacterEllipsis" />
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="6">
+                <TextBlock
+                    x:Name="StatusText"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Opacity="0.6"
+                    Text="Estado: Dropbox" />
+                <TextBlock
+                    x:Name="VoiceDebugText"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Opacity="0.5"
+                    Text=""
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
             <TextBlock
                 x:Name="ModeText"
                 Grid.Column="1"
-                Margin="0,0,12,0"
-                Opacity="0.7"
+                VerticalAlignment="Center"
+                FontSize="11"
+                Opacity="0.6"
                 Text="Modo: Buscar" />
 
             <TextBlock
                 x:Name="CountText"
                 Grid.Column="2"
-                Opacity="0.7"
+                VerticalAlignment="Center"
+                FontSize="11"
+                Opacity="0.6"
                 Text="0 resultados" />
         </Grid>
+
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            POPUP AYUDA — sin cambios
+            ═══════════════════════════════════════════════════════
+        -->
         <Popup x:Name="HelpPopup" IsLightDismissEnabled="True">
             <Grid
                 Width="{Binding ElementName=RootLayout, Path=ActualWidth}"
                 Height="{Binding ElementName=RootLayout, Path=ActualHeight}"
                 Background="#90000000">
-
                 <Border
                     Width="600"
                     MaxWidth="650"
@@ -844,35 +1233,30 @@
                     VerticalAlignment="Center"
                     Background="#1A110E"
                     CornerRadius="12">
-
                     <Grid RowSpacing="12">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-
                         <TextBlock
                             Grid.Row="0"
                             HorizontalAlignment="Center"
                             FontSize="18"
                             FontWeight="SemiBold"
                             Text="Ayuda · Comandos de búsqueda" />
-
                         <ScrollViewer
                             Grid.Row="1"
                             HorizontalScrollBarVisibility="Disabled"
                             VerticalScrollBarVisibility="Auto">
                             <ContentPresenter x:Name="HelpContentHost" />
                         </ScrollViewer>
-
                         <Button
                             Grid.Row="2"
                             HorizontalAlignment="Right"
                             Click="HelpPopupClose_Click"
                             Content="Cerrar" />
                     </Grid>
-
                 </Border>
             </Grid>
         </Popup>
