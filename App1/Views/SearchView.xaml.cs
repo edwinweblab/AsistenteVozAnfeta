@@ -1641,6 +1641,7 @@ namespace Anfeta.UI.Views
             try
             {
                 _bookmarks = await _bookmarksService.LoadAsync(CancellationToken.None);
+                RefreshBookmarksPanelUi();
                 StatusText.Text = $"Estado: Bookmarks cargados ✅ ({_bookmarks.Count})";
             }
             catch (Exception ex)
@@ -1700,7 +1701,8 @@ namespace Anfeta.UI.Views
                     // 4) UI inmediata
                     row.IsBookmarked = true;
                     StatusText.Text = "Estado: Bookmark guardado ⭐✅";
-                }
+                } 
+                RefreshBookmarksPanelUi();
 
                 // 5) Si estás en vista Bookmarks, repinta la lista
                 if (_mode == ViewMode.Bookmarks)
@@ -1723,17 +1725,90 @@ namespace Anfeta.UI.Views
                 _bookmarksService.RemoveByPath(_bookmarks, path);
                 await _bookmarksService.SaveAsync(_bookmarks, CancellationToken.None);
 
+                RefreshBookmarksPanelUi();            // ← reemplaza el LoadBookmarksAsync() de abajo
+                                                      //   (más rápido: no hace I/O, solo rebindea)
                 StatusText.Text = "Estado: Bookmark eliminado ⭐❌";
 
                 if (_mode == ViewMode.Bookmarks)
                     await ShowBookmarksAsync();
-
-                await LoadBookmarksAsync();
             }
             catch (Exception ex)
             {
                 StatusText.Text = $"Estado: Error bookmark panel → {ex.Message}";
             }
+        }
+        private async void BookmarksList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is not BookmarkItem bm) return;
+
+            var path = (bm.LocalPath ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(path)) return;
+
+            // Carpeta → navega igual que el explorer central
+            if ((bm.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Directory.Exists(path))
+                {
+                    await BrowseFolderAsync(path, pushHistory: true);
+                    StatusText.Text = "Estado: Carpeta abierta desde Favoritos 📁";
+                }
+                else
+                {
+                    StatusText.Text = "Estado: Carpeta no encontrada en local ❗";
+                }
+                return;
+            }
+
+            // Archivo → misma lógica de hidratación de Dropbox que ResultsList
+            try
+            {
+                _cts?.Cancel();
+                _cts = new CancellationTokenSource();
+
+                LoadingRing.IsActive = true;
+                LoadingRing.Visibility = Visibility.Visible;
+
+                if (File.Exists(path) && NeedsHydration(path))
+                {
+                    StatusText.Text = "Estado: Descargando desde Dropbox… ⬇️";
+                    var ok = await EnsureHydratedAsync(path, _cts.Token);
+                    if (!ok)
+                    {
+                        StatusText.Text = "Estado: No se pudo descargar (timeout). Revisa tu conexión.";
+                        return;
+                    }
+                }
+
+                if (!File.Exists(path))
+                {
+                    StatusText.Text = "Estado: Archivo no encontrado en local ❗";
+                    return;
+                }
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true
+                });
+
+                StatusText.Text = "Estado: Favorito abierto ✅";
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error al abrir favorito → {ex.Message}";
+            }
+            finally
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+        }
+        private void RefreshBookmarksPanelUi()
+        {
+            // Mismo truco que usas con ResultsList: null → reasignar
+            BookmarksList.ItemsSource = null;
+            BookmarksList.ItemsSource = _bookmarks;
         }
         #endregion
         #region ===== Results / Details / Open =====
@@ -3246,6 +3321,9 @@ namespace Anfeta.UI.Views
 
             flyout.ShowAt(fe, e.GetPosition(fe));
         }
+        
+
+
         #endregion
         #region ===== Comandos de voz =====
 
@@ -3713,9 +3791,10 @@ namespace Anfeta.UI.Views
             _dictList = rows ?? Array.Empty<SearchResultRow>();
             _dictIndex = 0;
             _dictPlaying = false;
-
-            // si estaba reproduciendo, detenlo
             _dictCts?.Cancel();
+
+            // Resetea el botón visualmente cuando llegan resultados nuevos
+            DispatcherQueue.TryEnqueue(() => UpdatePlayPauseIcon(false));   // ← nueva línea
         }
         private async Task Dictation_SpeakCurrentAsync(CancellationToken ct)
         {
@@ -3817,10 +3896,25 @@ namespace Anfeta.UI.Views
             _dictCts?.Cancel();
 
             try { _dictPlayer?.Pause(); } catch { }
+
+            UpdatePlayPauseIcon(false);   // ← nueva línea
         }
-        private async void BtnDictPlay_Click(object sender, RoutedEventArgs e)
+        private async void BtnDictPlayPause_Click(object sender, RoutedEventArgs e)
         {
-            await Dictation_PlayAsync();
+            if (_dictPlaying)
+            {
+                // Estaba reproduciendo → pausar
+                Dictation_Pause();
+                // UpdatePlayPauseIcon(false) ya lo llama Dictation_Pause()
+            }
+            else
+            {
+                // Estaba pausado → reproducir
+                UpdatePlayPauseIcon(true);
+                await Dictation_PlayAsync();
+                // Al terminar Dictation_PlayAsync (fin de lista), resetea el ícono
+                UpdatePlayPauseIcon(false);
+            }
         }
 
         private void BtnDictPause_Click(object sender, RoutedEventArgs e)
@@ -3832,7 +3926,7 @@ namespace Anfeta.UI.Views
         {
             if (_dictList.Count == 0) return;
 
-            Dictation_Pause();
+            Dictation_Pause();   // ya resetea el ícono
             _dictIndex = Math.Min(_dictIndex + 1, _dictList.Count - 1);
 
             _dictCts?.Cancel();
@@ -3845,13 +3939,26 @@ namespace Anfeta.UI.Views
         {
             if (_dictList.Count == 0) return;
 
-            Dictation_Pause();
+            Dictation_Pause();   // ya resetea el ícono
             _dictIndex = Math.Max(_dictIndex - 1, 0);
 
             _dictCts?.Cancel();
             _dictCts = new CancellationTokenSource();
 
             await Dictation_SpeakCurrentAsync(_dictCts.Token);
+        }
+
+        private void UpdatePlayPauseIcon(bool playing)
+        {
+            // Accede al SymbolIcon via el contenido del ToggleButton
+            if (BtnSpeechPlay.Content is SymbolIcon icon)
+                icon.Symbol = playing ? Symbol.Pause : Symbol.Play;
+
+            BtnSpeechPlay.IsChecked = playing;
+
+            ToolTipService.SetToolTip(
+                BtnSpeechPlay,
+                playing ? "Pausar" : "Reproducir");
         }
         #endregion
 
