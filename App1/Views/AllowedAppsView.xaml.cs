@@ -16,15 +16,12 @@ namespace Anfeta.UI.Views
         {
             InitializeComponent();
 
-            // DI
             VM = App.AppHost.Services.GetRequiredService<AllowedAppsViewModel>();
             DataContext = VM;
 
-            // Cargar al entrar
             _ = VM.LoadAsync();
         }
 
-        // Toggle: habilitar/deshabilitar (ya lo tienes bien)
         private void AllowedToggle_Toggled(object sender, RoutedEventArgs e)
         {
             try
@@ -40,15 +37,17 @@ namespace Anfeta.UI.Views
             }
         }
 
-        // Botón Sinónimos (ya lo tienes bien)
         private async void EditSynonyms_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (sender is Button btn && btn.DataContext is LocalAppEntry app)
+                if (sender is Button btn && btn.Tag is LocalAppEntry app)
                 {
                     await VM.OpenSynonymsDialogAsync(app, this.XamlRoot);
+                    return;
                 }
+
+                Debug.WriteLine("[AllowedAppsView] EditSynonyms_Click: no se encontró LocalAppEntry en Tag.");
             }
             catch (Exception ex)
             {
@@ -56,12 +55,12 @@ namespace Anfeta.UI.Views
             }
         }
 
-        // NUEVO: botón "Re-escanear apps instaladas"
         private async void Rescan_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                await VM.RescanCommand.ExecuteAsync(null);
+                if (VM.RescanCommand != null)
+                    await VM.RescanCommand.ExecuteAsync(null);
             }
             catch (Exception ex)
             {
@@ -69,12 +68,12 @@ namespace Anfeta.UI.Views
             }
         }
 
-        // NUEVO: botón "Agregar manualmente (.exe)" (por ahora placeholder)
         private async void AddManual_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                await VM.AddManualCommand.ExecuteAsync(null);
+                if (VM.AddManualCommand != null)
+                    await VM.AddManualCommand.ExecuteAsync(null);
             }
             catch (Exception ex)
             {
