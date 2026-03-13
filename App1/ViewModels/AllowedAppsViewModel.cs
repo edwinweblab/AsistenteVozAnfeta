@@ -10,8 +10,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Drawing.Printing;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -27,9 +29,33 @@ namespace Anfeta.UI.ViewModels
         private readonly IFilePickerService _filePicker;
 
         public ObservableCollection<LocalAppEntry> AllowedApps { get; } = new();
+        public ObservableCollection<LocalAppEntry> PagedAllowedApps { get; } = new();
+
+        private List<LocalAppEntry> _filteredApps = new();
 
         [ObservableProperty] private bool isLoading;
         [ObservableProperty] private string status = "Listo.";
+        [ObservableProperty] private string searchText = string.Empty;
+        [ObservableProperty] private int currentPage = 1;
+        [ObservableProperty] private int pageSize = 10;
+        [ObservableProperty] private int totalPages = 1;
+        [ObservableProperty] private int totalFilteredItems = 0;
+
+        public string CurrentPageDisplay => $"Página {CurrentPage} de {TotalPages}";
+
+        public string PaginationSummary
+        {
+            get
+            {
+                if (TotalFilteredItems == 0)
+                    return "No hay aplicaciones para mostrar.";
+
+                int start = ((CurrentPage - 1) * PageSize) + 1;
+                int end = Math.Min(CurrentPage * PageSize, TotalFilteredItems);
+
+                return $"Mostrando {start}-{end} de {TotalFilteredItems} aplicaciones";
+            }
+        }
 
         public AllowedAppsViewModel(
             LocalAppsRepository repo,
@@ -43,6 +69,38 @@ namespace Anfeta.UI.ViewModels
             _filePicker = filePicker ?? throw new ArgumentNullException(nameof(filePicker));
         }
 
+        partial void OnSearchTextChanged(string value)
+        {
+            CurrentPage = 1;
+            ApplyFilterAndPagination();
+        }
+
+        partial void OnCurrentPageChanged(int value)
+        {
+            RefreshPagedItems();
+            OnPropertyChanged(nameof(CurrentPageDisplay));
+            OnPropertyChanged(nameof(PaginationSummary));
+        }
+
+        partial void OnTotalPagesChanged(int value)
+        {
+            OnPropertyChanged(nameof(CurrentPageDisplay));
+        }
+
+        partial void OnTotalFilteredItemsChanged(int value)
+        {
+            OnPropertyChanged(nameof(PaginationSummary));
+        }
+
+        partial void OnPageSizeChanged(int value)
+        {
+            if (PageSize <= 0)
+                PageSize = 10;
+
+            CurrentPage = 1;
+            ApplyFilterAndPagination();
+        }
+
         [RelayCommand]
         public async Task LoadAsync()
         {
@@ -54,8 +112,11 @@ namespace Anfeta.UI.ViewModels
                 var apps = await Task.Run(() => _repo.GetAll());
 
                 AllowedApps.Clear();
-                foreach (var a in apps)
+                foreach (var a in apps.OrderBy(x => x.FriendlyName))
                     AllowedApps.Add(a);
+
+                CurrentPage = 1;
+                ApplyFilterAndPagination();
 
                 Status = $"Cargadas: {AllowedApps.Count}";
             }
@@ -88,8 +149,8 @@ namespace Anfeta.UI.ViewModels
                     }
                 });
 
-                await LoadAsync();
                 _registry.Reload();
+                await LoadAsync();
 
                 Status = $"Escaneo completo. Detectadas: {detected.Count}";
             }
@@ -113,6 +174,7 @@ namespace Anfeta.UI.ViewModels
             {
                 _repo.SetEnabled(app.AppKey, app.Enabled);
                 _registry.Reload();
+
                 Status = $"{app.FriendlyName}: {(app.Enabled ? "habilitada" : "deshabilitada")}.";
             }
             catch (Exception ex)
@@ -161,8 +223,8 @@ namespace Anfeta.UI.ViewModels
 
                 await Task.Run(() => _repo.UpsertApp(entry));
 
-                await LoadAsync();
                 _registry.Reload();
+                await LoadAsync();
 
                 Status = $"Agregada: {friendlyName} (deshabilitada por defecto)";
             }
@@ -175,6 +237,79 @@ namespace Anfeta.UI.ViewModels
             {
                 IsLoading = false;
             }
+        }
+
+        [RelayCommand]
+        public void NextPage()
+        {
+            if (CurrentPage < TotalPages)
+                CurrentPage++;
+        }
+
+        [RelayCommand]
+        public void PreviousPage()
+        {
+            if (CurrentPage > 1)
+                CurrentPage--;
+        }
+
+        private void ApplyFilterAndPagination()
+        {
+            IEnumerable<LocalAppEntry> query = AllowedApps;
+
+            if (!string.IsNullOrWhiteSpace(SearchText))
+            {
+                var term = SearchText.Trim().ToLowerInvariant();
+
+                query = query.Where(a =>
+                    (!string.IsNullOrWhiteSpace(a.FriendlyName) && a.FriendlyName.ToLowerInvariant().Contains(term)) ||
+                    (!string.IsNullOrWhiteSpace(a.ExecutableName) && a.ExecutableName.ToLowerInvariant().Contains(term)) ||
+                    (!string.IsNullOrWhiteSpace(a.ExecutablePath) && a.ExecutablePath.ToLowerInvariant().Contains(term)) ||
+                    (!string.IsNullOrWhiteSpace(a.Category) && a.Category.ToLowerInvariant().Contains(term)) ||
+                    (!string.IsNullOrWhiteSpace(a.Source) && a.Source.ToLowerInvariant().Contains(term)) ||
+                    (!string.IsNullOrWhiteSpace(a.AppKey) && a.AppKey.ToLowerInvariant().Contains(term))
+                );
+            }
+
+            _filteredApps = query
+                .OrderBy(a => a.FriendlyName)
+                .ToList();
+
+            TotalFilteredItems = _filteredApps.Count;
+            TotalPages = Math.Max(1, (int)Math.Ceiling((double)TotalFilteredItems / PageSize));
+
+            if (CurrentPage > TotalPages)
+                CurrentPage = TotalPages;
+
+            if (CurrentPage < 1)
+                CurrentPage = 1;
+
+            RefreshPagedItems();
+            OnPropertyChanged(nameof(CurrentPageDisplay));
+            OnPropertyChanged(nameof(PaginationSummary));
+        }
+
+        private void RefreshPagedItems()
+        {
+            PagedAllowedApps.Clear();
+
+            if (_filteredApps.Count == 0)
+            {
+                OnPropertyChanged(nameof(CurrentPageDisplay));
+                OnPropertyChanged(nameof(PaginationSummary));
+                return;
+            }
+
+            var items = _filteredApps
+                .Skip((CurrentPage - 1) * PageSize)
+                .Take(PageSize)
+                .ToList();
+
+            foreach (var item in items)
+                PagedAllowedApps.Add(item);
+
+            OnPropertyChanged(nameof(CurrentPageDisplay));
+            OnPropertyChanged(nameof(PaginationSummary));
         }
 
         private string MakeUniqueKey(string baseText)
