@@ -200,7 +200,7 @@ namespace Anfeta.UI.Services.Groq
                 + $"   CORRECTO: 'recuérdame enviar el reporte el viernes a las 3' -> resource:recordatorios, action:create, params:{{\"mensaje\":\"enviar el reporte\",\"fechaHora\":\"<viernes próximo>T15:00:00-06:00\"}}\n"
                 + "   INCORRECTO: 'recuérdame enviar el reporte' -> resource:reportes (NUNCA HAGAS ESTO)\n\n"
                 + "6) RECURSOS SOPORTADOS (API):\n"
-                + "   - actividades: list|today|get|search|create\n"
+                + "   - actividades: list|today|get|search|create|update|delete\n"
                 + "   - revisiones: today|en-curso\n"
                 + "   - reportes: list|today (SOLO historial de revisiones; params permitido: date)\n"
                 + "   - recordatorios: list|pending|today|tomorrow|create|update|delete|complete\n"
@@ -246,6 +246,8 @@ namespace Anfeta.UI.Services.Groq
                 + "   User: 'borra el recordatorio ABC123' -> intent:ApiCall, scope:API, provider:weblab, resource:recordatorios, action:delete, params:{\"id\":\"ABC123\"}, confidence:1.0\n\n"
                 + "   -- COMPLETAR recordatorio --\n"
                 + "   User: 'marca como completado el recordatorio ABC123' -> intent:ApiCall, scope:API, provider:weblab, resource:recordatorios, action:complete, params:{\"id\":\"ABC123\"}, confidence:1.0\n\n"
+                + "   User: 'elimina la actividad ABC123' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:delete, params:{\"id\":\"ABC123\"}, confidence:1.0\n"
+                + "   User: 'borra la actividad ABC123' -> intent:ApiCall, scope:API, provider:weblab, resource:actividades, action:delete, params:{\"id\":\"ABC123\"}, confidence:1.0\n\n"
                 + "User: \""
                 + userMessage
                 + "\"\n\n"

@@ -147,6 +147,7 @@ namespace Anfeta.UI.Services.Interpretation
                         var r = await _actividades.CreateActivityAsync(request, ct);
                         return (r.Ok, r.PlainText);
                     }
+
                     if (action == "update")
                     {
                         var id = TryGetString(paramsJson, "id");
@@ -185,7 +186,17 @@ namespace Anfeta.UI.Services.Interpretation
                         var r = await _actividades.UpdateActivityAsync(id!, request, ct);
                         return (r.Ok, r.PlainText);
                     }
-                    return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get, create, update.");
+
+                    if (action == "delete")
+                    {
+                        var id = TryGetString(paramsJson, "id");
+                        if (string.IsNullOrWhiteSpace(id))
+                            return (false, "Falta el ID de la actividad.");
+
+                        var r = await _actividades.DeleteActivityAsync(id!, ct);
+                        return (r.Ok, r.PlainText);
+                    }
+                    return (false, $"Acción '{action}' no soportada para actividades. Disponibles: list, today, search, get, create, update, delete.");
                 }
 
                 // ── REVISIONES ───────────────────────────────────────────────

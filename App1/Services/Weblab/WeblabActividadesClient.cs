@@ -777,5 +777,45 @@ namespace Anfeta.UI.Services.Weblab
                 return new ApiPlainResponse { Ok = false, PlainText = $"Error: {ex.Message}" };
             }
         }
+        public async Task<ApiPlainResponse> DeleteActivityAsync(string id, CancellationToken ct = default)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(id))
+                    return new ApiPlainResponse { Ok = false, PlainText = "Falta el ID de la actividad." };
+
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine("===== DELETE ACTIVITY DEBUG =====");
+                System.Diagnostics.Debug.WriteLine($"DELETE {_http.BaseAddress}api/actividades/{id}");
+                System.Diagnostics.Debug.WriteLine("=================================");
+#endif
+
+                using var resp = await _http.DeleteAsync($"/api/actividades/{Uri.EscapeDataString(id)}", ct);
+                var body = await resp.Content.ReadAsStringAsync(ct);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    return new ApiPlainResponse
+                    {
+                        Ok = false,
+                        PlainText = $"No pude eliminar la actividad. HTTP {(int)resp.StatusCode}: {body}"
+                    };
+                }
+
+                return new ApiPlainResponse
+                {
+                    Ok = true,
+                    PlainText = "Actividad eliminada correctamente."
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = "Operación cancelada." };
+            }
+            catch (Exception ex)
+            {
+                return new ApiPlainResponse { Ok = false, PlainText = $"Error: {ex.Message}" };
+            }
+        }
     }
 }

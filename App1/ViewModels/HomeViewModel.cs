@@ -198,8 +198,6 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // Computed — indica qué chip está activo. Binding OneWay desde ToggleButton.IsChecked.
-
         // Etiqueta del botón de pausa — cambia según estado del TTS.
         public string PauseTtsLabel => _tts.IsPaused ? "Reanudar" : "Pausar";
 
@@ -351,6 +349,19 @@ namespace Anfeta.UI.ViewModels
                    t.Contains("modifica actividad");
         }
 
+        private static bool IsDeleteActivityCommand(string text)
+        {
+            var t = (text ?? "").Trim().ToLowerInvariant();
+            return t.Contains("eliminar actividad") ||
+                   t.Contains("elimina actividad") ||
+                   t.Contains("borra actividad") ||
+                   t.Contains("borrar actividad") ||
+                   t.StartsWith("elimina ") ||
+                   t.StartsWith("eliminar ") ||
+                   t.StartsWith("borra ") ||
+                   t.StartsWith("borrar ");
+        }
+
         // LOCAL y BROWSER: sin confirmación. API: solo create/update/delete.
         private static bool RequiresConfirmation(string scope, string? action)
         {
@@ -416,6 +427,46 @@ namespace Anfeta.UI.ViewModels
             _lastRecordatoriosList = list;
             _lastRecordatoriosCacheTime = DateTime.Now;
             Debug.WriteLine($"[REC-SEL] Cache actualizado: {list.Count} recordatorios");
+        }
+
+        private static string ExtractActivityTitleFromDeleteCommand(string text)
+        {
+            var t = (text ?? "").Trim();
+
+            var prefixes = new[]
+            {
+                "eliminar actividad",
+                "elimina actividad",
+                "borrar actividad",
+                "borra actividad",
+                "eliminar",
+                "elimina",
+                "borrar",
+                "borra"
+            };
+
+            foreach (var prefix in prefixes)
+            {
+                if (t.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var result = t.Substring(prefix.Length).Trim();
+                    return result;
+                }
+            }
+
+            return "";
+        }
+
+        private CachedActivityItem? FindActivityInCacheForDelete(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return null;
+
+            var matches = _activitiesCache.SearchByTitle(query);
+            if (matches.Count == 0)
+                return null;
+
+            return matches[0];
         }
 
         // =====================================================================
@@ -920,7 +971,7 @@ namespace Anfeta.UI.ViewModels
 
                 if (string.Equals(provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
-                    action is "list" or "update" or "create")
+                    action is "list" or "update" or "create" or "delete")
                 {
                     await RefreshActivitiesCacheAsync(CancellationToken.None);
                 }
@@ -1171,6 +1222,60 @@ namespace Anfeta.UI.ViewModels
                     ListenOnceCommand.NotifyCanExecuteChanged();
                     UpdateUiSafe(startEditMessage, "Editando actividad...");
                     await SpeakSafeAsync(startEditMessage);
+                    return;
+                }
+
+                // ── Inicio: eliminación de actividad ───────────────────────────
+                if (IsDeleteActivityCommand(text))
+                {
+                    Debug.WriteLine("[ACTIVITY_DELETE_FLOW] Iniciando eliminación");
+
+                    if (!_activitiesCache.HasData())
+                        await RefreshActivitiesCacheAsync(ct);
+
+                    var activityQuery = ExtractActivityTitleFromDeleteCommand(text);
+
+                    if (string.IsNullOrWhiteSpace(activityQuery))
+                    {
+                        await ResetAfterActionAsync(
+                            "No entendí qué actividad deseas eliminar.",
+                            "Actividad no identificada",
+                            speak: "No entendí qué actividad deseas eliminar.");
+                        return;
+                    }
+
+                    var activity = FindActivityInCacheForDelete(activityQuery);
+
+                    if (activity == null)
+                    {
+                        await ResetAfterActionAsync(
+                            $"No encontré una actividad que coincida con {activityQuery}.",
+                            "No encontrada",
+                            speak: $"No encontré una actividad que coincida con {activityQuery}.");
+                        return;
+                    }
+
+                    _pendingIntent = "ApiCall";
+                    _pendingScope = "API";
+                    _pendingProvider = "weblab";
+                    _pendingResource = "actividades";
+                    _pendingAction = "delete";
+                    _pendingParamsJson = JsonSerializer.Serialize(new { id = activity.Id });
+                    _pendingRawJson = JsonSerializer.Serialize(new
+                    {
+                        provider = "weblab",
+                        resource = "actividades",
+                        action = "delete",
+                        id = activity.Id,
+                        title = activity.Title
+                    });
+
+                    var confirmMsg = $"¿Confirmas eliminar la actividad {activity.Title}?";
+
+                    IsListening = false;
+                    ListenOnceCommand.NotifyCanExecuteChanged();
+                    UpdateUiSafe(confirmMsg, "Confirmación requerida");
+                    await SpeakSafeAsync(confirmMsg);
                     return;
                 }
 
@@ -1447,7 +1552,7 @@ namespace Anfeta.UI.ViewModels
                         if (fastOk &&
                             string.Equals(fastResult.Provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
                             string.Equals(fastResult.Resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
-                            fastResult.Action is "list" or "update" or "create")
+                            fastResult.Action is "list" or "update" or "create" or "delete")
                         {
                             await RefreshActivitiesCacheAsync(ct);
                         }
@@ -1649,7 +1754,7 @@ namespace Anfeta.UI.ViewModels
 
                     if (string.Equals(provider, "weblab", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(resource, "actividades", StringComparison.OrdinalIgnoreCase) &&
-                        action is "list" or "update" or "create")
+                        action is "list" or "update" or "create" or "delete")
                     {
                         await RefreshActivitiesCacheAsync(ct);
                     }
