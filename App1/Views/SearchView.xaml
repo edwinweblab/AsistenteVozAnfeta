@@ -473,14 +473,14 @@
                                                 Click="BtnRefreshTree_Click"
                                                 Content="Actualizar"
                                                 CornerRadius="6"
-                                                FontSize="12" />
+                                                FontSize="9" />
                                             <Button
                                                 Grid.Column="1"
                                                 Height="30"
                                                 Click="BtnGoRoot_Click"
                                                 Content="Inicio (/)"
                                                 CornerRadius="6"
-                                                FontSize="12" />
+                                                FontSize="10" />
                                         </Grid>
                                         <TreeView
                                             x:Name="FolderTree"
@@ -630,7 +630,7 @@
                                                 Click="BtnRefreshTree_Click"
                                                 Content="Actualizar"
                                                 CornerRadius="6"
-                                                FontSize="12" />
+                                                FontSize="9" />
                                             <Button
                                                 Grid.Row="0"
                                                 Grid.Column="1"
@@ -639,7 +639,7 @@
                                                 Click="BtnGoRoot_Click"
                                                 Content="Inicio (/)"
                                                 CornerRadius="6"
-                                                FontSize="12" />
+                                                FontSize="10" />
                                             <Button
                                                 Grid.Row="1"
                                                 Grid.Column="0"
@@ -649,7 +649,7 @@
                                                 Click="BtnAddExcludedFolder_Click"
                                                 Content="Excluir carpeta..."
                                                 CornerRadius="6"
-                                                FontSize="12" />
+                                                FontSize="13" />
                                         </Grid>
                                         <ListView
                                             x:Name="ExcludedFoldersList"
@@ -704,7 +704,6 @@
                     </StackPanel>
                 </ScrollViewer>
             </Border>
-
 
             <!--  ── CENTER PANEL ──────────────────────────────────  -->
             <Grid Grid.Column="2">
