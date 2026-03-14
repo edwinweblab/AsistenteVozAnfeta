@@ -315,9 +315,9 @@
                 </NavigationViewItem>
 
                 <NavigationViewItem
-                    Content="Comandos Disponibles"
+                    Content="Centro de ayuda"
                     Tag="Commands"
-                    ToolTipService.ToolTip="Lista de comandos disponibles">
+                    ToolTipService.ToolTip="Guía de uso y catálogo de comandos">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE8F1;" />
                     </NavigationViewItem.Icon>

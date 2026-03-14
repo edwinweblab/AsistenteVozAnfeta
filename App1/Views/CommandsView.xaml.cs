@@ -1,355 +1,947 @@
-﻿using Microsoft.UI.Xaml;
+﻿using Microsoft.UI;
+using Microsoft.UI.Text;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Windows.UI;
 
-namespace Anfeta.UI.Views;
-
-public sealed partial class CommandsView : Page
+namespace Anfeta.UI.Views
 {
-    private const string ApisTxt = @"
-GUIA DE COMANDOS – ASISTENTE WEBLAB (LITE)
+    // =========================================================================
+    // MODELS
+    // =========================================================================
 
-MÓDULO: ACTIVIDADES
-CMD-ACT-001 — Listar todas las actividades | Frase: ""Muéstrame todas las actividades""
-CMD-ACT-002 — Buscar actividades por texto | Frase: ""Busca actividades con contrato""
-CMD-ACT-003 — Obtener actividades por rango de fechas | Frase: ""Actividades de esta semana""
-CMD-ACT-004 — Obtener actividad por ID | Frase: ""Abrir actividad por ID""
-CMD-ACT-005 — Crear actividad | Frase: ""Crea una actividad nueva""
-CMD-ACT-006 — Crear actividad con tarjet | Frase: ""Crear actividad desde tarjeta""
-CMD-ACT-007 — Crear actividad vacía | Frase: ""Crea una actividad en blanco""
-CMD-ACT-008 — Actualizar actividad | Frase: ""Actualiza esta actividad""
-CMD-ACT-009 — Eliminar actividad | Frase: ""Elimina esta actividad""
-
-ACCIONES BATCH – ACTIVIDADES
-CMD-ACT-BATCH-001 — Reprogramar atrasados | Frase: ""Reprograma actividades atrasadas""
-CMD-ACT-BATCH-002 — Mover FTF a mañana | Frase: ""Mueve FTF a mañana""
-CMD-ACT-BATCH-003 — Asignar horarios largos hoy | Frase: ""Asigna horarios largos hoy""
-CMD-ACT-BATCH-004 — Mover fechas | Frase: ""Mueve fechas de actividades""
-CMD-ACT-BATCH-005 — Actualizar propiedades masivas | Frase: ""Actualiza actividades en lote""
-
-MÓDULO: PENDIENTES
-CMD-PEN-001 — Crear pendiente | Frase: ""Agrega un pendiente""
-CMD-PEN-002 — Reordenar pendientes | Frase: ""Reordena pendientes""
-CMD-PEN-003 — Actualizar pendiente | Frase: ""Marca pendiente como hecho""
-CMD-PEN-004 — Eliminar pendiente | Frase: ""Elimina pendiente""
-
-MÓDULO: DROPBOX / NOTION FILES
-CMD-DBX-001 — Sincronización inicial | Frase: ""Inicia sincronización completa""
-CMD-DBX-002 — Delta sync | Frase: ""Sincroniza cambios recientes""
-CMD-DBX-003 — Listar archivos | Frase: ""Lista archivos""
-CMD-DBX-004 — Obtener metadata | Frase: ""Ver info del archivo""
-CMD-DBX-005 — Breadcrumbs | Frase: ""Muéstrame la ruta del archivo""
-CMD-DBX-006 — Tree de carpetas | Frase: ""Muestra árbol de carpetas""
-CMD-DBX-007 — Estadísticas | Frase: ""Estadísticas de Dropbox""
-CMD-DBX-008 — Buscar archivos simple | Frase: ""Busca archivos""
-CMD-DBX-009 — Buscar archivos con links | Frase: ""Busca archivos con Notion""
-CMD-DBX-010 — Asegurar link compartido | Frase: ""Genera link del archivo""
-CMD-DBX-011 — Recomputar metadata | Frase: ""Recalcula metadata""
-CMD-DBX-012 — Subir archivo | Frase: ""Sube este archivo""
-CMD-DBX-013 — Crear carpeta | Frase: ""Crea una carpeta""
-CMD-DBX-014 — Renombrar nodo | Frase: ""Renombra archivo""
-CMD-DBX-015 — Eliminar nodo | Frase: ""Elimina archivo""
-
-MÓDULO: GOOGLE AUTH & CALENDAR
-CMD-GGL-001 — Iniciar auth Google | Frase: ""Conecta Google""
-CMD-GGL-002 — Logout Google | Frase: ""Desconecta Google""
-CMD-GGL-003 — Estado Google | Frase: ""¿Estoy conectado a Google?""
-CMD-GGL-004 — Crear evento calendario | Frase: ""Crea evento en calendario""
-CMD-GGL-005 — Actualizar evento | Frase: ""Actualiza el evento""
-CMD-GGL-006 — Listar eventos | Frase: ""Muéstrame mis eventos""
-CMD-GGL-007 — Eliminar evento | Frase: ""Elimina el evento""
-
-MÓDULO: OPCIONES
-CMD-OPT-001 — Obtener opciones | Frase: ""Carga opciones del sistema""
-
-MÓDULO: PRESENCE
-CMD-PRE-001 — Usuarios online | Frase: ""¿Quién está en línea?""
-
-MÓDULO: PROYECTOS
-CMD-PRJ-001 — Listar proyectos | Frase: ""Lista proyectos""
-CMD-PRJ-002 — Buscar proyectos | Frase: ""Busca un proyecto""
-CMD-PRJ-003 — Obtener proyecto por ID | Frase: ""Abrir proyecto por ID""
-CMD-PRJ-004 — Crear proyecto | Frase: ""Crea un proyecto""
-CMD-PRJ-005 — Actualizar proyecto | Frase: ""Actualiza el proyecto""
-CMD-PRJ-006 — Eliminar proyecto | Frase: ""Elimina el proyecto""
-
-MÓDULO: RECORDATORIOS
-CMD-REC-001 — Crear recordatorio | Frase: ""Crea un recordatorio""
-CMD-REC-002 — Listar recordatorios | Frase: ""Muéstrame recordatorios""
-CMD-REC-003 — Marcar como enviado | Frase: ""Marca recordatorio como enviado""
-CMD-REC-004 — Eliminar recordatorio | Frase: ""Elimina el recordatorio""
-
-MÓDULO: REPORTES
-CMD-REP-001 — Listar eventos | Frase: ""Eventos del sistema""
-CMD-REP-002 — Resumen por periodo | Frase: ""Resumen del mes""
-CMD-REP-003 — Resumen personalizado | Frase: ""Resumen personalizado""
-CMD-REP-004 — Últimos registros | Frase: ""Últimos movimientos""
-CMD-REP-005 — Comprobatoria | Frase: ""Comprobatoria por colaborador""
-CMD-REP-006 — Tareas rezagadas | Frase: ""Tareas rezagadas""
-CMD-REP-007 — Revisiones por fecha | Frase: ""Revisiones por fecha""
-
-MÓDULO: REVISIONES
-CMD-REV-001 — Listar revisiones | Frase: ""Lista revisiones""
-CMD-REV-002 — Revisiones por actividad | Frase: ""Revisiones de la actividad""
-CMD-REV-003 — Buscar revisiones | Frase: ""Busca revisiones""
-CMD-REV-004 — Revisiones por fechas | Frase: ""Revisiones por rango de fechas""
-CMD-REV-005 — Resumen día actual | Frase: ""Resumen de revisiones de hoy""
-CMD-REV-006 — Mover fechas (batch) | Frase: ""Mueve fechas de revisiones""
-CMD-REV-007 — Confirmar revisión | Frase: ""Confirma revisión""
-CMD-REV-008 — Ordenar revisiones | Frase: ""Ordena revisiones""
-CMD-REV-009 — Obtener revisión por ID | Frase: ""Abrir revisión por ID""
-CMD-REV-010 — Duplicar revisión | Frase: ""Duplica revisión""
-CMD-REV-011 — Migrar assignees | Frase: ""Migrar responsables""
-CMD-REV-012 — Preview revisión | Frase: ""Ver preview de revisión""
-CMD-REV-013 — Refresh preview | Frase: ""Actualiza preview de revisión""
-CMD-REV-014 — Crear revisión | Frase: ""Crea una revisión""
-CMD-REV-015 — Actualizar revisión | Frase: ""Actualiza la revisión""
-CMD-REV-016 — Eliminar revisión | Frase: ""Elimina la revisión""
-
-MÓDULO: USUARIOS
-CMD-USR-001 — Buscar usuarios | Frase: ""Busca un usuario""
-
-MÓDULO: SOCKET / TIEMPO REAL
-CMD-SKT-001 — Presence ping | Frase: ""Mantener sesión activa""
-CMD-SKT-002 — Enviar mensaje de chat | Frase: ""Envía mensaje a un usuario""
-";
-
-    private List<CommandModule> _modules = new();
-    private CommandModule? _selectedModule;
-    private string _query = "";
-
-    public string SelectedModuleTitle => _selectedModule?.Name ?? "Selecciona un módulo";
-    public string SelectedModuleSubtitle => _selectedModule is null
-        ? "Elige un módulo para ver sus comandos."
-        : $"{_selectedModule.Commands.Count} comandos detectados.";
-
-    public CommandsView()
+    public sealed class TutorialStep
     {
-        InitializeComponent();
-        DataContext = this;
-        Loaded += CommandsView_Loaded;
+        public string Number { get; init; } = "";
+        public string Glyph { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Description { get; init; } = "";
+        public string? Detail { get; init; }
+
+        public Visibility DetailVisibility =>
+            string.IsNullOrWhiteSpace(Detail) ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private void CommandsView_Loaded(object sender, RoutedEventArgs e)
+    public sealed class InterfaceElement
     {
-        _modules = ParseModules(ApisTxt);
-
-        ModulesCombo.DisplayMemberPath = "Name";
-        ModulesCombo.ItemsSource = _modules;
-        ModulesCombo.SelectedIndex = _modules.Count > 0 ? 0 : -1;
-
-        ApplyFilter();
-        UpdateHeaderBindings();
+        public string Glyph { get; init; } = "";
+        public string Name { get; init; } = "";
+        public string Description { get; init; } = "";
     }
 
-    private void ModulesCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    public sealed class CommandModule
     {
-        _selectedModule = ModulesCombo.SelectedItem as CommandModule;
-        ApplyFilter();
-        UpdateHeaderBindings();
+        public string Name { get; init; } = "";
+        public List<CommandItem> Commands { get; init; } = new();
     }
 
-    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    public sealed class CommandItem
     {
-        _query = (SearchBox.Text ?? "").Trim();
-        ApplyFilter();
-        UpdateHeaderBindings();
-    }
+        public string Id { get; init; } = "";
+        public string Module { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Tier { get; init; } = "Tier 1";
+        public string[] Phrases { get; init; } = Array.Empty<string>();
+        public string ResponseExample { get; init; } = "";
+        public string? Endpoint { get; init; }
+        public bool RequiresConfirmation { get; init; }
+        public bool IsMultiTurn { get; init; }
 
-    private void Clear_Click(object sender, RoutedEventArgs e)
-    {
-        SearchBox.Text = "";
-        _query = "";
-        if (_modules.Count > 0) ModulesCombo.SelectedIndex = 0;
-        ApplyFilter();
-        UpdateHeaderBindings();
-    }
+        public string PhrasesLine => string.Join("  ·  ", Phrases);
+        public string IdAndModule => $"{Id}  ·  {Module}";
 
-    private void ApplyFilter()
-    {
-        _selectedModule = ModulesCombo.SelectedItem as CommandModule;
+        public Visibility ConfirmVisibility =>
+            RequiresConfirmation ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility MultiTurnVisibility =>
+            IsMultiTurn ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility EndpointVisibility =>
+            string.IsNullOrWhiteSpace(Endpoint) ? Visibility.Collapsed : Visibility.Visible;
 
-        if (_modules.Count == 0)
+        // Tier colors
+        public Brush TierForeground => Tier switch
         {
-            CommandsList.ItemsSource = Array.Empty<CommandItem>();
-            return;
-        }
+            var t when t.StartsWith("Tier 1") => new SolidColorBrush(Color.FromArgb(255, 45, 184, 126)),
+            var t when t.StartsWith("Tier 2") => new SolidColorBrush(Color.FromArgb(255, 210, 140, 48)),
+            _ => new SolidColorBrush(Color.FromArgb(255, 139, 126, 212))
+        };
 
-        var q = (_query ?? "").Trim().ToLowerInvariant();
-
-        // Base: módulo seleccionado o todo
-        var baseList = _selectedModule?.Commands ?? _modules.SelectMany(m => m.Commands).ToList();
-
-        if (string.IsNullOrWhiteSpace(q))
+        public Brush TierBackground => Tier switch
         {
-            CommandsList.ItemsSource = baseList;
-            return;
-        }
-
-        bool Match(CommandItem c) =>
-            (c.Id ?? "").ToLowerInvariant().Contains(q) ||
-            (c.Module ?? "").ToLowerInvariant().Contains(q) ||
-            (c.Title ?? "").ToLowerInvariant().Contains(q) ||
-            (c.Endpoint ?? "").ToLowerInvariant().Contains(q) ||
-            (c.Function ?? "").ToLowerInvariant().Contains(q) ||
-            (c.ExamplesLine ?? "").ToLowerInvariant().Contains(q) ||
-            (c.MinParamsLine ?? "").ToLowerInvariant().Contains(q);
-
-        // 1) intenta dentro del módulo
-        var filtered = baseList.Where(Match).ToList();
-
-        // 2) fallback global
-        if (filtered.Count == 0)
-        {
-            filtered = _modules.SelectMany(m => m.Commands).Where(Match).ToList();
-        }
-
-        CommandsList.ItemsSource = filtered;
+            var t when t.StartsWith("Tier 1") => new SolidColorBrush(Color.FromArgb(30, 45, 184, 126)),
+            var t when t.StartsWith("Tier 2") => new SolidColorBrush(Color.FromArgb(30, 210, 140, 48)),
+            _ => new SolidColorBrush(Color.FromArgb(30, 139, 126, 212))
+        };
     }
 
-    private void UpdateHeaderBindings()
+    public sealed class DetailContent
     {
-        DataContext = null;
-        DataContext = this;
+        public string Glyph { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Body { get; init; } = "";
+        public string Note { get; init; } = "";
     }
 
-    // -----------------------------
-    // PARSER
-    // -----------------------------
-    private static List<CommandModule> ParseModules(string text)
+    public sealed class StatusColorRow
     {
-        text = text.Replace("\r\n", "\n");
+        public string DotColorHex { get; init; } = "#888888";
+        public string Description { get; init; } = "";
 
-        // Detecta líneas tipo: MÓDULO: X  /  MODULO: X
-        var modRegex = new Regex(@"(?im)^\s*m[oó]dulo\s*:\s*(.+?)\s*$", RegexOptions.Compiled);
-        var modMatches = modRegex.Matches(text);
-
-        if (modMatches.Count == 0)
+        public SolidColorBrush DotBrush
         {
-            var cmds = ParseCommandsFromModuleChunk("General", text);
-            return cmds.Count > 0
-                ? new List<CommandModule> { new CommandModule { Name = "General", Commands = cmds } }
-                : new List<CommandModule>();
-        }
-
-        var ranges = new List<(string name, int start, int end)>();
-
-        for (int i = 0; i < modMatches.Count; i++)
-        {
-            var name = modMatches[i].Groups[1].Value.Trim();
-            var start = modMatches[i].Index;
-            var end = (i + 1 < modMatches.Count) ? modMatches[i + 1].Index : text.Length;
-            ranges.Add((name, start, end));
-        }
-
-        var result = new List<CommandModule>();
-        foreach (var r in ranges)
-        {
-            var chunk = text.Substring(r.start, r.end - r.start);
-            var cmds = ParseCommandsFromModuleChunk(r.name, chunk);
-            if (cmds.Count > 0)
-                result.Add(new CommandModule { Name = r.name, Commands = cmds });
-        }
-
-        return result;
-    }
-
-    private static List<CommandItem> ParseCommandsFromModuleChunk(string moduleName, string chunk)
-    {
-        var commands = new List<CommandItem>();
-
-        // CMD-XXX-001 — Nombre | Frase: "..."
-        var cmdRegex = new Regex(
-            @"(?im)^\s*(CMD-[A-Z0-9\-]+)\s*(?:—|-)\s*(.+?)\s*\|\s*Frase\s*:\s*(?:""(.+?)""|(.+))\s*$",
-            RegexOptions.Compiled);
-
-        foreach (Match m in cmdRegex.Matches(chunk))
-        {
-            var id = m.Groups[1].Value.Trim();
-            var title = m.Groups[2].Value.Trim();
-            var phrase = m.Groups[3].Success ? m.Groups[3].Value.Trim() : m.Groups[4].Value.Trim();
-            phrase = phrase.Trim().Trim('"');
-
-            var lowerTitle = title.ToLowerInvariant();
-            var requiresConfirmation =
-                lowerTitle.Contains("crear") ||
-                lowerTitle.Contains("actualizar") ||
-                lowerTitle.Contains("eliminar") ||
-                lowerTitle.Contains("mover") ||
-                lowerTitle.Contains("reprogramar") ||
-                lowerTitle.Contains("renombrar") ||
-                lowerTitle.Contains("subir") ||
-                lowerTitle.Contains("sincron");
-
-            commands.Add(new CommandItem
+            get
             {
-                Id = id,
-                Module = moduleName,
-                Title = title,
-                Endpoint = "—",
-                Function = "—",
-                MinParamsLine = "—",
-                ExamplesLine = phrase,
-                RequiresConfirmation = requiresConfirmation,
-                RequiresInternet = true
-            });
+                try
+                {
+                    var hex = DotColorHex.TrimStart('#');
+                    return new SolidColorBrush(Color.FromArgb(255,
+                        Convert.ToByte(hex[0..2], 16),
+                        Convert.ToByte(hex[2..4], 16),
+                        Convert.ToByte(hex[4..6], 16)));
+                }
+                catch { return new SolidColorBrush(Colors.Gray); }
+            }
+        }
+    }
+
+    public sealed class StatusItem
+    {
+        public string Glyph { get; init; } = "";
+        public string Name { get; init; } = "";
+        public string DemoLabel { get; init; } = "";
+        public string DemoDotHex { get; init; } = "#888888";
+        public string Title { get; init; } = "";
+        public List<StatusColorRow> ColorRows { get; init; } = new();
+
+        public SolidColorBrush DemoDotBrush
+        {
+            get
+            {
+                try
+                {
+                    var hex = DemoDotHex.TrimStart('#');
+                    return new SolidColorBrush(Color.FromArgb(255,
+                        Convert.ToByte(hex[0..2], 16),
+                        Convert.ToByte(hex[2..4], 16),
+                        Convert.ToByte(hex[4..6], 16)));
+                }
+                catch { return new SolidColorBrush(Colors.Gray); }
+            }
+        }
+    }
+
+    public sealed class SearchSuggestion
+    {
+        public string Text { get; init; } = "";
+        public string Category { get; init; } = "";
+        public int DetailIndex { get; init; } = -1;
+        public string? TabTarget { get; init; }
+        public string? ModuleFilter { get; init; }
+    }
+
+    // =========================================================================
+    // PAGE
+    // =========================================================================
+
+    public sealed partial class CommandsView : Page
+    {
+        // ── State ──────────────────────────────────────────────────────────────
+        private List<CommandModule> _modules = new();
+        private List<DetailContent> _details = new();
+        private List<SearchSuggestion> _searchIndex = new();
+        private CommandModule? _selectedModule;
+        private string _query = "";
+        private string _tierFilter = "";
+        private int _dailyDisplayIdx;
+
+        // Daily rotation order — índices a _details
+        private static readonly int[] DailyRotation = { 0, 2, 4, 1, 3, 5 };
+
+        // ── Computed ───────────────────────────────────────────────────────────
+        public string SelectedModuleTitle =>
+            _selectedModule?.Name ?? "Todos los módulos";
+
+        public string SelectedModuleSubtitle =>
+            _selectedModule is null
+                ? $"{_modules.Sum(m => m.Commands.Count)} comandos disponibles"
+                : $"{_selectedModule.Commands.Count} comandos en este módulo";
+
+        // ── Constructor ────────────────────────────────────────────────────────
+        public CommandsView()
+        {
+            InitializeComponent();
+            DataContext = this;
+            Loaded += OnLoaded;
         }
 
-        return commands;
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            _details = BuildDetails();
+            _searchIndex = BuildSearchIndex();
+            _modules = BuildModules();
+
+            StatusList.ItemsSource = BuildStatusItems();
+            BasicStepsList.ItemsSource = GetBasicSteps();
+            InterfaceElementsList.ItemsSource = GetInterfaceElements();
+            MultiTurnList.ItemsSource = GetMultiTurnFlows();
+
+            var comboItems = new List<CommandModule> { new CommandModule { Name = "Todos" } };
+            comboItems.AddRange(_modules);
+            ModulesCombo.ItemsSource = comboItems;
+            ModulesCombo.SelectedIndex = 0;
+
+            // Daily card: arranca por día del año, mod cantidad
+            _dailyDisplayIdx = DateTime.Now.DayOfYear % DailyRotation.Length;
+            RefreshDailyCard();
+
+            TotalCount.Text = _modules.Sum(m => m.Commands.Count).ToString();
+            VisibleCount.Text = TotalCount.Text;
+
+            ApplyFilter();
+        }
+
+        // ── Daily card ─────────────────────────────────────────────────────────
+        private void RefreshDailyCard()
+        {
+            if (_details.Count == 0) return;
+
+            var idx = DailyRotation[_dailyDisplayIdx % DailyRotation.Length];
+            var d = _details[idx % _details.Count];
+
+            DailyGlyphIcon.Glyph = d.Glyph;
+            DailyTitle.Text = d.Title;
+
+            // Máximo 85 caracteres para que no se vea comprimido
+            DailyDesc.Text = d.Body.Length > 85
+                ? d.Body[..85].TrimEnd() + "..."
+                : d.Body;
+
+            DailyCounter.Text = $"{_dailyDisplayIdx + 1} / {DailyRotation.Length}";
+        }
+
+        private void DailyPrev_Click(object sender, RoutedEventArgs e)
+        {
+            _dailyDisplayIdx = (_dailyDisplayIdx - 1 + DailyRotation.Length)
+                               % DailyRotation.Length;
+            RefreshDailyCard();
+        }
+
+        private void DailyNext_Click(object sender, RoutedEventArgs e)
+        {
+            _dailyDisplayIdx = (_dailyDisplayIdx + 1) % DailyRotation.Length;
+            RefreshDailyCard();
+        }
+
+        private async void DailyCard_Tapped(object sender,
+            Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+        {
+            var idx = DailyRotation[_dailyDisplayIdx % DailyRotation.Length];
+            await ShowDetailAsync(idx);
+        }
+
+        // ── Tab switching ──────────────────────────────────────────────────────
+        private void ShowPanel(StackPanel active)
+        {
+            ExplorePanel.Visibility = active == ExplorePanel ? Visibility.Visible : Visibility.Collapsed;
+            TutorialPanel.Visibility = active == TutorialPanel ? Visibility.Visible : Visibility.Collapsed;
+            CommandsPanel.Visibility = active == CommandsPanel ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void BtnExplore_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPanel(ExplorePanel);
+            BtnExplore.IsChecked = true; BtnTutorial.IsChecked = false; BtnCommands.IsChecked = false;
+        }
+
+        private void BtnTutorial_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPanel(TutorialPanel);
+            BtnExplore.IsChecked = false; BtnTutorial.IsChecked = true; BtnCommands.IsChecked = false;
+        }
+
+        private void BtnCommands_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPanel(CommandsPanel);
+            BtnExplore.IsChecked = false; BtnTutorial.IsChecked = false; BtnCommands.IsChecked = true;
+        }
+
+        private void NavigateToTab(string tab, string? moduleFilter = null)
+        {
+            switch (tab)
+            {
+                case "tutorial": BtnTutorial_Click(null!, null!); break;
+                case "commands":
+                    BtnCommands_Click(null!, null!);
+                    if (moduleFilter is not null)
+                    {
+                        var idx = (ModulesCombo.ItemsSource as List<CommandModule>)
+                            ?.FindIndex(m => m.Name == moduleFilter) ?? -1;
+                        if (idx >= 0) ModulesCombo.SelectedIndex = idx;
+                    }
+                    break;
+                default: BtnExplore_Click(null!, null!); break;
+            }
+        }
+
+        // ── Search ─────────────────────────────────────────────────────────────
+        private void ExploreSearch_TextChanged(AutoSuggestBox sender,
+            AutoSuggestBoxTextChangedEventArgs args)
+        {
+            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+            var q = sender.Text.Trim().ToLowerInvariant();
+            sender.ItemsSource = string.IsNullOrWhiteSpace(q)
+                ? new List<SearchSuggestion>()
+                : _searchIndex.Where(s => s.Text.ToLowerInvariant().Contains(q)).Take(8).ToList();
+        }
+
+        private async void ExploreSearch_SuggestionChosen(AutoSuggestBox sender,
+            AutoSuggestBoxSuggestionChosenEventArgs args)
+        {
+            if (args.SelectedItem is not SearchSuggestion s) return;
+            sender.Text = "";
+            sender.ItemsSource = new List<SearchSuggestion>();
+            if (s.DetailIndex >= 0) await ShowDetailAsync(s.DetailIndex);
+            else NavigateToTab(s.TabTarget ?? "commands", s.ModuleFilter);
+        }
+
+        private async void ExploreSearch_QuerySubmitted(AutoSuggestBox sender,
+            AutoSuggestBoxQuerySubmittedEventArgs args)
+        {
+            if (args.ChosenSuggestion is SearchSuggestion s)
+            {
+                sender.Text = "";
+                if (s.DetailIndex >= 0) await ShowDetailAsync(s.DetailIndex);
+                else NavigateToTab(s.TabTarget ?? "commands", s.ModuleFilter);
+            }
+        }
+
+        // ── Quick cards ────────────────────────────────────────────────────────
+        private async void QuickCard_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string t && int.TryParse(t, out var i))
+                await ShowDetailAsync(i);
+        }
+
+        // ── Detail dialog ──────────────────────────────────────────────────────
+        private async Task ShowDetailAsync(int index)
+        {
+            if (index < 0 || index >= _details.Count) return;
+            var d = _details[index];
+
+            // Icono + título
+            var titleRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 12,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var iconBorder = new Border
+            {
+                Width = 36,
+                Height = 36,
+                CornerRadius = new CornerRadius(9),
+                Background = new SolidColorBrush(Color.FromArgb(30, 255, 128, 0)),
+                Child = new FontIcon
+                {
+                    Glyph = d.Glyph,
+                    FontSize = 18,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 128, 0))
+                }
+            };
+
+            titleRow.Children.Add(iconBorder);
+            titleRow.Children.Add(new TextBlock
+            {
+                Text = d.Title,
+                FontSize = 17,
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            // Cuerpo
+            var bodyPanel = new StackPanel { Spacing = 16 };
+
+            // Separador
+            bodyPanel.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Color.FromArgb(30, 255, 255, 255)),
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+
+            bodyPanel.Children.Add(new TextBlock
+            {
+                Text = d.Body,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 14,
+                Opacity = 0.88,
+                LineHeight = 24
+            });
+
+            // Nota con acento naranja
+            bodyPanel.Children.Add(new Border
+            {
+                BorderBrush = new SolidColorBrush(Color.FromArgb(255, 255, 128, 0)),
+                BorderThickness = new Thickness(3, 0, 0, 0),
+                CornerRadius = new CornerRadius(0, 8, 8, 0),
+                Padding = new Thickness(14, 10, 14, 10),
+                Background = new SolidColorBrush(Color.FromArgb(20, 255, 128, 0)),
+                Child = new TextBlock
+                {
+                    Text = d.Note,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 12,
+                    FontStyle = Windows.UI.Text.FontStyle.Italic,
+                    Opacity = 0.8,
+                    LineHeight = 20
+                }
+            });
+
+            var scrollContent = new ScrollViewer
+            {
+                Content = bodyPanel,
+                MaxHeight = 400,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = titleRow,
+                Content = scrollContent,
+                CloseButtonText = "Cerrar",
+                XamlRoot = this.XamlRoot,
+                DefaultButton = ContentDialogButton.Close,
+                RequestedTheme = this.ActualTheme
+            };
+
+            dialog.Resources["ContentDialogMaxWidth"] = (double)500;
+
+            await dialog.ShowAsync();
+        }
+
+        // ── Filters (Commands) ─────────────────────────────────────────────────
+        private void ModulesCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var sel = ModulesCombo.SelectedItem as CommandModule;
+            _selectedModule = sel?.Name == "Todos" ? null : sel;
+            ApplyFilter();
+            RefreshHeader();
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            _query = SearchBox.Text?.Trim() ?? "";
+            ApplyFilter();
+        }
+
+        private void Clear_Click(object sender, RoutedEventArgs e)
+        {
+            SearchBox.Text = "";
+            _query = "";
+            _tierFilter = "";
+            ModulesCombo.SelectedIndex = 0;
+            _selectedModule = null;
+            ChipAll.IsChecked = true;
+            ChipT1.IsChecked = false;
+            ChipT2.IsChecked = false;
+            ChipT3.IsChecked = false;
+            ApplyFilter();
+            RefreshHeader();
+        }
+
+        private void ChipAll_Click(object sender, RoutedEventArgs e)
+        { _tierFilter = ""; SetChip(ChipAll); ApplyFilter(); }
+
+        private void ChipT1_Click(object sender, RoutedEventArgs e)
+        { _tierFilter = "1"; SetChip(ChipT1); ApplyFilter(); }
+
+        private void ChipT2_Click(object sender, RoutedEventArgs e)
+        { _tierFilter = "2"; SetChip(ChipT2); ApplyFilter(); }
+
+        private void ChipT3_Click(object sender, RoutedEventArgs e)
+        { _tierFilter = "3"; SetChip(ChipT3); ApplyFilter(); }
+
+        private void SetChip(ToggleButton active)
+        {
+            foreach (var c in new[] { ChipAll, ChipT1, ChipT2, ChipT3 })
+                c.IsChecked = c == active;
+        }
+
+        private void ApplyFilter()
+        {
+            var q = _query.ToLowerInvariant();
+            var baseList = _selectedModule?.Commands
+                ?? _modules.SelectMany(m => m.Commands).ToList();
+
+            var filtered = baseList.Where(c =>
+            {
+                if (!string.IsNullOrEmpty(_tierFilter) &&
+                    !c.Tier.StartsWith("Tier " + _tierFilter)) return false;
+                if (!string.IsNullOrWhiteSpace(q) &&
+                    !c.Title.ToLowerInvariant().Contains(q) &&
+                    !c.Module.ToLowerInvariant().Contains(q) &&
+                    !c.PhrasesLine.ToLowerInvariant().Contains(q) &&
+                    !c.ResponseExample.ToLowerInvariant().Contains(q)) return false;
+                return true;
+            }).ToList();
+
+            CommandsList.ItemsSource = filtered;
+            VisibleCount.Text = filtered.Count.ToString();
+        }
+
+        private void RefreshHeader()
+        {
+            DataContext = null;
+            DataContext = this;
+        }
+
+        // =========================================================================
+        // DATA
+        // =========================================================================
+
+        private static List<DetailContent> BuildDetails() => new()
+        {
+            new DetailContent // 0
+            {
+                Glyph = "\uE720",
+                Title = "Usar el micrófono",
+                Body  = "Presiona el botón naranja central para activar la escucha. El asistente indica el estado con una animación. Habla con claridad en español. Para cancelar en cualquier momento, presiona de nuevo el botón.",
+                Note  = "Si el micrófono aparece en rojo en la barra, ve a Configuración de Windows → Privacidad → Micrófono y habilita el acceso para Anfeta."
+            },
+            new DetailContent // 1
+            {
+                Glyph = "\uE787",
+                Title = "Conectar Google Calendar",
+                Body  = "Di 'conectar Google Calendar' y el asistente abrirá el navegador con el flujo de autorización de Google. Una vez autenticado, el indicador Calendar cambiará a verde. Para ver eventos di 'qué tengo hoy' o 'próximos eventos'.",
+                Note  = "Si el token expira, el asistente lo detecta y abre el navegador para reconectar automáticamente."
+            },
+            new DetailContent // 2
+            {
+                Glyph = "\uE8F9",
+                Title = "Crear actividad",
+                Body  = "Di 'crear actividad' o 'nueva tarea'. El asistente te pedirá: título → prioridad (Alta/Media/Baja) → fecha y hora de inicio → hora de fin → responsable. Al final muestra un resumen y pide confirmación antes de guardar.",
+                Note  = "Di 'corregir título' o 'corregir fecha' antes de confirmar para editar. 'Cancelar' aborta en cualquier momento."
+            },
+            new DetailContent // 3
+            {
+                Glyph = "\uE7E7",
+                Title = "Gestionar recordatorios",
+                Body  = "Para crear: di 'recuérdame [mensaje] el [fecha] a las [hora]'. Para ver: di 'mis recordatorios', 'recordatorios de hoy' o 'recordatorios pendientes'. Para eliminar o completar: primero lista, luego di 'elimina el primero' o 'completa el dos'.",
+                Note  = "La lista queda activa 5 minutos tras consultarla. Usa ordinales ('primero') o números directos ('el 2')."
+            },
+            new DetailContent // 4
+            {
+                Glyph = "\uE9D2",
+                Title = "Ver mis revisiones",
+                Body  = "Di 'revisiones de hoy' o 'revisiones de ayer' para el resumen con totales por estado. Luego di 'muéstrame las pendientes', 'ver las terminadas' o 'dame las confirmadas' para el detalle.",
+                Note  = "El detalle está disponible 10 minutos. Si expiró, di 'revisiones de hoy' para recargar."
+            },
+            new DetailContent // 5
+            {
+                Glyph = "\uE8D7",
+                Title = "Iniciar sesión",
+                Body  = "Para usar el asistente necesitas vincular tu cuenta empresarial. Ve a Configuración e ingresa tu correo asignado (ejemplo: nombre@practicante.com) y tu número de teléfono empresarial. El indicador cambiará cuando la vinculación sea exitosa.",
+                Note  = "Usa exactamente el correo y teléfono que te asignó la empresa. Si no los tienes, contacta a tu coordinador."
+            },
+        };
+
+        private static List<SearchSuggestion> BuildSearchIndex() => new()
+        {
+            new SearchSuggestion { Text = "Cómo usar el micrófono",           Category = "Guía",     DetailIndex = 0 },
+            new SearchSuggestion { Text = "Activar la escucha de voz",         Category = "Guía",     DetailIndex = 0 },
+            new SearchSuggestion { Text = "Permisos de micrófono",             Category = "Guía",     DetailIndex = 0 },
+            new SearchSuggestion { Text = "Conectar Google Calendar",          Category = "Guía",     DetailIndex = 1 },
+            new SearchSuggestion { Text = "Ver eventos del calendario",        Category = "Comandos", TabTarget = "commands", ModuleFilter = "Google Calendar" },
+            new SearchSuggestion { Text = "Crear actividad paso a paso",       Category = "Guía",     DetailIndex = 2 },
+            new SearchSuggestion { Text = "Nueva tarea por voz",               Category = "Comandos", TabTarget = "commands", ModuleFilter = "Actividades" },
+            new SearchSuggestion { Text = "Editar actividad",                  Category = "Comandos", TabTarget = "commands", ModuleFilter = "Actividades" },
+            new SearchSuggestion { Text = "Mis recordatorios",                 Category = "Comandos", TabTarget = "commands", ModuleFilter = "Recordatorios" },
+            new SearchSuggestion { Text = "Crear recordatorio",                Category = "Guía",     DetailIndex = 3 },
+            new SearchSuggestion { Text = "Eliminar recordatorio",             Category = "Guía",     DetailIndex = 3 },
+            new SearchSuggestion { Text = "Revisiones de hoy",                 Category = "Comandos", TabTarget = "commands", ModuleFilter = "Revisiones" },
+            new SearchSuggestion { Text = "Ver mis revisiones",                Category = "Guía",     DetailIndex = 4 },
+            new SearchSuggestion { Text = "Revisiones pendientes",             Category = "Guía",     DetailIndex = 4 },
+            new SearchSuggestion { Text = "Iniciar sesión",                    Category = "Guía",     DetailIndex = 5 },
+            new SearchSuggestion { Text = "Vincular cuenta empresarial",       Category = "Guía",     DetailIndex = 5 },
+            new SearchSuggestion { Text = "Comprobatoria personal",            Category = "Comandos", TabTarget = "commands", ModuleFilter = "Reportes" },
+            new SearchSuggestion { Text = "Tareas rezagadas",                  Category = "Comandos", TabTarget = "commands", ModuleFilter = "Reportes" },
+            new SearchSuggestion { Text = "Últimas acciones del equipo",       Category = "Comandos", TabTarget = "commands", ModuleFilter = "Reportes" },
+            new SearchSuggestion { Text = "Abrir aplicación por voz",          Category = "Comandos", TabTarget = "commands", ModuleFilter = "Local / Sistema" },
+            new SearchSuggestion { Text = "Cómo funciona el asistente",        Category = "Tutorial", TabTarget = "tutorial" },
+            new SearchSuggestion { Text = "Confirmar acción",                  Category = "Comandos", TabTarget = "commands", ModuleFilter = "Local / Sistema" },
+        };
+
+        private static List<StatusItem> BuildStatusItems() => new()
+        {
+            new StatusItem
+            {
+                Glyph = "\uE774", Name = "Internet", DemoLabel = "Internet", DemoDotHex = "#2DB880",
+                Title = "Conexión a internet",
+                ColorRows = new()
+                {
+                    new StatusColorRow { DotColorHex = "#2DB880", Description = "Verde — conexión activa, todos los comandos disponibles" },
+                    new StatusColorRow { DotColorHex = "#E24B4A", Description = "Rojo — sin conexión, solo comandos locales funcionan" },
+                }
+            },
+            new StatusItem
+            {
+                Glyph = "\uE77B", Name = "Anfeta", DemoLabel = "Anfeta", DemoDotHex = "#2DB880",
+                Title = "Sesión Weblab",
+                ColorRows = new()
+                {
+                    new StatusColorRow { DotColorHex = "#2DB880", Description = "Verde — sesión activa con tu cuenta empresarial" },
+                    new StatusColorRow { DotColorHex = "#888888", Description = "Gris — no autenticado, ve a Configuración → Iniciar sesión" },
+                }
+            },
+            new StatusItem
+            {
+                Glyph = "\uE8D7", Name = "Vinculación", DemoLabel = "No vinculado", DemoDotHex = "#888888",
+                Title = "Vinculación de cuenta",
+                ColorRows = new()
+                {
+                    new StatusColorRow { DotColorHex = "#2DB880", Description = "Verde — correo y teléfono empresarial vinculados correctamente" },
+                    new StatusColorRow { DotColorHex = "#888888", Description = "Gris — falta ingresar tu correo y número de teléfono asignados" },
+                }
+            },
+            new StatusItem
+            {
+                Glyph = "\uE720", Name = "Micrófono", DemoLabel = "Micrófono", DemoDotHex = "#2DB880",
+                Title = "Dispositivo de entrada",
+                ColorRows = new()
+                {
+                    new StatusColorRow { DotColorHex = "#2DB880", Description = "Verde — micrófono listo y con permisos concedidos" },
+                    new StatusColorRow { DotColorHex = "#E24B4A", Description = "Rojo — sin permisos o dispositivo no encontrado" },
+                }
+            },
+            new StatusItem
+            {
+                Glyph = "\uE8A5", Name = "Dropbox", DemoLabel = "Dropbox", DemoDotHex = "#E24B4A",
+                Title = "Sincronización Dropbox",
+                ColorRows = new()
+                {
+                    new StatusColorRow { DotColorHex = "#2DB880", Description = "Verde — Dropbox conectado y sincronizado" },
+                    new StatusColorRow { DotColorHex = "#E24B4A", Description = "Rojo — no conectado, ve a Configuración → Dropbox" },
+                }
+            },
+            new StatusItem
+            {
+                Glyph = "\uE787", Name = "Calendar", DemoLabel = "Calendar", DemoDotHex = "#888888",
+                Title = "Google Calendar",
+                ColorRows = new()
+                {
+                    new StatusColorRow { DotColorHex = "#2DB880", Description = "Verde — Calendar conectado, puedes ver y crear eventos" },
+                    new StatusColorRow { DotColorHex = "#888888", Description = "Gris — no conectado, di 'conectar Google Calendar'" },
+                }
+            },
+        };
+
+        private static List<TutorialStep> GetBasicSteps() => new()
+        {
+            new TutorialStep
+            {
+                Number = "1", Glyph = "\uE720",
+                Title  = "Activa el micrófono",
+                Description = "Presiona el botón central naranja. El asistente entra en modo escucha e indica el estado con animación.",
+                Detail      = "Presionarlo de nuevo mientras escucha cancela el reconocimiento sin ejecutar nada."
+            },
+            new TutorialStep
+            {
+                Number = "2", Glyph = "\uE8BD",
+                Title  = "Habla el comando",
+                Description = "Di el comando en español con claridad. No necesitas la frase exacta — el asistente entiende variaciones naturales.",
+                Detail      = "'revisiones de hoy' y 'mis revisiones hoy' producen el mismo resultado."
+            },
+            new TutorialStep
+            {
+                Number = "3", Glyph = "\uE8F8",
+                Title  = "Recibe la respuesta",
+                Description = "La respuesta aparece en el área Detectado y se reproduce en voz. Acciones sensibles piden confirmación antes de ejecutarse.",
+                Detail      = "Confirmar: 'sí' · 'ok' · 'dale'  —  Cancelar: 'no' · 'cancelar' · 'negativo'"
+            },
+        };
+
+        private static List<InterfaceElement> GetInterfaceElements() => new()
+        {
+            new InterfaceElement { Glyph = "\uE720", Name = "Botón micrófono",     Description = "Naranja fijo = listo. Animado = escuchando. Presionar cancela." },
+            new InterfaceElement { Glyph = "\uE995", Name = "Chips x1 / x1.5 / x2", Description = "Velocidad de reproducción de voz. Cambia en tiempo real sin regenerar audio." },
+            new InterfaceElement { Glyph = "\uE8D6", Name = "Entrada / Salida",    Description = "Micrófono activo (entrada) y altavoz para la respuesta (salida)." },
+            new InterfaceElement { Glyph = "\uE8BD", Name = "Área Detectado",      Description = "Muestra el texto reconocido y la respuesta del asistente." },
+            new InterfaceElement { Glyph = "\uE9D9", Name = "Área Sistema",        Description = "Estado del modelo de IA y errores. Verde = todo listo." },
+            new InterfaceElement { Glyph = "\uE81C", Name = "Actividad Reciente",  Description = "Últimos 15 comandos del día con hora. Contador de hoy." },
+            new InterfaceElement { Glyph = "\uE769", Name = "Pausa / Reanudar",    Description = "Pausa o reanuda la reproducción de voz sin cancelar la acción." },
+            new InterfaceElement { Glyph = "\uE8BB", Name = "Detener voz",         Description = "Corta la reproducción inmediatamente. La acción ya ejecutada no se revierte." },
+        };
+
+        private static List<TutorialStep> GetMultiTurnFlows() => new()
+        {
+            new TutorialStep
+            {
+                Number = "A", Glyph = "\uE8F9",
+                Title  = "Crear actividad",
+                Description = "Di 'crear actividad'. El asistente guía: título → prioridad → fecha → hora fin → responsable → confirmación.",
+                Detail      = "Di 'corregir [campo]' antes de confirmar. 'Cancelar' aborta en cualquier momento."
+            },
+            new TutorialStep
+            {
+                Number = "B", Glyph = "\uE70F",
+                Title  = "Editar actividad",
+                Description = "Di 'editar actividad [nombre]'. El asistente busca, confirma cuál encontró y pregunta qué campo cambiar.",
+                Detail      = "Campos: título, prioridad, estado, fecha inicio, fecha fin, anotaciones, pasos y links."
+            },
+            new TutorialStep
+            {
+                Number = "C", Glyph = "\uE7E7",
+                Title  = "Gestionar recordatorios por número",
+                Description = "Lista primero. Luego: 'elimina el primero', 'edita el segundo' o 'completa el tercero'.",
+                Detail      = "Lista activa 5 minutos. Usa ordinal ('primero') o número directo ('el 2')."
+            },
+            new TutorialStep
+            {
+                Number = "D", Glyph = "\uE948",
+                Title  = "Ver detalle de revisiones",
+                Description = "Después de 'revisiones de hoy': 'muéstrame las pendientes', 'ver terminadas' o 'dame confirmadas'.",
+                Detail      = "Detalle disponible 10 minutos. Si expiró, di 'revisiones de hoy' para recargar."
+            },
+        };
+
+        private static List<CommandModule> BuildModules() => new()
+        {
+            new CommandModule { Name = "Reportes", Commands = new()
+            {
+                new CommandItem
+                {
+                    Id = "REP-001", Module = "Reportes", Tier = "Tier 1",
+                    Title = "Comprobatoria personal",
+                    Phrases = new[] { "comprobatoria", "cómo voy hoy", "mi reporte de hoy", "ver mi comprobatoria" },
+                    ResponseExample = "[tu nombre]: FTF completado. Actividades en orden. Cuadrated pendiente.",
+                    Endpoint = "GET /api/reportes/comprobatoria?assignee={email}"
+                },
+                new CommandItem
+                {
+                    Id = "REP-002", Module = "Reportes", Tier = "Tier 1",
+                    Title = "Tareas rezagadas",
+                    Phrases = new[] { "tareas rezagadas", "mis rezagadas", "actividades atrasadas", "qué está atrasado" },
+                    ResponseExample = "[tu nombre], tienes 3 tareas rezagadas: 1. Revisar entregable (desde las 09:00).",
+                    Endpoint = "GET /api/reportes/rezagadas?assignee={email}&time={HH:mm}"
+                },
+                new CommandItem
+                {
+                    Id = "REP-003", Module = "Reportes", Tier = "Tier 1",
+                    Title = "Revisiones por fecha",
+                    Phrases = new[] { "revisiones de hoy", "mis revisiones de hoy", "revisiones de ayer", "cuántas revisiones tengo hoy" },
+                    ResponseExample = "[tu nombre], hoy tienes 8 revisiones: 3 terminadas, 2 confirmadas y 3 pendientes.",
+                    Endpoint = "GET /api/reportes/revisiones-por-fecha?date=YYYY-MM-DD"
+                },
+                new CommandItem
+                {
+                    Id = "REP-004", Module = "Reportes", Tier = "Tier 1",
+                    Title = "Últimas acciones del equipo",
+                    Phrases = new[] { "últimas acciones", "qué ha pasado", "últimos cambios", "muéstrame lo último" },
+                    ResponseExample = "Últimas 5 acciones: 1. juan creó revisión: Sprint Review. 2. maría actualizó actividad.",
+                    Endpoint = "GET /api/reportes/ultimos"
+                },
+            }},
+
+            new CommandModule { Name = "Recordatorios", Commands = new()
+            {
+                new CommandItem
+                {
+                    Id = "REC-001", Module = "Recordatorios", Tier = "Tier 1",
+                    Title = "Ver todos los recordatorios",
+                    Phrases = new[] { "mis recordatorios", "ver recordatorios", "listar recordatorios", "qué recordatorios tengo" },
+                    ResponseExample = "Tienes 3 recordatorios: Recordatorio 1. Revisar entregable. Hoy a las 15:00. Pendiente. Calendar: Sí.",
+                    Endpoint = "GET /api/recordatorios/usuario/{phone}"
+                },
+                new CommandItem
+                {
+                    Id = "REC-002", Module = "Recordatorios", Tier = "Tier 1",
+                    Title = "Recordatorios de hoy",
+                    Phrases = new[] { "recordatorios de hoy", "mis recordatorios de hoy", "qué recordatorios tengo hoy" },
+                    ResponseExample = "Hoy tienes 2 recordatorios: Recordatorio 1. Llamar al cliente. A las 10:00.",
+                    Endpoint = "GET /api/recordatorios/usuario/{phone} — filtro local por fecha"
+                },
+                new CommandItem
+                {
+                    Id = "REC-003", Module = "Recordatorios", Tier = "Tier 1",
+                    Title = "Recordatorios de mañana",
+                    Phrases = new[] { "recordatorios de mañana", "mis recordatorios de mañana", "qué recordatorios tengo mañana" },
+                    ResponseExample = "Mañana tienes 1 recordatorio: Revisión semanal a las 09:00.",
+                    Endpoint = "GET /api/recordatorios/usuario/{phone} — filtro local por fecha"
+                },
+                new CommandItem
+                {
+                    Id = "REC-004", Module = "Recordatorios", Tier = "Tier 1",
+                    Title = "Recordatorios pendientes",
+                    Phrases = new[] { "recordatorios pendientes", "mis recordatorios pendientes", "recordatorios sin completar" },
+                    ResponseExample = "Tienes 2 recordatorios pendientes: Recordatorio 1. Enviar informe a las 16:00.",
+                    Endpoint = "GET /api/recordatorios/usuario/{phone} — activo=true, enviado=false"
+                },
+                new CommandItem
+                {
+                    Id = "REC-005", Module = "Recordatorios", Tier = "Tier 1 → IA",
+                    Title = "Crear recordatorio",
+                    Phrases = new[] { "recuérdame...", "pon un recordatorio", "crea un recordatorio", "programa un recordatorio" },
+                    ResponseExample = "Recordatorio 'Llamar al cliente' creado y sincronizado con tu Google Calendar.",
+                    Endpoint = "POST /api/recordatorios"
+                },
+                new CommandItem
+                {
+                    Id = "REC-006", Module = "Recordatorios", Tier = "Tier 2",
+                    Title = "Eliminar o completar recordatorio",
+                    Phrases = new[] { "elimina el primero", "borra el 2", "completa el tercero", "marca el 1 como completado" },
+                    ResponseExample = "¿Seguro que deseas eliminar el recordatorio 1: 'Llamar al cliente' de hoy a las 10:00? → confirmar → Eliminado correctamente.",
+                    Endpoint = "DELETE /api/recordatorios/{id}  ·  PATCH /api/recordatorios/{id}/completar",
+                    RequiresConfirmation = true, IsMultiTurn = true
+                },
+                new CommandItem
+                {
+                    Id = "REC-007", Module = "Recordatorios", Tier = "Tier 2",
+                    Title = "Editar recordatorio",
+                    Phrases = new[] { "edita el primero", "modifica el 2", "actualiza el tercero" },
+                    ResponseExample = "¿Qué deseas cambiar en 'Llamar al cliente'? → (di el nuevo valor) → Recordatorio actualizado correctamente.",
+                    Endpoint = "PUT /api/recordatorios/{id}",
+                    RequiresConfirmation = true, IsMultiTurn = true
+                },
+            }},
+
+            new CommandModule { Name = "Google Calendar", Commands = new()
+            {
+                new CommandItem
+                {
+                    Id = "CAL-001", Module = "Google Calendar", Tier = "Tier 1",
+                    Title = "Eventos de hoy",
+                    Phrases = new[] { "qué tengo hoy", "eventos de hoy", "agenda de hoy", "tengo algo hoy", "qué hay hoy" },
+                    ResponseExample = "Hoy tienes 2 eventos: a las 10:00, Reunión de equipo. a las 15:30, Demo con cliente.",
+                    Endpoint = "GET google/calendar/list (hoy 00:00–23:59, max 10)"
+                },
+                new CommandItem
+                {
+                    Id = "CAL-002", Module = "Google Calendar", Tier = "Tier 1",
+                    Title = "Próximos eventos de la semana",
+                    Phrases = new[] { "mis eventos", "ver calendario", "próximos eventos", "eventos de la semana", "qué tengo esta semana" },
+                    ResponseExample = "Tienes 4 eventos próximos: el lunes 17 a las 09:00, Stand-up. el martes 18 a las 14:00, Revisión.",
+                    Endpoint = "GET google/calendar/list (hoy + 7 días, max 10)"
+                },
+                new CommandItem
+                {
+                    Id = "CAL-003", Module = "Google Calendar", Tier = "Tier 3 — IA",
+                    Title = "Crear evento en calendario",
+                    Phrases = new[] { "crea un evento", "agrega evento al calendario", "programa una reunión" },
+                    ResponseExample = "Evento 'Reunión de equipo' creado para el 20 de marzo a las 10:00.",
+                    Endpoint = "POST google/calendar/create",
+                    RequiresConfirmation = true
+                },
+                new CommandItem
+                {
+                    Id = "CAL-004", Module = "Google Calendar", Tier = "Tier 3 — IA",
+                    Title = "Estado y gestión de conexión",
+                    Phrases = new[] { "estado de Google Calendar", "conectar Google Calendar", "desconectar Google Calendar" },
+                    ResponseExample = "Tu Google Calendar está conectado.  /  Se abrió el navegador para conectar tu cuenta.",
+                    Endpoint = "google/calendar/status  ·  /connect  ·  /disconnect"
+                },
+            }},
+
+            new CommandModule { Name = "Actividades", Commands = new()
+            {
+                new CommandItem
+                {
+                    Id = "ACT-001", Module = "Actividades", Tier = "Tier 2",
+                    Title = "Crear actividad",
+                    Phrases = new[] { "crear actividad", "nueva actividad", "crea actividad", "crear tarea", "nueva tarea" },
+                    ResponseExample = "¿Cuál es el título? → ¿Qué prioridad? → ¿Cuándo inicia? → ¿Hora de fin? → ¿Para quién? → Actividad creada correctamente.",
+                    Endpoint = "POST /api/actividades",
+                    IsMultiTurn = true
+                },
+                new CommandItem
+                {
+                    Id = "ACT-002", Module = "Actividades", Tier = "Tier 2",
+                    Title = "Editar actividad",
+                    Phrases = new[] { "editar actividad [nombre]", "edita actividad", "modificar actividad", "cambiar actividad" },
+                    ResponseExample = "Encontré 'Revisión de sprint'. ¿Qué campo quieres editar? → Prioridad → Alta → Actividad actualizada.",
+                    Endpoint = "PUT /api/actividades/{id}",
+                    RequiresConfirmation = true, IsMultiTurn = true
+                },
+                new CommandItem
+                {
+                    Id = "ACT-003", Module = "Actividades", Tier = "Tier 3 — IA",
+                    Title = "Listar mis actividades",
+                    Phrases = new[] { "lista mis actividades", "ver mis actividades", "qué actividades tengo" },
+                    ResponseExample = "Tienes 5 actividades: 1. Revisión de sprint — Alta. 2. Actualizar documentación — Media.",
+                    Endpoint = "GET /api/actividades (limit=10)"
+                },
+                new CommandItem
+                {
+                    Id = "ACT-004", Module = "Actividades", Tier = "Tier 3 — IA",
+                    Title = "Buscar actividad",
+                    Phrases = new[] { "busca la actividad [nombre]", "buscar actividad", "encuentra la actividad de [tema]" },
+                    ResponseExample = "Encontré 2 actividades con 'sprint': 1. Revisión de sprint. 2. Planning sprint.",
+                    Endpoint = "GET /api/actividades/search?q={texto}"
+                },
+                new CommandItem
+                {
+                    Id = "ACT-005", Module = "Actividades", Tier = "Tier 3 — IA",
+                    Title = "Actividades de hoy",
+                    Phrases = new[] { "mis actividades de hoy", "qué actividades tengo hoy", "actividades para hoy" },
+                    ResponseExample = "Hoy tienes 3 actividades: 1. Stand-up diario — Alta. 2. Revisión de código — Media.",
+                    Endpoint = "GET /api/actividades/today?assignee={email}"
+                },
+            }},
+
+            new CommandModule { Name = "Revisiones", Commands = new()
+            {
+                new CommandItem
+                {
+                    Id = "REV-001", Module = "Revisiones", Tier = "Tier 1 + Tier 2",
+                    Title = "Revisiones del día + detalle por estado",
+                    Phrases = new[] { "revisiones de hoy", "revisiones de ayer", "muéstrame las pendientes", "ver las terminadas", "dame las confirmadas", "ver todas" },
+                    ResponseExample = "[tu nombre], hoy tienes 8 revisiones: 3 terminadas, 2 confirmadas y 3 pendientes. → (drill-down) → tienes 3 revisiones pendientes: 1. Sprint Review.",
+                    Endpoint = "GET /api/reportes/revisiones-por-fecha?date={date} — cache 10 min para drill-down",
+                    IsMultiTurn = true
+                },
+                new CommandItem
+                {
+                    Id = "REV-002", Module = "Revisiones", Tier = "Tier 3 — IA",
+                    Title = "Revisiones en curso",
+                    Phrases = new[] { "revisiones activas", "revisiones en curso", "qué revisiones están activas" },
+                    ResponseExample = "Tienes 2 revisiones en curso: 1. Revisión del módulo de pagos. 2. Revisión de entregable Q1.",
+                    Endpoint = "GET /api/revisiones/activa"
+                },
+            }},
+
+            new CommandModule { Name = "Local / Sistema", Commands = new()
+            {
+                new CommandItem
+                {
+                    Id = "LOC-001", Module = "Local / Sistema", Tier = "Tier 1",
+                    Title = "Abrir aplicación",
+                    Phrases = new[] { "abre chrome", "abre la calculadora", "abrir el explorador", "abre el bloc de notas" },
+                    ResponseExample = "Acción OK: abierto chrome.",
+                    Endpoint = "LOCAL — Process.Start(exe) — apps registradas en configuración"
+                },
+                new CommandItem
+                {
+                    Id = "LOC-002", Module = "Local / Sistema", Tier = "Tier 2",
+                    Title = "Confirmar acción pendiente",
+                    Phrases = new[] { "sí", "confirmar", "confirmo", "ok", "dale" },
+                    ResponseExample = "Ejecuta la última acción que esperaba confirmación."
+                },
+                new CommandItem
+                {
+                    Id = "LOC-003", Module = "Local / Sistema", Tier = "Tier 2",
+                    Title = "Cancelar acción pendiente",
+                    Phrases = new[] { "no", "cancelar", "cancela", "negativo" },
+                    ResponseExample = "Acción cancelada."
+                },
+            }},
+        };
     }
-}
-
-/* ===========================
-   MODELOS (MISMO ARCHIVO)
-   =========================== */
-
-public class CommandModule
-{
-    public string Name { get; set; } = "";
-    public List<CommandItem> Commands { get; set; } = new();
-}
-
-public class CommandItem
-{
-    public string Id { get; set; } = "";
-    public string Module { get; set; } = "";
-    public string Title { get; set; } = "";
-    public string Endpoint { get; set; } = "—";
-    public string Function { get; set; } = "—";
-    public string MinParamsLine { get; set; } = "—";
-    public string ExamplesLine { get; set; } = "—";
-
-    public bool RequiresConfirmation { get; set; }
-    public bool RequiresInternet { get; set; }
-
-    public string IdAndModule => $"{Id} • {Module}";
-
-    public string InternetBadgeText => RequiresInternet ? "Internet" : "Local";
-    public string ConfirmBadgeText => RequiresConfirmation ? "Confirmación" : "Sin confirmación";
-    public string Description => BuildDescription(Title);
-
-    private static string BuildDescription(string title)
-    {
-        var t = (title ?? "").ToLowerInvariant();
-
-        if (t.Contains("listar")) return "Muestra una lista de elementos del módulo seleccionado.";
-        if (t.Contains("buscar")) return "Permite encontrar elementos por texto o filtros.";
-        if (t.Contains("obtener") || t.Contains("abrir") || t.Contains("detalle")) return "Abre el detalle de un elemento específico.";
-        if (t.Contains("crear") || t.Contains("agrega") || t.Contains("nuevo")) return "Crea un nuevo registro dentro del sistema.";
-        if (t.Contains("actualizar") || t.Contains("cambiar") || t.Contains("marca")) return "Modifica información o estado de un registro existente.";
-        if (t.Contains("eliminar") || t.Contains("borrar")) return "Elimina un registro del sistema (acción sensible).";
-        if (t.Contains("sincron")) return "Sincroniza información entre servicios (puede tardar).";
-        if (t.Contains("delta")) return "Sincroniza únicamente cambios recientes.";
-        if (t.Contains("mover") || t.Contains("reprogramar")) return "Reorganiza fechas o prioridades en lote (acción sensible).";
-        if (t.Contains("preview")) return "Muestra una vista previa sin modificar información.";
-        if (t.Contains("confirmar") || t.Contains("aprobar")) return "Confirma o aprueba un elemento (acción sensible).";
-        if (t.Contains("usuarios online") || t.Contains("online")) return "Muestra quién está conectado en este momento.";
-        if (t.Contains("mensaje") || t.Contains("chat")) return "Envía un mensaje a otro usuario (acción sensible).";
-
-        return "Ejecuta una acción del asistente dentro del módulo.";
-    }
-
 }
