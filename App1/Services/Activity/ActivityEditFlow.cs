@@ -72,6 +72,13 @@ namespace Anfeta.UI.Services.Activity
 
         public (bool Continue, string Message, CachedActivityItem? Activity, UpdateActividadRequest? Patch) ProcessResponse(string userText)
         {
+            var t = (userText ?? "").Trim().ToLowerInvariant();
+
+            if (t == "cancelar" || t == "cancela" || t == "no" || t == "negativo")
+            {
+                _state.Reset();
+                return (false, "Edición cancelada.", null, null);
+            }
             switch (_state.Phase)
             {
                 case EditFlowPhase.SearchingActivity:
@@ -93,7 +100,6 @@ namespace Anfeta.UI.Services.Activity
                     return (false, "No hay un flujo de edición activo.", null, null);
             }
         }
-
         private (bool Continue, string Message, CachedActivityItem? Activity, UpdateActividadRequest? Patch) ProcessSearchingActivity(string userText)
         {
             var results = _cache.SearchByTitle(userText);
@@ -257,8 +263,19 @@ namespace Anfeta.UI.Services.Activity
             t = t.Replace("edita actividad", "", StringComparison.OrdinalIgnoreCase);
             t = t.Replace("editar", "", StringComparison.OrdinalIgnoreCase);
             t = t.Replace("edita", "", StringComparison.OrdinalIgnoreCase);
+
             t = t.Replace("cambiar actividad", "", StringComparison.OrdinalIgnoreCase);
             t = t.Replace("cambia actividad", "", StringComparison.OrdinalIgnoreCase);
+
+            t = t.Replace("modificar actividad", "", StringComparison.OrdinalIgnoreCase);
+            t = t.Replace("modifica actividad", "", StringComparison.OrdinalIgnoreCase);
+            t = t.Replace("modificar", "", StringComparison.OrdinalIgnoreCase);
+            t = t.Replace("modifica", "", StringComparison.OrdinalIgnoreCase);
+
+            t = t.Replace("actualizar actividad", "", StringComparison.OrdinalIgnoreCase);
+            t = t.Replace("actualiza actividad", "", StringComparison.OrdinalIgnoreCase);
+            t = t.Replace("actualizar", "", StringComparison.OrdinalIgnoreCase);
+            t = t.Replace("actualiza", "", StringComparison.OrdinalIgnoreCase);
 
             return t.Trim();
         }

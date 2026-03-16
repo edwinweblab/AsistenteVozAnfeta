@@ -346,7 +346,11 @@ namespace Anfeta.UI.ViewModels
                    t.Contains("cambiar actividad") ||
                    t.Contains("cambia actividad") ||
                    t.Contains("modificar actividad") ||
-                   t.Contains("modifica actividad");
+                   t.Contains("modifica actividad") ||
+                   t.Contains("actualizar actividad") ||
+                   t.Contains("actualiza actividad") ||
+                   t.StartsWith("actualizar ") ||
+                   t.StartsWith("actualiza ");
         }
 
         private static bool IsDeleteActivityCommand(string text)
@@ -1145,6 +1149,18 @@ namespace Anfeta.UI.ViewModels
                 if (_activityEditFlow.IsActive)
                 {
                     Debug.WriteLine("[ACTIVITY_EDIT_FLOW] Procesando respuesta");
+
+                    // Cancelación explícita del flujo de edición
+                    if (IsCancelPhrase(text))
+                    {
+                        _activityEditFlow.Reset();
+                        await ResetAfterActionAsync(
+                            "Edición de actividad cancelada.",
+                            "Edición cancelada",
+                            speak: "Edición de actividad cancelada.");
+                        return;
+                    }
+
                     var editResult = _activityEditFlow.ProcessResponse(text);
 
                     Debug.WriteLine("===== PATCH DEBUG =====");
@@ -1188,7 +1204,11 @@ namespace Anfeta.UI.ViewModels
 
                         if (updateParamsJson == "{}")
                         {
-                            await ResetAfterActionAsync("No detecté ningún cambio para actualizar.", "Sin cambios", speak: "No detecté ningún cambio para actualizar.");
+                            _activityEditFlow.Reset();
+                            await ResetAfterActionAsync(
+                                "No detecté ningún cambio para actualizar.",
+                                "Sin cambios",
+                                speak: "No detecté ningún cambio para actualizar.");
                             return;
                         }
 
@@ -1200,10 +1220,12 @@ namespace Anfeta.UI.ViewModels
                             await RecordCommandAsync(text, "ACTIVIDAD");
                         }
 
+                        _activityEditFlow.Reset();
                         await ResetAfterActionAsync(msg, ok ? "Actividad actualizada" : "Error", speak: msg);
                         return;
                     }
 
+                    _activityEditFlow.Reset();
                     await ResetAfterActionAsync(editResult.Message, "Edición cancelada", speak: editResult.Message);
                     return;
                 }
