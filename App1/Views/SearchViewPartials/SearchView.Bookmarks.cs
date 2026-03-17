@@ -36,13 +36,13 @@ namespace Anfeta.UI.Views
                 }
                 else
                 {
-                    items = items.Where(b => AdvancedQueryV3.Evaluate(parsed.Expr, new BookmarkView(b)));
+                    items = items.Where(b => AdvancedQueryV3.EvaluateWithPlan(parsed.Expr, new BookmarkView(b), parsed.Plan));
                 }
             }
 
             // Evitar doble filtrado si ya se hizo arriba
             if (string.IsNullOrWhiteSpace(rawQuery))
-                items = items.Where(b => AdvancedQueryV3.Evaluate(parsed.Expr, new BookmarkView(b)));
+                items = items.Where(b => AdvancedQueryV3.EvaluateWithPlan(parsed.Expr, new BookmarkView(b), parsed.Plan));
 
             if (!string.IsNullOrWhiteSpace(parsed.Plan.FolderContains))
             {

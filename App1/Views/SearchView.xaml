@@ -68,7 +68,7 @@
             <!--  Micrófono  -->
             <Grid
                 Grid.Column="1"
-                Width="42"
+                Width="70"
                 Height="32"
                 VerticalAlignment="Center">
                 <muxc:SplitButton
@@ -77,7 +77,7 @@
                     Padding="6,0"
                     HorizontalContentAlignment="Center"
                     Click="VoiceSplit_Click"
-                    CornerRadius="6"
+                    CornerRadius="7"
                     ToolTipService.ToolTip="Voz">
                     <muxc:SplitButton.Content>
                         <SymbolIcon Symbol="Microphone" />
@@ -1215,7 +1215,7 @@
 
         <!--
             ═══════════════════════════════════════════════════════
-            POPUP AYUDA — sin cambios
+            POPUP AYUDA 
             ═══════════════════════════════════════════════════════
         -->
         <Popup x:Name="HelpPopup" IsLightDismissEnabled="True">
@@ -1230,7 +1230,7 @@
                     Padding="16"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Background="#1A110E"
+                    Background="Black"
                     CornerRadius="12">
                     <Grid RowSpacing="12">
                         <Grid.RowDefinitions>

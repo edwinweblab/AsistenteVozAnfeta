@@ -230,7 +230,13 @@ namespace Anfeta.UI.Views
             if (up.Contains(" AND ") || up.Contains(" OR ") || up.Contains(" NOT ")) return true;
             if (q.StartsWith("-", StringComparison.Ordinal) || q.Contains(" -", StringComparison.Ordinal)) return true;
 
-            string[] cmds = { "ext:", "type:", "folder:", "sort:", "limit:", "page:", "size:", "date:", "dm:", "year:", "month:", "name:", "path:", "content:", "id:", "status:", "meta:", "author:", "creator:", "access:", "shared:" };
+            // ! como NOT inline (Everything: reporte !SEO)
+            if (q.Contains('!')) return true;
+
+            // | como OR inline (Everything: aprtzzr|prtzzr|rtzzr)
+            // ya está arriba en q.Contains('|') — solo lo dejamos documentado aquí
+
+            string[] cmds = { "ext:", "type:", "folder:", "sort:", "limit:", "page:", "size:", "date:", "dm:", "year:", "month:", "name:", "path:", "nopath:", "regex:", "content:", "id:", "status:", "meta:", "author:", "creator:", "access:", "shared:" };
             foreach (var c in cmds)
                 if (up.Contains(c.ToUpperInvariant(), StringComparison.Ordinal)) return true;
 
