@@ -205,14 +205,21 @@ namespace Anfeta.UI.Views
                 }
                 else
                 {
-                    items = items.Where(x => AdvancedQueryV3.Evaluate(parsed.Expr, new RowView(x)));
+                    // EvaluateWithPlan ya maneja internamente:
+                    //   - expr booleana (AND/OR/NOT/pipe)
+                    //   - nopath:
+                    //   - ext: con lista (pdf;docx;xlsx)
+                    //   - FolderContains y OnlyFolders se aplican abajo como siempre
+                    items = items.Where(x => AdvancedQueryV3.EvaluateWithPlan(parsed.Expr, new RowView(x), parsed.Plan));
 
+                    // FolderContains: filtro de ruta/carpeta (de la query o ruta absoluta)
                     if (!string.IsNullOrWhiteSpace(parsed.Plan.FolderContains))
                     {
                         var f = parsed.Plan.FolderContains.ToLowerInvariant();
                         items = items.Where(x => (x.Target ?? "").ToLowerInvariant().Contains(f));
                     }
 
+                    // OnlyFolders: type:folder / type:file
                     if (parsed.Plan.OnlyFolders.HasValue)
                     {
                         var wantFolder = parsed.Plan.OnlyFolders.Value;
@@ -222,19 +229,13 @@ namespace Anfeta.UI.Views
                                 : (x.Type ?? "").Equals("FILE", StringComparison.OrdinalIgnoreCase));
                     }
 
-                    if (!string.IsNullOrWhiteSpace(parsed.Plan.Ext))
-                    {
-                        var e = parsed.Plan.Ext;
-                        items = items.Where(x =>
-                        {
-                            var ext = Path.GetExtension(x.Target ?? x.Name ?? "").TrimStart('.').ToLowerInvariant();
-                            if (e == "img") return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
-                            return ext == e;
-                        });
-                    }
+                    // Nota: parsed.Plan.Ext / ExtList ya fue aplicado dentro de EvaluateWithPlan,
+                    // NO hace falta volver a filtrar aquí.
                 }
             }
 
+            // ApplyChipFilters: solo actúa cuando el usuario clickea un chip
+            // sin escribir query (p. ej. _extFilter viene del chip PDF, DOCX, etc.)
             items = ApplyChipFilters(items);
             items = ApplySortKey(items);
 
@@ -281,7 +282,7 @@ namespace Anfeta.UI.Views
                 }
                 else
                 {
-                    items = items.Where(x => AdvancedQueryV3.Evaluate(parsed.Expr, new RowView(x)));
+                    items = items.Where(x => AdvancedQueryV3.EvaluateWithPlan(parsed.Expr, new RowView(x), parsed.Plan));
 
                     if (!string.IsNullOrWhiteSpace(parsed.Plan.FolderContains))
                     {
@@ -297,17 +298,7 @@ namespace Anfeta.UI.Views
                                 ? (x.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase)
                                 : (x.Type ?? "").Equals("FILE", StringComparison.OrdinalIgnoreCase));
                     }
-
-                    if (!string.IsNullOrWhiteSpace(parsed.Plan.Ext))
-                    {
-                        var e = parsed.Plan.Ext;
-                        items = items.Where(x =>
-                        {
-                            var ext = Path.GetExtension(x.Target ?? x.Name ?? "").TrimStart('.').ToLowerInvariant();
-                            if (e == "img") return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
-                            return ext == e;
-                        });
-                    }
+                    // Ext / ExtList ya aplicados dentro de EvaluateWithPlan
                 }
             }
 
