@@ -807,13 +807,43 @@ namespace Anfeta.UI.Views
 
         private Microsoft.UI.Xaml.Controls.TreeViewNode MakeExcludeNode(string dirPath)
         {
-            var data = new ExcludeNode { Name = System.IO.Path.GetFileName(dirPath), Path = dirPath, IsChecked = false, IsLoaded = false };
-            var node = new Microsoft.UI.Xaml.Controls.TreeViewNode { Content = data };
+            var data = new ExcludeNode
+            {
+                Name = System.IO.Path.GetFileName(dirPath),
+                Path = dirPath,
+                IsChecked = false,
+                IsLoaded = true   // ya cargado — no lazy load
+            };
 
-            if (HasSubfolders(dirPath))
-                node.Children.Add(new Microsoft.UI.Xaml.Controls.TreeViewNode { Content = new ExcludeNode { Name = "Cargando...", Path = "__dummy__" } });
-            else
-                data.IsLoaded = true;
+            var node = new Microsoft.UI.Xaml.Controls.TreeViewNode
+            {
+                Content = data,
+                IsExpanded = false
+            };
+
+            // Carga directa de subcarpetas (solo 1 nivel)
+            // Al expandir cada hijo, sus propios hijos se cargarán igual
+            try
+            {
+                foreach (var sub in Directory.EnumerateDirectories(dirPath))
+                {
+                    var childData = new ExcludeNode
+                    {
+                        Name = System.IO.Path.GetFileName(sub),
+                        Path = sub,
+                        IsChecked = false,
+                        IsLoaded = false   // los nietos se cargan al expandir
+                    };
+                    var childNode = new Microsoft.UI.Xaml.Controls.TreeViewNode
+                    {
+                        Content = childData,
+                        IsExpanded = false,
+                        HasUnrealizedChildren = HasSubfolders(sub)
+                    };
+                    node.Children.Add(childNode);
+                }
+            }
+            catch { }
 
             return node;
         }
@@ -899,6 +929,58 @@ namespace Anfeta.UI.Views
                   </Grid>
                 </DataTemplate>");
 
+                // Expanding carga los nietos cuando el usuario expande un hijo
+                tv.Expanding += (s, expandArgs) =>
+                {
+                    if (expandArgs.Item is not Microsoft.UI.Xaml.Controls.TreeViewNode expandNode) return;
+                    if (expandNode.Content is not ExcludeNode expandData) return;
+                    if (expandData.IsLoaded) return;
+
+                    expandData.IsLoaded = true;
+                    expandNode.HasUnrealizedChildren = false;
+
+                    try
+                    {
+                        foreach (var sub in Directory.EnumerateDirectories(expandData.Path))
+                        {
+                            var childData = new ExcludeNode
+                            {
+                                Name = System.IO.Path.GetFileName(sub),
+                                Path = sub,
+                                IsChecked = false,
+                                IsLoaded = false
+                            };
+                            expandNode.Children.Add(new Microsoft.UI.Xaml.Controls.TreeViewNode
+                            {
+                                Content = childData,
+                                IsExpanded = false,
+                                HasUnrealizedChildren = HasSubfolders(sub)
+                            });
+                        }
+                    }
+                    catch { }
+                };
+
+                // Expanding se dispara cuando el usuario abre un nodo con HasUnrealizedChildren=true
+                tv.Expanding += (s, expandArgs) =>
+                {
+                    if (expandArgs.Item is not Microsoft.UI.Xaml.Controls.TreeViewNode expandNode) return;
+                    if (expandNode.Content is not ExcludeNode expandData) return;
+                    if (expandData.IsLoaded) return;
+
+                    expandData.IsLoaded = true;
+                    expandNode.HasUnrealizedChildren = false;
+
+                    try
+                    {
+                        foreach (var sub in Directory.EnumerateDirectories(expandData.Path))
+                            expandNode.Children.Add(MakeExcludeNode(sub));
+                    }
+                    catch { }
+                };
+
+                // ── FIX 2: Al checkear padre, colapsar y limpiar sus hijos ───
+                // Si la carpeta padre está excluida, no tiene sentido navegar sus hijos
                 tv.AddHandler(UIElement.TappedEvent, new TappedEventHandler((s, e2) =>
                 {
                     var cb = FindAncestor<CheckBox>(e2.OriginalSource as DependencyObject);
@@ -917,7 +999,20 @@ namespace Anfeta.UI.Views
                         var isChecked = cb.IsChecked == true;
                         data.IsChecked = isChecked;
                         data.IsEnabled = true;
-                        ApplyToChildren(node, isChecked);
+
+                        if (isChecked)
+                        {
+                            // Padre checked → colapsar nodo y ocultar hijos visualmente
+                            // (no tiene sentido excluir subcarpetas si el padre ya está excluido)
+                            node.IsExpanded = false;
+                            // Marcar hijos como checked+disabled sin mostrarlos
+                            ApplyToChildren(node, isChecked: true);
+                        }
+                        else
+                        {
+                            // Padre unchecked → rehabilitar hijos
+                            ApplyToChildren(node, isChecked: false);
+                        }
                     });
                 }), true);
 
@@ -975,10 +1070,19 @@ namespace Anfeta.UI.Views
 
         private static void CollectChecked(Microsoft.UI.Xaml.Controls.TreeViewNode node, List<string> acc)
         {
-            if (node?.Content is ExcludeNode data && data.IsChecked &&
-                !string.IsNullOrWhiteSpace(data.Path) && data.Path != "__dummy__")
-                acc.Add(data.Path);
+            if (node?.Content is ExcludeNode data && data.Path != "__dummy__")
+            {
+                if (data.IsChecked)
+                {
+                    // Padre checked → agregar solo el padre y NO recorrer hijos
+                    // (excluir el padre ya excluye todo su contenido)
+                    if (!string.IsNullOrWhiteSpace(data.Path))
+                        acc.Add(data.Path);
+                    return;  // ← STOP, no bajar a hijos
+                }
+            }
 
+            // Padre NO checked → seguir buscando en hijos
             foreach (var child in node.Children)
                 CollectChecked(child, acc);
         }
@@ -995,8 +1099,10 @@ namespace Anfeta.UI.Views
             {
                 if (child.Content is ExcludeNode cd && cd.Path != "__dummy__")
                 {
-                    cd.IsChecked = isChecked;
+                    // Si padre checked → deshabilitar hijos (cubiertos por el padre)
+                    // Si padre unchecked → rehabilitar hijos y desmarcarlos
                     cd.IsEnabled = !isChecked;
+                    cd.IsChecked = false;  // siempre desmarcar — el padre es el que cuenta
                 }
                 ApplyToChildren(child, isChecked);
             }
@@ -1282,9 +1388,14 @@ namespace Anfeta.UI.Views
         {
             var stack = new StackPanel { Spacing = 12 };
             stack.Children.Add(CreateSection("Ejemplos rápidos", "Toca un ejemplo para colocarlo automáticamente en el buscador:"));
-            stack.Children.Add(CreateExampleRow("reporte -SEO", "Busca 'reporte' excluyendo la palabra 'SEO'"));
+            stack.Children.Add(CreateExampleRow("reporte -SEO", "Excluye 'SEO' con guión"));
+            stack.Children.Add(CreateExampleRow("reporte !SEO", "Excluye 'SEO' con signo de exclamación"));
             stack.Children.Add(CreateExampleRow("factura AND 2026", "Debe contener ambos términos"));
             stack.Children.Add(CreateExampleRow("\"estado de cuenta\"", "Frase exacta entre comillas"));
+            stack.Children.Add(CreateExampleRow("aprtzzr|prtzzr|rtzzr bbria", "OR entre variantes + AND con otro término"));
+            stack.Children.Add(CreateExampleRow("regex:^00act", "Archivos cuyo nombre empieza con '00act'"));
+            stack.Children.Add(CreateExampleRow("regex:reporte.*(pdf|url)", "Regex: reporte seguido de pdf o url"));
+            stack.Children.Add(CreateExampleRow("reporte AND febrero !SEO ext:pdf", "Ejemplo completo combinando todo"));
             return stack;
         }
 
@@ -1296,6 +1407,8 @@ namespace Anfeta.UI.Views
             stack.Children.Add(CreateTokenChip("OR", "Cualquiera de los términos"));
             stack.Children.Add(CreateTokenChip("NOT", "Excluye un término"));
             stack.Children.Add(CreateTokenChip("-SEO", "Forma corta para excluir (NOT SEO)"));
+            stack.Children.Add(CreateTokenChip("!SEO", "Igual que -SEO, estilo Everything"));
+            stack.Children.Add(CreateTokenChip("a|b|c", "OR entre variantes separadas por |"));
             stack.Children.Add(CreateTokenChip("( A OR B )", "Agrupación con paréntesis"));
             return stack;
         }
@@ -1303,12 +1416,28 @@ namespace Anfeta.UI.Views
         private UIElement BuildHelpFilters()
         {
             var stack = new StackPanel { Spacing = 12 };
-            stack.Children.Add(CreateSection("Filtros", "Limita los resultados por tipo o ubicación:"));
-            stack.Children.Add(CreateTokenChip("ext:pdf", "Archivos PDF"));
-            stack.Children.Add(CreateTokenChip("ext:docx", "Documentos Word"));
-            stack.Children.Add(CreateTokenChip("ext:xlsx", "Excel"));
+
+            stack.Children.Add(CreateSection("Filtros de tipo", "Limita los resultados por extensión o tipo:"));
+            stack.Children.Add(CreateTokenChip("ext:pdf", "Solo archivos PDF"));
+            stack.Children.Add(CreateTokenChip("ext:pdf;docx;xlsx", "Varios tipos separados por ;"));
+            stack.Children.Add(CreateTokenChip(".url", "Archivos .url (accesos directos web)"));
             stack.Children.Add(CreateTokenChip("type:folder", "Solo carpetas"));
-            stack.Children.Add(CreateTokenChip("folder:finanzas", "Carpetas con ese nombre"));
+            stack.Children.Add(CreateTokenChip("type:file", "Solo archivos"));
+
+            stack.Children.Add(CreateSection("Filtros de ubicación", "Limita por ruta o carpeta:"));
+            stack.Children.Add(CreateTokenChip("folder:finanzas", "Rutas que contengan 'finanzas'"));
+            stack.Children.Add(CreateTokenChip("nopath:SEO", "Excluye resultados cuya ruta contenga 'SEO'"));
+
+            stack.Children.Add(CreateSection("Regex", "Expresiones regulares para búsquedas avanzadas:"));
+            stack.Children.Add(CreateTokenChip("regex:^00act", "Empieza con '00act'"));
+            stack.Children.Add(CreateTokenChip("regex:\\d{4}-\\d{2}", "Patrón de fecha yyyy-mm"));
+            stack.Children.Add(CreateTokenChip("regex:reporte.*(pdf|url)", "reporte seguido de pdf o url"));
+
+            stack.Children.Add(CreateSection("Tamaño y fecha", ""));
+            stack.Children.Add(CreateTokenChip("size:>10MB", "Archivos mayores a 10 MB"));
+            stack.Children.Add(CreateTokenChip("dm:<=7", "Modificado hace 7 días o menos"));
+            stack.Children.Add(CreateTokenChip("date:2025-01-01", "Modificado exactamente en esa fecha"));
+
             return stack;
         }
 
@@ -1316,10 +1445,14 @@ namespace Anfeta.UI.Views
         {
             var stack = new StackPanel { Spacing = 12 };
             stack.Children.Add(CreateSection("Tips", "Consejos para búsquedas más efectivas:"));
-            stack.Children.Add(new TextBlock { Text = "• Usa comillas para buscar frases exactas.", TextWrapping = TextWrapping.Wrap });
-            stack.Children.Add(new TextBlock { Text = "• Usa -palabra para excluir resultados.", TextWrapping = TextWrapping.Wrap });
-            stack.Children.Add(new TextBlock { Text = "• Combina filtros y operadores para búsquedas avanzadas.", TextWrapping = TextWrapping.Wrap });
-            stack.Children.Add(CreateExampleRow("reporte AND febrero -SEO ext:pdf", "Ejemplo completo combinando todo"));
+            stack.Children.Add(new TextBlock { Text = "• Usa comillas para buscar frases exactas: \"estado de cuenta\"", TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(new TextBlock { Text = "• Usa -palabra o !palabra para excluir resultados.", TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(new TextBlock { Text = "• Usa a|b|c para buscar variantes de una misma palabra en un solo token.", TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(new TextBlock { Text = "• nopath:carpeta excluye resultados que estén dentro de esa ruta.", TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(new TextBlock { Text = "• ext:pdf;docx busca varios tipos a la vez separando con ;", TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(new TextBlock { Text = "• regex: acepta cualquier expresión regular .NET. Por defecto ignora mayúsculas.", TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(new TextBlock { Text = "• Combina todo: a|b|c !excluir ext:pdf folder:proyectos", TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(CreateExampleRow("aprtzzr|prtzzr bbria !SEO nopath:archivo ext:url", "Ejemplo avanzado estilo Everything"));
             return stack;
         }
 
