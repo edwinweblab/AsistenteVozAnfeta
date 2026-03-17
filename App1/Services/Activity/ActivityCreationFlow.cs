@@ -121,7 +121,7 @@ namespace Anfeta.UI.Services.Activity
         }
 
         /// Procesa respuesta de clarificación AM/PM.
-        /// FIX 3: reconoce "antes" y "después" solos como respuesta válida — sin necesitar la frase completa.
+        /// FIX: reconoce "antes" y "después" solos como respuesta válida.
         private (bool, string, ActivityCreationState?) ProcessTimeClarificationResponse(string response)
         {
             if (!_state.AmbiguousHour.HasValue || !_state.AmbiguousBaseDate.HasValue)
@@ -143,8 +143,6 @@ namespace Anfeta.UI.Services.Activity
                 .Replace("porlatarde", "pm")
                 .Replace("porlamañana", "am");
 
-            // FIX 3: "antes" solo o "antes del mediodía" → AM.
-            // "después"/"despues" solo → PM.
             bool isAM = normalized.Contains("mañana") ||
                         normalized.Contains("am") ||
                         normalized.Contains("antesmediodia") ||
@@ -397,8 +395,6 @@ namespace Anfeta.UI.Services.Activity
         }
 
         /// Establece campo con validación.
-        /// FIX coherencia dueEnd: cuando el usuario responde solo con una hora (sin fecha),
-        /// usa _state.DueStart.Date como base en lugar de fallar.
         private (bool valid, string message) SetField(string field, string value)
         {
             switch (field)
@@ -477,7 +473,6 @@ namespace Anfeta.UI.Services.Activity
                         return (false, "No hay fecha de inicio para calcular fin automático.");
                     }
 
-                    // FIX coherencia: intentar con ExtractFields primero (cubre respuestas con fecha completa)
                     var extractedEnd = _extractor.ExtractFields(value);
                     if (extractedEnd.DueStart.HasValue)
                     {
@@ -485,7 +480,6 @@ namespace Anfeta.UI.Services.Activity
                         return (true, $"Fin: {_state.DueEnd.Value:dd/MM/yyyy HH:mm}");
                     }
 
-                    // Si ExtractFields falló (respuesta solo con hora), usar DueStart.Date como base
                     if (_state.DueStart.HasValue)
                     {
                         var timeOnly = _extractor.ExtractTimeWithBase(value, _state.DueStart.Value);
@@ -493,7 +487,6 @@ namespace Anfeta.UI.Services.Activity
                         {
                             _state.DueEnd = timeOnly.Value;
 
-                            // Si la hora de fin queda antes que la de inicio, asumir día siguiente
                             if (_state.DueEnd.Value <= _state.DueStart.Value)
                                 _state.DueEnd = _state.DueEnd.Value.AddDays(1);
 
@@ -575,36 +568,51 @@ namespace Anfeta.UI.Services.Activity
             return $"{date:dd/MM/yyyy} {hour}{minuteStr} {period}";
         }
 
+        /// Procesa respuesta en fase de asignación.
+        /// FIX: detecta "listar", "no sé", "ver equipo" para mostrar colaboradores disponibles.
         private (bool, string, ActivityCreationState?) ProcessAskingAssigneeResponse(string response)
         {
             var lower = response.Trim().ToLowerInvariant();
 
-            if (lower.Contains("para mí") ||
-                lower.Contains("para mi") ||
-                lower.Contains("a mí") ||
-                lower.Contains("a mi") ||
+            // Para mí / yo
+            if (lower.Contains("para mí") || lower.Contains("para mi") ||
+                lower.Contains("a mí") || lower.Contains("a mi") ||
                 lower.Contains("para ti") ||
-                lower == "yo" ||
-                lower == "mi" ||
-                lower == "mí")
+                lower == "yo" || lower == "mi" || lower == "mí")
             {
                 _state.Assignees = null;
                 _state.Phase = FlowPhase.Confirming;
                 return (true, GenerateConfirmation(), null);
             }
 
-            if (lower.Contains("omitir") ||
-                lower.Contains("sin asignar") ||
-                lower.Contains("ninguno") ||
-                lower.Contains("nadie") ||
-                lower.Contains("continuar") ||
-                lower == "no")
+            // Omitir / sin asignar
+            if (lower.Contains("omitir") || lower.Contains("sin asignar") ||
+                lower.Contains("ninguno") || lower.Contains("nadie") ||
+                lower.Contains("continuar") || lower == "no")
             {
                 _state.Assignees = new List<AssigneeInfo>();
                 _state.Phase = FlowPhase.Confirming;
                 return (true, GenerateConfirmation(), null);
             }
 
+            // Listar colaboradores disponibles
+            if (lower.Contains("no sé") || lower.Contains("no se") ||
+                lower.Contains("listar") || lower.Contains("lista") ||
+                lower.Contains("ver equipo") || lower.Contains("quiénes son") ||
+                lower.Contains("quienes son") || lower.Contains("ver colaboradores") ||
+                lower.Contains("muéstrame") || lower.Contains("muestrame") ||
+                lower.Contains("quién hay") || lower.Contains("quien hay") ||
+                lower == "equipo" || lower == "colaboradores" || lower == "opciones")
+            {
+                System.Diagnostics.Debug.WriteLine("[FLOW] Listando colaboradores disponibles...");
+
+                _state.PendingSearchTask = Task.Run(async () =>
+                    await _usersClient.SearchUsersAsync(""));
+
+                return ProcessListingCollaboratorsPhase();
+            }
+
+            // Para [nombre]
             if (lower.StartsWith("para "))
             {
                 var name = response.Substring(5).Trim();
@@ -619,15 +627,14 @@ namespace Anfeta.UI.Services.Activity
                 if (!string.IsNullOrWhiteSpace(name) && name.Length > 1)
                 {
                     name = char.ToUpper(name[0]) + name.Substring(1);
-
                     _state.PendingAssigneeNames = new List<string> { name };
                     _state.CurrentAssigneeIndex = 0;
                     _state.Assignees = new List<AssigneeInfo>();
-
                     return StartSearchingAssignee(name);
                 }
             }
 
+            // Nombre directo o múltiple con "y"
             var cleanedResponse = response.Trim();
             cleanedResponse = System.Text.RegularExpressions.Regex.Replace(
                 cleanedResponse,
@@ -640,7 +647,8 @@ namespace Anfeta.UI.Services.Activity
             {
                 if (cleanedResponse.ToLowerInvariant().Contains(" y "))
                 {
-                    var names = cleanedResponse.Split(new[] { " y ", ", ", "," }, StringSplitOptions.RemoveEmptyEntries)
+                    var names = cleanedResponse
+                        .Split(new[] { " y ", ", ", "," }, StringSplitOptions.RemoveEmptyEntries)
                         .Select(n => n.Trim())
                         .Where(n => !string.IsNullOrWhiteSpace(n) && n.Length > 1)
                         .Select(n => char.ToUpper(n[0]) + n.Substring(1))
@@ -651,18 +659,15 @@ namespace Anfeta.UI.Services.Activity
                         _state.PendingAssigneeNames = names;
                         _state.CurrentAssigneeIndex = 0;
                         _state.Assignees = new List<AssigneeInfo>();
-
                         return StartSearchingAssignee(names[0]);
                     }
                 }
                 else
                 {
                     var name = char.ToUpper(cleanedResponse[0]) + cleanedResponse.Substring(1);
-
                     _state.PendingAssigneeNames = new List<string> { name };
                     _state.CurrentAssigneeIndex = 0;
                     _state.Assignees = new List<AssigneeInfo>();
-
                     return StartSearchingAssignee(name);
                 }
             }
@@ -674,13 +679,9 @@ namespace Anfeta.UI.Services.Activity
         {
             var lower = response.Trim().ToLowerInvariant();
 
-            if (lower.Contains("una hora") ||
-                lower.Contains("1 hora") ||
-                lower == "default" ||
-                lower == "omitir" ||
-                lower == "continuar" ||
-                lower == "automático" ||
-                lower == "automatico")
+            if (lower.Contains("una hora") || lower.Contains("1 hora") ||
+                lower == "default" || lower == "omitir" || lower == "continuar" ||
+                lower == "automático" || lower == "automatico")
             {
                 if (_state.DueStart.HasValue)
                 {
@@ -691,17 +692,15 @@ namespace Anfeta.UI.Services.Activity
                 return (false, "Error: no hay fecha de inicio.", null);
             }
 
-            if (lower.Contains("sin fecha") ||
-                lower.Contains("no tiene") ||
-                lower == "no" ||
-                lower == "ninguna")
+            if (lower.Contains("sin fecha") || lower.Contains("no tiene") ||
+                lower == "no" || lower == "ninguna")
             {
                 _state.DueEnd = null;
                 _state.Phase = FlowPhase.AskingAssignee;
                 return (true, GetAssigneeQuestion(), null);
             }
 
-            // Duración en horas: "2 horas", "tres horas"
+            // Duración en horas
             var duracionMatch = System.Text.RegularExpressions.Regex.Match(lower, @"(\d+|una|dos|tres|cuatro|cinco)\s+horas?");
             if (duracionMatch.Success)
             {
@@ -724,7 +723,7 @@ namespace Anfeta.UI.Services.Activity
                 }
             }
 
-            // Hora específica: "hasta las 5", "termina a las 6", "a las 5 de la tarde"
+            // Hora específica
             var horaMatch = System.Text.RegularExpressions.Regex.Match(lower, @"(?:hasta|termina|a)\s+las?\s+(\d{1,2})");
             if (horaMatch.Success && int.TryParse(horaMatch.Groups[1].Value, out var hora))
             {
@@ -738,17 +737,10 @@ namespace Anfeta.UI.Services.Activity
                         if (!isPM && !lower.Contains("am") && !lower.Contains("mañana"))
                         {
                             var horaInicio = _state.DueStart.Value.Hour;
-                            if (hora <= horaInicio && hora != 12)
-                                hora += 12;
+                            if (hora <= horaInicio && hora != 12) hora += 12;
                         }
-                        else if (isPM && hora != 12)
-                        {
-                            hora += 12;
-                        }
-                        else if (hora == 12 && lower.Contains("am"))
-                        {
-                            hora = 0;
-                        }
+                        else if (isPM && hora != 12) hora += 12;
+                        else if (hora == 12 && lower.Contains("am")) hora = 0;
                     }
 
                     _state.DueEnd = baseDate.AddHours(hora);
@@ -764,27 +756,158 @@ namespace Anfeta.UI.Services.Activity
             return (true, GetDueEndQuestion(), null);
         }
 
+        /// Ejecuta búsqueda global y presenta lista de colaboradores para seleccionar.
+        private (bool, string, ActivityCreationState?) ProcessListingCollaboratorsPhase()
+        {
+            if (_state.PendingSearchTask == null)
+            {
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, "No pude obtener la lista. Di el nombre de la persona.", null);
+            }
+
+            UserSearchResponse results;
+            try
+            {
+                results = _state.PendingSearchTask.GetAwaiter().GetResult();
+                _state.PendingSearchTask = null;
+            }
+            catch (Exception ex)
+            {
+                _state.PendingSearchTask = null;
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, $"Error al obtener la lista: {ex.Message}. Di el nombre directamente.", null);
+            }
+
+            if (!results.Success || results.Items.Count == 0)
+            {
+                _state.Phase = FlowPhase.AskingAssignee;
+                return (true, "No encontré colaboradores disponibles. Di el nombre directamente.", null);
+            }
+
+            _state.PendingSearchResults = results.Items.Take(10).ToList();
+            _state.PendingAssigneeNames = new List<string> { "" };
+            _state.CurrentAssigneeIndex = 0;
+            _state.Assignees = new List<AssigneeInfo>();
+            _state.Phase = FlowPhase.SelectingFromMultiple;
+
+            return (true, GenerateMultipleOptionsMessage(_state.PendingSearchResults), null);
+        }
+
+        /// Procesa selección entre múltiples resultados.
+        /// FIX: usa Regex con word boundary — acepta número literal, palabra, ordinal o nombre parcial.
+        private (bool, string, ActivityCreationState?) ProcessSelectingFromMultipleResponse(string response)
+        {
+            var lower = response.Trim().ToLowerInvariant();
+            var totalResults = _state.PendingSearchResults!.Count;
+
+            var selection = TryParseSelectionNumber(lower, totalResults);
+
+            // Fallback por nombre parcial
+            if (!selection.HasValue)
+            {
+                for (int i = 0; i < totalResults; i++)
+                {
+                    var u = _state.PendingSearchResults[i];
+                    var firstName = u.FirstName.ToLowerInvariant();
+                    var fullName = $"{firstName} {u.LastName.ToLowerInvariant()}";
+                    if (lower.Contains(firstName) || fullName.Contains(lower))
+                    {
+                        selection = i + 1;
+                        break;
+                    }
+                }
+            }
+
+            if (!selection.HasValue || selection.Value < 1 || selection.Value > totalResults)
+                return (true, $"No entendí. Di un número del 1 al {totalResults}, o el nombre de la persona.", null);
+
+            var user = _state.PendingSearchResults[selection.Value - 1];
+            _state.Assignees!.Add(new AssigneeInfo
+            {
+                Name = $"{user.FirstName} {user.LastName}",
+                Email = user.Email,
+                CollaboratorId = user.CollaboratorId
+            });
+
+            _state.PendingSearchResults = null;
+
+            if (_state.CurrentAssigneeIndex < _state.PendingAssigneeNames!.Count - 1)
+            {
+                _state.CurrentAssigneeIndex++;
+                return StartSearchingAssignee(_state.PendingAssigneeNames[_state.CurrentAssigneeIndex]);
+            }
+
+            _state.Phase = FlowPhase.Confirming;
+            return (true, GenerateConfirmation(), null);
+        }
+
+        /// Extrae número de selección desde texto en español con word boundary.
+        /// Entrada: lower (texto), max (límite superior válido).
+        /// Salida: número 1-based o null si no se reconoció.
+        private static int? TryParseSelectionNumber(string lower, int max)
+        {
+            // Limpiar prefijos comunes
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                lower,
+                @"\b(número|numero|opción|opcion|el|la|los|las)\b\s*",
+                " "
+            ).Trim();
+
+            // Número literal tras limpiar
+            if (int.TryParse(cleaned.Trim(), out var nClean) && nClean >= 1 && nClean <= max)
+                return nClean;
+
+            // Dígito en texto original
+            var digitMatch = System.Text.RegularExpressions.Regex.Match(lower, @"\b(\d+)\b");
+            if (digitMatch.Success &&
+                int.TryParse(digitMatch.Groups[1].Value, out var nd) &&
+                nd >= 1 && nd <= max)
+                return nd;
+
+            // Palabras en español — los más largos primero para evitar match parcial
+            var palabras = new (string patron, int valor)[]
+            {
+                (@"primero|primera",  1), (@"primer", 1), (@"uno|una", 1),
+                (@"segundo|segunda",  2), (@"dos",    2),
+                (@"tercero|tercera",  3), (@"tercer", 3), (@"tres",   3),
+                (@"cuarto|cuarta",    4), (@"cuatro", 4),
+                (@"quinto|quinta",    5), (@"cinco",  5),
+                (@"sexto|sexta",      6), (@"seis",   6),
+                (@"séptimo|septimo",  7), (@"siete",  7),
+                (@"octavo|octava",    8), (@"ocho",   8),
+                (@"noveno|novena",    9), (@"nueve",  9),
+                (@"décimo|decimo",   10), (@"diez",  10),
+            };
+
+            foreach (var (patron, valor) in palabras)
+            {
+                if (valor > max) continue;
+                if (System.Text.RegularExpressions.Regex.IsMatch(cleaned, $@"\b({patron})\b") ||
+                    System.Text.RegularExpressions.Regex.IsMatch(lower, $@"\b({patron})\b"))
+                    return valor;
+            }
+
+            return null;
+        }
+
         private List<string> GetNameVariations(string name)
         {
             var variations = new List<string>();
-
-            if (string.IsNullOrWhiteSpace(name))
-                return variations;
+            if (string.IsNullOrWhiteSpace(name)) return variations;
 
             var lower = name.ToLowerInvariant();
-
             var replacements = new Dictionary<string, string[]>
             {
-                { "bryan", new[] { "brian", "brayan" } },
-                { "brian", new[] { "bryan", "brayan" } },
-                { "stefany", new[] { "stephanie", "estefania", "estefany" } },
+                { "bryan",     new[] { "brian", "brayan" } },
+                { "brian",     new[] { "bryan", "brayan" } },
+                { "stefany",   new[] { "stephanie", "estefania", "estefany" } },
                 { "stephanie", new[] { "stefany", "estefania", "estefany" } },
-                { "jonathan", new[] { "jonatan", "johnny" } },
-                { "cristian", new[] { "christian", "cristhian" } },
+                { "jonathan",  new[] { "jonatan", "johnny" } },
+                { "cristian",  new[] { "christian", "cristhian" } },
                 { "christian", new[] { "cristian", "cristhian" } },
-                { "jose", new[] { "josé", "pepe" } },
-                { "maria", new[] { "maría" } },
-                { "edwin", new[] { "edwing" } }
+                { "jose",      new[] { "josé", "pepe" } },
+                { "maria",     new[] { "maría" } },
+                { "edwin",     new[] { "edwing" } }
             };
 
             foreach (var kvp in replacements)
@@ -796,7 +919,6 @@ namespace Anfeta.UI.Services.Activity
                         var variation = lower.Replace(kvp.Key, replacement);
                         if (variation.Length > 0)
                             variation = char.ToUpper(variation[0]) + variation.Substring(1);
-
                         variations.Add(variation);
                     }
                 }
@@ -807,52 +929,39 @@ namespace Anfeta.UI.Services.Activity
 
         private string ExtractFirstName(string fullName)
         {
-            if (string.IsNullOrWhiteSpace(fullName))
-                return string.Empty;
-
+            if (string.IsNullOrWhiteSpace(fullName)) return string.Empty;
             var parts = fullName.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-
-            if (parts.Length == 0)
-                return string.Empty;
-
+            if (parts.Length == 0) return string.Empty;
             var firstName = parts[0];
             if (firstName.Length > 0)
                 firstName = char.ToUpper(firstName[0]) + firstName.Substring(1).ToLower();
-
             return firstName;
         }
 
         private string RemoveAccents(string text)
         {
-            if (string.IsNullOrWhiteSpace(text))
-                return text;
-
+            if (string.IsNullOrWhiteSpace(text)) return text;
             var normalized = text.Normalize(System.Text.NormalizationForm.FormD);
-            var result = new System.Text.StringBuilder();
-
+            var result = new StringBuilder();
             foreach (var c in normalized)
             {
                 var category = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
                 if (category != System.Globalization.UnicodeCategory.NonSpacingMark)
                     result.Append(c);
             }
-
             return result.ToString().Normalize(System.Text.NormalizationForm.FormC);
         }
 
         private List<UserSearchItem> FilterByLastName(List<UserSearchItem> items, string searchLastName)
         {
-            if (string.IsNullOrWhiteSpace(searchLastName))
-                return items;
+            if (string.IsNullOrWhiteSpace(searchLastName)) return items;
 
             var normalizedSearch = RemoveAccents(searchLastName.ToLowerInvariant());
             var filtered = new List<UserSearchItem>();
 
             foreach (var item in items)
             {
-                if (string.IsNullOrWhiteSpace(item.LastName))
-                    continue;
-
+                if (string.IsNullOrWhiteSpace(item.LastName)) continue;
                 var normalizedLast = RemoveAccents(item.LastName.ToLowerInvariant());
                 var searchWords = normalizedSearch.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                 var itemWords = normalizedLast.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -864,12 +973,11 @@ namespace Anfeta.UI.Services.Activity
                         if (itemWord.Contains(searchWord) || searchWord.Contains(itemWord))
                         {
                             filtered.Add(item);
-                            System.Diagnostics.Debug.WriteLine($"[FLOW] Apellido coincidente: '{item.LastName}' contiene '{searchLastName}'");
+                            System.Diagnostics.Debug.WriteLine($"[FLOW] Apellido coincidente: '{item.LastName}'");
                             goto NextItem;
                         }
                     }
                 }
-
             NextItem:;
             }
 
@@ -887,26 +995,14 @@ namespace Anfeta.UI.Services.Activity
             {
                 var originalName = name.Trim();
 
-                System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 1: Nombre completo '{originalName}'");
                 var result = await _usersClient.SearchUsersAsync(originalName);
-
-                if (result.Success && result.Items.Count > 0)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[FLOW] Encontrado con nombre completo: {result.Items.Count} resultados");
-                    return result;
-                }
+                if (result.Success && result.Items.Count > 0) return result;
 
                 var normalized = RemoveAccents(originalName);
                 if (normalized != originalName)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 2: Sin tildes '{normalized}'");
                     result = await _usersClient.SearchUsersAsync(normalized);
-
-                    if (result.Success && result.Items.Count > 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[FLOW] Encontrado sin tildes: {result.Items.Count} resultados");
-                        return result;
-                    }
+                    if (result.Success && result.Items.Count > 0) return result;
                 }
 
                 var firstName = ExtractFirstName(originalName);
@@ -915,81 +1011,52 @@ namespace Anfeta.UI.Services.Activity
                 if (hasMultipleWords)
                 {
                     var restOfName = originalName.Substring(firstName.Length).Trim();
-                    var variations = GetNameVariations(firstName);
-
-                    foreach (var variation in variations)
+                    foreach (var variation in GetNameVariations(firstName))
                     {
                         var fullVariation = $"{variation} {restOfName}";
-                        System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 3: Variación con apellido '{fullVariation}'");
                         result = await _usersClient.SearchUsersAsync(fullVariation);
+                        if (result.Success && result.Items.Count > 0) return result;
 
-                        if (result.Success && result.Items.Count > 0)
+                        var fullVariationNorm = RemoveAccents(fullVariation);
+                        if (fullVariationNorm != fullVariation)
                         {
-                            System.Diagnostics.Debug.WriteLine($"[FLOW] Encontrado con variación completa: {result.Items.Count} resultados");
-                            return result;
-                        }
-
-                        var fullVariationNormalized = RemoveAccents(fullVariation);
-                        if (fullVariationNormalized != fullVariation)
-                        {
-                            result = await _usersClient.SearchUsersAsync(fullVariationNormalized);
-                            if (result.Success && result.Items.Count > 0)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[FLOW] Encontrado con variación sin tildes: {result.Items.Count} resultados");
-                                return result;
-                            }
+                            result = await _usersClient.SearchUsersAsync(fullVariationNorm);
+                            if (result.Success && result.Items.Count > 0) return result;
                         }
                     }
                 }
 
-                var nameVariations = GetNameVariations(firstName);
-                foreach (var variation in nameVariations)
+                foreach (var variation in GetNameVariations(firstName))
                 {
                     result = await _usersClient.SearchUsersAsync(variation);
-
-                    if (result.Success && result.Items.Count > 0)
+                    if (result.Success && result.Items.Count > 0 && hasMultipleWords)
                     {
-                        if (hasMultipleWords)
-                        {
-                            var lastName = originalName.Substring(firstName.Length).Trim();
-                            var filterResult = FilterByLastName(result.Items, lastName);
-
-                            if (filterResult.Count > 0)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[FLOW] Encontrado con variación y apellido: {filterResult.Count} resultados");
-                                return new UserSearchResponse { Success = true, Items = filterResult };
-                            }
-                        }
+                        var lastName = originalName.Substring(firstName.Length).Trim();
+                        var filterResult = FilterByLastName(result.Items, lastName);
+                        if (filterResult.Count > 0)
+                            return new UserSearchResponse { Success = true, Items = filterResult };
                     }
                 }
 
                 if (!string.IsNullOrWhiteSpace(firstName))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FLOW] Estrategia 5: Solo primer nombre '{firstName}'");
                     result = await _usersClient.SearchUsersAsync(firstName);
-
                     if (result.Success && result.Items.Count > 0)
                     {
                         if (hasMultipleWords)
                         {
                             var lastName = originalName.Substring(firstName.Length).Trim();
                             var filterResult = FilterByLastName(result.Items, lastName);
-
                             if (filterResult.Count > 0)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[FLOW] Encontrado por primer nombre con apellido: {filterResult.Count} resultados");
                                 return new UserSearchResponse { Success = true, Items = filterResult };
-                            }
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"[FLOW] Encontrado por primer nombre: {result.Items.Count} resultados");
                             return result;
                         }
                     }
                 }
 
-                System.Diagnostics.Debug.WriteLine("[FLOW] No encontrado con ninguna estrategia");
                 return new UserSearchResponse { Success = true, Items = new List<UserSearchItem>() };
             });
 
@@ -1004,19 +1071,15 @@ namespace Anfeta.UI.Services.Activity
                 return (true, "Error en búsqueda. ¿A quién quieres asignar?", null);
             }
 
-            System.Diagnostics.Debug.WriteLine("[FLOW] Obteniendo resultado de búsqueda...");
-
             UserSearchResponse results;
             try
             {
                 results = _state.PendingSearchTask.GetAwaiter().GetResult();
                 _state.PendingSearchTask = null;
-
-                System.Diagnostics.Debug.WriteLine($"[FLOW] Resultado obtenido. Items: {results?.Items?.Count ?? -1}");
+                System.Diagnostics.Debug.WriteLine($"[FLOW] Resultado: {results?.Items?.Count ?? -1} items");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[FLOW] Error en búsqueda: {ex.Message}");
                 _state.PendingSearchTask = null;
                 _state.Phase = FlowPhase.AskingAssignee;
                 return (true, $"Error en búsqueda: {ex.Message}. ¿Intentar de nuevo?", null);
@@ -1082,130 +1145,14 @@ namespace Anfeta.UI.Services.Activity
             return (true, "No entendí. ¿Es correcto? Di 'sí' o 'no'.", null);
         }
 
-        /// Procesa selección entre múltiples resultados de búsqueda de assignee.
-        /// Acepta: número literal ("2"), palabras ("dos", "el dos", "número dos"),
-        /// ordinales ("segundo", "el segundo") y el nombre directamente.
-        private (bool, string, ActivityCreationState?) ProcessSelectingFromMultipleResponse(string response)
-        {
-            var lower = response.Trim().ToLowerInvariant();
-            var totalResults = _state.PendingSearchResults!.Count;
-
-            // Intentar extraer número de la respuesta
-            var selection = TryParseSelectionNumber(lower, totalResults);
-
-            // Si no encontró número, intentar por nombre parcial
-            if (!selection.HasValue)
-            {
-                for (int i = 0; i < totalResults; i++)
-                {
-                    var u = _state.PendingSearchResults[i];
-                    var fullName = $"{u.FirstName} {u.LastName}".ToLowerInvariant();
-                    if (fullName.Contains(lower) || lower.Contains(u.FirstName.ToLowerInvariant()))
-                    {
-                        selection = i + 1;
-                        break;
-                    }
-                }
-            }
-
-            if (!selection.HasValue || selection.Value < 1 || selection.Value > totalResults)
-                return (true, $"Opción no válida. Di un número del 1 al {totalResults} o el nombre.", null);
-
-            var user = _state.PendingSearchResults[selection.Value - 1];
-            _state.Assignees!.Add(new AssigneeInfo
-            {
-                Name = $"{user.FirstName} {user.LastName}",
-                Email = user.Email,
-                CollaboratorId = user.CollaboratorId
-            });
-
-            _state.PendingSearchResults = null;
-
-            if (_state.CurrentAssigneeIndex < _state.PendingAssigneeNames!.Count - 1)
-            {
-                _state.CurrentAssigneeIndex++;
-                return StartSearchingAssignee(_state.PendingAssigneeNames[_state.CurrentAssigneeIndex]);
-            }
-
-            _state.Phase = FlowPhase.Confirming;
-            return (true, GenerateConfirmation(), null);
-        }
-
-        /// Extrae un número de selección desde texto en español.
-        /// Acepta: "2", "el 2", "número 2", "dos", "el dos", "segundo", "el segundo".
-        /// Entrada: lower (texto en minúsculas), max (límite superior válido).
-        /// Salida: número 1-based o null si no se reconoció.
-        private static int? TryParseSelectionNumber(string lower, int max)
-        {
-            // Palabras → número
-            var palabras = new Dictionary<string, int>
-            {
-                ["uno"] = 1,
-                ["una"] = 1,
-                ["primero"] = 1,
-                ["primera"] = 1,
-                ["primer"] = 1,
-                ["dos"] = 2,
-                ["segundo"] = 2,
-                ["segunda"] = 2,
-                ["tres"] = 3,
-                ["tercero"] = 3,
-                ["tercera"] = 3,
-                ["tercer"] = 3,
-                ["cuatro"] = 4,
-                ["cuarto"] = 4,
-                ["cuarta"] = 4,
-                ["cinco"] = 5,
-                ["quinto"] = 5,
-                ["quinta"] = 5,
-                ["seis"] = 6,
-                ["sexto"] = 6,
-                ["sexta"] = 6,
-                ["siete"] = 7,
-                ["séptimo"] = 7,
-                ["septimo"] = 7,
-                ["ocho"] = 8,
-                ["octavo"] = 8,
-                ["octava"] = 8,
-                ["nueve"] = 9,
-                ["noveno"] = 9,
-                ["novena"] = 9,
-                ["diez"] = 10,
-                ["décimo"] = 10,
-                ["decimo"] = 10
-            };
-
-            // Limpiar prefijos comunes: "el", "la", "número", "opción", "el número"
-            var cleaned = lower
-                .Replace("número", "").Replace("numero", "")
-                .Replace("opción", "").Replace("opcion", "")
-                .Replace("el ", "").Replace("la ", "")
-                .Trim();
-
-            // Número literal
-            if (int.TryParse(cleaned, out var n) && n >= 1 && n <= max)
-                return n;
-
-            // Número literal en el texto original (ej: "el 2", "número 3")
-            var matchDigit = System.Text.RegularExpressions.Regex.Match(lower, @"\b(\d+)\b");
-            if (matchDigit.Success && int.TryParse(matchDigit.Groups[1].Value, out var nd) && nd >= 1 && nd <= max)
-                return nd;
-
-            // Palabra en español
-            foreach (var kv in palabras)
-                if (cleaned.Contains(kv.Key) || lower.Contains(kv.Key))
-                    if (kv.Value <= max) return kv.Value;
-
-            return null;
-        }
-
+        /// Pregunta de asignación — menciona la opción de listar el equipo.
         private string GetAssigneeQuestion()
         {
             return GetRandomQuestion(new[]
             {
-                "¿Esta actividad es para ti o quieres asignársela a otra persona? Di: 'para mí', nombre de persona, o 'omitir'",
-                "¿Quién será responsable? Puedes decir: 'para mí', el nombre de alguien, o 'omitir'",
-                "¿Es para ti o para otra persona? Responde: 'para mí', nombre, o 'omitir'"
+                "¿Para quién es esta actividad? Di 'para mí', el nombre de alguien, 'listar' para ver el equipo, u 'omitir'.",
+                "¿Quién será responsable? Di 'para mí', un nombre, 'ver equipo' para ver opciones, u 'omitir'.",
+                "¿A quién se la asignamos? Di 'para mí', el nombre, 'listar colaboradores', u 'omitir'."
             });
         }
 
@@ -1219,22 +1166,24 @@ namespace Anfeta.UI.Services.Activity
             });
         }
 
-        public ActivityCreationState GetCurrentState() => _state;
-        public bool IsActive() => _state.Phase != FlowPhase.Gathering || _state.HasTitulo;
-
+        /// Lista de resultados con instrucciones claras de selección.
         private string GenerateMultipleOptionsMessage(List<UserSearchItem> results)
         {
             var sb = new StringBuilder();
             sb.AppendLine($"Encontré {results.Count} personas:");
 
-            for (int i = 0; i < Math.Min(results.Count, 5); i++)
+            for (int i = 0; i < Math.Min(results.Count, 10); i++)
             {
                 var u = results[i];
-                sb.AppendLine($"{i + 1}) {u.FirstName} {u.LastName} - {u.Email}");
+                sb.AppendLine($"  {i + 1}. {u.FirstName} {u.LastName}");
             }
 
-            sb.AppendLine("¿A cuál te refieres? Di el número.");
+            sb.AppendLine();
+            sb.Append("Di el número (uno, dos, tres...) o el nombre de quien quieres asignar.");
             return sb.ToString();
         }
+
+        public ActivityCreationState GetCurrentState() => _state;
+        public bool IsActive() => _state.Phase != FlowPhase.Gathering || _state.HasTitulo;
     }
 }
