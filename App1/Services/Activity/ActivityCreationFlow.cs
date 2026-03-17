@@ -1082,35 +1082,121 @@ namespace Anfeta.UI.Services.Activity
             return (true, "No entendí. ¿Es correcto? Di 'sí' o 'no'.", null);
         }
 
+        /// Procesa selección entre múltiples resultados de búsqueda de assignee.
+        /// Acepta: número literal ("2"), palabras ("dos", "el dos", "número dos"),
+        /// ordinales ("segundo", "el segundo") y el nombre directamente.
         private (bool, string, ActivityCreationState?) ProcessSelectingFromMultipleResponse(string response)
         {
-            var lower = response.Trim();
+            var lower = response.Trim().ToLowerInvariant();
+            var totalResults = _state.PendingSearchResults!.Count;
 
-            if (int.TryParse(lower, out var selection) &&
-                selection >= 1 &&
-                selection <= _state.PendingSearchResults!.Count)
+            // Intentar extraer número de la respuesta
+            var selection = TryParseSelectionNumber(lower, totalResults);
+
+            // Si no encontró número, intentar por nombre parcial
+            if (!selection.HasValue)
             {
-                var user = _state.PendingSearchResults[selection - 1];
-                _state.Assignees!.Add(new AssigneeInfo
+                for (int i = 0; i < totalResults; i++)
                 {
-                    Name = $"{user.FirstName} {user.LastName}",
-                    Email = user.Email,
-                    CollaboratorId = user.CollaboratorId
-                });
-
-                _state.PendingSearchResults = null;
-
-                if (_state.CurrentAssigneeIndex < _state.PendingAssigneeNames!.Count - 1)
-                {
-                    _state.CurrentAssigneeIndex++;
-                    return StartSearchingAssignee(_state.PendingAssigneeNames[_state.CurrentAssigneeIndex]);
+                    var u = _state.PendingSearchResults[i];
+                    var fullName = $"{u.FirstName} {u.LastName}".ToLowerInvariant();
+                    if (fullName.Contains(lower) || lower.Contains(u.FirstName.ToLowerInvariant()))
+                    {
+                        selection = i + 1;
+                        break;
+                    }
                 }
-
-                _state.Phase = FlowPhase.Confirming;
-                return (true, GenerateConfirmation(), null);
             }
 
-            return (true, "Opción no válida. Di el número (1, 2, 3, etc.)", null);
+            if (!selection.HasValue || selection.Value < 1 || selection.Value > totalResults)
+                return (true, $"Opción no válida. Di un número del 1 al {totalResults} o el nombre.", null);
+
+            var user = _state.PendingSearchResults[selection.Value - 1];
+            _state.Assignees!.Add(new AssigneeInfo
+            {
+                Name = $"{user.FirstName} {user.LastName}",
+                Email = user.Email,
+                CollaboratorId = user.CollaboratorId
+            });
+
+            _state.PendingSearchResults = null;
+
+            if (_state.CurrentAssigneeIndex < _state.PendingAssigneeNames!.Count - 1)
+            {
+                _state.CurrentAssigneeIndex++;
+                return StartSearchingAssignee(_state.PendingAssigneeNames[_state.CurrentAssigneeIndex]);
+            }
+
+            _state.Phase = FlowPhase.Confirming;
+            return (true, GenerateConfirmation(), null);
+        }
+
+        /// Extrae un número de selección desde texto en español.
+        /// Acepta: "2", "el 2", "número 2", "dos", "el dos", "segundo", "el segundo".
+        /// Entrada: lower (texto en minúsculas), max (límite superior válido).
+        /// Salida: número 1-based o null si no se reconoció.
+        private static int? TryParseSelectionNumber(string lower, int max)
+        {
+            // Palabras → número
+            var palabras = new Dictionary<string, int>
+            {
+                ["uno"] = 1,
+                ["una"] = 1,
+                ["primero"] = 1,
+                ["primera"] = 1,
+                ["primer"] = 1,
+                ["dos"] = 2,
+                ["segundo"] = 2,
+                ["segunda"] = 2,
+                ["tres"] = 3,
+                ["tercero"] = 3,
+                ["tercera"] = 3,
+                ["tercer"] = 3,
+                ["cuatro"] = 4,
+                ["cuarto"] = 4,
+                ["cuarta"] = 4,
+                ["cinco"] = 5,
+                ["quinto"] = 5,
+                ["quinta"] = 5,
+                ["seis"] = 6,
+                ["sexto"] = 6,
+                ["sexta"] = 6,
+                ["siete"] = 7,
+                ["séptimo"] = 7,
+                ["septimo"] = 7,
+                ["ocho"] = 8,
+                ["octavo"] = 8,
+                ["octava"] = 8,
+                ["nueve"] = 9,
+                ["noveno"] = 9,
+                ["novena"] = 9,
+                ["diez"] = 10,
+                ["décimo"] = 10,
+                ["decimo"] = 10
+            };
+
+            // Limpiar prefijos comunes: "el", "la", "número", "opción", "el número"
+            var cleaned = lower
+                .Replace("número", "").Replace("numero", "")
+                .Replace("opción", "").Replace("opcion", "")
+                .Replace("el ", "").Replace("la ", "")
+                .Trim();
+
+            // Número literal
+            if (int.TryParse(cleaned, out var n) && n >= 1 && n <= max)
+                return n;
+
+            // Número literal en el texto original (ej: "el 2", "número 3")
+            var matchDigit = System.Text.RegularExpressions.Regex.Match(lower, @"\b(\d+)\b");
+            if (matchDigit.Success && int.TryParse(matchDigit.Groups[1].Value, out var nd) && nd >= 1 && nd <= max)
+                return nd;
+
+            // Palabra en español
+            foreach (var kv in palabras)
+                if (cleaned.Contains(kv.Key) || lower.Contains(kv.Key))
+                    if (kv.Value <= max) return kv.Value;
+
+            return null;
         }
 
         private string GetAssigneeQuestion()
