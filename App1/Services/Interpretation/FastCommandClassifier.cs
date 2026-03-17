@@ -248,10 +248,9 @@ namespace Anfeta.UI.Services.Interpretation
             // ── ABRIR APP ────────────────────────────────────────────────────────
             if (lower.StartsWith("abre ") || lower.StartsWith("abrir "))
             {
-                var appName = lower
-                    .Replace("abre ", "")
-                    .Replace("abrir ", "")
-                    .Trim();
+                var appName = lower.StartsWith("abre ")
+                    ? lower["abre ".Length..]
+                    : lower["abrir ".Length..];
 
                 appName = appName
                     .Replace("el ", "")
@@ -289,24 +288,28 @@ namespace Anfeta.UI.Services.Interpretation
             }
 
             // ── BUSCAR EN WEB ────────────────────────────────────────────────────
+            // FIX 1: Extracción por slice de prefijo en lugar de Replace global.
+            // FIX 2: Delega a Groq si la query apunta a un recurso de Weblab.
             if (lower.StartsWith("busca ") || lower.StartsWith("buscar "))
             {
-                var query = lower
-                    .Replace("busca ", "")
-                    .Replace("buscar ", "")
-                    .Trim();
+                var query = lower.StartsWith("busca ")
+                    ? lower["busca ".Length..].Trim()
+                    : lower["buscar ".Length..].Trim();
 
-                if (!string.IsNullOrWhiteSpace(query))
+                if (string.IsNullOrWhiteSpace(query))
+                    return (false, null);
+
+                if (IsWeblabResourceQuery(query))
+                    return (false, null);
+
+                return (true, new InterpretationResult
                 {
-                    return (true, new InterpretationResult
-                    {
-                        Intent = "WebSearch",
-                        Scope = "LOCAL",
-                        Confidence = 0.9,
-                        NeedsConfirmation = false,
-                        Params = new Dictionary<string, object> { ["query"] = query }
-                    });
-                }
+                    Intent = "WebSearch",
+                    Scope = "LOCAL",
+                    Confidence = 0.9,
+                    NeedsConfirmation = false,
+                    Params = new Dictionary<string, object> { ["query"] = query }
+                });
             }
 
             // ── MINIMIZAR TODO ───────────────────────────────────────────────────
@@ -330,7 +333,6 @@ namespace Anfeta.UI.Services.Interpretation
 
         /// Detecta solicitud de comprobatoria del usuario en sesión.
         /// Anclas: "comprobatoria", "cómo voy hoy", "reporte del día", "mi reporte".
-        /// Excluye frases de recordatorios y calendario — palabras ancla completamente distintas.
         private static bool IsComprobatoriaCommand(string lower)
         {
             var patterns = new[]
@@ -348,7 +350,6 @@ namespace Anfeta.UI.Services.Interpretation
                 "enseñame mi reporte",
                 "cómo estoy hoy",
                 "como estoy hoy",
-                // Frases adicionales
                 "quiero ver mi comprobatoria",
                 "muéstrame mi comprobatoria",
                 "muestrame mi comprobatoria",
@@ -362,7 +363,6 @@ namespace Anfeta.UI.Services.Interpretation
 
         /// Detecta solicitud de tareas rezagadas.
         /// Ancla: "rezagad" (cubre rezagada/rezagadas) o "tareas atrasadas".
-        /// Palabra completamente única — sin riesgo de cruce con otros detectores.
         private static bool IsRezagadasCommand(string lower)
         {
             if (lower.Contains("rezagad") ||
@@ -370,7 +370,6 @@ namespace Anfeta.UI.Services.Interpretation
                 lower.Contains("actividades atrasadas"))
                 return true;
 
-            // Frases adicionales explícitas
             var patterns = new[]
             {
                 "quiero ver mis tareas rezagadas",
@@ -398,7 +397,6 @@ namespace Anfeta.UI.Services.Interpretation
                 "cuantas revisiones tengo hoy",
                 "revisiones para hoy",
                 "mis revisiones hoy",
-                // Frases adicionales
                 "quiero ver mis revisiones de hoy",
                 "muéstrame mis revisiones de hoy",
                 "muestrame mis revisiones de hoy",
@@ -427,9 +425,8 @@ namespace Anfeta.UI.Services.Interpretation
         }
 
         /// Detecta solicitud de últimos eventos de auditoría.
-        /// Anclas conservadoras: "últimas acciones", "qué ha pasado", "últimos cambios".
-        /// Se evalúa al final de reportes para no interceptar frases más específicas.
-        /// No contiene "eventos" solo — evita colisión con IsCalendarWeekCommand.
+        /// Anclas conservadoras — se evalúa al final de reportes para no interceptar
+        /// frases más específicas. No contiene "eventos" solo (evita colisión con calendar).
         private static bool IsReportesUltimosCommand(string lower)
         {
             var patterns = new[]
@@ -443,7 +440,6 @@ namespace Anfeta.UI.Services.Interpretation
                 "actividad reciente del equipo",
                 "qué pasó recientemente",
                 "que paso recientemente",
-                // Frases adicionales
                 "quiero ver qué ha pasado",
                 "quiero ver que ha pasado",
                 "muéstrame qué ha pasado",
@@ -463,7 +459,40 @@ namespace Anfeta.UI.Services.Interpretation
         }
 
         // ────────────────────────────────────────────────────────────────────────
-        // DETECTORES — EXISTENTES (sin cambios)
+        // DETECTORES — WEBLAB GUARD
+        // ────────────────────────────────────────────────────────────────────────
+
+        /// Devuelve true si la query comienza con un recurso conocido de Weblab.
+        /// Entrada: query (texto después de "busca"/"buscar", ya en minúsculas).
+        /// Salida: true = delegar a Groq; false = es búsqueda web legítima.
+        private static bool IsWeblabResourceQuery(string query)
+        {
+            var weblabPrefixes = new[]
+            {
+                "actividad",
+                "actividades",
+                "revision",
+                "revisión",
+                "revisiones",
+                "recordatorio",
+                "recordatorios",
+                "proyecto",
+                "proyectos",
+                "usuario",
+                "usuarios",
+                "pendiente",
+                "pendientes"
+            };
+
+            foreach (var prefix in weblabPrefixes)
+                if (query.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+            return false;
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // DETECTORES — ACTIVIDADES / CALENDARIO
         // ────────────────────────────────────────────────────────────────────────
 
         private static bool IsCreateActivityCommand(string lower)
@@ -536,19 +565,9 @@ namespace Anfeta.UI.Services.Interpretation
             return false;
         }
 
-        private string? MapSynonymToAppKey(string synonym)
-        {
-            var allApps = _registry.GetAllApps();
-            foreach (var app in allApps)
-            {
-                if (app.AppKey.Equals(synonym, StringComparison.OrdinalIgnoreCase))
-                    return app.AppKey;
-
-                if (app.Synonyms.Any(s => s.Equals(synonym, StringComparison.OrdinalIgnoreCase)))
-                    return app.AppKey;
-            }
-            return null;
-        }
+        // ────────────────────────────────────────────────────────────────────────
+        // DETECTORES — RECORDATORIOS
+        // ────────────────────────────────────────────────────────────────────────
 
         private static bool IsRecordatoriosTodayCommand(string lower)
         {
@@ -559,6 +578,36 @@ namespace Anfeta.UI.Services.Interpretation
                 "recordatorios para hoy",
                 "qué recordatorios tengo hoy",
                 "que recordatorios tengo hoy"
+            };
+            foreach (var p in patterns)
+                if (lower.Contains(p)) return true;
+            return false;
+        }
+
+        private static bool IsRecordatoriosTomorrowCommand(string lower)
+        {
+            var patterns = new[]
+            {
+                "recordatorios de mañana",
+                "mis recordatorios de mañana",
+                "recordatorios para mañana",
+                "qué recordatorios tengo mañana",
+                "que recordatorios tengo mañana"
+            };
+            foreach (var p in patterns)
+                if (lower.Contains(p)) return true;
+            return false;
+        }
+
+        private static bool IsRecordatoriosPendingCommand(string lower)
+        {
+            var patterns = new[]
+            {
+                "recordatorios pendientes",
+                "mis recordatorios pendientes",
+                "qué recordatorios tengo pendientes",
+                "que recordatorios tengo pendientes",
+                "recordatorios sin completar"
             };
             foreach (var p in patterns)
                 if (lower.Contains(p)) return true;
@@ -594,47 +643,44 @@ namespace Anfeta.UI.Services.Interpretation
             return false;
         }
 
-        private static bool IsRecordatoriosPendingCommand(string lower)
-        {
-            var patterns = new[]
-            {
-                "recordatorios pendientes",
-                "mis recordatorios pendientes",
-                "qué recordatorios tengo pendientes",
-                "que recordatorios tengo pendientes",
-                "recordatorios sin completar"
-            };
-            foreach (var p in patterns)
-                if (lower.Contains(p)) return true;
-            return false;
-        }
-
-        private static bool IsRecordatoriosTomorrowCommand(string lower)
-        {
-            var patterns = new[]
-            {
-                "recordatorios de mañana",
-                "mis recordatorios de mañana",
-                "recordatorios para mañana",
-                "qué recordatorios tengo mañana",
-                "que recordatorios tengo mañana"
-            };
-            foreach (var p in patterns)
-                if (lower.Contains(p)) return true;
-            return false;
-        }
-
+        /// FIX: eliminado Contains — usaba búsqueda demasiado amplia que podía
+        /// interceptar frases como "elimina el recordatorio" antes de que llegaran
+        /// al flujo correcto del ViewModel. Solo StartsWith es seguro aquí.
         private static bool IsCreateRecordatorioCommand(string lower)
         {
             var patterns = new[]
             {
-                "recuérdame", "recuerdame", "pon un recordatorio", "crea un recordatorio",
-                "agregar recordatorio", "añadir recordatorio", "nuevo recordatorio",
-                "agenda un recordatorio", "programa un recordatorio"
+                "recuérdame",
+                "recuerdame",
+                "pon un recordatorio",
+                "crea un recordatorio",
+                "agregar recordatorio",
+                "añadir recordatorio",
+                "nuevo recordatorio",
+                "agenda un recordatorio",
+                "programa un recordatorio"
             };
             foreach (var p in patterns)
-                if (lower.StartsWith(p) || lower.Contains(p)) return true;
+                if (lower.StartsWith(p)) return true;
             return false;
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // HELPERS
+        // ────────────────────────────────────────────────────────────────────────
+
+        private string? MapSynonymToAppKey(string synonym)
+        {
+            var allApps = _registry.GetAllApps();
+            foreach (var app in allApps)
+            {
+                if (app.AppKey.Equals(synonym, StringComparison.OrdinalIgnoreCase))
+                    return app.AppKey;
+
+                if (app.Synonyms.Any(s => s.Equals(synonym, StringComparison.OrdinalIgnoreCase)))
+                    return app.AppKey;
+            }
+            return null;
         }
     }
 }

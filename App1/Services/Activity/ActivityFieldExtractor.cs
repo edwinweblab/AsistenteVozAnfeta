@@ -7,16 +7,12 @@ using System.Text.RegularExpressions;
 
 namespace Anfeta.UI.Services.Activity
 {
-    /// <summary>
-    /// Extrae campos de actividad desde el comando de voz inicial
-    /// </summary>
+    /// Extrae campos de actividad desde el comando de voz inicial.
     public sealed class ActivityFieldExtractor
     {
-        /// <summary>
-        /// Extrae todos los campos posibles del comando
-        /// Entrada: command - "crear actividad enviar reporte con prioridad alta mañana a las 5"
-        /// Salida: ActivityCreationState con campos extraídos
-        /// </summary>
+        /// Extrae todos los campos posibles del comando.
+        /// Entrada: command — "crear actividad enviar reporte con prioridad alta mañana a las 5"
+        /// Salida: ActivityCreationState con campos extraídos.
         public ActivityCreationState ExtractFields(string command)
         {
             var state = new ActivityCreationState();
@@ -26,11 +22,9 @@ namespace Anfeta.UI.Services.Activity
 
             var lower = command.Trim().ToLowerInvariant();
 
-            // Extraer campos
             state.Titulo = ExtractTitulo(lower);
             state.Prioridad = ExtractPrioridad(lower);
 
-            // ✅ ACTUALIZADO: Manejar 4 elementos de la tupla
             var (start, end, ambiguousHour, ambiguousBaseDate) = ExtractFechaHora(lower);
 
             state.DueStart = start;
@@ -41,14 +35,28 @@ namespace Anfeta.UI.Services.Activity
             return state;
         }
 
-        /// <summary>
-        /// Extrae el título de la actividad
-        /// Entrada: command - comando en minúsculas
-        /// Salida: título extraído o null
-        /// </summary>
+        /// Extrae solo la hora de un texto, usando una fecha base explícita.
+        /// Útil cuando el usuario responde solo con una hora ("a las 5 de la tarde")
+        /// sin mencionar fecha, y la fecha se conoce del contexto (DueStart.Date).
+        /// Entrada: command en minúsculas, baseDate — fecha base para construir el DateTimeOffset.
+        /// Salida: DateTimeOffset con fecha base + hora extraída, o null si no se pudo.
+        public DateTimeOffset? ExtractTimeWithBase(string command, DateTimeOffset baseDate)
+        {
+            if (string.IsNullOrWhiteSpace(command)) return null;
+
+            var lower = command.Trim().ToLowerInvariant();
+            var (horaDecimal, needsClarification) = ExtractHora(lower);
+
+            if (!horaDecimal.HasValue || needsClarification) return null;
+
+            return baseDate.Date.Add(TimeSpan.FromHours(horaDecimal.Value));
+        }
+
+        /// Extrae el título de la actividad.
+        /// Entrada: command en minúsculas.
+        /// Salida: título extraído o null.
         private string? ExtractTitulo(string command)
         {
-            // Buscar después de "crear actividad", "nueva actividad", etc.
             var patterns = new[]
             {
                 @"crear actividad\s+(.+)",
@@ -65,7 +73,6 @@ namespace Anfeta.UI.Services.Activity
                 {
                     var titulo = match.Groups[1].Value.Trim();
 
-                    // Limpiar palabras clave que no son parte del título
                     titulo = Regex.Replace(titulo, @"\s+(con\s+)?prioridad\s+(alta|media|baja).*", "", RegexOptions.IgnoreCase);
                     titulo = Regex.Replace(titulo, @"\s+para\s+(hoy|mañana|pasado mañana).*", "", RegexOptions.IgnoreCase);
                     titulo = Regex.Replace(titulo, @"\s+(el|a las|en)\s+\d+.*", "", RegexOptions.IgnoreCase);
@@ -78,11 +85,8 @@ namespace Anfeta.UI.Services.Activity
             return null;
         }
 
-        /// <summary>
-        /// Extrae la prioridad
-        /// Entrada: command - comando en minúsculas
-        /// Salida: "Alta", "Media", "Baja" o null
-        /// </summary>
+        /// Extrae la prioridad.
+        /// Salida: "Alta", "Media", "Baja" o null.
         private string? ExtractPrioridad(string command)
         {
             if (command.Contains("prioridad alta") || command.Contains("alta prioridad") || command.Contains("urgente"))
@@ -97,11 +101,10 @@ namespace Anfeta.UI.Services.Activity
             return null;
         }
 
-        /// <summary>
-        /// Extrae fecha y hora del comando
-        /// Entrada: command - comando en minúsculas
-        /// Salida: (inicio, fin, hora ambigua, fecha base)
-        /// </summary>
+        /// Extrae fecha y hora del comando.
+        /// FIX 1: agrega detección de días de semana (lunes–domingo).
+        /// Entrada: command en minúsculas.
+        /// Salida: (inicio, fin, hora ambigua, fecha base para clarificación).
         private (DateTimeOffset? start, DateTimeOffset? end, int? ambiguousHour, DateTimeOffset? ambiguousBaseDate) ExtractFechaHora(string command)
         {
             var now = DateTimeOffset.Now;
@@ -111,45 +114,73 @@ namespace Anfeta.UI.Services.Activity
             {
                 baseDate = now.Date;
             }
-            else if (command.Contains("mañana"))
-            {
-                baseDate = now.Date.AddDays(1);
-            }
             else if (command.Contains("pasado mañana"))
             {
                 baseDate = now.Date.AddDays(2);
             }
+            else if (command.Contains("mañana"))
+            {
+                baseDate = now.Date.AddDays(1);
+            }
             else
             {
-                // ✅ PATRÓN MEJORADO: detecta CON o SIN "el"
-                var dateMatch = Regex.Match(command, @"(?:el\s+)?(\d{1,2})\s+de\s+(\w+)(?:\s+(?:del|de)\s+(\d{4}))?");
-                if (dateMatch.Success)
+                // Detectar día de semana: "el viernes", "para el lunes", "este martes"
+                var diasSemana = new Dictionary<string, DayOfWeek>
                 {
-                    if (int.TryParse(dateMatch.Groups[1].Value, out var day))
+                    ["lunes"] = DayOfWeek.Monday,
+                    ["martes"] = DayOfWeek.Tuesday,
+                    ["miércoles"] = DayOfWeek.Wednesday,
+                    ["miercoles"] = DayOfWeek.Wednesday,
+                    ["jueves"] = DayOfWeek.Thursday,
+                    ["viernes"] = DayOfWeek.Friday,
+                    ["sábado"] = DayOfWeek.Saturday,
+                    ["sabado"] = DayOfWeek.Saturday,
+                    ["domingo"] = DayOfWeek.Sunday
+                };
+
+                foreach (var kvp in diasSemana)
+                {
+                    if (command.Contains(kvp.Key))
                     {
-                        var monthName = dateMatch.Groups[2].Value.ToLowerInvariant();
-                        var month = GetMonthNumber(monthName);
+                        var targetDay = kvp.Value;
+                        var daysAhead = ((int)targetDay - (int)now.DayOfWeek + 7) % 7;
 
-                        if (month > 0)
+                        // Si el día mencionado es hoy, ir al próximo (no el mismo día)
+                        if (daysAhead == 0)
+                            daysAhead = 7;
+
+                        baseDate = now.Date.AddDays(daysAhead);
+                        break;
+                    }
+                }
+
+                // Si no matcheó día de semana, buscar fecha exacta: "el 20 de marzo"
+                if (!baseDate.HasValue)
+                {
+                    var dateMatch = Regex.Match(command, @"(?:el\s+)?(\d{1,2})\s+de\s+(\w+)(?:\s+(?:del|de)\s+(\d{4}))?");
+                    if (dateMatch.Success)
+                    {
+                        if (int.TryParse(dateMatch.Groups[1].Value, out var day))
                         {
-                            // ✅ Detectar año si está presente
-                            var year = now.Year;
-                            if (dateMatch.Groups[3].Success && int.TryParse(dateMatch.Groups[3].Value, out var parsedYear))
-                            {
-                                year = parsedYear;
-                            }
-                            else if (month < now.Month || (month == now.Month && day < now.Day))
-                            {
-                                year++;
-                            }
+                            var monthName = dateMatch.Groups[2].Value.ToLowerInvariant();
+                            var month = GetMonthNumber(monthName);
 
-                            try
+                            if (month > 0)
                             {
-                                baseDate = new DateTimeOffset(year, month, day, 0, 0, 0, now.Offset);
-                            }
-                            catch
-                            {
-                                // Fecha inválida (ej: 31 de febrero)
+                                var year = now.Year;
+                                if (dateMatch.Groups[3].Success && int.TryParse(dateMatch.Groups[3].Value, out var parsedYear))
+                                    year = parsedYear;
+                                else if (month < now.Month || (month == now.Month && day < now.Day))
+                                    year++;
+
+                                try
+                                {
+                                    baseDate = new DateTimeOffset(year, month, day, 0, 0, 0, now.Offset);
+                                }
+                                catch
+                                {
+                                    // Fecha inválida (ej: 31 de febrero)
+                                }
                             }
                         }
                     }
@@ -160,23 +191,21 @@ namespace Anfeta.UI.Services.Activity
                 return (null, null, null, null);
 
             var duracion = ExtractDuracion(command);
+            var (horaDecimal, needsClarification) = ExtractHora(command);
 
-            var (hour, needsClarification) = ExtractHora(command);
-
-            if (needsClarification && hour.HasValue)
+            // hora ambigua: guardar solo la parte entera para la pregunta AM/PM
+            if (needsClarification && horaDecimal.HasValue)
             {
-                return (null, null, hour.Value, baseDate.Value);
+                var horaEntera = (int)horaDecimal.Value;
+                return (null, null, horaEntera, baseDate.Value);
             }
 
-            if (hour.HasValue)
+            if (horaDecimal.HasValue)
             {
-                var start = baseDate.Value.AddHours(hour.Value);
+                var start = baseDate.Value.Add(TimeSpan.FromHours(horaDecimal.Value));
 
                 if (duracion.HasValue)
-                {
-                    var end = start.AddHours(duracion.Value);
-                    return (start, end, null, null);
-                }
+                    return (start, start.AddHours(duracion.Value), null, null);
 
                 return (start, null, null, null);
             }
@@ -184,40 +213,42 @@ namespace Anfeta.UI.Services.Activity
             var defaultStart = baseDate.Value.AddHours(9);
 
             if (duracion.HasValue)
-            {
-                var defaultEnd = defaultStart.AddHours(duracion.Value);
-                return (defaultStart, defaultEnd, null, null);
-            }
+                return (defaultStart, defaultStart.AddHours(duracion.Value), null, null);
 
             return (defaultStart, null, null, null);
         }
 
-        /// <summary>
-        /// Extrae hora y detecta si necesita clarificación AM/PM
-        /// Soporta: "3 pm", "3:00 pm", "5 y media", "5:30", "después de mediodía"
-        /// </summary>
-        private (int? hora, bool needsClarification) ExtractHora(string command)
+        /// Extrae hora y detecta si necesita clarificación AM/PM.
+        /// FIX 2: normaliza "a m"/"p m" con espacio o punto antes de evaluar patrones.
+        /// FIX 3: retorna double? para preservar los minutos como fracción decimal.
+        ///         Ejemplo: 8:30 PM → 20.5 (AddHours(20.5) = 20:30).
+        /// Soporta: "3 pm", "8:00 a m", "8:00 a.m.", "5 y media", "a las 3", mediodía.
+        private (double? hora, bool needsClarification) ExtractHora(string command)
         {
             int? horaBase = null;
             int minutos = 0;
             bool hasExplicitAMPM = false;
             bool isPM = false;
 
-            // ========================================
-            // NORMALIZAR: Unificar variaciones de "mediodía"
-            // ========================================
-            command = command.Replace("después de mediodía", "despuesmediodia")
-                             .Replace("despues de mediodia", "despuesmediodia")
-                             .Replace("después del mediodía", "despuesmediodia")
-                             .Replace("despues del mediodia", "despuesmediodia")
-                             .Replace("antes de mediodía", "antesmediodia")
-                             .Replace("antes de mediodia", "antesmediodia")
-                             .Replace("antes del mediodía", "antesmediodia")
-                             .Replace("antes del mediodia", "antesmediodia");
+            // ── FIX 2: normalizar variantes de AM/PM con espacio o punto ────────────
+            // El STT puede transcribir "AM" como "a m", "A.M.", "a.m.", etc.
+            command = Regex.Replace(command, @"\ba\s*\.\s*m\s*\.?\b", "am", RegexOptions.IgnoreCase);
+            command = Regex.Replace(command, @"\bp\s*\.\s*m\s*\.?\b", "pm", RegexOptions.IgnoreCase);
+            command = Regex.Replace(command, @"\ba\s+m\b", "am", RegexOptions.IgnoreCase);
+            command = Regex.Replace(command, @"\bp\s+m\b", "pm", RegexOptions.IgnoreCase);
 
-            // ========================================
-            // CASO 1A: Hora con minutos + PM/AM: "3:00 pm", "5:30 despuesmediodia"
-            // ========================================
+            // ── Normalizar variaciones de "mediodía" ─────────────────────────────────
+            command = command
+                .Replace("después de mediodía", "despuesmediodia")
+                .Replace("despues de mediodia", "despuesmediodia")
+                .Replace("después del mediodía", "despuesmediodia")
+                .Replace("despues del mediodia", "despuesmediodia")
+                .Replace("antes de mediodía", "antesmediodia")
+                .Replace("antes de mediodia", "antesmediodia")
+                .Replace("antes del mediodía", "antesmediodia")
+                .Replace("antes del mediodia", "antesmediodia");
+
+            // CASO 1A: Hora con minutos + AM/PM: "3:00 pm", "8:00 am", "5:30 de la tarde"
             var match1 = Regex.Match(command, @"(\d{1,2}):(\d{2})\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)");
             if (match1.Success)
             {
@@ -229,9 +260,7 @@ namespace Anfeta.UI.Services.Activity
                 isPM = indicator.Contains("pm") || indicator.Contains("tarde") || indicator.Contains("despues");
             }
 
-            // ========================================
-            // CASO 1B: Hora con minutos SIN PM/AM: "3:30", "5:45"
-            // ========================================
+            // CASO 1B: Hora con minutos SIN AM/PM: "3:30", "5:45"
             if (!hasExplicitAMPM)
             {
                 var match2 = Regex.Match(command, @"(\d{1,2}):(\d{2})(?!\s*(pm|am|tarde|mañana))");
@@ -242,21 +271,15 @@ namespace Anfeta.UI.Services.Activity
 
                     // Formato 24h (14:00, 17:30)
                     if (horaBase >= 13 && horaBase <= 23)
-                    {
-                        return (horaBase.Value, false);
-                    }
+                        return (horaBase.Value + minutos / 60.0, false);
 
-                    // Hora ambigua con minutos (3:30, 11:45)
+                    // Hora ambigua (3:30, 11:45)
                     if (horaBase >= 1 && horaBase <= 12)
-                    {
-                        return (horaBase.Value, true);
-                    }
+                        return (horaBase.Value, true); // Minutos se guardan al resolver AM/PM
                 }
             }
 
-            // ========================================
-            // CASO 2: Hora con PM/AM SIN minutos: "3 pm", "5 despuesmediodia"
-            // ========================================
+            // CASO 2: Hora con AM/PM SIN minutos: "3 pm", "5 de la tarde"
             if (!hasExplicitAMPM)
             {
                 var match3 = Regex.Match(command, @"(\d{1,2})\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)");
@@ -271,9 +294,7 @@ namespace Anfeta.UI.Services.Activity
                 }
             }
 
-            // ========================================
             // CASO 3: "y media" = :30
-            // ========================================
             if (!hasExplicitAMPM && horaBase == null)
             {
                 var matchMedia = Regex.Match(command, @"(\d{1,2})\s*y\s*media\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)?");
@@ -291,9 +312,7 @@ namespace Anfeta.UI.Services.Activity
                 }
             }
 
-            // ========================================
             // CASO 4: "y cuarto" = :15
-            // ========================================
             if (!hasExplicitAMPM && horaBase == null)
             {
                 var matchCuarto = Regex.Match(command, @"(\d{1,2})\s*y\s*cuarto\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)?");
@@ -311,9 +330,7 @@ namespace Anfeta.UI.Services.Activity
                 }
             }
 
-            // ========================================
             // CASO 5: "menos cuarto" = :45
-            // ========================================
             if (!hasExplicitAMPM && horaBase == null)
             {
                 var matchMenosCuarto = Regex.Match(command, @"(\d{1,2})\s*menos\s*cuarto\s*(pm|am|de la tarde|de la mañana|despuesmediodia|antesmediodia)?");
@@ -332,25 +349,15 @@ namespace Anfeta.UI.Services.Activity
                 }
             }
 
-            // ========================================
-            // CASO 6: Solo "despuesmediodia" sin hora
-            // ========================================
+            // CASO 6: Solo "despuesmediodia" sin hora → default 2 PM
             if (horaBase == null && command.Contains("despuesmediodia"))
-            {
-                return (14, false); // Default 2 PM
-            }
+                return (14.0, false);
 
-            // ========================================
-            // CASO 7: Solo "antesmediodia" sin hora
-            // ========================================
+            // CASO 7: Solo "antesmediodia" sin hora → default 10 AM
             if (horaBase == null && command.Contains("antesmediodia"))
-            {
-                return (10, false); // Default 10 AM
-            }
+                return (10.0, false);
 
-            // ========================================
-            // CASO 8: Hora simple sin indicador: "a las 3"
-            // ========================================
+            // CASO 8: Hora simple sin indicador: "a las 3", "las 5"
             if (horaBase == null)
             {
                 var matchSimple = Regex.Match(command, @"(?:a las|las)\s+(\d{1,2})(?!\s*(pm|am|tarde|mañana|:))");
@@ -361,67 +368,49 @@ namespace Anfeta.UI.Services.Activity
                 }
             }
 
-            // ========================================
-            // CALCULAR HORA FINAL
-            // ========================================
-
             if (horaBase == null)
                 return (null, false);
 
-            // Si tiene AM/PM explícito
+            // Calcular hora final con minutos incluidos como fracción decimal
             if (hasExplicitAMPM)
             {
                 int horaFinal;
-
                 if (isPM)
-                {
-                    horaFinal = (horaBase == 12) ? 12 : horaBase.Value + 12;
-                }
-                else // AM
-                {
-                    horaFinal = (horaBase == 12) ? 0 : horaBase.Value;
-                }
+                    horaFinal = horaBase == 12 ? 12 : horaBase.Value + 12;
+                else
+                    horaFinal = horaBase == 12 ? 0 : horaBase.Value;
 
-                return (horaFinal, false);
+                return (horaFinal + minutos / 60.0, false);
             }
 
-            // Hora ambigua (1-12 sin AM/PM)
+            // Hora ambigua (1-12 sin AM/PM) — retornar solo la hora entera para la pregunta
             if (horaBase >= 1 && horaBase <= 12)
-            {
                 return (horaBase.Value, true);
-            }
 
             // Formato 24h
             if (horaBase >= 0 && horaBase <= 23)
-            {
-                return (horaBase.Value, false);
-            }
+                return (horaBase.Value + minutos / 60.0, false);
 
             return (null, false);
         }
 
         private int? ExtractDuracion(string command)
         {
-            // "durante 2 horas", "por 3 horas"
             var match1 = Regex.Match(command, @"(?:durante|por)\s+(\d+)\s+horas?");
             if (match1.Success && int.TryParse(match1.Groups[1].Value, out var horas1))
                 return horas1;
 
-            // "de 3 a 5" (rango de horas)
             var match2 = Regex.Match(command, @"de\s+(\d{1,2})\s+a\s+(\d{1,2})");
             if (match2.Success)
             {
                 if (int.TryParse(match2.Groups[1].Value, out var inicio) &&
                     int.TryParse(match2.Groups[2].Value, out var fin))
                 {
-                    if (fin > inicio)
-                        return fin - inicio;
-                    if (fin < inicio)
-                        return (fin + 12) - inicio;
+                    if (fin > inicio) return fin - inicio;
+                    if (fin < inicio) return (fin + 12) - inicio;
                 }
             }
 
-            // "2 horas", "tres horas"
             var match3 = Regex.Match(command, @"(\d+|una|dos|tres|cuatro|cinco)\s+horas?");
             if (match3.Success)
             {
@@ -435,16 +424,12 @@ namespace Anfeta.UI.Services.Activity
                     "cinco" => 5,
                     _ => int.TryParse(num, out var n) ? n : (int?)null
                 };
-                if (duracion.HasValue)
-                    return duracion.Value;
+                if (duracion.HasValue) return duracion.Value;
             }
 
             return null;
         }
 
-        /// <summary>
-        /// Convierte nombre de mes a número
-        /// </summary>
         private int GetMonthNumber(string monthName)
         {
             return monthName switch
@@ -470,7 +455,6 @@ namespace Anfeta.UI.Services.Activity
             var names = new List<string>();
             var lower = command.Trim().ToLowerInvariant();
 
-            // SOLO detectar cuando dice explícitamente "asignar"/"asígnale"
             var patterns = new[]
             {
                 @"(?:asignar|asígnala|asignala|asígnale|asignale)\s+a\s+(.+?)(?:\s+prioridad|\s+mañana|\s+hoy|\s+el\s+\d+|$)",
@@ -502,7 +486,6 @@ namespace Anfeta.UI.Services.Activity
                                 if (!string.IsNullOrWhiteSpace(cleaned) && cleaned.Length > 1)
                                 {
                                     cleaned = char.ToUpper(cleaned[0]) + cleaned.Substring(1);
-
                                     if (!names.Contains(cleaned))
                                         names.Add(cleaned);
                                 }

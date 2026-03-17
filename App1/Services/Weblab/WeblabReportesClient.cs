@@ -41,7 +41,6 @@ namespace Anfeta.UI.Services.Weblab
 
         // ────────────────────────────────────────────────────────────────────────
         // GET /api/reportes/ultimos
-        // Devuelve los últimos eventos de auditoría del equipo.
         // ────────────────────────────────────────────────────────────────────────
 
         /// Obtiene los últimos eventos de auditoría registrados.
@@ -125,8 +124,14 @@ namespace Anfeta.UI.Services.Weblab
             var assignee = _appState.CurrentUserEmail;
             var name = _appState.CurrentUserName ?? assignee;
 
+            // El perfil se carga en bootstrap de forma async.
+            // Si llega null aquí, el usuario habló antes de que terminara.
             if (string.IsNullOrWhiteSpace(assignee))
-                return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };
+                return new ApiPlainResponse
+                {
+                    Ok = false,
+                    PlainText = "Aún estoy cargando tu perfil. Espera un momento e intenta de nuevo."
+                };
 
             try
             {
@@ -206,7 +211,11 @@ namespace Anfeta.UI.Services.Weblab
             var name = _appState.CurrentUserName ?? assignee;
 
             if (string.IsNullOrWhiteSpace(assignee))
-                return new ApiPlainResponse { Ok = false, PlainText = "No pude identificar tu usuario." };
+                return new ApiPlainResponse
+                {
+                    Ok = false,
+                    PlainText = "Aún estoy cargando tu perfil. Espera un momento e intenta de nuevo."
+                };
 
             try
             {
@@ -286,7 +295,7 @@ namespace Anfeta.UI.Services.Weblab
                 return new ApiPlainResponse
                 {
                     Ok = false,
-                    PlainText = "No pude identificar tu perfil. Intenta cerrar y abrir sesión."
+                    PlainText = "Aún estoy cargando tu perfil. Espera un momento e intenta de nuevo."
                 };
 
             if (string.IsNullOrWhiteSpace(date))
@@ -357,7 +366,6 @@ namespace Anfeta.UI.Services.Weblab
                         }
                     }
 
-                    // Poblar caché para drill-down
                     LastRevisionesCache = new ReportRevisionesCache
                     {
                         Date = date,
@@ -390,8 +398,7 @@ namespace Anfeta.UI.Services.Weblab
         // DRILL-DOWN — responde desde caché sin llamar al API
         // ────────────────────────────────────────────────────────────────────────
 
-        /// Devuelve la lista de revisiones de un bucket (pendientes/terminadas/confirmadas).
-        /// Lee de LastRevisionesCache — sin llamada HTTP.
+        /// Devuelve la lista de revisiones de un bucket desde caché — sin HTTP.
         /// Entrada: bucket = "pendientes" | "terminadas" | "confirmadas" | "todas"
         public ApiPlainResponse GetRevisionesDetail(string bucket)
         {

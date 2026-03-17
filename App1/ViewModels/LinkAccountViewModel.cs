@@ -15,6 +15,7 @@ namespace Anfeta.UI.ViewModels
         private readonly AuthStateService _auth;
         private readonly WeblabUsersClient _users;
         private readonly WeblabAuthClient _authApi;
+        private readonly AppStateService _appState;
 
         private string _email = "";
         private string _phone = "";
@@ -77,7 +78,6 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        // Primera letra del nombre para el avatar
         public string AvatarInitial =>
             !string.IsNullOrWhiteSpace(UserProfile?.FirstName)
                 ? UserProfile.FirstName.Substring(0, 1).ToUpper()
@@ -97,14 +97,19 @@ namespace Anfeta.UI.ViewModels
         public IAsyncRelayCommand LinkCommand { get; }
         public IAsyncRelayCommand SignOutCommand { get; }
 
-        // Solo se invoca al vincular exitosamente, NO al cerrar sesión
+        // Solo se invoca al vincular exitosamente, NO al cerrar sesión.
         public event Action? RequestNavigateHome;
 
-        public LinkAccountViewModel(AuthStateService auth, WeblabUsersClient users, WeblabAuthClient authApi)
+        public LinkAccountViewModel(
+            AuthStateService auth,
+            WeblabUsersClient users,
+            WeblabAuthClient authApi,
+            AppStateService appState)
         {
             _auth = auth;
             _users = users;
             _authApi = authApi;
+            _appState = appState;
 
             LinkCommand = new AsyncRelayCommand(LinkAsync, CanLinkExecute);
             SignOutCommand = new AsyncRelayCommand(SignOutAsync);
@@ -120,10 +125,8 @@ namespace Anfeta.UI.ViewModels
             };
         }
 
-        /// <summary>
         /// Carga el perfil del usuario desde el API.
         /// Llamar desde View.Loaded si IsAuthenticated es true.
-        /// </summary>
         public async Task LoadProfileAsync()
         {
             if (!IsAuthenticated)
@@ -156,19 +159,22 @@ namespace Anfeta.UI.ViewModels
             }
         }
 
-        /// <summary>
-        /// Cierra sesión y limpia el perfil.
+        /// Cierra sesión, limpia perfil y limpia AppStateService.
         /// La vista permanece abierta, no navega al home.
-        /// </summary>
         private async Task SignOutAsync()
         {
             try
             {
                 UserProfile = null;
+
+                _appState.CurrentUserEmail = null;
+                _appState.CurrentUserName = null;
+                _appState.CollaboratorId = null;
+
                 await _auth.SignOutAsync();
 
                 OnPropertyChanged(nameof(IsAuthenticated));
-                Debug.WriteLine("[PROFILE] Sesión cerrada. Permanece en la página.");
+                Debug.WriteLine("[PROFILE] Sesión cerrada. AppState limpiado.");
             }
             catch (Exception ex)
             {
@@ -178,10 +184,9 @@ namespace Anfeta.UI.ViewModels
 
         private bool CanLinkExecute() => CanLink;
 
-        /// <summary>
         /// Vincula el dispositivo con la cuenta Weblab.
+        /// Puebla AppStateService inmediatamente tras vinculación exitosa.
         /// Navega al home solo si la vinculación fue exitosa.
-        /// </summary>
         private async Task LinkAsync()
         {
             ErrorMessage = "";
@@ -245,9 +250,16 @@ namespace Anfeta.UI.ViewModels
                 await _auth.SetSignedInAsync(reg.Token!);
                 Debug.WriteLine("[LINK] Vinculación OK. Token guardado.");
 
+                // Poblar AppStateService inmediatamente con los datos ya disponibles.
+                // Evita que los reportes fallen en la misma sesión de vinculación.
+                _appState.CurrentUserEmail = email;
+                _appState.CurrentUserName = $"{search.FirstName} {search.LastName}".Trim();
+                _appState.CollaboratorId = search.CollaboratorId;
+
+                Debug.WriteLine($"[LINK] AppState poblado → Email={_appState.CurrentUserEmail} Name={_appState.CurrentUserName} CollabId={_appState.CollaboratorId}");
+
                 await LoadProfileAsync();
 
-                // Navega al home solo tras vinculación exitosa
                 RequestNavigateHome?.Invoke();
             }
             catch (Exception ex)
