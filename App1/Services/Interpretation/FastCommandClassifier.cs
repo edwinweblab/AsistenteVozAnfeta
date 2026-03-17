@@ -1,4 +1,4 @@
-﻿// Services/FastCommandClassifier.cs
+// Services/FastCommandClassifier.cs
 using Anfeta.UI.Models.Interpretation;
 using System;
 using System.Collections.Generic;
@@ -274,17 +274,65 @@ namespace Anfeta.UI.Services.Interpretation
             }
 
             // ── CERRAR APP ───────────────────────────────────────────────────────
-            if (lower == "cierra" || lower == "cerrar" ||
-                lower == "ciérralo" || lower == "cierra esto" ||
-                lower.StartsWith("cierra ") || lower.StartsWith("cerrar "))
+            if (lower.StartsWith("cierra") || lower.StartsWith("cerrar"))
             {
+                var appName = lower.StartsWith("cierra ")
+                    ? lower["cierra ".Length..]
+                    : lower.StartsWith("cerrar ")
+                        ? lower["cerrar ".Length..]
+                        : "";
+
+                appName = appName
+                    .Replace("el ", "")
+                    .Replace("la ", "")
+                    .Replace("los ", "")
+                    .Replace("las ", "")
+                    .Replace("esto", "")
+                    .Replace("lo", "")
+                    .Trim();
+
+                var appKey = string.IsNullOrWhiteSpace(appName) ? null : MapSynonymToAppKey(appName);
+
                 return (true, new InterpretationResult
                 {
                     Intent = "CloseApp",
                     Scope = "LOCAL",
-                    Confidence = 0.9,
+                    AppKey = appKey,
+                    Confidence = 0.95,
                     NeedsConfirmation = false
                 });
+            }
+
+            // ── MINIMIZAR APP ───────────────────────────────────────────────────
+            if (lower.StartsWith("minimiza ") || lower.StartsWith("minimizar "))
+            {
+                var appName = lower.StartsWith("minimiza ")
+                    ? lower["minimiza ".Length..]
+                    : lower["minimizar ".Length..];
+
+                appName = appName
+                    .Replace("el ", "")
+                    .Replace("la ", "")
+                    .Replace("los ", "")
+                    .Replace("las ", "")
+                    .Trim();
+
+                // Evitar colisión con "minimiza todo"
+                if (appName != "todo")
+                {
+                    var appKey = MapSynonymToAppKey(appName);
+                    if (appKey != null)
+                    {
+                        return (true, new InterpretationResult
+                        {
+                            Intent = "MinimizeApp",
+                            Scope = "LOCAL",
+                            AppKey = appKey,
+                            Confidence = 0.95,
+                            NeedsConfirmation = false
+                        });
+                    }
+                }
             }
 
             // ── BUSCAR EN WEB ────────────────────────────────────────────────────
