@@ -1,13 +1,21 @@
-﻿// Services/LocalActionExecutor.cs
+// Services/LocalActionExecutor.cs
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace Anfeta.UI.Services.Interpretation
 {
     public sealed class LocalActionExecutor
     {
         private readonly CapabilityRegistry _registry;
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        private const int SW_MAXIMIZE = 3;
+        private const int SW_MINIMIZE = 6;
 
         // Blacklist mínima (seguridad)
         private static readonly string[] BlockedExeNames =
@@ -58,16 +66,25 @@ namespace Anfeta.UI.Services.Interpretation
                 return false;
             }
 
-            if (!string.Equals(intent, "OpenApp", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(intent, "OpenApp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(intent, "CloseApp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(intent, "MinimizeApp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(intent, "MaximizeApp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(intent, "MinimizeAll", StringComparison.OrdinalIgnoreCase))
             {
                 message = $"Intent LOCAL reconocido pero no implementado aún: {intent}";
                 return false;
             }
 
+            if (string.Equals(intent, "MinimizeAll", StringComparison.OrdinalIgnoreCase))
+            {
+                return TryMinimizeAll(out message);
+            }
+
             var key = NormalizeAppKey(appKey);
             if (string.IsNullOrWhiteSpace(key))
             {
-                message = "Falta app_key para OpenApp.";
+                message = $"No especificaste qué aplicación {intent.ToLowerInvariant()}.";
                 return false;
             }
 
@@ -104,23 +121,40 @@ namespace Anfeta.UI.Services.Interpretation
 
             try
             {
-                // Para .lnk: UseShellExecute=true es lo correcto
-                // Para .exe: también funciona bien.
-                var psi = new ProcessStartInfo
+                if (string.Equals(intent, "OpenApp", StringComparison.OrdinalIgnoreCase))
                 {
-                    FileName = target,
-                    UseShellExecute = true
-                };
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = target,
+                        UseShellExecute = true
+                    };
+                    Process.Start(psi);
+                    message = $"Acción OK: abierto {appDef.FriendlyName}.";
+                    return true;
+                }
 
-                Process.Start(psi);
+                if (string.Equals(intent, "CloseApp", StringComparison.OrdinalIgnoreCase))
+                {
+                    return TryCloseApp(target, appDef.FriendlyName, out message);
+                }
 
-                message = $"Acción OK: abierto {appDef.FriendlyName}.";
-                return true;
+                if (string.Equals(intent, "MinimizeApp", StringComparison.OrdinalIgnoreCase))
+                {
+                    return TryMinimizeApp(target, appDef.FriendlyName, out message);
+                }
+
+                if (string.Equals(intent, "MaximizeApp", StringComparison.OrdinalIgnoreCase))
+                {
+                    return TryMaximizeApp(target, appDef.FriendlyName, out message);
+                }
+
+                message = "Acción no reconocida.";
+                return false;
             }
             catch (Exception ex)
             {
                 // Tip: Win32Exception suele dar mensaje útil cuando el target no se puede iniciar.
-                message = $"Error al ejecutar {appDef.FriendlyName}: {ex.Message}";
+                message = $"Error al ejecutar {intent} para {appDef.FriendlyName}: {ex.Message}";
                 return false;
             }
         }
@@ -145,6 +179,116 @@ namespace Anfeta.UI.Services.Interpretation
             catch
             {
                 return exeOrPath.Trim().ToLowerInvariant();
+            }
+        }
+
+        private bool TryCloseApp(string target, string friendlyName, out string message)
+        {
+            var exeNameOnly = GetExeNameOnly(target);
+            var processes = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exeNameOnly));
+
+            if (processes.Length == 0)
+            {
+                message = $"No encontré ninguna instancia de {friendlyName} abierta.";
+                return false;
+            }
+
+            foreach (var p in processes)
+            {
+                try
+                {
+                    if (!p.CloseMainWindow())
+                    {
+                        p.Kill();
+                    }
+                }
+                catch { /* Ignorar errores al cerrar instancias individuales */ }
+            }
+
+            message = $"Acción OK: cerrando {friendlyName}.";
+            return true;
+        }
+
+        private bool TryMinimizeApp(string target, string friendlyName, out string message)
+        {
+            var exeNameOnly = GetExeNameOnly(target);
+            var processes = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exeNameOnly));
+
+            if (processes.Length == 0)
+            {
+                message = $"No encontré ninguna instancia de {friendlyName} abierta.";
+                return false;
+            }
+
+            bool minimizedAtLeastOne = false;
+            foreach (var p in processes)
+            {
+                if (p.MainWindowHandle != IntPtr.Zero)
+                {
+                    ShowWindow(p.MainWindowHandle, SW_MINIMIZE);
+                    minimizedAtLeastOne = true;
+                }
+            }
+
+            if (minimizedAtLeastOne)
+            {
+                message = $"Acción OK: minimizando {friendlyName}.";
+                return true;
+            }
+
+            message = $"No pude minimizar la ventana de {friendlyName}.";
+            return false;
+        }
+
+        private bool TryMaximizeApp(string target, string friendlyName, out string message)
+        {
+            var exeNameOnly = GetExeNameOnly(target);
+            var processes = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exeNameOnly));
+
+            if (processes.Length == 0)
+            {
+                message = $"No encontré ninguna instancia de {friendlyName} abierta.";
+                return false;
+            }
+
+            bool maximizedAtLeastOne = false;
+            foreach (var p in processes)
+            {
+                if (p.MainWindowHandle != IntPtr.Zero)
+                {
+                    ShowWindow(p.MainWindowHandle, SW_MAXIMIZE);
+                    maximizedAtLeastOne = true;
+                }
+            }
+
+            if (maximizedAtLeastOne)
+            {
+                message = $"Acción OK: maximizando {friendlyName}.";
+                return true;
+            }
+
+            message = $"No pude maximizar la ventana de {friendlyName}.";
+            return false;
+        }
+
+        private bool TryMinimizeAll(out string message)
+        {
+            try
+            {
+                Type? shellType = Type.GetTypeFromProgID("Shell.Application");
+                if (shellType != null)
+                {
+                    object? shell = Activator.CreateInstance(shellType);
+                    shellType.InvokeMember("MinimizeAll", System.Reflection.BindingFlags.InvokeMethod, null, shell, null);
+                }
+
+                message = "Acción OK: minimizando todo.";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                message = $"Error al minimizar todo: {ex.Message}";
+                return false;
             }
         }
 
