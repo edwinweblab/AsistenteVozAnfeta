@@ -291,7 +291,12 @@ namespace Anfeta.UI.Services.Interpretation
                     .Replace("lo", "")
                     .Trim();
 
-                var appKey = string.IsNullOrWhiteSpace(appName) ? null : MapSynonymToAppKey(appName);
+                if (string.IsNullOrWhiteSpace(appName))
+                    return (false, null); // Dejar que IA infiera app activa
+
+                var appKey = MapSynonymToAppKey(appName);
+                if (appKey == null)
+                    return (false, null); // No reconocido, dejar que IA intente (ej: "cierra discord")
 
                 return (true, new InterpretationResult
                 {
@@ -321,17 +326,17 @@ namespace Anfeta.UI.Services.Interpretation
                 if (appName != "todo")
                 {
                     var appKey = MapSynonymToAppKey(appName);
-                    if (appKey != null)
+                    if (appKey == null)
+                        return (false, null);
+
+                    return (true, new InterpretationResult
                     {
-                        return (true, new InterpretationResult
-                        {
-                            Intent = "MinimizeApp",
-                            Scope = "LOCAL",
-                            AppKey = appKey,
-                            Confidence = 0.95,
-                            NeedsConfirmation = false
-                        });
-                    }
+                        Intent = "MinimizeApp",
+                        Scope = "LOCAL",
+                        AppKey = appKey,
+                        Confidence = 0.95,
+                        NeedsConfirmation = false
+                    });
                 }
             }
 

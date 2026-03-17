@@ -12,7 +12,7 @@ namespace Anfeta.UI.Services.Interpretation
         private readonly CapabilityRegistry _registry;
 
         [DllImport("user32.dll")]
-        private static bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         private const int SW_MINIMIZE = 6;
 
@@ -82,7 +82,7 @@ namespace Anfeta.UI.Services.Interpretation
             var key = NormalizeAppKey(appKey);
             if (string.IsNullOrWhiteSpace(key))
             {
-                message = $"Falta app_key para {intent}.";
+                message = $"No especificaste qué aplicación {intent.ToLowerInvariant()}.";
                 return false;
             }
 
