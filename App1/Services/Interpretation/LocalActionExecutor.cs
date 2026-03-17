@@ -14,6 +14,7 @@ namespace Anfeta.UI.Services.Interpretation
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+        private const int SW_MAXIMIZE = 3;
         private const int SW_MINIMIZE = 6;
 
         // Blacklist mínima (seguridad)
@@ -68,6 +69,7 @@ namespace Anfeta.UI.Services.Interpretation
             if (!string.Equals(intent, "OpenApp", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(intent, "CloseApp", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(intent, "MinimizeApp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(intent, "MaximizeApp", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(intent, "MinimizeAll", StringComparison.OrdinalIgnoreCase))
             {
                 message = $"Intent LOCAL reconocido pero no implementado aún: {intent}";
@@ -139,6 +141,11 @@ namespace Anfeta.UI.Services.Interpretation
                 if (string.Equals(intent, "MinimizeApp", StringComparison.OrdinalIgnoreCase))
                 {
                     return TryMinimizeApp(target, appDef.FriendlyName, out message);
+                }
+
+                if (string.Equals(intent, "MaximizeApp", StringComparison.OrdinalIgnoreCase))
+                {
+                    return TryMaximizeApp(target, appDef.FriendlyName, out message);
                 }
 
                 message = "Acción no reconocida.";
@@ -230,6 +237,37 @@ namespace Anfeta.UI.Services.Interpretation
             }
 
             message = $"No pude minimizar la ventana de {friendlyName}.";
+            return false;
+        }
+
+        private bool TryMaximizeApp(string target, string friendlyName, out string message)
+        {
+            var exeNameOnly = GetExeNameOnly(target);
+            var processes = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exeNameOnly));
+
+            if (processes.Length == 0)
+            {
+                message = $"No encontré ninguna instancia de {friendlyName} abierta.";
+                return false;
+            }
+
+            bool maximizedAtLeastOne = false;
+            foreach (var p in processes)
+            {
+                if (p.MainWindowHandle != IntPtr.Zero)
+                {
+                    ShowWindow(p.MainWindowHandle, SW_MAXIMIZE);
+                    maximizedAtLeastOne = true;
+                }
+            }
+
+            if (maximizedAtLeastOne)
+            {
+                message = $"Acción OK: maximizando {friendlyName}.";
+                return true;
+            }
+
+            message = $"No pude maximizar la ventana de {friendlyName}.";
             return false;
         }
 

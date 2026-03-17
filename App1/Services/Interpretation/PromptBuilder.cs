@@ -92,7 +92,7 @@ namespace Anfeta.UI.Services.Interpretation
         /// <summary>Reglas ultra compactas</summary>
         private static void AppendCompactRules(StringBuilder sb)
         {
-            sb.AppendLine("REGLAS: intent (OpenApp|CloseApp|MinimizeApp|MinimizeAll|WebSearch|Unknown), scope (LOCAL|API), app_key de lista, NO múltiples opciones, SOLO JSON");
+            sb.AppendLine("REGLAS: intent (OpenApp|CloseApp|MinimizeApp|MaximizeApp|MinimizeAll|WebSearch|Unknown), scope (LOCAL|API), app_key de lista, NO múltiples opciones, SOLO JSON");
         }
 
         /// <summary>Agregar comando del usuario</summary>

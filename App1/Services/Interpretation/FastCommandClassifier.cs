@@ -365,6 +365,45 @@ namespace Anfeta.UI.Services.Interpretation
                 });
             }
 
+            // ── MAXIMIZAR TODO ───────────────────────────────────────────────────
+            if (lower.Contains("maximiza todo") || lower.Contains("maximizar todo"))
+            {
+                // Podríamos implementar esto similar a MinimizeAll si fuera necesario,
+                // pero por ahora lo dejamos como intent para que no lo atrape MaximizeApp parcial.
+                return (false, null); 
+            }
+
+            // ── MAXIMIZAR APP ───────────────────────────────────────────────────
+            if (lower.StartsWith("maximiza ") || lower.StartsWith("maximizar "))
+            {
+                var appName = lower.StartsWith("maximiza ")
+                    ? lower["maximiza ".Length..]
+                    : lower["maximizar ".Length..];
+
+                appName = appName
+                    .Replace("el ", "")
+                    .Replace("la ", "")
+                    .Replace("los ", "")
+                    .Replace("las ", "")
+                    .Trim();
+
+                if (string.IsNullOrWhiteSpace(appName))
+                    return (false, null);
+
+                var appKey = MapSynonymToAppKey(appName);
+                if (appKey == null)
+                    return (false, null);
+
+                return (true, new InterpretationResult
+                {
+                    Intent = "MaximizeApp",
+                    Scope = "LOCAL",
+                    AppKey = appKey,
+                    Confidence = 0.95,
+                    NeedsConfirmation = false
+                });
+            }
+
             // ── MINIMIZAR TODO ───────────────────────────────────────────────────
             if (lower.Contains("minimiza todo") || lower.Contains("minimizar todo"))
             {
