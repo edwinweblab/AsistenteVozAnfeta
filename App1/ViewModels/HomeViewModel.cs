@@ -1851,8 +1851,23 @@ namespace Anfeta.UI.ViewModels
             catch (Exception ex)
             {
                 Debug.WriteLine("[VM] Error inesperado en micrófono (reseteando): " + ex);
-                _ = _speechService.ResetAsync();
-                await ResetAfterActionAsync("El micrófono tuvo un problema y se reiniciará. Vuelve a intentarlo.", "Micrófono reiniciado", speak: "Se reiniciará el micrófono.");
+                await ResetAfterActionAsync("Reiniciando micrófono...", "Micrófono reiniciado", speak: "Reconectando el micrófono.");
+                
+                // Realizar el reset de forma síncrona/awaitable
+                try { await _speechService.ResetAsync(); } catch { }
+
+                // Auto-reintento
+                if (!_cancelRequested)
+                {
+                    App.UIQueue?.TryEnqueue(async () =>
+                    {
+                        await Task.Delay(500); // Pequeña pausa para asegurar liberación 
+                        if (ListenOnceCommand.CanExecute(null))
+                        {
+                            await ListenOnceCommand.ExecuteAsync(null);
+                        }
+                    });
+                }
             }
             finally
             {
