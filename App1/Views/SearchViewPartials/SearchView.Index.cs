@@ -24,14 +24,14 @@ namespace Anfeta.UI.Views
             if (DropboxIndexCoordinator.IsIndexing)
             {
                 ResetSearchModuleState();
-                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
+                StatusText.Text = "Estado: Ruta nueva detectada, indexando...";
                 return;
             }
 
             if (!string.IsNullOrWhiteSpace(DropboxIndexCoordinator.LastError))
             {
                 ResetSearchModuleState();
-                StatusText.Text = $"Estado: Error indexando → {DropboxIndexCoordinator.LastError}";
+                StatusText.Text = $"Estado: Error indexando -> {DropboxIndexCoordinator.LastError}";
                 return;
             }
 
@@ -42,7 +42,7 @@ namespace Anfeta.UI.Views
                 if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
                 {
                     ResetSearchModuleState();
-                    StatusText.Text = "Estado: Ruta inválida. Configura de nuevo en Settings.";
+                    StatusText.Text = "Estado: Ruta invalida. Configura de nuevo en Settings.";
                     return;
                 }
 
@@ -59,7 +59,7 @@ namespace Anfeta.UI.Views
 
                 await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
 
-                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
+                StatusText.Text = $"Estado: Index local listo ({App.LocalIndex.Count} items)";
             }
         }
 
@@ -80,7 +80,16 @@ namespace Anfeta.UI.Views
                     string.Equals(DROPBOX_ROOT, savedRoot, StringComparison.OrdinalIgnoreCase))
                     return;
 
-                DROPBOX_ROOT = saved!.Trim();
+                // Si no hay ruta configurada, salir limpiamente sin intentar .Trim() sobre null
+                if (string.IsNullOrWhiteSpace(saved))
+                {
+                    ResetSearchModuleState();
+                    StatusText.Text = "Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
+                    _bootstrappedOnce = true;
+                    return;
+                }
+
+                DROPBOX_ROOT = saved.Trim();
 
                 if (!App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
                 {
@@ -121,7 +130,7 @@ namespace Anfeta.UI.Views
                 {
                     ResetSearchModuleState();
                     StatusText.Text = DropboxIndexCoordinator.IsIndexing
-                        ? "Estado: Ruta nueva detectada, indexando…"
+                        ? "Estado: Ruta nueva detectada, indexando..."
                         : "Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
                     _bootstrappedOnce = true;
                     return;
@@ -139,7 +148,7 @@ namespace Anfeta.UI.Views
                 CommandsSidebarList.ItemsSource = _savedSearches;
                 RefreshCommandsSidebarUi();
 
-                StatusText.Text = $"Estado: Index local listo ✅ ({App.LocalIndex.Count} items)";
+                StatusText.Text = $"Estado: Index local listo ({App.LocalIndex.Count} items)";
                 _bootstrappedOnce = true;
             }
             finally
@@ -159,7 +168,7 @@ namespace Anfeta.UI.Views
                 _autoReindexCts = new CancellationTokenSource();
                 var ct = _autoReindexCts.Token;
 
-                StatusText.Text = "Estado: Detecté cambios en la carpeta. Reindexando…";
+                StatusText.Text = "Estado: Detecté cambios en la carpeta. Reindexando...";
                 DropboxIndexCoordinator.StartIndexing(DROPBOX_ROOT);
                 App.LocalIndex.Clear();
 
@@ -179,13 +188,13 @@ namespace Anfeta.UI.Views
                     DateTimeOffset.UtcNow.ToString("O");
 
                 DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
-                StatusText.Text = $"Estado: Reindex listo ✅ ({App.LocalIndex.Count} items)";
+                StatusText.Text = $"Estado: Reindex listo ({App.LocalIndex.Count} items)";
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
                 DropboxIndexCoordinator.MarkError(DROPBOX_ROOT, ex.Message);
-                StatusText.Text = $"Estado: Error reindexando → {ex.Message}";
+                StatusText.Text = $"Estado: Error reindexando -> {ex.Message}";
             }
         }
 

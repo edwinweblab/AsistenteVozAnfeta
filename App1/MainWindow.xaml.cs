@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using Windows.UI;
@@ -42,6 +43,24 @@ namespace Anfeta.UI
             if (AppNav?.MenuItems.Count > 0)
                 AppNav.SelectedItem = AppNav.MenuItems[0];
 
+            // Mostrar/ocultar footer de versión + overlay del panel sin desplazar contenido.
+            // Cuando el panel se expande, se aplica un desplazamiento negativo al Frame
+            // igual a la diferencia entre OpenPaneLength y CompactPaneLength (220-52=168),
+            // haciendo que el panel se superponga al contenido en lugar de empujarlo.
+            AppNav.PaneOpened += (s, e) =>
+            {
+                VersionFooter.Visibility = Visibility.Visible;
+                ContentFrame.RenderTransform = new Microsoft.UI.Xaml.Media.TranslateTransform
+                {
+                    X = -(AppNav.OpenPaneLength - AppNav.CompactPaneLength)
+                };
+            };
+            AppNav.PaneClosed += (s, e) =>
+            {
+                VersionFooter.Visibility = Visibility.Collapsed;
+                ContentFrame.RenderTransform = null;
+            };
+
             SubscribeDropboxState();
             CheckGoogleCalendarStatusOnStartup();
 
@@ -70,7 +89,8 @@ namespace Anfeta.UI
                 "Search" => typeof(SearchTabsView),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
-                "GoogleCalendar" => typeof(GoogleCalendarView), 
+                "GoogleCalendar" => typeof(GoogleCalendarView),
+                "Todoist" => typeof(TodoistView),
                 _ => typeof(HomeView)
             };
 
@@ -81,16 +101,44 @@ namespace Anfeta.UI
         /// Navega a Configuración al hacer click en el indicador Dropbox.
         private void DropboxIndicator_Click(object sender, RoutedEventArgs e)
         {
-            var settingsItem = AppNav.MenuItems
-                .OfType<NavigationViewItem>()
-                .FirstOrDefault(i => i.Tag?.ToString() == "Settings");
-
+            var settingsItem = FindNavItem("Settings");
             if (settingsItem != null)
                 AppNav.SelectedItem = settingsItem;
 
             if (ContentFrame?.CurrentSourcePageType != typeof(SettingsView))
                 ContentFrame?.Navigate(typeof(SettingsView));
         }
+
+        /// Navega a Google Calendar al hacer click en el indicador.
+        private void GoogleCalendarIndicator_Click(object sender, RoutedEventArgs e)
+        {
+            var calItem = FindNavItem("GoogleCalendar");
+            if (calItem != null)
+                AppNav.SelectedItem = calItem;
+
+            if (ContentFrame?.CurrentSourcePageType != typeof(GoogleCalendarView))
+                ContentFrame?.Navigate(typeof(GoogleCalendarView));
+        }
+
+        /// Busca un NavigationViewItem por Tag en MenuItems y FooterMenuItems.
+        /// Entrada: tag (string) — valor del Tag a buscar.
+        /// Salida: NavigationViewItem encontrado, o null.
+        private NavigationViewItem? FindNavItem(string tag)
+        {
+            return AllNavItems().FirstOrDefault(i => i.Tag?.ToString() == tag);
+        }
+
+        /// Devuelve todos los NavigationViewItem de MenuItems + FooterMenuItems.
+        private IEnumerable<NavigationViewItem> AllNavItems()
+        {
+            return AppNav.MenuItems
+                .OfType<NavigationViewItem>()
+                .Concat(AppNav.FooterMenuItems.OfType<NavigationViewItem>());
+        }
+
+        // ═══════════════════════════════════════════
+        // Google Calendar indicator
+        // ═══════════════════════════════════════════
 
         /// Verifica el estado de Google Calendar al iniciar y actualiza el indicador.
         private async void CheckGoogleCalendarStatusOnStartup()
@@ -107,38 +155,6 @@ namespace Anfeta.UI
             {
                 Debug.WriteLine($"[GCAL_INDICATOR] Error al verificar estado startup: {ex.Message}");
             }
-        }
-
-        // ═══════════════════════════════════════════
-        // Dropbox indicator
-        // ═══════════════════════════════════════════
-
-        /// Suscribe al evento de cambio de estado del coordinador Dropbox.
-        private void SubscribeDropboxState()
-        {
-            DropboxIndexCoordinator.StateChanged += OnDropboxStateChanged;
-            DispatcherQueue.TryEnqueue(UpdateDropboxIndicator);
-        }
-
-        /// Se dispara desde cualquier hilo cuando el coordinador cambia de estado.
-        private void OnDropboxStateChanged()
-        {
-            DispatcherQueue.TryEnqueue(UpdateDropboxIndicator);
-        }
-
-
-        /// Navega a Google Calendar al hacer click en el indicador.
-        private void GoogleCalendarIndicator_Click(object sender, RoutedEventArgs e)
-        {
-            var calItem = AppNav.MenuItems
-                .OfType<NavigationViewItem>()
-                .FirstOrDefault(i => i.Tag?.ToString() == "GoogleCalendar");
-
-            if (calItem != null)
-                AppNav.SelectedItem = calItem;
-
-            if (ContentFrame?.CurrentSourcePageType != typeof(GoogleCalendarView))
-                ContentFrame?.Navigate(typeof(GoogleCalendarView));
         }
 
         /// Actualiza el indicador de Google Calendar en la barra superior.
@@ -166,9 +182,24 @@ namespace Anfeta.UI
             }
         }
 
+        // ═══════════════════════════════════════════
+        // Dropbox indicator
+        // ═══════════════════════════════════════════
 
-        /// Actualiza el botón Dropbox según el estado actual:
-        /// sin configurar → rojo | indexando → amarillo | listo → verde | error → rojo
+        /// Suscribe al evento de cambio de estado del coordinador Dropbox.
+        private void SubscribeDropboxState()
+        {
+            DropboxIndexCoordinator.StateChanged += OnDropboxStateChanged;
+            DispatcherQueue.TryEnqueue(UpdateDropboxIndicator);
+        }
+
+        /// Se dispara desde cualquier hilo cuando el coordinador cambia de estado.
+        private void OnDropboxStateChanged()
+        {
+            DispatcherQueue.TryEnqueue(UpdateDropboxIndicator);
+        }
+
+        /// Actualiza el botón Dropbox según el estado actual.
         private void UpdateDropboxIndicator()
         {
             if (DotDropbox == null || IconDropbox == null || TxtDropbox == null) return;
@@ -203,15 +234,11 @@ namespace Anfeta.UI
         }
 
         /// Helper: aplica colores al punto, ícono y texto del indicador Dropbox.
-        /// dotR/G/B → color del punto | textR/G/B → color del ícono y texto
         private void SetDropboxColors(byte dotR, byte dotG, byte dotB, byte textR, byte textG, byte textB)
         {
-            var dotColor = new SolidColorBrush(Color.FromArgb(255, dotR, dotG, dotB));
-            var textColor = new SolidColorBrush(Color.FromArgb(255, textR, textG, textB));
-
-            DotDropbox.Fill = dotColor;
-            IconDropbox.Foreground = textColor;
-            TxtDropbox.Foreground = textColor;
+            DotDropbox.Fill = new SolidColorBrush(Color.FromArgb(255, dotR, dotG, dotB));
+            IconDropbox.Foreground = new SolidColorBrush(Color.FromArgb(255, textR, textG, textB));
+            TxtDropbox.Foreground = new SolidColorBrush(Color.FromArgb(255, textR, textG, textB));
         }
 
         // ═══════════════════════════════════════════
@@ -224,6 +251,5 @@ namespace Anfeta.UI
             Debug.WriteLine("MAINWINDOW: Closed");
             ((App)Application.Current).CleanupAndExit();
         }
-
     }
 }

@@ -24,7 +24,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!--  Brand  -->
+                <!--  Brand — ANFETA + Asistente de Voz  -->
                 <StackPanel
                     x:Name="BrandPanel"
                     Grid.Column="0"
@@ -44,18 +44,21 @@
                             Foreground="White"
                             Glyph="&#xE720;" />
                     </Border>
-                    <TextBlock
-                        VerticalAlignment="Center"
-                        CharacterSpacing="80"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        Foreground="#8C8075"
-                        Text="ANFETA" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock
+                            CharacterSpacing="80"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="#8C8075"
+                            Text="ANFETA" />
+                        <TextBlock
+                            FontSize="10"
+                            Foreground="#4A3E36"
+                            Text="Asistente de Voz" />
+                    </StackPanel>
                 </StackPanel>
 
-                <Border Grid.Column="1" />
-
-                <!--  Indicadores de estado  -->
+                <!--  Indicadores de estado — alineados a la derecha  -->
                 <StackPanel
                     Grid.Column="2"
                     HorizontalAlignment="Right"
@@ -116,6 +119,7 @@
                                 Foreground="{Binding SharedLinkForeground}"
                                 Glyph="&#xE8FA;" />
                             <TextBlock
+                                x:Name="TxtSharedLink"
                                 VerticalAlignment="Center"
                                 FontSize="12"
                                 FontWeight="SemiBold"
@@ -143,6 +147,7 @@
                                 Foreground="{Binding LinkForeground}"
                                 Glyph="&#xE72E;" />
                             <TextBlock
+                                x:Name="TxtLink"
                                 VerticalAlignment="Center"
                                 FontSize="12"
                                 FontWeight="SemiBold"
@@ -165,7 +170,7 @@
                         BorderBrush="Transparent"
                         BorderThickness="1"
                         CornerRadius="8"
-                        ToolTipService.ToolTip="Estado del micrófono - Configurar en Configuración">
+                        ToolTipService.ToolTip="Estado del micrófono">
                         <Button.Resources>
                             <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0EFFFFFF" />
                             <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#14FFFFFF" />
@@ -219,6 +224,7 @@
                                 Text="Dropbox" />
                         </StackPanel>
                     </Button>
+
                     <!--  Google Calendar  -->
                     <Button
                         x:Name="GoogleCalendarIndicator"
@@ -259,51 +265,33 @@
         </Border>
 
         <!--  ═══════════ NAVEGACIÓN PRINCIPAL ═══════════  -->
+        <!--
+            PaneDisplayMode="LeftCompact": panel colapsado por defecto, se expande al hacer clic.
+            IsPaneOpen="False": inicia cerrado.
+            CompactPaneLength: ancho en modo compacto (solo iconos).
+            OpenPaneLength: ancho al expandirse.
+        -->
         <NavigationView
             x:Name="AppNav"
             Grid.Row="1"
             CompactPaneLength="52"
             IsBackButtonVisible="Collapsed"
-            IsPaneOpen="True"
+            IsPaneOpen="False"
             IsSettingsVisible="False"
             OpenPaneLength="220"
-            PaneDisplayMode="Left"
+            PaneDisplayMode="LeftCompact"
             SelectionChanged="AppNav_SelectionChanged">
-            <NavigationView.PaneHeader>
-                <Grid Height="60" Padding="16,0">
-                    <StackPanel
-                        VerticalAlignment="Center"
-                        Orientation="Horizontal"
-                        Spacing="10">
-                        <Border
-                            Width="34"
-                            Height="34"
-                            Background="{StaticResource AnfetaAccentBrush}"
-                            CornerRadius="8">
-                            <FontIcon
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                FontSize="18"
-                                Foreground="White"
-                                Glyph="&#xE720;" />
-                        </Border>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock
-                                CharacterSpacing="40"
-                                FontSize="15"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                Text="ANFETA" />
-                            <TextBlock
-                                Margin="0,1,0,0"
-                                FontSize="10"
-                                Foreground="#6B5F56"
-                                Text="Asistente de Voz" />
-                        </StackPanel>
-                    </StackPanel>
-                </Grid>
-            </NavigationView.PaneHeader>
 
+            <!--
+                Sobreescribe el color de fondo del panel de navegación.
+                NavigationViewExpandedPaneBackground es el brush interno de WinUI 3.
+            -->
+            <NavigationView.Resources>
+                <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="#111111" />
+                <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="#111111" />
+            </NavigationView.Resources>
+
+            <!--  Items principales  -->
             <NavigationView.MenuItems>
                 <NavigationViewItem
                     Content="Panel Principal"
@@ -329,7 +317,6 @@
                     ToolTipService.ToolTip="Gestionar apps locales permitidas y sinónimos">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE8A7;" />
-                        <!--  icono tipo app/grid  -->
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
@@ -339,6 +326,33 @@
                     ToolTipService.ToolTip="Buscar en actividades y proyectos">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE721;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+
+            <!--
+                FooterMenuItems: items anclados en la parte inferior del panel.
+                Aquí van configuración, integraciones y herramientas secundarias.
+            -->
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItemSeparator />
+
+                <NavigationViewItem
+                    Content="Google Calendar"
+                    Tag="GoogleCalendar"
+                    ToolTipService.ToolTip="Conectar y gestionar Google Calendar">
+                    <NavigationViewItem.Icon>
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE787;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem
+                    Content="Todoist"
+                    Tag="Todoist"
+                    ToolTipService.ToolTip="Calendario y tareas de Todoist">
+                    <NavigationViewItem.Icon>
+                        <!--  E8D0: icono de lista de tareas en Segoe MDL2  -->
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D0;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
@@ -354,15 +368,6 @@
                 </NavigationViewItem>
 
                 <NavigationViewItem
-                    Content="Google Calendar"
-                    Tag="GoogleCalendar"
-                    ToolTipService.ToolTip="Conectar y gestionar Google Calendar">
-                    <NavigationViewItem.Icon>
-                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE787;" />
-                    </NavigationViewItem.Icon>
-                </NavigationViewItem>
-
-                <NavigationViewItem
                     Content="Pruebas de Sistema"
                     Tag="Tests"
                     ToolTipService.ToolTip="Ejecutar pruebas de diagnóstico">
@@ -370,54 +375,65 @@
                         <FontIcon Glyph="&#xE7C1;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-            </NavigationView.MenuItems>
+            </NavigationView.FooterMenuItems>
 
+            <!--
+                Footer de versión.
+                Se oculta por completo en estado compacto para evitar que el texto se corte.
+                Solo se muestra cuando el panel está expandido.
+            -->
             <NavigationView.PaneFooter>
                 <Border
+                    x:Name="VersionFooter"
                     Padding="16,12"
                     BorderBrush="#10FFFFFF"
-                    BorderThickness="0,1,0,0">
-                    <Grid>
-                        <StackPanel Spacing="3">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <!--  Punto cambiado a naranja para unificar con el acento  -->
-                                <Ellipse
-                                    Width="5"
-                                    Height="5"
-                                    VerticalAlignment="Center"
-                                    Fill="#F97316" />
-                                <TextBlock
-                                    FontSize="11"
-                                    Foreground="#8C8075"
-                                    Text="Versión 1.0.0" />
-                            </StackPanel>
+                    BorderThickness="0,1,0,0"
+                    Visibility="Collapsed">
+                    <StackPanel Spacing="3">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse
+                                Width="5"
+                                Height="5"
+                                VerticalAlignment="Center"
+                                Fill="#F97316" />
                             <TextBlock
-                                x:Name="TxtVersionSubtitle"
-                                Margin="11,0,0,0"
-                                FontSize="10"
-                                Foreground="#4A3E36"
-                                Text="Asistente de Voz Empresarial" />
+                                FontSize="11"
+                                Foreground="#8C8075"
+                                Text="Versión Beta" />
                         </StackPanel>
-                    </Grid>
+                        <TextBlock
+                            Margin="11,0,0,0"
+                            FontSize="10"
+                            Foreground="#4A3E36"
+                            Text="Asistente de Voz Empresarial" />
+                    </StackPanel>
                 </Border>
             </NavigationView.PaneFooter>
 
             <Frame x:Name="ContentFrame" />
 
+            <!--
+                VisualStateManager simplificado.
+                Solo controla los indicadores de la barra superior según ancho de ventana.
+                La lógica del nav (compacto/expandido) la maneja PaneDisplayMode="LeftCompact".
+            -->
             <VisualStateManager.VisualStateGroups>
                 <VisualStateGroup>
+
                     <VisualState x:Name="Compact">
                         <VisualState.StateTriggers>
                             <AdaptiveTrigger MinWindowWidth="0" />
                         </VisualState.StateTriggers>
                         <VisualState.Setters>
-                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Collapsed" />
                             <Setter Target="BrandPanel.Visibility" Value="Collapsed" />
-                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed" />
                             <Setter Target="TxtInternet.Visibility" Value="Collapsed" />
                             <Setter Target="TxtMic.Visibility" Value="Collapsed" />
-                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtSharedLink.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtLink.Visibility" Value="Collapsed" />
+                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed" />
                             <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtGoogleCal.Visibility" Value="Collapsed" />
                         </VisualState.Setters>
                     </VisualState>
 
@@ -426,13 +442,15 @@
                             <AdaptiveTrigger MinWindowWidth="720" />
                         </VisualState.StateTriggers>
                         <VisualState.Setters>
-                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible" />
                             <Setter Target="BrandPanel.Visibility" Value="Collapsed" />
-                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed" />
                             <Setter Target="TxtInternet.Visibility" Value="Visible" />
                             <Setter Target="TxtMic.Visibility" Value="Visible" />
-                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtSharedLink.Visibility" Value="Visible" />
+                            <Setter Target="TxtLink.Visibility" Value="Visible" />
+                            <Setter Target="DropboxIndicator.Visibility" Value="Collapsed" />
                             <Setter Target="GoogleCalendarIndicator.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtGoogleCal.Visibility" Value="Collapsed" />
                         </VisualState.Setters>
                     </VisualState>
 
@@ -441,17 +459,21 @@
                             <AdaptiveTrigger MinWindowWidth="1024" />
                         </VisualState.StateTriggers>
                         <VisualState.Setters>
-                            <Setter Target="TxtVersionSubtitle.Visibility" Value="Visible" />
                             <Setter Target="BrandPanel.Visibility" Value="Visible" />
-                            <Setter Target="DropboxIndicator.Visibility" Value="Visible" />
                             <Setter Target="TxtInternet.Visibility" Value="Visible" />
                             <Setter Target="TxtMic.Visibility" Value="Visible" />
-                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtSharedLink.Visibility" Value="Visible" />
+                            <Setter Target="TxtLink.Visibility" Value="Visible" />
+                            <Setter Target="DropboxIndicator.Visibility" Value="Visible" />
                             <Setter Target="GoogleCalendarIndicator.Visibility" Value="Visible" />
+                            <Setter Target="TxtDropbox.Visibility" Value="Collapsed" />
+                            <Setter Target="TxtGoogleCal.Visibility" Value="Visible" />
                         </VisualState.Setters>
                     </VisualState>
+
                 </VisualStateGroup>
             </VisualStateManager.VisualStateGroups>
+
         </NavigationView>
     </Grid>
 </Window>

@@ -102,8 +102,8 @@ namespace Anfeta.UI.Views
         // auto-reindex
         private CancellationTokenSource? _autoReindexCts;
 
-        // voz
-        private readonly VoiceCommandsRepository _voiceRepo;
+        // voz — _voiceRepo eliminado: era dead code, nunca fue asignado ni usado.
+        //        La DI resuelve VoiceCommandsRepository en _repo.
         private readonly VoiceCommandEngine _voiceEngine;
         private readonly VoiceSearchOrchestrator _voiceOrchestrator;
         private bool _isListening = false;
@@ -124,7 +124,7 @@ namespace Anfeta.UI.Views
         private CancellationTokenSource? _refreshCts;
         private string? _currentFolderPath;
 
-        // pestaÃ±as
+        // pestañas
         public event EventHandler<string>? TabTitleChanged;
         public event EventHandler? WorkspaceChanged;
 
@@ -234,8 +234,8 @@ namespace Anfeta.UI.Views
 
             _savedFiltersService = new SavedSearchFiltersService(_savedFiltersRepository);
 
-            DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
-            Unloaded += (_, __) => DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
+            // La suscripción a StateChanged vive SOLO en SearchView_Loaded bajo _isIndexStateHooked.
+            // No se suscribe aquí para evitar handler duplicado y memory leak.
 
             ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
@@ -267,6 +267,7 @@ namespace Anfeta.UI.Views
 
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
+            // Suscripción única controlada por flag — evita duplicados si Loaded se dispara más de una vez
             if (!_isIndexStateHooked)
             {
                 DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
@@ -331,8 +332,8 @@ namespace Anfeta.UI.Views
             EmptyResultsHint.Visibility = Visibility.Visible;
 
             DetailsTitle.Text = "Selecciona un elemento";
-            DetailsPath.Text = "â€”";
-            DetailsMeta.Text = "â€”";
+            DetailsPath.Text = "-";
+            DetailsMeta.Text = "-";
         }
 
         private void FinishUi()

@@ -25,6 +25,7 @@
     <None Remove="Views\LinkSharedAccountView.xaml" />
     <None Remove="Views\SearchTabsView.xaml" />
     <None Remove="Views\SearchView.xaml" />
+    <None Remove="Views\TodoistView.xaml" />
     <None Remove="Views\TroubleshootView.xaml" />
   </ItemGroup>
   <ItemGroup>
@@ -70,6 +71,11 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Folder Include="Assets\vosk-model-es\" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Page Update="Views\TodoistView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </Page>
 	</ItemGroup>
 	<ItemGroup>
 	  <Page Update="Views\Dialogs\SavedSearchFilterDialog.xaml">

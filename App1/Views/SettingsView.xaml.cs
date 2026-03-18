@@ -24,18 +24,19 @@ namespace Anfeta.UI.Views
     {
         private readonly AudioService _audioService;
         private readonly SettingsService _settingsService;
+        private readonly AppStateService _appState;
         private readonly DispatcherTimer _statusTimer;
 
         // Dropbox
-        private CancellationTokenSource? _indexCts; 
-
+        private CancellationTokenSource? _indexCts;
 
         public SettingsView()
         {
             InitializeComponent();
 
             _audioService = new AudioService();
-            _settingsService = new SettingsService(new AppStateService());
+            _appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+            _settingsService = new SettingsService(_appState);
 
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _statusTimer.Tick += (s, e) =>
@@ -110,18 +111,14 @@ namespace Anfeta.UI.Views
 
                 DispatcherQueue.TryEnqueue(() =>
                 {
-                    // Barra de estado superior
                     TxtStatusInput.Text = $"Entrada: {inputName}";
                     TxtStatusOutput.Text = $"Salida: {outputName}";
 
-                    // Labels dentro de cada card
                     TxtMicDevice.Text = inputName;
                     TxtSpeakerDevice.Text = outputName;
 
-                    // Sincroniza AppState → HomeView se actualiza automáticamente
-                    var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
-                    appState.InputDeviceName = inputName;
-                    appState.OutputDeviceName = outputName;
+                    _appState.InputDeviceName = inputName;
+                    _appState.OutputDeviceName = outputName;
                 });
             });
         }
@@ -147,7 +144,6 @@ namespace Anfeta.UI.Views
         // ─────────────────────────────────────────────────────────
 
         /// Inicia una prueba de nivel de micrófono durante 3 segundos.
-        /// Índice 0 = dispositivo predeterminado del sistema en NAudio.
         private async void BtnTestMic_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -192,7 +188,6 @@ namespace Anfeta.UI.Views
         }
 
         /// Reproduce un tono de prueba por el dispositivo de salida predeterminado del sistema.
-        /// Índice 0 = dispositivo predeterminado del sistema en NAudio.
         private async void BtnTestSpeaker_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -318,16 +313,13 @@ namespace Anfeta.UI.Views
         /// Carga y muestra el atajo de teclado actual guardado en AppState.
         private void LoadCurrentHotkey()
         {
-            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
-            TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
+            TxtHotkeyDisplay.Text = _appState.GetHotkeyDisplayString();
         }
 
         /// Abre el diálogo para cambiar el atajo de teclado global.
         private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
         {
-            var appState = App.AppHost.Services.GetRequiredService<AppStateService>();
-
-            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(appState, _settingsService)
+            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(_appState, _settingsService)
             {
                 XamlRoot = this.XamlRoot
             };
@@ -335,7 +327,7 @@ namespace Anfeta.UI.Views
             var result = await dialog.ShowAsync();
             if (result == ContentDialogResult.Primary)
             {
-                TxtHotkeyDisplay.Text = appState.GetHotkeyDisplayString();
+                TxtHotkeyDisplay.Text = _appState.GetHotkeyDisplayString();
                 ShowStatus("Atajo actualizado correctamente", InfoBarSeverity.Success);
             }
         }
@@ -400,7 +392,7 @@ namespace Anfeta.UI.Views
                     App.LocalIndex.Set(list);
                     await LocalIndexPersistence.SaveAsync(selectedPath, list, ct);
                     ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] =
-                    DateTimeOffset.UtcNow.ToString("O");
+                        DateTimeOffset.UtcNow.ToString("O");
                     DropboxIndexCoordinator.MarkReady(selectedPath);
                     ShowStatus($"Índice listo ({App.LocalIndex.Count} items)", InfoBarSeverity.Success);
                 }
@@ -408,12 +400,12 @@ namespace Anfeta.UI.Views
                 catch (Exception ex)
                 {
                     DropboxIndexCoordinator.MarkError(selectedPath, ex.Message);
-                    ShowStatus($"Error indexando → {ex.Message}", InfoBarSeverity.Error);
+                    ShowStatus($"Error indexando -> {ex.Message}", InfoBarSeverity.Error);
                 }
             }
             catch (Exception ex)
             {
-                ShowStatus($"Error eligiendo carpeta → {ex.Message}", InfoBarSeverity.Error);
+                ShowStatus($"Error eligiendo carpeta -> {ex.Message}", InfoBarSeverity.Error);
             }
             finally
             {

@@ -1,0 +1,1027 @@
+﻿<Page
+    x:Class="Anfeta.UI.Views.TodoistView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <!--
+        ═══════════════════════════════════════
+        RECURSOS LOCALES DE LA PÁGINA
+        Estilos del calendario: solo se usan aquí,
+        no contaminan Styles.xaml global.
+        ═══════════════════════════════════════
+    -->
+    <Page.Resources>
+
+        <!-- Encabezado de día de la semana (L M M J V S D) -->
+        <Style x:Key="CalDayHeaderStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#4A3E36" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <!-- Celda de día normal -->
+        <Style x:Key="CalDayStyle" TargetType="Border">
+            <Setter Property="Height" Value="44" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <!-- Celda vacía (días del mes anterior/siguiente) -->
+        <Style x:Key="CalDayEmptyStyle" TargetType="Border">
+            <Setter Property="Height" Value="44" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <!-- Número dentro de cada celda de día -->
+        <Style x:Key="CalDayNumberStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="#8C8075" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+    </Page.Resources>
+
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="28,24,28,32" Spacing="20">
+
+            <!-- ═══════════════════════════════════════
+                 CABECERA DE SECCIÓN
+                 ═══════════════════════════════════════ -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Título + estado de conexión -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Border
+                        Width="36" Height="36"
+                        Background="#1AF97316"
+                        CornerRadius="8">
+                        <FontIcon
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="18"
+                            Foreground="{StaticResource AnfetaAccentBrush}"
+                            Glyph="&#xE8D0;" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock
+                            FontSize="18"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Todoist" />
+                        <TextBlock
+                            FontSize="11"
+                            Foreground="#6B5F56"
+                            Text="Sincronización de tareas y recordatorios" />
+                    </StackPanel>
+
+                    <!--
+                        CHIP DE ESTADO
+                        Lógica: alternar entre "Conectado" (verde) y "No conectado" (neutral)
+                        según TodoistViewModel.IsConnected
+                    -->
+                    <Border
+                        x:Name="ChipEstado"
+                        Padding="10,4"
+                        Background="#1A34D399"
+                        BorderBrush="#2034D399"
+                        BorderThickness="1"
+                        CornerRadius="20"
+                        VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse
+                                x:Name="DotEstado"
+                                Width="6" Height="6"
+                                VerticalAlignment="Center"
+                                Fill="#34D399" />
+                            <TextBlock
+                                x:Name="TxtEstadoConexion"
+                                FontSize="11"
+                                Foreground="#34D399"
+                                Text="Conectado" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Email del usuario conectado — ocultar si no hay sesión -->
+                    <TextBlock
+                        x:Name="TxtEstadoUsuario"
+                        FontSize="11"
+                        Foreground="#6B5F56"
+                        VerticalAlignment="Center"
+                        Text="usuario@email.com" />
+                </StackPanel>
+
+                <!-- Botón desconectar — visible solo si conectado -->
+                <Button
+                    x:Name="BtnDesconectar"
+                    Grid.Column="1"
+                    Padding="14,8"
+                    Background="Transparent"
+                    BorderBrush="#14FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="13"
+                            Foreground="#6B5F56"
+                            Glyph="&#xE8FB;" />
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="#6B5F56"
+                            Text="Desconectar" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <!-- ═══════════════════════════════════════
+                 PANEL DESCONECTADO
+                 Visibility: Visible cuando IsConnected = false
+                              Collapsed cuando IsConnected = true
+                 ═══════════════════════════════════════ -->
+            <Border
+                x:Name="PanelDesconectado"
+                Style="{StaticResource CardStyle}"
+                Padding="0"
+                Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="360" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Ilustración / descripción -->
+                    <StackPanel
+                        Grid.Column="0"
+                        Padding="36,40"
+                        Spacing="16"
+                        VerticalAlignment="Center">
+                        <Border
+                            Width="52" Height="52"
+                            Background="#1AF97316"
+                            CornerRadius="12"
+                            HorizontalAlignment="Left">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontFamily="Segoe MDL2 Assets"
+                                FontSize="26"
+                                Foreground="{StaticResource AnfetaAccentBrush}"
+                                Glyph="&#xE8D0;" />
+                        </Border>
+                        <TextBlock
+                            FontSize="20"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Conecta tu cuenta de Todoist" />
+                        <TextBlock
+                            FontSize="13"
+                            Foreground="#8C8075"
+                            TextWrapping="Wrap"
+                            MaxWidth="400"
+                            Text="Al autorizar el acceso, Anfeta podrá sincronizar tus recordatorios como tareas en Todoist automáticamente." />
+
+                        <!-- Capacidades disponibles -->
+                        <StackPanel Spacing="8" Margin="0,8,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="13"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Glyph="&#xE73E;" />
+                                <TextBlock FontSize="13" Foreground="#8C8075" Text="Crear tareas desde recordatorios de Anfeta" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="13"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Glyph="&#xE73E;" />
+                                <TextBlock FontSize="13" Foreground="#8C8075" Text="Sincronizar fecha, hora y duración" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="13"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Glyph="&#xE73E;" />
+                                <TextBlock FontSize="13" Foreground="#8C8075" Text="Actualizar o eliminar tareas al modificar recordatorios" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="13"
+                                    Foreground="{StaticResource AnfetaAccentBrush}"
+                                    Glyph="&#xE73E;" />
+                                <TextBlock FontSize="13" Foreground="#8C8075" Text="Anfeta es siempre el sistema maestro" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Button
+                            x:Name="BtnConectar"
+                            Padding="20,10"
+                            Background="{StaticResource AnfetaAccentBrush}"
+                            BorderThickness="0"
+                            CornerRadius="8"
+                            HorizontalAlignment="Left"
+                            Margin="0,8,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="14"
+                                    Foreground="White"
+                                    Glyph="&#xE8A7;" />
+                                <TextBlock
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    Foreground="White"
+                                    Text="Autorizar con Todoist" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Panel derecho: nota de privacidad / scopes -->
+                    <Border
+                        Grid.Column="1"
+                        Background="#08FFFFFF"
+                        BorderBrush="#08FFFFFF"
+                        BorderThickness="1,0,0,0"
+                        Padding="28,40">
+                        <StackPanel Spacing="16">
+                            <TextBlock
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="#6B5F56"
+                                CharacterSpacing="60"
+                                Text="PERMISOS SOLICITADOS" />
+                            <StackPanel Spacing="12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="#8C8075" Text="data:read_write" />
+                                    <TextBlock FontSize="11" Foreground="#4A3E36" Text="Leer y escribir tareas" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <StackPanel Spacing="3">
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="#8C8075" Text="data:delete" />
+                                    <TextBlock FontSize="11" Foreground="#4A3E36" Text="Eliminar tareas al borrar recordatorios" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </StackPanel>
+                            <Border Height="1" Background="#08FFFFFF" />
+                            <TextBlock
+                                FontSize="11"
+                                Foreground="#4A3E36"
+                                TextWrapping="Wrap"
+                                Text="La autenticación usa OAuth 2.0 oficial de Todoist. Anfeta no almacena tu contraseña." />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- ═══════════════════════════════════════
+                 PANEL CONECTADO — CONTENIDO PRINCIPAL
+                 Visibility: Collapsed cuando IsConnected = false
+                              Visible cuando IsConnected = true
+                 ═══════════════════════════════════════ -->
+            <Grid x:Name="PanelConectado" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="340" />
+                </Grid.ColumnDefinitions>
+
+                <!-- ─────────────────────────────────────
+                     COLUMNA IZQUIERDA: CALENDARIO
+                     ───────────────────────────────────── -->
+                <Border Grid.Column="0" Style="{StaticResource CardStyle}" Padding="0">
+                    <StackPanel>
+
+                        <!-- Cabecera del mes + navegación -->
+                        <Grid Padding="20,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <!--
+                                    TxtMesAnio: actualizar al navegar entre meses.
+                                    Formato: "MARZO 2026"
+                                -->
+                                <TextBlock
+                                    x:Name="TxtMesAnio"
+                                    FontSize="16"
+                                    FontWeight="SemiBold"
+                                    CharacterSpacing="60"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    Text="MARZO 2026" />
+                                <TextBlock
+                                    x:Name="TxtConteoTareas"
+                                    FontSize="11"
+                                    Foreground="#6B5F56"
+                                    Text="3 tareas este mes" />
+                            </StackPanel>
+
+                            <!-- Botón mes anterior -->
+                            <Button
+                                x:Name="BtnMesAnterior"
+                                Grid.Column="2"
+                                Width="32" Height="32"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                CornerRadius="6">
+                                <FontIcon
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="12"
+                                    Foreground="#6B5F56"
+                                    Glyph="&#xE76B;" />
+                            </Button>
+
+                            <!-- Botón mes siguiente -->
+                            <Button
+                                x:Name="BtnMesSiguiente"
+                                Grid.Column="3"
+                                Width="32" Height="32"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                CornerRadius="6">
+                                <FontIcon
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="12"
+                                    Foreground="#6B5F56"
+                                    Glyph="&#xE76C;" />
+                            </Button>
+                        </Grid>
+
+                        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="20,0" />
+
+                        <!-- Grid del calendario -->
+                        <Grid Padding="16,12,16,16" RowSpacing="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <!-- Encabezado días -->
+                                <RowDefinition Height="Auto" />
+                                <!-- Semana 1 -->
+                                <RowDefinition Height="Auto" />
+                                <!-- Semana 2 -->
+                                <RowDefinition Height="Auto" />
+                                <!-- Semana 3 -->
+                                <RowDefinition Height="Auto" />
+                                <!-- Semana 4 -->
+                                <RowDefinition Height="Auto" />
+                                <!-- Semana 5 -->
+                                <RowDefinition Height="Auto" />
+                                <!-- Semana 6 -->
+                            </Grid.RowDefinitions>
+
+                            <!-- ── ENCABEZADO: días de la semana ── -->
+                            <Grid Grid.Row="0" ColumnSpacing="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="L" Style="{StaticResource CalDayHeaderStyle}" />
+                                <TextBlock Grid.Column="1" Text="M" Style="{StaticResource CalDayHeaderStyle}" />
+                                <TextBlock Grid.Column="2" Text="M" Style="{StaticResource CalDayHeaderStyle}" />
+                                <TextBlock Grid.Column="3" Text="J" Style="{StaticResource CalDayHeaderStyle}" />
+                                <TextBlock Grid.Column="4" Text="V" Style="{StaticResource CalDayHeaderStyle}" />
+                                <TextBlock Grid.Column="5" Text="S" Style="{StaticResource CalDayHeaderStyle}" />
+                                <TextBlock Grid.Column="6" Text="D" Style="{StaticResource CalDayHeaderStyle}" />
+                            </Grid>
+
+                            <!-- ── SEMANA 1: 1 (domingo) ── -->
+                            <Grid Grid.Row="1" ColumnSpacing="2" Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <!-- L M M J V S vacíos -->
+                                <Border Grid.Column="0" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="1" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="2" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="3" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="4" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="5" Style="{StaticResource CalDayEmptyStyle}" />
+                                <!-- D = día 1 -->
+                                <Border Grid.Column="6" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="1" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                            </Grid>
+
+                            <!-- ── SEMANA 2: 2–8 ── -->
+                            <Grid Grid.Row="2" ColumnSpacing="2" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="2" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="3" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="4" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="3" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="5" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="4" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="6" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="5" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="7" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="6" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="8" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                            </Grid>
+
+                            <!-- ── SEMANA 3: 9–15 ── -->
+                            <Grid Grid.Row="3" ColumnSpacing="2" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="9" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="10" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="11" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="3" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="12" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="4" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="13" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="5" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="14" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="6" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="15" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                            </Grid>
+
+                            <!-- ── SEMANA 4: 16–22 | día 17 = HOY con tarea ── -->
+                            <Grid Grid.Row="4" ColumnSpacing="2" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="16" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <!-- Día 17: HOY — background acento, dot de tarea -->
+                                <Border Grid.Column="1" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="6" Height="44">
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="17" FontSize="13" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
+                                        <Ellipse Width="4" Height="4" Fill="White" HorizontalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="18" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="3" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="19" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <!-- Día 20: con tarea -->
+                                <Border Grid.Column="4" Style="{StaticResource CalDayStyle}">
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="20" Style="{StaticResource CalDayNumberStyle}" />
+                                        <Ellipse Width="4" Height="4" Fill="{StaticResource AnfetaAccentBrush}" HorizontalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="5" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="21" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="6" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="22" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                            </Grid>
+
+                            <!-- ── SEMANA 5: 23–29 | día 25 con tarea ── -->
+                            <Grid Grid.Row="5" ColumnSpacing="2" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="23" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="24" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <!-- Día 25: con tarea -->
+                                <Border Grid.Column="2" Style="{StaticResource CalDayStyle}">
+                                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock Text="25" Style="{StaticResource CalDayNumberStyle}" />
+                                        <Ellipse Width="4" Height="4" Fill="{StaticResource AnfetaAccentBrush}" HorizontalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="3" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="26" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="4" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="27" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="5" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="28" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="6" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="29" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                            </Grid>
+
+                            <!-- ── SEMANA 6: 30–31 ── -->
+                            <Grid Grid.Row="6" ColumnSpacing="2" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="30" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource CalDayStyle}">
+                                    <TextBlock Text="31" Style="{StaticResource CalDayNumberStyle}" />
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="3" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="4" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="5" Style="{StaticResource CalDayEmptyStyle}" />
+                                <Border Grid.Column="6" Style="{StaticResource CalDayEmptyStyle}" />
+                            </Grid>
+                        </Grid>
+
+                        <!-- Leyenda -->
+                        <Border
+                            Padding="16,10"
+                            Background="#06FFFFFF"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="0,1,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="16">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Ellipse Width="8" Height="8" Fill="{StaticResource AnfetaAccentBrush}" VerticalAlignment="Center" />
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Tarea programada" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Border Width="16" Height="16" Background="{StaticResource AnfetaAccentBrush}" CornerRadius="3" VerticalAlignment="Center" />
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Hoy" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- ─────────────────────────────────────
+                     COLUMNA DERECHA: TAREAS + FORMULARIO
+                     ───────────────────────────────────── -->
+                <StackPanel Grid.Column="1" Spacing="12">
+
+                    <!-- ── LISTA DE TAREAS ── -->
+                    <Border Style="{StaticResource CardStyle}" Padding="0">
+                        <StackPanel>
+                            <Grid Padding="16,14,16,14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    VerticalAlignment="Center"
+                                    Text="Tareas este mes" />
+                                <!--
+                                    TxtContadorTareas: mostrar "3 / 10 completadas" etc.
+                                    Binding: TodoistViewModel.TaskSummary
+                                -->
+                                <TextBlock
+                                    x:Name="TxtContadorTareas"
+                                    Grid.Column="1"
+                                    FontSize="11"
+                                    Foreground="#6B5F56"
+                                    VerticalAlignment="Center"
+                                    Text="3 tareas" />
+                            </Grid>
+                            <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+
+                            <!--
+                                TAREA EJEMPLO 1 — Prioridad: Alta (3) — color #F59E0B
+                                todoistTaskId: "task_001" | due_datetime: 17 mar 15:00
+                                duration: 30 | duration_unit: minute
+                            -->
+                            <Border
+                                x:Name="TareaItem1"
+                                Padding="16,12"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="0,0,0,1">
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <!-- Indicador de prioridad — Alta: #F59E0B -->
+                                    <Border Grid.Column="0" Width="3" CornerRadius="2" Background="#F59E0B" VerticalAlignment="Stretch" />
+                                    <StackPanel Grid.Column="1" Spacing="3">
+                                        <TextBlock
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                            Text="Revisar entregable sprint 4"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock FontSize="11" Foreground="#6B5F56" Text="17 mar · 15:00" />
+                                            <TextBlock FontSize="11" Foreground="#4A3E36" Text="30 min" />
+                                            <!-- Chip de prioridad -->
+                                            <Border Padding="6,2" Background="#1AF59E0B" CornerRadius="4">
+                                                <TextBlock FontSize="10" Foreground="#F59E0B" Text="Alta" />
+                                            </Border>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <!-- Estado de sincronización: sincronizado / error / pendiente -->
+                                    <FontIcon
+                                        Grid.Column="2"
+                                        FontFamily="Segoe MDL2 Assets"
+                                        FontSize="13"
+                                        Foreground="#34D399"
+                                        Glyph="&#xE73E;"
+                                        VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+
+                            <!--
+                                TAREA EJEMPLO 2 — Prioridad: Media (2) — color #3B82F6
+                                todoistTaskId: "task_002" | due_datetime: 20 mar 10:00
+                                duration: 60 | duration_unit: minute
+                            -->
+                            <Border
+                                x:Name="TareaItem2"
+                                Padding="16,12"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="0,0,0,1">
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="3" CornerRadius="2" Background="#3B82F6" VerticalAlignment="Stretch" />
+                                    <StackPanel Grid.Column="1" Spacing="3">
+                                        <TextBlock
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                            Text="Llamar a cliente"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock FontSize="11" Foreground="#6B5F56" Text="20 mar · 10:00" />
+                                            <TextBlock FontSize="11" Foreground="#4A3E36" Text="60 min" />
+                                            <Border Padding="6,2" Background="#1A3B82F6" CornerRadius="4">
+                                                <TextBlock FontSize="10" Foreground="#3B82F6" Text="Media" />
+                                            </Border>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <FontIcon
+                                        Grid.Column="2"
+                                        FontFamily="Segoe MDL2 Assets"
+                                        FontSize="13"
+                                        Foreground="#34D399"
+                                        Glyph="&#xE73E;"
+                                        VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+
+                            <!--
+                                TAREA EJEMPLO 3 — Prioridad: Urgente (4) — color #EF4444
+                                todoistTaskId: null (pendiente sincronización — error visual)
+                                due_datetime: 25 mar | todoistSyncError activo
+                            -->
+                            <Border x:Name="TareaItem3" Padding="16,12">
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="3" CornerRadius="2" Background="#EF4444" VerticalAlignment="Stretch" />
+                                    <StackPanel Grid.Column="1" Spacing="3">
+                                        <TextBlock
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                            Text="Entrega informe Q1"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <TextBlock FontSize="11" Foreground="#6B5F56" Text="25 mar · 09:00" />
+                                            <Border Padding="6,2" Background="#1AEF4444" CornerRadius="4">
+                                                <TextBlock FontSize="10" Foreground="#EF4444" Text="Urgente" />
+                                            </Border>
+                                            <!-- Chip de error de sync — visible cuando todoistSyncError != null -->
+                                            <Border Padding="6,2" Background="#1AEF4444" CornerRadius="4">
+                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                    <FontIcon
+                                                        FontFamily="Segoe MDL2 Assets"
+                                                        FontSize="9"
+                                                        Foreground="#EF4444"
+                                                        Glyph="&#xE814;" />
+                                                    <TextBlock FontSize="10" Foreground="#EF4444" Text="Sin sincronizar" />
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <!-- Icono de error/reintentar -->
+                                    <Button
+                                        Grid.Column="2"
+                                        Width="28" Height="28"
+                                        Padding="0"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        CornerRadius="4"
+                                        ToolTipService.ToolTip="Reintentar sincronización">
+                                        <FontIcon
+                                            FontFamily="Segoe MDL2 Assets"
+                                            FontSize="13"
+                                            Foreground="#EF4444"
+                                            Glyph="&#xE72C;" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── FORMULARIO: NUEVA TAREA ── -->
+                    <!--
+                        Campos mapeados directamente al cuerpo de POST /api/v1/tasks de Todoist
+                        y al modelo de Recordatorio de Anfeta:
+                            mensaje          → content
+                            fechaHora        → due_datetime (DatePicker + TimePicker)
+                            duracionMinutos  → duration (int) + duration_unit ("minute")
+                            prioridad        → priority (1=normal, 2=media, 3=alta, 4=urgente)
+                            revisionId       → description (referencia interna)
+                    -->
+                    <Border Style="{StaticResource CardStyle}" Padding="0">
+                        <StackPanel>
+                            <!-- Cabecera del formulario -->
+                            <Grid Padding="16,14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                    <FontIcon
+                                        FontFamily="Segoe MDL2 Assets"
+                                        FontSize="14"
+                                        Foreground="{StaticResource AnfetaAccentBrush}"
+                                        Glyph="&#xE710;"
+                                        VerticalAlignment="Center" />
+                                    <TextBlock
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                        VerticalAlignment="Center"
+                                        Text="Nueva tarea" />
+                                </StackPanel>
+                                <!-- Toggle para expandir/colapsar el formulario -->
+                                <Button
+                                    x:Name="BtnToggleForm"
+                                    Grid.Column="1"
+                                    Width="28" Height="28"
+                                    Padding="0"
+                                    Background="Transparent"
+                                    BorderBrush="Transparent"
+                                    CornerRadius="4">
+                                    <FontIcon
+                                        x:Name="IconToggleForm"
+                                        FontFamily="Segoe MDL2 Assets"
+                                        FontSize="11"
+                                        Foreground="#6B5F56"
+                                        Glyph="&#xE70D;" />
+                                </Button>
+                            </Grid>
+
+                            <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+
+                            <!-- Cuerpo del formulario -->
+                            <StackPanel x:Name="FormBody" Padding="16,14" Spacing="12">
+
+                                <!-- content: descripción de la tarea -->
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Descripción de la tarea" />
+                                    <TextBox
+                                        x:Name="TxtNuevaTarea"
+                                        PlaceholderText="Ej: Revisar entregable del sprint"
+                                        FontSize="13"
+                                        MaxLength="500" />
+                                </StackPanel>
+
+                                <!-- due_datetime: fecha -->
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Fecha" />
+                                    <DatePicker
+                                        x:Name="DatePickerTarea"
+                                        HorizontalAlignment="Stretch"
+                                        DayFormat="{}{day.integer}"
+                                        MonthFormat="{}{month.abbreviated}"
+                                        YearFormat="{}{year.full}" />
+                                </StackPanel>
+
+                                <!-- due_datetime: hora -->
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Hora" />
+                                    <TimePicker
+                                        x:Name="TimePickerTarea"
+                                        HorizontalAlignment="Stretch"
+                                        ClockIdentifier="24HourClock" />
+                                </StackPanel>
+
+                                <!-- duration + duration_unit -->
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Duración" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="110" />
+                                        </Grid.ColumnDefinitions>
+                                        <NumberBox
+                                            x:Name="NumDuracion"
+                                            Grid.Column="0"
+                                            PlaceholderText="30"
+                                            Minimum="1"
+                                            Maximum="1440"
+                                            SmallChange="5"
+                                            SpinButtonPlacementMode="Inline"
+                                            FontSize="13" />
+                                        <!--
+                                            duration_unit: "minute" | "day"
+                                            Valores del enum de la API de Todoist
+                                        -->
+                                        <ComboBox
+                                            x:Name="ComboDuracionUnidad"
+                                            Grid.Column="1"
+                                            SelectedIndex="0"
+                                            FontSize="13">
+                                            <ComboBoxItem Content="Minutos" Tag="minute" />
+                                            <ComboBoxItem Content="Días" Tag="day" />
+                                        </ComboBox>
+                                    </Grid>
+                                </StackPanel>
+
+                                <!-- priority: 1=normal, 2=media, 3=alta, 4=urgente -->
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Prioridad" />
+                                    <ComboBox
+                                        x:Name="ComboPrioridad"
+                                        HorizontalAlignment="Stretch"
+                                        SelectedIndex="0"
+                                        FontSize="13">
+                                        <!-- Tag = valor numérico que recibe la API de Todoist -->
+                                        <ComboBoxItem Content="Normal" Tag="1" />
+                                        <ComboBoxItem Content="Media" Tag="2" />
+                                        <ComboBoxItem Content="Alta" Tag="3" />
+                                        <ComboBoxItem Content="Urgente" Tag="4" />
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <!-- description (campo opcional): revisionId o referencia interna -->
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="11" Foreground="#6B5F56" Text="Referencia / Revisión (opcional)" />
+                                    <TextBox
+                                        x:Name="TxtReferencia"
+                                        PlaceholderText="ID de revisión o nota interna"
+                                        FontSize="13"
+                                        MaxLength="200" />
+                                </StackPanel>
+
+                                <!-- Acciones del formulario -->
+                                <Grid ColumnSpacing="8" Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button
+                                        x:Name="BtnLimpiarForm"
+                                        Grid.Column="0"
+                                        HorizontalAlignment="Stretch"
+                                        Padding="0,10"
+                                        Background="Transparent"
+                                        BorderBrush="#14FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="8">
+                                        <TextBlock FontSize="13" Foreground="#6B5F56" Text="Limpiar" />
+                                    </Button>
+                                    <Button
+                                        x:Name="BtnCrearTarea"
+                                        Grid.Column="1"
+                                        Padding="20,10"
+                                        Background="{StaticResource AnfetaAccentBrush}"
+                                        BorderThickness="0"
+                                        CornerRadius="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <FontIcon
+                                                FontFamily="Segoe MDL2 Assets"
+                                                FontSize="13"
+                                                Foreground="White"
+                                                Glyph="&#xE710;" />
+                                            <TextBlock
+                                                FontSize="13"
+                                                FontWeight="SemiBold"
+                                                Foreground="White"
+                                                Text="Crear tarea" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <!--
+                                    Mensaje de estado del formulario.
+                                    Visibility: Collapsed por defecto.
+                                    Mostrar al crear, actualizar o si hay error.
+                                    Binding: TodoistViewModel.FormStatusMessage / FormStatusVisible
+                                -->
+                                <Border
+                                    x:Name="FormStatusBar"
+                                    Padding="12,8"
+                                    Background="#1A34D399"
+                                    BorderBrush="#2034D399"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Visibility="Collapsed">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon
+                                            x:Name="FormStatusIcon"
+                                            FontFamily="Segoe MDL2 Assets"
+                                            FontSize="13"
+                                            Foreground="#34D399"
+                                            Glyph="&#xE73E;" />
+                                        <TextBlock
+                                            x:Name="TxtFormStatus"
+                                            FontSize="12"
+                                            Foreground="#34D399"
+                                            VerticalAlignment="Center"
+                                            Text="Tarea creada y sincronizada" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+                <!-- fin columna derecha -->
+
+            </Grid>
+            <!-- fin panel conectado -->
+
+        </StackPanel>
+    </ScrollViewer>
+
+</Page>
