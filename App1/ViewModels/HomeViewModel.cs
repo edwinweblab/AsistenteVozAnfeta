@@ -1,4 +1,4 @@
-﻿// ViewModels/HomeViewModel.cs
+// ViewModels/HomeViewModel.cs
 using Anfeta.UI.Data;
 using Anfeta.UI.Models;
 using Anfeta.UI.Models.Interpretation;
@@ -15,6 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -101,6 +102,7 @@ namespace Anfeta.UI.ViewModels
         private bool _isModelReady;
         private readonly SemaphoreSlim _warmupLock = new(1, 1);
         private readonly SemaphoreSlim _speechInitLock = new(1, 1);
+        private int _listenGuard = 0;
 
         // =====================================================================
         // PROPERTIES — Model state
@@ -282,8 +284,29 @@ namespace Anfeta.UI.ViewModels
         }
 
         // =====================================================================
-        // LIFECYCLE
+        // LIFECYCLE & WINDOW MANAGEMENT
         // =====================================================================
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        private void BringAppToForeground()
+        {
+            try
+            {
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+                if (hwnd != IntPtr.Zero)
+                {
+                    SetForegroundWindow(hwnd);
+                    Debug.WriteLine("[VM] App traída al frente exitosamente.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[VM] Error al traer app al frente: {ex.Message}");
+            }
+        }
 
         public void Dispose()
         {
@@ -457,6 +480,7 @@ namespace Anfeta.UI.ViewModels
         private async Task SpeakSafeAsync(string text)
         {
             try { await _tts.SpeakAsync(text); }
+            catch (OperationCanceledException) { Debug.WriteLine("[TTS] Speak cancelado"); }
             catch (Exception ex) { Debug.WriteLine("[TTS] ERROR: " + ex); }
         }
 
@@ -900,18 +924,13 @@ namespace Anfeta.UI.ViewModels
             _cancelRequested = true;
             Interlocked.Increment(ref _listenSessionId);
 
-            try { await _speechService.CancelAsync(); } catch { }
-
             try
             {
                 _currentRecognitionCts?.Cancel();
-                _currentRecognitionCts?.Dispose();
             }
             catch { }
-            finally
-            {
-                _currentRecognitionCts = null;
-            }
+
+            _ = _speechService.CancelAsync();
 
             await ResetAfterActionAsync(uiMessage, uiStatus, speak: uiMessage);
         }
@@ -971,6 +990,8 @@ namespace Anfeta.UI.ViewModels
                 else if (intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
                     _contextManager.ClearActiveApp();
 
+                BringAppToForeground();
+
                 await ResetAfterActionAsync(msg, msg, speak: msg);
                 return;
             }
@@ -1022,50 +1043,58 @@ namespace Anfeta.UI.ViewModels
 
         private async Task ListenOnceAsync()
         {
-            Debug.WriteLine("[STT] ListenOnceAsync start");
+            if (Interlocked.CompareExchange(ref _listenGuard, 1, 0) != 0)
+                return;
+
+            CancellationTokenSource? localCts = null;
+            int mySession = 0;
+            CancellationToken ct;
 
             try
             {
-                _tts.Stop();
-                Debug.WriteLine("[TTS] Detenido antes de escuchar");
+                Debug.WriteLine("[STT] ListenOnceAsync start");
+
+                try
+                {
+                    _tts.Stop();
+                    Debug.WriteLine("[TTS] Detenido antes de escuchar");
+                }
+                catch (Exception ex) { Debug.WriteLine($"[TTS] Error al detener: {ex.Message}"); }
+
+                if (!IsModelReady)
+                {
+                    await ResetAfterActionAsync("Aún estoy cargando el modelo. Espera un momento.", "Cargando modelo...", speak: "Aún estoy cargando el modelo.");
+                    return;
+                }
+
+                if (!await EnsureSpeechReadyAsync())
+                {
+                    await ResetAfterActionAsync("No pude inicializar el micrófono. Revisa permisos/dispositivo.", "Error micrófono", speak: "No pude inicializar el micrófono.");
+                    return;
+                }
+
+                if (IsListening)
+                {
+                    Debug.WriteLine("[STT] Ya estaba escuchando -> cancelar");
+                    Interlocked.Exchange(ref _listenGuard, 0);
+                    await CancelListeningAsync("Escucha cancelada. Puedes intentar de nuevo.", "Cancelado");
+                    return;
+                }
+
+                _cancelRequested = false;
+                mySession = Interlocked.Increment(ref _listenSessionId);
+
+                _currentRecognitionCts = new CancellationTokenSource();
+                localCts = _currentRecognitionCts;
+                ct = localCts.Token;
+
+                IsListening = true;
+                UpdateUiSafe("Preparando micrófono...", "Preparando...", recognized: "");
             }
-            catch (GroqRateLimitException ex)
+            finally
             {
-                Debug.WriteLine("[GROQ] Rate limit: " + ex.Message);
-                await ResetAfterActionAsync(
-                    "El servicio de IA está saturado. Espera unos segundos e intenta de nuevo.",
-                    "Rate limit Groq",
-                    speak: "El servicio de inteligencia está saturado. Intenta en unos segundos.");
+                Interlocked.Exchange(ref _listenGuard, 0);
             }
-            catch (Exception ex) { Debug.WriteLine($"[TTS] Error al detener: {ex.Message}"); }
-
-            if (!IsModelReady)
-            {
-                await ResetAfterActionAsync("Aún estoy cargando el modelo. Espera un momento.", "Cargando modelo...", speak: "Aún estoy cargando el modelo.");
-                return;
-            }
-
-            if (!await EnsureSpeechReadyAsync())
-            {
-                await ResetAfterActionAsync("No pude inicializar el micrófono. Revisa permisos/dispositivo.", "Error micrófono", speak: "No pude inicializar el micrófono.");
-                return;
-            }
-
-            if (IsListening)
-            {
-                Debug.WriteLine("[STT] Ya estaba escuchando -> cancelar");
-                await CancelListeningAsync("Escucha cancelada. Puedes intentar de nuevo.", "Cancelado");
-                return;
-            }
-
-            _cancelRequested = false;
-            var mySession = Interlocked.Increment(ref _listenSessionId);
-
-            IsListening = true;
-            UpdateUiSafe("Preparando micrófono...", "Preparando...", recognized: "");
-
-            _currentRecognitionCts = new CancellationTokenSource();
-            var ct = _currentRecognitionCts.Token;
 
             try
             {
@@ -1074,7 +1103,24 @@ namespace Anfeta.UI.ViewModels
                 {
                     UpdateUiSafe("Escuchando... habla ahora", "Escuchando... habla ahora", recognized: "");
                     if (_backgroundMode)
+                    {
                         _ = SpeakSafeAsync("Te escucho.");
+                    }
+                    else
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                using var audio = new Anfeta.UI.Services.Speech.AudioService();
+                                await audio.PlayTestSound(-1);
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine("[UI] Error al reproducir beep: " + ex);
+                            }
+                        });
+                    }
                 });
 
                 Debug.WriteLine("------------------------------------");
@@ -1084,7 +1130,6 @@ namespace Anfeta.UI.ViewModels
                 if (_cancelRequested || ct.IsCancellationRequested || mySession != _listenSessionId)
                 {
                     Debug.WriteLine("[STT] Resultado ignorado por cancel/sesion nueva");
-                    await ResetAfterActionAsync("Reconocimiento cancelado.", "Cancelado", speak: "Cancelado.");
                     return;
                 }
 
@@ -1523,6 +1568,8 @@ namespace Anfeta.UI.ViewModels
                         else if (fastResult.Intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
                             _contextManager.ClearActiveApp();
 
+                        BringAppToForeground();
+
                         await RecordCommandAsync(text, "LOCAL");
                         await ResetAfterActionAsync(fastExecMsg, fastExecMsg, speak: fastExecMsg);
                         return;
@@ -1734,6 +1781,8 @@ namespace Anfeta.UI.ViewModels
                     else if (intent.Equals("CloseApp", StringComparison.OrdinalIgnoreCase))
                         _contextManager.ClearActiveApp();
 
+                    BringAppToForeground();
+
                     await RecordCommandAsync(text, "LOCAL");
                     await ResetAfterActionAsync(msg, msg, speak: msg);
                     return;
@@ -1791,18 +1840,33 @@ namespace Anfeta.UI.ViewModels
                 _speechInitialized = false;
                 await ResetAfterActionAsync(ex.Message, "ERROR: Permiso denegado", speak: "Permiso denegado para el micrófono.");
             }
+            catch (GroqRateLimitException ex)
+            {
+                Debug.WriteLine("[GROQ] Rate limit: " + ex.Message);
+                await ResetAfterActionAsync(
+                    "El servicio de IA está saturado. Espera unos segundos e intenta de nuevo.",
+                    "Rate limit Groq",
+                    speak: "El servicio de inteligencia está saturado. Intenta en unos segundos.");
+            }
             catch (Exception ex)
             {
-                Debug.WriteLine("[VM] Error inesperado: " + ex);
-                await ResetAfterActionAsync("Error al procesar el comando.", "Error", speak: "Ocurrió un error.");
+                Debug.WriteLine("[VM] Error inesperado en micrófono (reseteando): " + ex);
+                _ = _speechService.ResetAsync();
+                await ResetAfterActionAsync("El micrófono tuvo un problema y se reiniciará. Vuelve a intentarlo.", "Micrófono reiniciado", speak: "Se reiniciará el micrófono.");
             }
             finally
             {
-                IsListening = false;
-                try { _currentRecognitionCts?.Dispose(); } catch { }
-                _currentRecognitionCts = null;
+                if (localCts != null)
+                {
+                    try { localCts.Dispose(); } catch { }
+                    if (ReferenceEquals(_currentRecognitionCts, localCts))
+                    {
+                        _currentRecognitionCts = null;
+                        IsListening = false;
+                    }
+                }
 
-                ListenOnceCommand.NotifyCanExecuteChanged();
+                App.UIQueue?.TryEnqueue(() => ListenOnceCommand.NotifyCanExecuteChanged());
                 Debug.WriteLine("[STT] ListenOnceAsync end (cleanup OK)");
             }
         }

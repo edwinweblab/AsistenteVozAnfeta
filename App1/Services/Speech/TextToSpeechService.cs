@@ -1,4 +1,4 @@
-﻿using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi;
 using System;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -16,6 +16,7 @@ namespace Anfeta.UI.Services.Speech
         private readonly SpeechSynthesizer _synth = new();
         private MediaPlayer? _player;
         private string? _originalDefaultDevice;
+        private CancellationTokenSource? _ttsCts;
 
         // Velocidad actual. Rango: 0.5–6.0. Default: 1.0
         public double SpeakingRate { get; private set; } = 1.0;
@@ -96,13 +97,16 @@ namespace Anfeta.UI.Services.Speech
             await StopAsync();
             ct.ThrowIfCancellationRequested();
 
+            _ttsCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var linkedCt = _ttsCts.Token;
+
             if (_appState.OutputDeviceId.HasValue)
                 SetTemporaryDefaultDevice(_appState.OutputDeviceId.Value);
 
             try
             {
-                var stream = await _synth.SynthesizeTextToStreamAsync(text);
-                ct.ThrowIfCancellationRequested();
+                var stream = await _synth.SynthesizeTextToStreamAsync(text).AsTask(linkedCt);
+                linkedCt.ThrowIfCancellationRequested();
 
                 _player = new MediaPlayer();
                 _player.Source = MediaSource.CreateFromStream(stream, stream.ContentType);
@@ -164,6 +168,10 @@ namespace Anfeta.UI.Services.Speech
         {
             try
             {
+                _ttsCts?.Cancel();
+                _ttsCts?.Dispose();
+                _ttsCts = null;
+
                 if (_player != null)
                 {
                     _player.Pause();
