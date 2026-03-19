@@ -1,4 +1,4 @@
-﻿using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using System;
 using System.Collections.Generic;
@@ -142,15 +142,13 @@ namespace Anfeta.UI.Services.Speech
             _waveIn = null;
         }
 
-        // Reproduce un sonido de prueba en el dispositivo especificado
-        // deviceId: índice del dispositivo WaveOut
         public async Task PlayTestSound(int deviceId)
         {
             StopTestSound();
 
             var chime = new MultiToneProvider(
                 new[] { 800f, 1000f },
-                new[] { 0.04f, 0.04f },
+                new[] { 0.4f, 0.4f },
                 new[] { 150, 150 }
             );
 

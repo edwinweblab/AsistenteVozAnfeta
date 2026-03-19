@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Services.Speech;
+using Anfeta.UI.Services.Speech;
 using NAudio.CoreAudioApi;
 using System;
 using System.Collections.Generic;
@@ -39,13 +39,24 @@ namespace Anfeta.UI.Services
 
         public string GetCurrentLanguage() => _currentLanguage;
 
-        /// Verifica permisos y disponibilidad del idioma con un recognizer desechable.
-        /// NO guarda recognizer persistente — SpeechRecognizer no es reutilizable.
+        /// Verifica permisos y disponibilidad del idioma.
+        /// Crea una instancia de SpeechRecognizer persistente para reutilizarla.
         public async Task InitializeAsync(string languageTag = "es-MX")
         {
             await _lock.WaitAsync();
             try
             {
+                if (_initialized && _activeRecognizer != null && _currentLanguage.Equals(languageTag, StringComparison.OrdinalIgnoreCase))
+                {
+                    return; // Ya está inicializado con el mismo idioma
+                }
+
+                if (_activeRecognizer != null)
+                {
+                    try { _activeRecognizer.Dispose(); } catch { }
+                    _activeRecognizer = null;
+                }
+
                 var available = SpeechRecognizer.SupportedTopicLanguages;
                 if (available.Count == 0)
                     throw new InvalidOperationException("No hay idiomas instalados.");
@@ -56,13 +67,17 @@ namespace Anfeta.UI.Services
 
                 _currentLanguage = targetLang.LanguageTag;
 
-                using var probe = new SpeechRecognizer(targetLang);
-                probe.Constraints.Add(new SpeechRecognitionTopicConstraint(
+                var recognizer = new SpeechRecognizer(targetLang);
+                recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(
                     SpeechRecognitionScenario.Dictation, "dictation"));
+
+                recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(1.5);
+                recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.0);
+                recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
 
                 try
                 {
-                    var compile = await probe.CompileConstraintsAsync();
+                    var compile = await recognizer.CompileConstraintsAsync();
                     if (compile.Status != SpeechRecognitionResultStatus.Success)
                         throw new InvalidOperationException($"CompileConstraintsAsync falló: {compile.Status}");
                 }
@@ -73,8 +88,9 @@ namespace Anfeta.UI.Services
                     throw;
                 }
 
+                _activeRecognizer = recognizer;
                 _initialized = true;
-                Debug.WriteLine("[STT] Inicialización OK. Lang=" + _currentLanguage);
+                Debug.WriteLine("[STT] Inicialización persistente OK. Lang=" + _currentLanguage);
             }
             finally
             {
@@ -106,88 +122,69 @@ namespace Anfeta.UI.Services
             }
         }
 
-        /// Restaura el dispositivo de captura predeterminado original.
-        private void RestoreDefaultDevice()
-        {
-            if (_originalDefaultDevice == null) return;
-            try
-            {
-                var policyConfig = new PolicyConfigClient();
-                policyConfig.SetDefaultEndpoint(_originalDefaultDevice, 2);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[STT] Error al restaurar device: {ex.Message}");
-            }
-            finally
-            {
-                _originalDefaultDevice = null;
-            }
-        }
 
-        /// Crea un SpeechRecognizer nuevo, lo compila y ejecuta el reconocimiento.
+
+        /// Ejecuta el reconocimiento.
         /// onReady: callback invocado justo antes de RecognizeAsync.
         /// Usar para actualizar la UI a "Escuchando" en el momento exacto en que
         /// el micrófono empieza a capturar — no antes.
-        /// SpeechRecognizer NO es reutilizable después de RecognizeAsync().
         public async Task<string?> RecognizeOnceAsync(CancellationToken ct = default, Action? onReady = null)
         {
-            if (!_initialized)
+            if (!_initialized || _activeRecognizer == null)
                 throw new InvalidOperationException("Llama InitializeAsync() primero.");
 
             await _lock.WaitAsync(ct);
             try
             {
-                var available = SpeechRecognizer.SupportedTopicLanguages;
-                if (available.Count == 0) return null;
-
-                Language? lang = available.FirstOrDefault(l =>
-                    l.LanguageTag.Equals(_currentLanguage, StringComparison.OrdinalIgnoreCase))
-                    ?? available.First();
-
                 if (_appState.InputDeviceId.HasValue)
-                    SetTemporaryDefaultDevice(_appState.InputDeviceId.Value);
+                {
+                    var devId = _appState.InputDeviceId.Value;
+                    await Task.Run(() => SetTemporaryDefaultDevice(devId));
+                }
 
-                SpeechRecognizer? recognizer = null;
                 try
                 {
-                    recognizer = new SpeechRecognizer(lang);
-                    recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(
-                        SpeechRecognitionScenario.Dictation, "dictation"));
-
-                    recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(1.5);
-                    recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.0);
-                    recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
-
-                    _activeRecognizer = recognizer;
-
-                    var compile = await recognizer.CompileConstraintsAsync();
-                    if (compile.Status != SpeechRecognitionResultStatus.Success)
-                    {
-                        Debug.WriteLine($"[STT] Compile falló: {compile.Status}");
-                        return null;
-                    }
-
                     if (ct.IsCancellationRequested) return null;
 
-                    // Compilación lista. El recognizer está a punto de capturar audio.
-                    // Notificar al llamador para sincronizar el estado de la UI.
+                    // El recognizer está a punto de capturar audio.
+                    // Notificar al llamador para sincronizar el estado de la UI o emitir sonido.
                     onReady?.Invoke();
                     Debug.WriteLine("[STT] RecognizeAsync iniciando (micrófono activo).");
 
                     using var reg = ct.Register(() => _ = CancelAsync());
 
-                    SpeechRecognitionResult result;
+                    SpeechRecognitionResult? result = null;
                     try
                     {
-                        result = await recognizer.RecognizeAsync();
+                        var recTask = _activeRecognizer.RecognizeAsync().AsTask();
+                        var cancelTcs = new TaskCompletionSource<bool>();
+                        using var reg2 = ct.Register(() => cancelTcs.TrySetResult(true));
+                        
+                        var completed = await Task.WhenAny(recTask, cancelTcs.Task);
+                        if (completed == cancelTcs.Task)
+                        {
+                            Debug.WriteLine("[STT] RecognizeAsync cancelado via CTS");
+                            return null;
+                        }
+                        
+                        result = await recTask;
                     }
                     catch (System.Runtime.InteropServices.COMException ex)
                     {
+                        _initialized = false;
+                        try { _activeRecognizer?.Dispose(); } catch { }
+                        _activeRecognizer = null;
+
                         if (ex.HResult == unchecked((int)0x80045509))
-                            throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
+                            throw new UnauthorizedAccessException("El micrófono necesita estar en primer plano o aceptar la política de voz.");
+                        
                         Debug.WriteLine($"[STT] COMException en RecognizeAsync: {ex.HResult:X8}");
-                        return null;
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[STT] Exception en RecognizeAsync: {ex.Message}");
+                        throw;
                     }
 
                     if (ct.IsCancellationRequested) return null;
@@ -199,19 +196,38 @@ namespace Anfeta.UI.Services
                     Debug.WriteLine($"[STT] Resultado: '{text ?? "<null>"}' | Status={result?.Status}");
                     return text;
                 }
-                catch (System.Runtime.InteropServices.COMException ex)
+                catch (Exception ex)
                 {
-                    if (ex.HResult == unchecked((int)0x80045509))
-                        throw new UnauthorizedAccessException("Acepta la política de voz en Windows.");
-                    return null;
+                    if (ex is System.Runtime.InteropServices.COMException comEx && comEx.HResult == unchecked((int)0x80045509))
+                    {
+                        _initialized = false;
+                        try { _activeRecognizer?.Dispose(); } catch { }
+                        _activeRecognizer = null;
+                        throw new UnauthorizedAccessException("El micrófono necesita estar en primer plano o aceptar la política de voz.");
+                    }
+                    
+                    Debug.WriteLine($"[STT] Excepción general en RecognizeOnceAsync: {ex.Message}");
+                    throw;
                 }
                 finally
                 {
-                    try { recognizer?.Dispose(); } catch { }
-                    if (ReferenceEquals(_activeRecognizer, recognizer))
-                        _activeRecognizer = null;
-
-                    RestoreDefaultDevice();
+                    var toRestore = _originalDefaultDevice;
+                    if (toRestore != null)
+                    {
+                        _ = Task.Run(() =>
+                        {
+                            try
+                            {
+                                var policyConfig = new PolicyConfigClient();
+                                policyConfig.SetDefaultEndpoint(toRestore, 2);
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[STT] Error al restaurar device: {ex.Message}");
+                            }
+                        });
+                        _originalDefaultDevice = null;
+                    }
                 }
             }
             finally
@@ -224,7 +240,12 @@ namespace Anfeta.UI.Services
         {
             var r = _activeRecognizer;
             if (r == null) return;
-            try { await r.StopRecognitionAsync(); } catch { }
+            try 
+            { 
+                var stopTask = r.StopRecognitionAsync().AsTask();
+                await Task.WhenAny(stopTask, Task.Delay(1000));
+            } 
+            catch { }
         }
 
         public async Task ResetAsync(string languageTag = "es-MX")
