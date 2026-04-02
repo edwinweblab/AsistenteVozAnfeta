@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Services;
+using Anfeta.UI.Services;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Speech;
 using Microsoft.Extensions.DependencyInjection;
@@ -106,8 +106,8 @@ namespace Anfeta.UI.Views
         {
             await Task.Run(() =>
             {
-                var inputName = GetSystemDefaultDeviceName(DataFlow.Capture);
-                var outputName = GetSystemDefaultDeviceName(DataFlow.Render);
+                var inputName = AudioService.GetSystemDefaultDeviceName(DataFlow.Capture);
+                var outputName = AudioService.GetSystemDefaultDeviceName(DataFlow.Render);
 
                 DispatcherQueue.TryEnqueue(() =>
                 {
@@ -123,21 +123,6 @@ namespace Anfeta.UI.Views
             });
         }
 
-        /// Obtiene el nombre amigable del dispositivo de audio predeterminado de Windows.
-        /// DataFlow.Capture = micrófono, DataFlow.Render = altavoces.
-        private static string GetSystemDefaultDeviceName(DataFlow flow)
-        {
-            try
-            {
-                using var enumerator = new MMDeviceEnumerator();
-                var device = enumerator.GetDefaultAudioEndpoint(flow, Role.Multimedia);
-                return device?.FriendlyName ?? "No disponible";
-            }
-            catch
-            {
-                return "No disponible";
-            }
-        }
 
         // ─────────────────────────────────────────────────────────
         // AUDIO — PRUEBAS

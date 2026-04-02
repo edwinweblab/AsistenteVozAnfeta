@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Data;
+using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Activity;
 using Anfeta.UI.Services.Auth;
@@ -284,7 +284,8 @@ namespace Anfeta.UI
                         sp.GetRequiredService<WeblabRecordatoriosClient>(),
                         sp.GetRequiredService<WeblabReportesClient>(),
                         sp.GetRequiredService<ActivityEditFlow>(),
-                        sp.GetRequiredService<CommandHistoryRepository>()
+                        sp.GetRequiredService<CommandHistoryRepository>(),
+                        sp.GetRequiredService<AudioService>()
                     ));
                 })
                 .Build();
@@ -306,6 +307,25 @@ namespace Anfeta.UI
 
             _ = HomeVM;
             _ = CheckAndWarmupGroqAsync();
+            
+            // Auto-detección de dispositivos de audio al arrancar
+            try
+            {
+                var appState = AppHost.Services.GetRequiredService<AppStateService>();
+                if (appState.InputDeviceName == "No configurado")
+                {
+                    appState.InputDeviceName = AudioService.GetSystemDefaultDeviceName(NAudio.CoreAudioApi.DataFlow.Capture);
+                }
+                if (appState.OutputDeviceName == "No configurado")
+                {
+                    appState.OutputDeviceName = AudioService.GetSystemDefaultDeviceName(NAudio.CoreAudioApi.DataFlow.Render);
+                }
+                Debug.WriteLine($"[AUDIO] Auto-detect: In={appState.InputDeviceName}, Out={appState.OutputDeviceName}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AUDIO] Error en auto-detect: {ex.Message}");
+            }
 
             try
             {

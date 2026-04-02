@@ -71,8 +71,8 @@ namespace Anfeta.UI.Services
                 recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(
                     SpeechRecognitionScenario.Dictation, "dictation"));
 
-                recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(1.5);
-                recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(1.0);
+                recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(6.0);
+                recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromSeconds(2.0);
                 recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(0);
 
                 try
@@ -140,6 +140,9 @@ namespace Anfeta.UI.Services
                 {
                     var devId = _appState.InputDeviceId.Value;
                     await Task.Run(() => SetTemporaryDefaultDevice(devId));
+                    
+                    // Pequeña pausa para que Windows asiente el cambio de dispositivo predeterminado
+                    await Task.Delay(500, ct); 
                 }
 
                 try

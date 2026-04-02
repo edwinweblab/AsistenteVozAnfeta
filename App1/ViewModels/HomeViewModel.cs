@@ -29,6 +29,7 @@ namespace Anfeta.UI.ViewModels
         // =====================================================================
 
         private readonly ISpeechToTextService _speechService;
+        private readonly AudioService _audioService;
         private readonly ICommandInterpretationService _interpreter;
         private readonly ITextToSpeechService _tts;
         private readonly LocalActionExecutor _localExecutor;
@@ -235,7 +236,8 @@ namespace Anfeta.UI.ViewModels
             WeblabRecordatoriosClient recordatoriosClient,
             WeblabReportesClient reportesClient,
             ActivityEditFlow activityEditFlow,
-            CommandHistoryRepository historyRepo)
+            CommandHistoryRepository historyRepo,
+            AudioService audioService)
         {
             _speechService = speechService;
             _interpreter = interpreter;
@@ -257,6 +259,7 @@ namespace Anfeta.UI.ViewModels
             _reportesClient = reportesClient;
             _activityEditFlow = activityEditFlow;
             _historyRepo = historyRepo;
+            _audioService = audioService;
 
             _apiKeyService.KeysChanged += OnKeysChanged;
 
@@ -1112,8 +1115,7 @@ namespace Anfeta.UI.ViewModels
                         {
                             try
                             {
-                                using var audio = new Anfeta.UI.Services.Speech.AudioService();
-                                await audio.PlayTestSound(-1);
+                                await _audioService.PlayTestSound(-1);
                             }
                             catch (Exception ex)
                             {

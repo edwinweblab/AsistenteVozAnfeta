@@ -18,6 +18,21 @@ namespace Anfeta.UI.Services.Speech
             _enumerator = new MMDeviceEnumerator();
         }
 
+        /// <summary>Obtiene el nombre amigable del dispositivo predeterminado de Windows.</summary>
+        public static string GetSystemDefaultDeviceName(DataFlow flow)
+        {
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDefaultAudioEndpoint(flow, Role.Multimedia);
+                return device?.FriendlyName ?? "No disponible";
+            }
+            catch
+            {
+                return "No disponible";
+            }
+        }
+
         // Obtiene la lista de dispositivos de entrada de audio disponibles
         // Retorna lista de AudioDeviceInfo con index, id, nombre y si es default
         public List<Models.AudioDeviceInfo> GetInputDevices()
