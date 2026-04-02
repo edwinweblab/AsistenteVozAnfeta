@@ -1,4 +1,4 @@
-using NAudio.CoreAudioApi;
+﻿using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using System;
 using System.Collections.Generic;
@@ -18,7 +18,8 @@ namespace Anfeta.UI.Services.Speech
             _enumerator = new MMDeviceEnumerator();
         }
 
-        /// <summary>Obtiene el nombre amigable del dispositivo predeterminado de Windows.</summary>
+        /// Nombre del dispositivo predeterminado del sistema.
+        /// flow: Capture (mic) o Render (speakers).
         public static string GetSystemDefaultDeviceName(DataFlow flow)
         {
             try
@@ -33,8 +34,7 @@ namespace Anfeta.UI.Services.Speech
             }
         }
 
-        // Obtiene la lista de dispositivos de entrada de audio disponibles
-        // Retorna lista de AudioDeviceInfo con index, id, nombre y si es default
+        // Entrada: ninguna. Salida: lista de dispositivos de captura activos con su índice NAudio.
         public List<Models.AudioDeviceInfo> GetInputDevices()
         {
             var devices = new List<Models.AudioDeviceInfo>();
@@ -44,10 +44,7 @@ namespace Anfeta.UI.Services.Speech
             {
                 defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
             }
-            catch
-            {
-                // No hay dispositivo de entrada por defecto
-            }
+            catch { }
 
             for (int i = 0; i < WaveIn.DeviceCount; i++)
             {
@@ -57,25 +54,15 @@ namespace Anfeta.UI.Services.Speech
 
                 string deviceId = coreDevice?.ID ?? Guid.NewGuid().ToString();
                 string uniqueId = DeviceIdManager.GetOrCreateId(deviceId, "INPUT");
+                bool isDefault = defaultDevice != null && coreDevice != null && coreDevice.ID == defaultDevice.ID;
 
-                bool isDefault = defaultDevice != null &&
-                                 coreDevice != null &&
-                                 coreDevice.ID == defaultDevice.ID;
-
-                devices.Add(new Models.AudioDeviceInfo(
-                    i,
-                    deviceId,
-                    uniqueId,
-                    cap.ProductName,
-                    isDefault
-                ));
+                devices.Add(new Models.AudioDeviceInfo(i, deviceId, uniqueId, cap.ProductName, isDefault));
             }
 
             return devices;
         }
 
-        // Obtiene la lista de dispositivos de salida de audio disponibles
-        // Retorna lista de AudioDeviceInfo con index, id, nombre y si es default
+        // Entrada: ninguna. Salida: lista de dispositivos de salida activos con su índice NAudio.
         public List<Models.AudioDeviceInfo> GetOutputDevices()
         {
             var devices = new List<Models.AudioDeviceInfo>();
@@ -85,10 +72,7 @@ namespace Anfeta.UI.Services.Speech
             {
                 defaultDevice = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
             }
-            catch
-            {
-                // No hay dispositivo de salida por defecto
-            }
+            catch { }
 
             for (int i = -1; i < WaveOut.DeviceCount; i++)
             {
@@ -103,26 +87,16 @@ namespace Anfeta.UI.Services.Speech
 
                 string deviceId = coreDevice?.ID ?? Guid.NewGuid().ToString();
                 string uniqueId = DeviceIdManager.GetOrCreateId(deviceId, "OUTPUT");
+                bool isDefault = defaultDevice != null && coreDevice != null && coreDevice.ID == defaultDevice.ID;
 
-                bool isDefault = defaultDevice != null &&
-                                 coreDevice != null &&
-                                 coreDevice.ID == defaultDevice.ID;
-
-                devices.Add(new Models.AudioDeviceInfo(
-                    i,
-                    deviceId,
-                    uniqueId,
-                    cap.ProductName,
-                    isDefault
-                ));
+                devices.Add(new Models.AudioDeviceInfo(i, deviceId, uniqueId, cap.ProductName, isDefault));
             }
 
             return devices;
         }
 
-        // Inicia la prueba del micrófono y envía niveles de audio al callback
-        // deviceId: índice del dispositivo WaveIn
-        // levelCallback: función que recibe el nivel de audio (0-100)
+        // Inicia prueba de micrófono. Envía nivel 0-100 al callback cada ~50ms.
+        // Entrada: deviceId (índice WaveIn), levelCallback.
         public void StartMicTest(int deviceId, Action<float> levelCallback)
         {
             StopMicTest();
@@ -149,7 +123,7 @@ namespace Anfeta.UI.Services.Speech
             _waveIn.StartRecording();
         }
 
-        // Detiene la prueba del micrófono y libera recursos
+        // Detiene la prueba de micrófono y libera recursos.
         public void StopMicTest()
         {
             _waveIn?.StopRecording();
@@ -157,25 +131,32 @@ namespace Anfeta.UI.Services.Speech
             _waveIn = null;
         }
 
+        // Reproduce un tono suave de confirmación en el dispositivo indicado.
+        // Entrada: deviceId (-1 = predeterminado del sistema).
+        // El tono usa frecuencias graves con fade-in/out para no ser agresivo al oído.
         public async Task PlayTestSound(int deviceId)
         {
             StopTestSound();
 
+            // 440 Hz (La4) y 520 Hz: zona de confort auditivo, no agresivas.
+            // Amplitud 0.12f: suficiente para escuchar sin sobresaltar.
+            // 90ms por tono con envelope de 20% fade-in + 60% sustain + 20% fade-out.
             var chime = new MultiToneProvider(
-                new[] { 800f, 1000f },
-                new[] { 0.4f, 0.4f },
-                new[] { 150, 150 }
+                frequencies: new[] { 440f, 520f },
+                amplitudes: new[] { 0.12f, 0.10f },
+                durationMs: new[] { 90, 90 }
             );
 
             _waveOut = new WaveOutEvent { DeviceNumber = deviceId };
             _waveOut.Init(chime);
             _waveOut.Play();
 
-            await Task.Delay(400);
+            // 280ms = tiempo total de audio + margen para flush del buffer.
+            await Task.Delay(280);
             StopTestSound();
         }
 
-        // Detiene el sonido de prueba y libera recursos
+        // Detiene el sonido de prueba y libera el WaveOutEvent.
         public void StopTestSound()
         {
             _waveOut?.Stop();
@@ -191,6 +172,8 @@ namespace Anfeta.UI.Services.Speech
         }
     }
 
+    // Generador de tono puro con envelope trapezoidal (fade-in / sustain / fade-out).
+    // Elimina el clic abrupto en ataque y release que hace percibir el sonido como agresivo.
     internal class MultiToneProvider : WaveProvider32
     {
         private readonly float[] _frequencies;
@@ -199,6 +182,9 @@ namespace Anfeta.UI.Services.Speech
         private int _sample;
         private int _toneIndex;
         private int _toneSamples;
+
+        // fadeRatio: fracción del tono usada para fade-in y fade-out (0.0–0.5).
+        private const float FadeRatio = 0.20f;
 
         public MultiToneProvider(float[] frequencies, float[] amplitudes, int[] durationMs)
         {
@@ -218,16 +204,29 @@ namespace Anfeta.UI.Services.Speech
                     continue;
                 }
 
-                var freq = _frequencies[_toneIndex];
-                var amp = _amplitudes[_toneIndex];
-                var duration = _durations[_toneIndex] * WaveFormat.SampleRate / 1000;
+                int durationSamples = _durations[_toneIndex] * WaveFormat.SampleRate / 1000;
+                float freq = _frequencies[_toneIndex];
+                float amp = _amplitudes[_toneIndex];
 
-                buffer[offset + i] = (float)(amp * Math.Sin(2 * Math.PI * _sample * freq / WaveFormat.SampleRate));
+                // Envelope trapezoidal: evita clicks en ataque y release.
+                float progress = durationSamples > 0 ? (float)_toneSamples / durationSamples : 1f;
+                float envelope;
+                if (progress < FadeRatio)
+                    envelope = progress / FadeRatio;               // fade-in
+                else if (progress > 1f - FadeRatio)
+                    envelope = (1f - progress) / FadeRatio;        // fade-out
+                else
+                    envelope = 1f;                                  // sustain
+
+                envelope = Math.Clamp(envelope, 0f, 1f);
+
+                buffer[offset + i] = envelope * amp *
+                    (float)Math.Sin(2 * Math.PI * _sample * freq / WaveFormat.SampleRate);
 
                 _sample++;
                 _toneSamples++;
 
-                if (_toneSamples >= duration)
+                if (_toneSamples >= durationSamples)
                 {
                     _toneIndex++;
                     _sample = 0;
@@ -239,7 +238,7 @@ namespace Anfeta.UI.Services.Speech
         }
     }
 
-    /// <summary>Gestiona IDs únicos persistentes para dispositivos</summary>
+    /// Gestiona IDs únicos persistentes por dispositivo entre sesiones.
     public static class DeviceIdManager
     {
         private static readonly Windows.Storage.ApplicationDataContainer _settings =
@@ -250,24 +249,19 @@ namespace Anfeta.UI.Services.Speech
             string key = $"DeviceId_{type}_{coreAudioId}";
 
             if (_settings.Values.ContainsKey(key))
-            {
                 return (string)_settings.Values[key];
-            }
 
             int nextId = GetNextId(type);
-            string uniqueId = $"{type}_ID{nextId}";
-            _settings.Values[key] = uniqueId;
-
-            return uniqueId;
+            string uid = $"{type}_ID{nextId}";
+            _settings.Values[key] = uid;
+            return uid;
         }
 
         private static int GetNextId(string type)
         {
             string counterKey = $"DeviceCounter_{type}";
             int current = _settings.Values.ContainsKey(counterKey)
-                ? (int)_settings.Values[counterKey]
-                : 0;
-
+                ? (int)_settings.Values[counterKey] : 0;
             int next = current + 1;
             _settings.Values[counterKey] = next;
             return next;

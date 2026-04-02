@@ -1,4 +1,4 @@
-// ViewModels/HomeViewModel.cs
+﻿// ViewModels/HomeViewModel.cs
 using Anfeta.UI.Data;
 using Anfeta.UI.Models;
 using Anfeta.UI.Models.Interpretation;
@@ -927,13 +927,9 @@ namespace Anfeta.UI.ViewModels
             _cancelRequested = true;
             Interlocked.Increment(ref _listenSessionId);
 
-            try
-            {
-                _currentRecognitionCts?.Cancel();
-            }
-            catch { }
+            try { _currentRecognitionCts?.Cancel(); } catch { }
 
-            _ = _speechService.CancelAsync();
+            _speechInitialized = false;
 
             await ResetAfterActionAsync(uiMessage, uiStatus, speak: uiMessage);
         }
@@ -1102,27 +1098,28 @@ namespace Anfeta.UI.ViewModels
             try
             {
                 Debug.WriteLine("[STT] RecognizeOnceAsync...");
+                if (!_backgroundMode)
+                {
+                    try { await _audioService.PlayTestSound(-1); }
+                    catch (Exception ex) { Debug.WriteLine("[UI] Error al reproducir beep: " + ex); }
+
+                    // Buffer para que el eco del beep se disipe antes de que el mic esté activo.
+                    await Task.Delay(200, ct);
+                }
+
+                if (ct.IsCancellationRequested || _cancelRequested)
+                {
+                    Debug.WriteLine("[STT] Cancelado durante buffer post-beep");
+                    await ResetAfterActionAsync("Escucha cancelada.", "Cancelado");
+                    return;
+                }
+
                 var text = await _speechService.RecognizeOnceAsync(ct, onReady: () =>
                 {
                     UpdateUiSafe("Escuchando... habla ahora", "Escuchando... habla ahora", recognized: "");
                     if (_backgroundMode)
-                    {
                         _ = SpeakSafeAsync("Te escucho.");
-                    }
-                    else
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                await _audioService.PlayTestSound(-1);
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine("[UI] Error al reproducir beep: " + ex);
-                            }
-                        });
-                    }
+                    // Beep ya fue emitido antes de este callback — onReady solo actualiza UI.
                 });
 
                 Debug.WriteLine("------------------------------------");
@@ -1852,24 +1849,13 @@ namespace Anfeta.UI.ViewModels
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("[VM] Error inesperado en micrófono (reseteando): " + ex);
-                await ResetAfterActionAsync("Reiniciando micrófono...", "Micrófono reiniciado", speak: "Reconectando el micrófono.");
-                
-                // Realizar el reset de forma síncrona/awaitable
+                Debug.WriteLine("[VM] Error inesperado en micrófono: " + ex);
+                _speechInitialized = false;
                 try { await _speechService.ResetAsync(); } catch { }
-
-                // Auto-reintento
-                if (!_cancelRequested)
-                {
-                    App.UIQueue?.TryEnqueue(async () =>
-                    {
-                        await Task.Delay(500); // Pequeña pausa para asegurar liberación 
-                        if (ListenOnceCommand.CanExecute(null))
-                        {
-                            await ListenOnceCommand.ExecuteAsync(null);
-                        }
-                    });
-                }
+                await ResetAfterActionAsync(
+                    "Ocurrió un error con el micrófono. Intenta de nuevo.",
+                    "Error en micrófono",
+                    speak: "Ocurrió un error. Intenta de nuevo.");
             }
             finally
             {
