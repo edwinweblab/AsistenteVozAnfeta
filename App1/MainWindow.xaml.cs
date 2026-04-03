@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using Windows.Foundation;
 using Windows.UI;
 
 namespace Anfeta.UI
@@ -17,6 +18,9 @@ namespace Anfeta.UI
     public sealed partial class MainWindow : Window
     {
         private readonly ShellViewModel _shell;
+
+        // Evita buscar el overlay más de una vez una vez que ya fue desactivado.
+        private bool _lightDismissDisabled = false;
 
         public MainWindow()
         {
@@ -43,23 +47,9 @@ namespace Anfeta.UI
             if (AppNav?.MenuItems.Count > 0)
                 AppNav.SelectedItem = AppNav.MenuItems[0];
 
-            // Mostrar/ocultar footer de versión + overlay del panel sin desplazar contenido.
-            // Cuando el panel se expande, se aplica un desplazamiento negativo al Frame
-            // igual a la diferencia entre OpenPaneLength y CompactPaneLength (220-52=168),
-            // haciendo que el panel se superponga al contenido en lugar de empujarlo.
-            AppNav.PaneOpened += (s, e) =>
-            {
-                VersionFooter.Visibility = Visibility.Visible;
-                ContentFrame.RenderTransform = new Microsoft.UI.Xaml.Media.TranslateTransform
-                {
-                    X = -(AppNav.OpenPaneLength - AppNav.CompactPaneLength)
-                };
-            };
-            AppNav.PaneClosed += (s, e) =>
-            {
-                VersionFooter.Visibility = Visibility.Collapsed;
-                ContentFrame.RenderTransform = null;
-            };
+            AppNav.Loaded += AppNav_Loaded;
+            AppNav.PaneOpened += AppNav_PaneOpened;
+            AppNav.PaneClosed += (s, e) => VersionFooter.Visibility = Visibility.Collapsed;
 
             SubscribeDropboxState();
             CheckGoogleCalendarStatusOnStartup();
@@ -67,6 +57,83 @@ namespace Anfeta.UI
             this.Closed += MainWindow_Closed;
 
             Debug.WriteLine("MAINWINDOW: constructor OK");
+        }
+
+        // ═══════════════════════════════════════════
+        // Nav — Clip
+        // ═══════════════════════════════════════════
+
+        private void AppNav_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Recorta el NavigationView a OpenPaneLength para que el ContentGrid
+            // interno no tape el Frame que está detrás.
+            AppNav.Clip = new RectangleGeometry
+            {
+                Rect = new Rect(0, 0, AppNav.OpenPaneLength, 10000)
+            };
+
+            Debug.WriteLine($"[NAV] Clip aplicado: {AppNav.OpenPaneLength}px");
+        }
+
+        // ═══════════════════════════════════════════
+        // Nav — LightDismissLayer
+        // Se busca en PaneOpened porque el elemento solo existe en el árbol
+        // visual después de que el pane se abre por primera vez.
+        // ═══════════════════════════════════════════
+
+        private void AppNav_PaneOpened(NavigationView sender, object args)
+        {
+            VersionFooter.Visibility = Visibility.Visible;
+
+            if (_lightDismissDisabled) return;
+
+            var overlay = FindDescendantByName(AppNav, "LightDismissLayer");
+            if (overlay is FrameworkElement fe)
+            {
+                fe.Opacity = 0;
+                fe.IsHitTestVisible = false;
+                _lightDismissDisabled = true;
+                Debug.WriteLine("[NAV] LightDismissLayer desactivado.");
+            }
+            else
+            {
+                // Si no se encontró, volcamos todos los elementos con nombre
+                // para identificar el nombre real en esta versión de WinUI 3.
+                Debug.WriteLine("[NAV] LightDismissLayer no encontrado — volcando árbol visual:");
+                DumpNamedDescendants(AppNav, 0);
+            }
+        }
+
+        // Busca un FrameworkElement por nombre en el árbol visual descendente.
+        // Entrada: parent, name. Salida: DependencyObject? o null.
+        private static DependencyObject? FindDescendantByName(DependencyObject parent, string name)
+        {
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is FrameworkElement fe && fe.Name == name)
+                    return child;
+
+                var result = FindDescendantByName(child, name);
+                if (result != null) return result;
+            }
+            return null;
+        }
+
+        // Vuelca en Debug todos los FrameworkElement con nombre no vacío.
+        // Entrada: parent, depth — nivel de indentación para el log.
+        private static void DumpNamedDescendants(DependencyObject parent, int depth)
+        {
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is FrameworkElement fe && !string.IsNullOrEmpty(fe.Name))
+                    Debug.WriteLine($"[TREE] {new string(' ', depth * 2)}{child.GetType().Name} -> '{fe.Name}'");
+
+                DumpNamedDescendants(child, depth + 1);
+            }
         }
 
         // ═══════════════════════════════════════════
@@ -121,8 +188,6 @@ namespace Anfeta.UI
         }
 
         /// Busca un NavigationViewItem por Tag en MenuItems y FooterMenuItems.
-        /// Entrada: tag (string) — valor del Tag a buscar.
-        /// Salida: NavigationViewItem encontrado, o null.
         private NavigationViewItem? FindNavItem(string tag)
         {
             return AllNavItems().FirstOrDefault(i => i.Tag?.ToString() == tag);
@@ -140,7 +205,6 @@ namespace Anfeta.UI
         // Google Calendar indicator
         // ═══════════════════════════════════════════
 
-        /// Verifica el estado de Google Calendar al iniciar y actualiza el indicador.
         private async void CheckGoogleCalendarStatusOnStartup()
         {
             try
@@ -157,7 +221,7 @@ namespace Anfeta.UI
             }
         }
 
-        /// Actualiza el indicador de Google Calendar en la barra superior.
+        /// Actualiza el indicador de Google Calendar.
         /// Entrada: connected (bool) — estado de conexión actual.
         public void UpdateGoogleCalendarIndicator(bool connected)
         {
@@ -186,20 +250,17 @@ namespace Anfeta.UI
         // Dropbox indicator
         // ═══════════════════════════════════════════
 
-        /// Suscribe al evento de cambio de estado del coordinador Dropbox.
         private void SubscribeDropboxState()
         {
             DropboxIndexCoordinator.StateChanged += OnDropboxStateChanged;
             DispatcherQueue.TryEnqueue(UpdateDropboxIndicator);
         }
 
-        /// Se dispara desde cualquier hilo cuando el coordinador cambia de estado.
         private void OnDropboxStateChanged()
         {
             DispatcherQueue.TryEnqueue(UpdateDropboxIndicator);
         }
 
-        /// Actualiza el botón Dropbox según el estado actual.
         private void UpdateDropboxIndicator()
         {
             if (DotDropbox == null || IconDropbox == null || TxtDropbox == null) return;
@@ -233,7 +294,8 @@ namespace Anfeta.UI
             }
         }
 
-        /// Helper: aplica colores al punto, ícono y texto del indicador Dropbox.
+        // Aplica colores al indicador Dropbox.
+        // Entrada: componentes RGB para el punto y para el texto/ícono.
         private void SetDropboxColors(byte dotR, byte dotG, byte dotB, byte textR, byte textG, byte textB)
         {
             DotDropbox.Fill = new SolidColorBrush(Color.FromArgb(255, dotR, dotG, dotB));
