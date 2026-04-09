@@ -996,7 +996,7 @@
                         Padding="0"
                         IsItemClickEnabled="True"
                         ItemClick="BookmarksList_ItemClick"
-                        ItemsSource="{x:Bind _bookmarks, Mode=OneWay}"
+                        ItemsSource="{x:Bind _bookmarksOc, Mode=OneWay}"
                         SelectionMode="Single">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
