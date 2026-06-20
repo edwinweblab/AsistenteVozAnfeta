@@ -252,9 +252,26 @@ namespace Anfeta.UI.Views
         private bool MatchesSavedFilterOnRow(Anfeta.UI.Models.Weblab.SearchResultRow row, string query)
         {
             if (row is null) return false;
-            string target = _currentMatchOptions.MatchPath
-                ? (row.Target ?? string.Empty)
-                : (row.Name ?? string.Empty);
+
+            string target;
+
+            if (row.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion)
+            {
+                target = string.Join(" ", new[]
+                {
+            row.Name,
+            row.Target,
+            row.SearchText,
+            row.Description
+        }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            }
+            else
+            {
+                target = _currentMatchOptions.MatchPath
+                    ? (row.Target ?? string.Empty)
+                    : (row.Name ?? string.Empty);
+            }
+
             return MatchesSavedFilterText(target, query);
         }
 

@@ -3,6 +3,7 @@
     public enum SearchSource
     {
         Local,
-        Dropbox
+        Dropbox,
+        Notion
     }
 }

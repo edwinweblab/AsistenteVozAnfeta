@@ -18,11 +18,26 @@ namespace Anfeta.UI.Views
         private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
+            BtnDetailsLocation.Content = IsNotionRow(row)
+    ? "Abrir Notion"
+    : "Ubicación";
             if (ResultsList.SelectedIndex >= 0)
                 _dictIndex = ResultsList.SelectedIndex;
 
             DetailsTitle.Text = row.Name;
             DetailsPath.Text = row.Target;
+
+            if (IsNotionRow(row))
+            {
+                DetailsMeta.Text =
+                    $"Tipo: {row.Type}\n" +
+                    $"Origen: Notion\n" +
+                    $"Estado: Página de Notion\n" +
+                    $"Modificado: {(!string.IsNullOrWhiteSpace(row.ServerModified) ? row.ServerModified : "—")}";
+
+                StatusText.Text = "Estado: Página de Notion seleccionada ✅";
+                return;
+            }
 
             var online = File.Exists(row.Target) && NeedsHydration(row.Target);
 
@@ -41,6 +56,26 @@ namespace Anfeta.UI.Views
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
             if (string.IsNullOrWhiteSpace(row.Target)) return;
+
+            if (IsNotionRow(row))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = row.Target,
+                        UseShellExecute = true
+                    });
+
+                    StatusText.Text = "Estado: Página de Notion abierta ✅";
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: Error abriendo Notion → {ex.Message}";
+                }
+
+                return;
+            }
 
             if ((row.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase))
             {
@@ -90,6 +125,26 @@ namespace Anfeta.UI.Views
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
             if (string.IsNullOrWhiteSpace(row.Target)) return;
 
+            if (IsNotionRow(row))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = row.Target,
+                        UseShellExecute = true
+                    });
+
+                    StatusText.Text = "Estado: Página de Notion abierta ✅";
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: Error abriendo Notion → {ex.Message}";
+                }
+
+                return;
+            }
+
             if ((row.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase))
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -113,7 +168,11 @@ namespace Anfeta.UI.Views
                 {
                     StatusText.Text = "Estado: Descargando desde Dropbox… ⬇️";
                     var ok = await EnsureHydratedAsync(row.Target, _cts.Token);
-                    if (!ok) { StatusText.Text = "Estado: No se pudo descargar (timeout)."; return; }
+                    if (!ok)
+                    {
+                        StatusText.Text = "Estado: No se pudo descargar (timeout).";
+                        return;
+                    }
                 }
 
                 StatusText.Text = "Estado: Abriendo…";
@@ -136,6 +195,26 @@ namespace Anfeta.UI.Views
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
             if (string.IsNullOrWhiteSpace(row.Target)) return;
+
+            if (IsNotionRow(row))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = row.Target,
+                        UseShellExecute = true
+                    });
+
+                    StatusText.Text = "Estado: Página de Notion abierta ✅";
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: Error abriendo Notion → {ex.Message}";
+                }
+
+                return;
+            }
 
             var path = row.Target;
 
@@ -175,6 +254,17 @@ namespace Anfeta.UI.Views
         private void PageSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
 
         #endregion
+
+        #region ==== Notion ==== 
+        private static bool IsNotionRow(SearchResultRow row)
+        {
+            return row.Source == SearchSource.Notion ||
+                   string.Equals(row.Type, "NOTION_PAGE", StringComparison.OrdinalIgnoreCase);
+        }
+        
+        #endregion
+
+
 
         #region ===== Utils (Highlight / Hydration / Helpers) =====
 

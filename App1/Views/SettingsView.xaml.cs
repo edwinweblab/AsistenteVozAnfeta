@@ -16,6 +16,10 @@ using Windows.Media.Capture;
 using Windows.Storage;
 using Windows.UI;
 using WinRT.Interop;
+using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Services.Notion;
+using System.Collections.Generic;
+using System.Linq;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 
 namespace Anfeta.UI.Views
@@ -29,7 +33,9 @@ namespace Anfeta.UI.Views
 
         // Dropbox
         private CancellationTokenSource? _indexCts;
-
+        private const string LS_NotionToken = "Notion.Token";
+        private const string LS_NotionDataSourceId = "Notion.DataSourceId";
+        private const string LS_NotionLastSyncUtc = "Notion.LastSyncUtc";
         public SettingsView()
         {
             InitializeComponent();
@@ -57,6 +63,7 @@ namespace Anfeta.UI.Views
         {
             LoadCurrentHotkey();
             LoadDropboxRootIntoUI();
+            LoadNotionSettingsIntoUI();
 
             _ = Task.Run(async () =>
             {
@@ -388,15 +395,77 @@ namespace Anfeta.UI.Views
 
                 try
                 {
+                    // 1. Indexar carpeta local
                     var list = await LocalIndexBuilder.BuildAsync(selectedPath, ct);
+
+                    // 2. Si Notion está configurado, agregar páginas de Notion al mismo índice
+                    var notionToken = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+                    var notionDataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
+
+                    string? notionWarning = null;
+                    int notionCount = 0;
+
+                    if (!string.IsNullOrWhiteSpace(notionToken) &&
+                        !string.IsNullOrWhiteSpace(notionDataSourceId))
+                    {
+                        try
+                        {
+                            ShowStatus("Carpeta indexada. Sincronizando Notion...", InfoBarSeverity.Informational);
+
+                            var notionItems = await NotionIndexBuilder.BuildAsync(
+                                notionToken,
+                                notionDataSourceId,
+                                ct);
+
+                            notionCount = notionItems.Count;
+                            list.AddRange(notionItems);
+
+                            ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] =
+                                DateTimeOffset.UtcNow.ToString("O");
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception notionEx)
+                        {
+                            notionWarning = notionEx.Message;
+                        }
+                    }
+
+                    // 3. Guardar índice combinado: Local + Notion
                     App.LocalIndex.Set(list);
+
                     await LocalIndexPersistence.SaveAsync(selectedPath, list, ct);
+
                     ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] =
                         DateTimeOffset.UtcNow.ToString("O");
+
                     DropboxIndexCoordinator.MarkReady(selectedPath);
-                    ShowStatus($"Índice listo ({App.LocalIndex.Count} items)", InfoBarSeverity.Success);
+
+                    if (!string.IsNullOrWhiteSpace(notionWarning))
+                    {
+                        ShowStatus(
+                            $"Índice local listo ({App.LocalIndex.Count} items), pero Notion falló -> {notionWarning}",
+                            InfoBarSeverity.Warning);
+                    }
+                    else if (notionCount > 0)
+                    {
+                        ShowStatus(
+                            $"Índice listo ({App.LocalIndex.Count} items) · Notion: {notionCount} páginas",
+                            InfoBarSeverity.Success);
+                    }
+                    else
+                    {
+                        ShowStatus(
+                            $"Índice listo ({App.LocalIndex.Count} items)",
+                            InfoBarSeverity.Success);
+                    }
                 }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException)
+                {
+                    ShowStatus("Indexación cancelada.", InfoBarSeverity.Warning);
+                }
                 catch (Exception ex)
                 {
                     DropboxIndexCoordinator.MarkError(selectedPath, ex.Message);
@@ -441,7 +510,209 @@ namespace Anfeta.UI.Views
             DropboxPathBox.Text = string.Empty;
             ShowStatus("Ruta reiniciada. Configura una nueva carpeta.", InfoBarSeverity.Informational);
         }
+        // ─────────────────────────────────────────────────────────
+        // NOTION
+        // ─────────────────────────────────────────────────────────
 
+        private void LoadNotionSettingsIntoUI()
+        {
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            var dataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
+            var lastSync = ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] as string;
+
+            NotionTokenBox.Password = token ?? string.Empty;
+            NotionDataSourceIdBox.Text = dataSourceId ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                NotionStatusText.Text = string.IsNullOrWhiteSpace(lastSync)
+                    ? $"Configurado: {dataSourceId}"
+                    : $"Configurado: {dataSourceId} · Última sincronización: {FormatUtcLocal(lastSync)}";
+            }
+            else
+            {
+                NotionStatusText.Text = "Notion no configurado.";
+            }
+        }
+
+        private bool TryGetNotionInputs(out string token, out string dataSourceId)
+        {
+            token = (NotionTokenBox.Password ?? string.Empty).Trim();
+            dataSourceId = (NotionDataSourceIdBox.Text ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                ShowStatus("Agrega el token de Notion.", InfoBarSeverity.Warning);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                ShowStatus("Agrega el Data Source ID de Notion.", InfoBarSeverity.Warning);
+                return false;
+            }
+
+            return true;
+        }
+
+        private void BtnSaveNotion_Click(object sender, RoutedEventArgs e)
+        {
+            if (!TryGetNotionInputs(out var token, out var dataSourceId))
+                return;
+
+            ApplicationData.Current.LocalSettings.Values[LS_NotionToken] = token;
+            ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] = dataSourceId;
+
+            NotionStatusText.Text = $"Configurado: {dataSourceId}";
+            ShowStatus("Configuración de Notion guardada.", InfoBarSeverity.Success);
+        }
+
+        private async void BtnTestNotion_Click(object sender, RoutedEventArgs e)
+        {
+            if (!TryGetNotionInputs(out var token, out var dataSourceId))
+                return;
+
+            SetNotionButtonsEnabled(false);
+
+            try
+            {
+                ShowStatus("Probando conexión con Notion...", InfoBarSeverity.Informational);
+
+                var items = await NotionIndexBuilder.BuildAsync(
+                    token,
+                    dataSourceId,
+                    CancellationToken.None,
+                    maxItems: 5);
+
+                ShowStatus($"Conexión Notion correcta ✅ Páginas de prueba: {items.Count}", InfoBarSeverity.Success);
+            }
+            catch (Exception ex)
+            {
+                ShowStatus($"Error Notion -> {ex.Message}", InfoBarSeverity.Error);
+            }
+            finally
+            {
+                SetNotionButtonsEnabled(true);
+            }
+        }
+
+        private async void BtnSyncNotion_Click(object sender, RoutedEventArgs e)
+        {
+            if (!TryGetNotionInputs(out var token, out var dataSourceId))
+                return;
+
+            ApplicationData.Current.LocalSettings.Values[LS_NotionToken] = token;
+            ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] = dataSourceId;
+
+            _indexCts?.Cancel();
+            _indexCts = new CancellationTokenSource();
+            var ct = _indexCts.Token;
+
+            SetNotionButtonsEnabled(false);
+
+            try
+            {
+                ShowStatus("Sincronizando páginas de Notion...", InfoBarSeverity.Informational);
+
+                var notionItems = await NotionIndexBuilder.BuildAsync(
+                    token,
+                    dataSourceId,
+                    ct);
+
+                var currentWithoutNotion = App.LocalIndex
+                    .GetAll()
+                    .Where(x => x.Source != SearchSource.Notion)
+                    .ToList();
+
+                currentWithoutNotion.AddRange(notionItems);
+
+                App.LocalIndex.Set(currentWithoutNotion);
+
+                await SaveCurrentIndexIfPossibleAsync(currentWithoutNotion, ct);
+
+                var now = DateTimeOffset.UtcNow.ToString("O");
+                ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] = now;
+
+                NotionStatusText.Text = $"Configurado: {dataSourceId} · Última sincronización: {FormatUtcLocal(now)}";
+
+                ShowStatus(
+                    $"Notion sincronizado ✅ Páginas: {notionItems.Count} · Índice total: {App.LocalIndex.Count}",
+                    InfoBarSeverity.Success);
+            }
+            catch (OperationCanceledException)
+            {
+                ShowStatus("Sincronización cancelada.", InfoBarSeverity.Warning);
+            }
+            catch (Exception ex)
+            {
+                ShowStatus($"Error sincronizando Notion -> {ex.Message}", InfoBarSeverity.Error);
+            }
+            finally
+            {
+                SetNotionButtonsEnabled(true);
+            }
+        }
+
+        private async void BtnResetNotion_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new ContentDialog
+            {
+                Title = "Limpiar configuración de Notion",
+                Content = "Esto quitará el token, el Data Source ID y eliminará las páginas de Notion del índice actual.\n\n¿Deseas continuar?",
+                PrimaryButtonText = "Continuar",
+                CloseButtonText = "Cancelar",
+                XamlRoot = this.XamlRoot
+            };
+
+            if (await dlg.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionToken);
+            ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionDataSourceId);
+            ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionLastSyncUtc);
+
+            var withoutNotion = App.LocalIndex
+                .GetAll()
+                .Where(x => x.Source != SearchSource.Notion)
+                .ToList();
+
+            App.LocalIndex.Set(withoutNotion);
+            await SaveCurrentIndexIfPossibleAsync(withoutNotion, CancellationToken.None);
+
+            NotionTokenBox.Password = string.Empty;
+            NotionDataSourceIdBox.Text = string.Empty;
+            NotionStatusText.Text = "Notion no configurado.";
+
+            ShowStatus("Configuración de Notion limpiada.", InfoBarSeverity.Informational);
+        }
+
+        private void SetNotionButtonsEnabled(bool enabled)
+        {
+            BtnSaveNotion.IsEnabled = enabled;
+            BtnTestNotion.IsEnabled = enabled;
+            BtnSyncNotion.IsEnabled = enabled;
+            BtnResetNotion.IsEnabled = enabled;
+        }
+
+        private async Task SaveCurrentIndexIfPossibleAsync(List<SearchResultRow> items, CancellationToken ct)
+        {
+            var root = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
+
+            if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+            {
+                await LocalIndexPersistence.SaveAsync(root, items, ct);
+                ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] =
+                    DateTimeOffset.UtcNow.ToString("O");
+            }
+        }
+
+        private static string FormatUtcLocal(string utcText)
+        {
+            if (DateTimeOffset.TryParse(utcText, out var dto))
+                return dto.LocalDateTime.ToString("yyyy-MM-dd HH:mm");
+
+            return utcText;
+        }
         // ─────────────────────────────────────────────────────────
         // API KEYS
         // ─────────────────────────────────────────────────────────

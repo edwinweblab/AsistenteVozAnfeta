@@ -193,7 +193,6 @@ namespace Anfeta.UI.Views
                 _dictPlayer.MediaFailed -= OnFailed;
             }
         }
-
         private async Task Dictation_PlayAsync()
         {
             if (_dictList.Count == 0)
@@ -215,15 +214,6 @@ namespace Anfeta.UI.Views
                 while (_dictPlaying && !ct.IsCancellationRequested)
                 {
                     await Dictation_SpeakCurrentAsync(ct);
-
-                    while (_dictPlayer != null &&
-                           _dictPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        await Task.Delay(80, ct);
-                    }
-
-                    await Dictation_SpeakCurrentAsync(ct);
                     await WaitForMediaEndAsync(ct);
 
                     _dictIndex++;
@@ -237,6 +227,10 @@ namespace Anfeta.UI.Views
                 }
             }
             catch (OperationCanceledException) { }
+            finally
+            {
+                _dictPlaying = false;
+            }
         }
 
         private void Dictation_Pause()
@@ -249,24 +243,38 @@ namespace Anfeta.UI.Views
 
         private async void BtnDictPlay_Click(object sender, RoutedEventArgs e)
         {
+            await ToggleDictationPlaybackAsync();
+        }
+
+        private async void BtnDictPlayPause_Click(object sender, RoutedEventArgs e)
+        {
+            await ToggleDictationPlaybackAsync();
+        }
+
+        private async Task ToggleDictationPlaybackAsync()
+        {
             if (_dictPlaying)
             {
                 Dictation_Pause();
+                return;
             }
-            else
+
+            try
             {
                 UpdatePlayPauseIcon(true);
                 await Dictation_PlayAsync();
+            }
+            finally
+            {
                 UpdatePlayPauseIcon(false);
             }
         }
 
         // Alias para compatibilidad con handlers XAML que usen BtnDictPlayPause_Click
-        private async void BtnDictPlayPause_Click(object sender, RoutedEventArgs e)
-            => await Task.Run(() => BtnDictPlay_Click(sender, e));
-
         private void BtnDictPause_Click(object sender, RoutedEventArgs e)
-            => Dictation_Pause();
+        {
+            Dictation_Pause();
+        }
 
         private async void BtnDictNext_Click(object sender, RoutedEventArgs e)
         {
@@ -290,11 +298,23 @@ namespace Anfeta.UI.Views
 
         private void UpdatePlayPauseIcon(bool playing)
         {
-            if (BtnSpeechPlay.Content is SymbolIcon icon)
-                icon.Symbol = playing ? Symbol.Pause : Symbol.Play;
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(() => UpdatePlayPauseIcon(playing));
+                return;
+            }
 
-            BtnSpeechPlay.IsChecked = playing;
-            ToolTipService.SetToolTip(BtnSpeechPlay, playing ? "Pausar" : "Reproducir");
+            try
+            {
+                BtnSpeechPlayIcon.Symbol = playing ? Symbol.Pause : Symbol.Play;
+                BtnSpeechPlay.IsChecked = playing;
+                ToolTipService.SetToolTip(BtnSpeechPlay, playing ? "Pausar" : "Reproducir");
+            }
+            catch
+            {
+                // Evita que la UI truene si el botón todavía no está inicializado
+                // o si la vista ya se descargó.
+            }
         }
 
         #endregion

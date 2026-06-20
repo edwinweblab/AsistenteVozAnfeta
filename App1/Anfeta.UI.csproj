@@ -157,8 +157,6 @@
 
   <!-- Mantener soporte de COM integrado (NAudio, AudioSwitcher, MMDeviceEnumerator) -->
   <ItemGroup>
-    <RuntimeHostConfigurationOption Include="System.Runtime.InteropServices.BuiltInComInterop.IsSupported"
-                                    Value="true"
-                                    Trim="true" />
+    <RuntimeHostConfigurationOption Include="System.Runtime.InteropServices.BuiltInComInterop.IsSupported" Value="true" Trim="true" />
   </ItemGroup>
 </Project>
