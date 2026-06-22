@@ -26,6 +26,10 @@ namespace Anfeta.UI.Models.Weblab
         }
 
         public string NodeId { get; set; } = "";
+        public string ExternalId { get; set; } = "";
+        public string ExternalUrl { get; set; } = "";
+        public string SearchText { get; set; } = "";
+        public string Description { get; set; } = "";
 
         private string _name = "";
         public string Name

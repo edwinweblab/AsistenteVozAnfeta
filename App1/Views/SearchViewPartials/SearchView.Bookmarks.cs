@@ -131,8 +131,18 @@ namespace Anfeta.UI.Views
             if (sender is not Button btn) return;
             if (btn.Tag is not SearchResultRow row) return;
 
-            var path = (row.Target ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(path)) return;
+            await ToggleBookmarkAsync(row);
+        }
+
+        private async Task ToggleBookmarkAsync(SearchResultRow row)
+        {
+            var path = GetBookmarkTarget(row);
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                StatusText.Text = "Estado: No hay ruta o URL para guardar en favoritos.";
+                return;
+            }
 
             try
             {
@@ -143,8 +153,12 @@ namespace Anfeta.UI.Views
                 {
                     _bookmarksService.RemoveByPath(_bookmarks, path);
                     await _bookmarksService.SaveAsync(_bookmarks, ct);
+
                     row.IsBookmarked = false;
-                    StatusText.Text = "Estado: Bookmark eliminado ⭐❌";
+
+                    StatusText.Text = row.Source == SearchSource.Notion
+                        ? "Estado: Página de Notion eliminada de Favoritos ⭐❌"
+                        : "Estado: Bookmark eliminado ⭐❌";
                 }
                 else
                 {
@@ -156,12 +170,17 @@ namespace Anfeta.UI.Views
                         Type = row.Type ?? "",
                         Size = row.Size,
                         Modified = row.ServerModified ?? "",
-                        Folder = "General",
+                        Folder = row.Source == SearchSource.Notion ? "Notion" : "General",
                         CreatedAt = DateTimeOffset.Now
                     });
+
                     await _bookmarksService.SaveAsync(_bookmarks, ct);
+
                     row.IsBookmarked = true;
-                    StatusText.Text = "Estado: Bookmark guardado ⭐✅";
+
+                    StatusText.Text = row.Source == SearchSource.Notion
+                        ? "Estado: Página de Notion guardada en Favoritos ⭐✅"
+                        : "Estado: Bookmark guardado ⭐✅";
                 }
 
                 RefreshBookmarksPanelUi();
@@ -173,6 +192,17 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text = $"Estado: Error bookmark → {ex.Message}";
             }
+        }
+
+        private static string GetBookmarkTarget(SearchResultRow row)
+        {
+            if (row.Source == SearchSource.Notion &&
+                !string.IsNullOrWhiteSpace(row.ExternalUrl))
+            {
+                return row.ExternalUrl.Trim();
+            }
+
+            return (row.Target ?? string.Empty).Trim();
         }
 
         private async void BtnBookmarkPanelStar_Click(object sender, RoutedEventArgs e)

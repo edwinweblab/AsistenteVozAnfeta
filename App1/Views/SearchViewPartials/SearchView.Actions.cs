@@ -35,6 +35,7 @@ namespace Anfeta.UI.Views
             try
             {
                 const int MAX_OPEN = 5;
+
                 if (rows.Count > 1)
                 {
                     var ok = await ConfirmOpenManyAsync(rows.Count, MAX_OPEN);
@@ -42,17 +43,25 @@ namespace Anfeta.UI.Views
                 }
 
                 var max = Math.Min(rows.Count, MAX_OPEN);
+
                 for (int i = 0; i < max; i++)
                 {
+                    var target = GetRowTarget(rows[i]);
+
+                    if (string.IsNullOrWhiteSpace(target))
+                        continue;
+
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                     {
-                        FileName = rows[i].Target,
+                        FileName = target,
                         UseShellExecute = true
                     });
                 }
 
+                var hasNotion = rows.Take(max).Any(IsNotionRow);
+
                 StatusText.Text = rows.Count == 1
-                    ? "Abierto ✅"
+                    ? hasNotion ? "Página de Notion abierta ✅" : "Abierto ✅"
                     : $"Abiertos {Math.Min(rows.Count, MAX_OPEN)} de {rows.Count} ✅";
             }
             catch (Exception ex)
@@ -118,10 +127,15 @@ namespace Anfeta.UI.Views
 
             try
             {
+                var target = GetRowTarget(row);
+
                 var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
-                pkg.SetText(row.Target);
+                pkg.SetText(target);
                 Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
-                StatusText.Text = "Copiado: ruta ✅";
+
+                StatusText.Text = IsNotionRow(row)
+                    ? "Copiado: URL de Notion ✅"
+                    : "Copiado: ruta ✅";
             }
             catch (Exception ex)
             {
@@ -133,6 +147,12 @@ namespace Anfeta.UI.Views
         {
             var rows = GetSelectedRowsOrCtx(sender);
             if (rows.Count == 0) return;
+
+            if (rows.Any(IsNotionRow))
+            {
+                StatusText.Text = "Estado: 'Abrir en Explorador Local' no aplica para páginas de Notion. Usa 'Abrir'.";
+                return;
+            }
 
             var first = rows[0];
 
@@ -150,6 +170,7 @@ namespace Anfeta.UI.Views
                         Arguments = args,
                         UseShellExecute = true
                     });
+
                     StatusText.Text = "Explorer abierto ✅";
                 }
                 else
@@ -164,6 +185,7 @@ namespace Anfeta.UI.Views
                         Arguments = $"\"{folder}\"",
                         UseShellExecute = true
                     });
+
                     StatusText.Text = "Explorer abierto (primer elemento) ✅";
                 }
             }
@@ -173,36 +195,59 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private void CtxOpenWeb_Click(object sender, RoutedEventArgs e) { }
+        private void CtxOpenWeb_Click(object sender, RoutedEventArgs e)
+        {
+            CtxOpenPath_Click(sender, e);
+        }
 
         private void CtxCopyPath_Click(object sender, RoutedEventArgs e)
         {
             var rows = GetSelectedRowsOrCtx(sender);
             if (rows.Count == 0) return;
 
-            var text = string.Join(Environment.NewLine, rows.Select(r => r.Target));
+            var text = string.Join(Environment.NewLine, rows.Select(GetRowTarget));
+
             var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
             pkg.SetText(text);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
 
-            StatusText.Text = rows.Count == 1 ? "Copiado: ruta ✅" : $"Copiadas {rows.Count} rutas ✅";
+            var hasNotion = rows.Any(IsNotionRow);
+
+            StatusText.Text = rows.Count == 1
+                ? hasNotion ? "Copiado: URL de Notion ✅" : "Copiado: ruta ✅"
+                : hasNotion ? $"Copiados {rows.Count} enlaces/rutas ✅" : $"Copiadas {rows.Count} rutas ✅";
         }
 
         private void CtxCopyLink_Click(object sender, RoutedEventArgs e)
         {
             var row = GetCtxRowOrSelected(sender);
-            if (row == null) { StatusText.Text = "DEBUG: row null (copiar link)"; return; }
+            if (row == null)
+            {
+                StatusText.Text = "DEBUG: row null (copiar link)";
+                return;
+            }
+
+            var target = GetRowTarget(row);
 
             var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
-            pkg.SetText(row.Target);
+            pkg.SetText(target);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
-            StatusText.Text = "Copiado ✅";
+
+            StatusText.Text = IsNotionRow(row)
+                ? "Copiado: link de Notion ✅"
+                : "Copiado ✅";
         }
 
         private async void CtxDelete_Click(object sender, RoutedEventArgs e)
         {
             var rows = GetSelectedRowsOrCtx(sender);
             if (rows.Count == 0) return;
+
+            if (rows.Any(IsNotionRow))
+            {
+                StatusText.Text = "Estado: Eliminar no aplica para páginas de Notion desde este buscador.";
+                return;
+            }
 
             var ok = await ConfirmDeleteAsync(rows);
             if (!ok) return;
@@ -224,7 +269,18 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private void CtxBookmark_Click(object sender, RoutedEventArgs e) { }
+        private async void CtxBookmark_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+
+            if (row == null)
+            {
+                StatusText.Text = "Estado: Selecciona un elemento para agregar a Favoritos.";
+                return;
+            }
+
+            await ToggleBookmarkAsync(row);
+        }
 
         #endregion
 
@@ -412,7 +468,11 @@ namespace Anfeta.UI.Views
                 if (row == null) return;
                 selected.Add(row);
             }
-
+            if (selected.Any(IsNotionRow))
+            {
+                StatusText.Text = "Estado: Renombrar no aplica para páginas de Notion desde este buscador.";
+                return;
+            }
             if (selected.Count == 1)
             {
                 var row = selected[0];
@@ -760,6 +820,64 @@ namespace Anfeta.UI.Views
         }
 
         #endregion
+
+        #region== Notion ==
+        private static string GetRowTarget(SearchResultRow row)
+        {
+            if (IsNotionRow(row) && !string.IsNullOrWhiteSpace(row.ExternalUrl))
+                return row.ExternalUrl;
+
+            return row.Target ?? string.Empty;
+        }
+
+        private void ResultsContextFlyout_Opening(object sender, object e)
+        {
+            var row = ResultsList.SelectedItem as SearchResultRow;
+            var isNotion = row != null && IsNotionRow(row);
+
+            CtxMenuOpenItem.Text = isNotion
+                ? "Abrir en Notion"
+                : "Abrir";
+
+            CtxMenuOpenExplorerItem.Text = isNotion
+                ? "No aplica: Explorador local"
+                : "Abrir en Explorador Local";
+
+            CtxMenuOpenExplorerItem.IsEnabled = !isNotion;
+
+            CtxMenuCopyPathItem.Text = isNotion
+                ? "Copiar URL de Notion"
+                : "Copiar ruta";
+
+            CtxMenuCopyLinkItem.Text = isNotion
+                ? "Copiar link de Notion"
+                : "Copiar link";
+
+            CtxMenuRenameItem.IsEnabled = !isNotion;
+            CtxMenuDeleteItem.IsEnabled = !isNotion;
+
+            if (row != null)
+            {
+                CtxMenuBookmarkItem.Text = row.IsBookmarked
+                    ? "Quitar de Favoritos"
+                    : "Agregar a Favoritos";
+            }
+            else
+            {
+                CtxMenuBookmarkItem.Text = "Agregar a Favoritos";
+            }
+        }
+
+        private void DetailsMoreFlyout_Opening(object sender, object e)
+        {
+            var row = ResultsList.SelectedItem as SearchResultRow;
+            var isNotion = row != null && IsNotionRow(row);
+
+            DetailsRenameItem.IsEnabled = !isNotion;
+            DetailsDeleteItem.IsEnabled = !isNotion;
+        }
+        #endregion
+
 
         #region ===== Exclusiones =====
 

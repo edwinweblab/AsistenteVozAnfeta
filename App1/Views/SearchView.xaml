@@ -60,7 +60,7 @@
                 x:Name="SearchBox"
                 Grid.Column="0"
                 VerticalAlignment="Center"
-                PlaceholderText="Buscar en Dropbox... (AND / OR / NOT, ext:pdf)"
+                PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
                 QueryIcon="Find"
                 QuerySubmitted="SearchBox_QuerySubmitted"
                 TextChanged="SearchBox_TextChanged" />
@@ -853,17 +853,50 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                         <ListView.ContextFlyout>
-                            <MenuFlyout>
-                                <MenuFlyoutItem Click="CtxOpen_Click" Text="Abrir" />
-                                <MenuFlyoutItem Click="CtxOpenWeb_Click" Text="Abrir en Explorador Local" />
+                            <MenuFlyout
+        x:Name="ResultsContextFlyout"
+        Opening="ResultsContextFlyout_Opening">
+
+                                <MenuFlyoutItem
+            x:Name="CtxMenuOpenItem"
+            Click="CtxOpen_Click"
+            Text="Abrir" />
+
+                                <MenuFlyoutItem
+            x:Name="CtxMenuOpenExplorerItem"
+            Click="CtxOpenPath_Click"
+            Text="Abrir en Explorador Local" />
+
                                 <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Click="CtxCopyPath_Click" Text="Copiar ruta" />
-                                <MenuFlyoutItem Click="CtxCopyLink_Click" Text="Copiar link" />
+
+                                <MenuFlyoutItem
+            x:Name="CtxMenuCopyPathItem"
+            Click="CtxCopyPath_Click"
+            Text="Copiar ruta" />
+
+                                <MenuFlyoutItem
+            x:Name="CtxMenuCopyLinkItem"
+            Click="CtxCopyLink_Click"
+            Text="Copiar link" />
+
                                 <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar…" />
-                                <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
+
+                                <MenuFlyoutItem
+            x:Name="CtxMenuRenameItem"
+            Click="CtxRename_Click"
+            Text="Renombrar…" />
+
+                                <MenuFlyoutItem
+            x:Name="CtxMenuDeleteItem"
+            Click="CtxDelete_Click"
+            Text="Eliminar" />
+
                                 <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Click="CtxBookmark_Click" Text="Agregar a Favoritos" />
+
+                                <MenuFlyoutItem
+            x:Name="CtxMenuBookmarkItem"
+            Click="CtxBookmark_Click"
+            Text="Agregar a Favoritos" />
                             </MenuFlyout>
                         </ListView.ContextFlyout>
                     </ListView>
@@ -1123,14 +1156,15 @@
                             CornerRadius="6"
                             FontSize="11" />
                         <Button
-                            Grid.Column="1"
-                            Height="26"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Center"
-                            Click="BtnDetailsLink_Click"
-                            Content="Ubicación"
-                            CornerRadius="6"
-                            FontSize="11" />
+    x:Name="BtnDetailsLocation"
+    Grid.Column="1"
+    Height="26"
+    HorizontalAlignment="Stretch"
+    VerticalAlignment="Center"
+    Click="BtnDetailsLink_Click"
+    Content="Ubicación"
+    CornerRadius="6"
+    FontSize="11" />
                         <Button
                             Grid.Column="2"
                             Width="28"
@@ -1141,11 +1175,25 @@
                             CornerRadius="6"
                             FontSize="13">
                             <Button.Flyout>
-                                <MenuFlyout>
-                                    <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
+                                <MenuFlyout
+        x:Name="DetailsMoreFlyout"
+        Opening="DetailsMoreFlyout_Opening">
+
+                                    <MenuFlyoutItem
+            Click="BtnDetailsInfo_Click"
+            Text="Info" />
+
                                     <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Click="CtxRename_Click" Text="Renombrar..." />
-                                    <MenuFlyoutItem Click="CtxDelete_Click" Text="Eliminar" />
+
+                                    <MenuFlyoutItem
+            x:Name="DetailsRenameItem"
+            Click="CtxRename_Click"
+            Text="Renombrar..." />
+
+                                    <MenuFlyoutItem
+            x:Name="DetailsDeleteItem"
+            Click="CtxDelete_Click"
+            Text="Eliminar" />
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>
@@ -1215,7 +1263,7 @@
 
         <!--
             ═══════════════════════════════════════════════════════
-            POPUP AYUDA 
+            POPUP AYUDA
             ═══════════════════════════════════════════════════════
         -->
         <Popup x:Name="HelpPopup" IsLightDismissEnabled="True">

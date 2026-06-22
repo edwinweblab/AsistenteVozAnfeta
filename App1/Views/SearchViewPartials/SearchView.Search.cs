@@ -51,7 +51,9 @@ namespace Anfeta.UI.Views
         {
             if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput && !_allowProgrammaticSearch)
                 return;
-            if (_suppressSuggest) return;
+
+            if (_suppressSuggest)
+                return;
 
             if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
             {
@@ -67,17 +69,25 @@ namespace Anfeta.UI.Views
 
             EnsureSearchDebounce();
 
-            var q = (sender.Text ?? "").Trim();
+            var q = (sender.Text ?? string.Empty).Trim();
 
+            // ─────────────────────────────────────────────
+            // Si el usuario limpió el buscador
+            // ─────────────────────────────────────────────
             if (string.IsNullOrWhiteSpace(q))
             {
                 CancelPendingSearch();
+
+                // Muy importante: guardar que el query quedó vacío.
+                SetTabTitle("");
+                NotifyWorkspaceChanged();
 
                 if (DropboxIndexCoordinator.IsIndexing)
                 {
                     StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
                     return;
                 }
+
                 if (!App.LocalIndex.HasData)
                 {
                     ResetSearchModuleState();
@@ -85,20 +95,32 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                _mode = ViewMode.Explorer;
-                ModeText.Text = "Modo: Explorar (Local)";
-
                 var folderToShow =
                     (!string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
                         ? _currentFolder
                         : DROPBOX_ROOT;
 
                 if (!string.IsNullOrWhiteSpace(folderToShow) && Directory.Exists(folderToShow))
+                {
+                    _mode = ViewMode.Explorer;
+                    ModeText.Text = "Modo: Explorar (Local)";
                     _ = BrowseFolderAsync(folderToShow, pushHistory: false);
+                    return;
+                }
+
+                // Si no hay carpeta local, pero sí hay índice, muestra Notion completo.
+                _mode = ViewMode.Explorer;
+                ModeText.Text = "Modo: Buscar (Notion)";
+                BreadcrumbText.Text = "Todos los resultados";
+
+                _ = RunLocalSearchAsync("");
 
                 return;
             }
 
+            // ─────────────────────────────────────────────
+            // Si el usuario escribió una búsqueda
+            // ─────────────────────────────────────────────
             if (DropboxIndexCoordinator.IsIndexing)
             {
                 StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
@@ -106,6 +128,7 @@ namespace Anfeta.UI.Views
             }
 
             SetTabTitle(SearchBox.Text);
+            NotifyWorkspaceChanged();
 
             if (!App.LocalIndex.HasData)
             {
@@ -114,7 +137,6 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            NotifyWorkspaceChanged();
             _searchDebounceTimer!.Stop();
             _searchDebounceTimer.Start();
         }
@@ -170,7 +192,7 @@ namespace Anfeta.UI.Views
                 BreadcrumbText.Text = string.IsNullOrWhiteSpace(uiQuery)
                     ? DROPBOX_ROOT
                     : $"Buscar: {uiQuery}";
-                ModeText.Text = "Modo: Buscar (Local)";
+                ModeText.Text = "Modo: Buscar (Local + Notion)";
 
                 await RunLocalSearchAsync(effectiveQuery ?? uiQuery);
                 StatusText.Text = "Estado: Búsqueda local ✅";

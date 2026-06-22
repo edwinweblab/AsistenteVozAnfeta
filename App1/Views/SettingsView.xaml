@@ -142,7 +142,132 @@
                         </Grid>
                     </Border>
                 </StackPanel>
+                <!--  ═══ SECCIÓN NOTION ═══  -->
+                <StackPanel Spacing="14">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border
+            Width="3"
+            Height="18"
+            Background="{StaticResource AnfetaAccentBrush}"
+            CornerRadius="2" />
+                        <FontIcon
+            FontSize="14"
+            Foreground="{StaticResource AnfetaAccentBrush}"
+            Glyph="&#xE8A5;" />
+                        <TextBlock
+            VerticalAlignment="Center"
+            CharacterSpacing="100"
+            FontSize="11"
+            FontWeight="SemiBold"
+            Foreground="#FFFFFF"
+            Text="NOTION" />
+                    </StackPanel>
 
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border
+                Grid.Column="0"
+                Background="{StaticResource AnfetaAccentBrush}"
+                CornerRadius="12,0,0,12"
+                Opacity="0.6" />
+
+                            <StackPanel
+                Grid.Column="1"
+                Padding="18,16"
+                Spacing="14">
+
+                                <StackPanel Spacing="3">
+                                    <TextBlock
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Foreground="#FFFFFF"
+                        Text="Base de datos de Notion" />
+                                    <TextBlock
+                        FontSize="11"
+                        Foreground="#D4C9C0"
+                        Text="ANFETA leerá páginas de Notion y las agregará al buscador."
+                        TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock
+                        FontSize="11"
+                        Foreground="#D4C9C0"
+                        Text="Token de integración" />
+                                    <PasswordBox
+                        x:Name="NotionTokenBox"
+                        Height="40"
+                        PlaceholderText="ntn_..." />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock
+                        FontSize="11"
+                        Foreground="#D4C9C0"
+                        Text="Data Source ID" />
+                                    <TextBox
+                        x:Name="NotionDataSourceIdBox"
+                        Height="40"
+                        PlaceholderText="2eeabd7d-91b7-8193-a131-000b08cd54e2" />
+                                </StackPanel>
+
+                                <TextBlock
+                    x:Name="NotionStatusText"
+                    FontSize="11"
+                    Foreground="#D4C9C0"
+                    Text="Notion no configurado."
+                    TextWrapping="Wrap" />
+
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button
+                        x:Name="BtnSaveNotion"
+                        Click="BtnSaveNotion_Click"
+                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xE74E;" />
+                                            <TextBlock Text="Guardar" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button
+                        x:Name="BtnTestNotion"
+                        Click="BtnTestNotion_Click"
+                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xE9D9;" />
+                                            <TextBlock Text="Probar conexión" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button
+                        x:Name="BtnSyncNotion"
+                        Click="BtnSyncNotion_Click"
+                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xE895;" />
+                                            <TextBlock Text="Sincronizar Notion" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button
+                        x:Name="BtnResetNotion"
+                        Click="BtnResetNotion_Click"
+                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xE74D;" />
+                                            <TextBlock Text="Limpiar" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
                 <!--  ═══ SECCIÓN AUDIO ═══  -->
                 <StackPanel Spacing="14">
                     <StackPanel Orientation="Horizontal" Spacing="10">
