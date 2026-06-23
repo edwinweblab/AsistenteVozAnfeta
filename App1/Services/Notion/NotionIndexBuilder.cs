@@ -17,10 +17,11 @@ namespace Anfeta.UI.Services.Notion
         private const string NotionVersion = "2026-03-11";
 
         public static async Task<List<SearchResultRow>> BuildAsync(
-            string token,
-            string dataSourceId,
-            CancellationToken ct = default,
-            int? maxItems = null)
+        string token,
+        string dataSourceId,
+        CancellationToken ct = default,
+        int? maxItems = null,
+        DateTimeOffset? lastEditedAfterUtc = null) 
         {
             if (string.IsNullOrWhiteSpace(token))
                 throw new ArgumentException("Token de Notion vacío.");
@@ -64,6 +65,32 @@ namespace Anfeta.UI.Services.Notion
                 {
                     ["page_size"] = pageSize
                 };
+
+                if (lastEditedAfterUtc.HasValue)
+                {
+                    var afterUtc = lastEditedAfterUtc.Value
+                        .ToUniversalTime()
+                        .AddSeconds(-2) // margen pequeño para no perder cambios cercanos
+                        .ToString("O");
+
+                    payload["filter"] = new Dictionary<string, object?>
+                    {
+                        ["timestamp"] = "last_edited_time",
+                        ["last_edited_time"] = new Dictionary<string, object?>
+                        {
+                            ["after"] = afterUtc
+                        }
+                    };
+
+                    payload["sorts"] = new[]
+                    {
+        new Dictionary<string, object?>
+        {
+            ["timestamp"] = "last_edited_time",
+            ["direction"] = "ascending"
+        }
+    };
+                }
 
                 if (!string.IsNullOrWhiteSpace(nextCursor))
                     payload["start_cursor"] = nextCursor;
@@ -116,7 +143,36 @@ namespace Anfeta.UI.Services.Notion
 
             return results;
         }
+        public static Task<List<SearchResultRow>> BuildChangedSinceAsync(
+    string token,
+    string dataSourceId,
+    DateTimeOffset lastSyncUtc,
+    CancellationToken ct = default,
+    int? maxItems = null)
+        {
+            return BuildAsync(
+                token,
+                dataSourceId,
+                ct,
+                maxItems,
+                lastEditedAfterUtc: lastSyncUtc);
+        }
 
+        public static async Task<bool> HasChangesSinceAsync(
+            string token,
+            string dataSourceId,
+            DateTimeOffset lastSyncUtc,
+            CancellationToken ct = default)
+        {
+            var changes = await BuildChangedSinceAsync(
+                token,
+                dataSourceId,
+                lastSyncUtc,
+                ct,
+                maxItems: 1);
+
+            return changes.Count > 0;
+        }
         private static SearchResultRow MapPageToSearchRow(JsonElement page)
         {
             var pageId = GetString(page, "id");

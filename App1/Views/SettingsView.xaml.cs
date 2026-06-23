@@ -667,23 +667,38 @@ namespace Anfeta.UI.Views
             if (await dlg.ShowAsync() != ContentDialogResult.Primary)
                 return;
 
-            ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionToken);
-            ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionDataSourceId);
-            ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionLastSyncUtc);
+            try
+            {
+                ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionToken);
+                ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionDataSourceId);
+                ApplicationData.Current.LocalSettings.Values.Remove(LS_NotionLastSyncUtc);
 
-            var withoutNotion = App.LocalIndex
-                .GetAll()
-                .Where(x => x.Source != SearchSource.Notion)
-                .ToList();
+                var withoutNotion = App.LocalIndex
+                    .GetAll()
+                    .Where(x => x.Source != SearchSource.Notion)
+                    .ToList();
 
-            App.LocalIndex.Set(withoutNotion);
-            await SaveCurrentIndexIfPossibleAsync(withoutNotion, CancellationToken.None);
+                if (withoutNotion.Count > 0)
+                {
+                    App.LocalIndex.Set(withoutNotion);
+                    await SaveCurrentIndexIfPossibleAsync(withoutNotion, CancellationToken.None);
+                }
+                else
+                {
+                    App.LocalIndex.Clear();
+                    await LocalIndexPersistence.ClearAsync();
+                }
 
-            NotionTokenBox.Password = string.Empty;
-            NotionDataSourceIdBox.Text = string.Empty;
-            NotionStatusText.Text = "Notion no configurado.";
+                NotionTokenBox.Password = string.Empty;
+                NotionDataSourceIdBox.Text = string.Empty;
+                NotionStatusText.Text = "Notion no configurado.";
 
-            ShowStatus("Configuración de Notion limpiada.", InfoBarSeverity.Informational);
+                ShowStatus("Configuración de Notion limpiada.", InfoBarSeverity.Informational);
+            }
+            catch (Exception ex)
+            {
+                ShowStatus($"Error limpiando Notion -> {ex.Message}", InfoBarSeverity.Error);
+            }
         }
 
         private void SetNotionButtonsEnabled(bool enabled)
@@ -696,6 +711,12 @@ namespace Anfeta.UI.Views
 
         private async Task SaveCurrentIndexIfPossibleAsync(List<SearchResultRow> items, CancellationToken ct)
         {
+            if (items == null || items.Count == 0)
+            {
+                await LocalIndexPersistence.ClearAsync();
+                return;
+            }
+
             var root = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
 
             if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))

@@ -2,13 +2,15 @@
 using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Speech;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
-using System.Linq;
+using System.Collections.Generic;
 using static Anfeta.UI.Helpers.AppSettingsKeys; 
 
 namespace Anfeta.UI.Views
@@ -18,6 +20,16 @@ namespace Anfeta.UI.Views
         private const string LS_NotionToken = "Notion.Token";
         private const string LS_NotionDataSourceId = "Notion.DataSourceId";
         private const string LS_NotionLastSyncUtc = "Notion.LastSyncUtc";
+        private DispatcherQueueTimer? _notionChangeTimer;
+        private bool _notionSyncRunning;
+
+        private static string FormatUtcLocal(string utcText)
+        {
+            if (DateTimeOffset.TryParse(utcText, out var dto))
+                return dto.LocalDateTime.ToString("yyyy-MM-dd HH:mm");
+
+            return utcText;
+        }
         #region ===== Index Coordinator (Auto-index) =====
 
         private void OnIndexStateChanged()
@@ -72,11 +84,16 @@ namespace Anfeta.UI.Views
         private async Task EnsureIndexBootstrappedAsync()
         {
             await _bootstrapLock.WaitAsync();
-
             try
             {
+                // Si la vista ya había iniciado y el índice ya tiene datos,
+                // NO salir sin pintar: hay que refrescar la lista visual.
                 if (_bootstrappedOnce && App.LocalIndex.HasData)
+                {
+                    await PaintLoadedIndexAsync();
+                    StartNotionChangeWatcher();
                     return;
+                }
 
                 var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
                 var savedRoot = (saved ?? string.Empty).Trim();
@@ -86,6 +103,8 @@ namespace Anfeta.UI.Views
                     !string.IsNullOrWhiteSpace(savedRoot) &&
                     string.Equals(DROPBOX_ROOT, savedRoot, StringComparison.OrdinalIgnoreCase))
                 {
+                    await PaintLoadedIndexAsync();
+                    StartNotionChangeWatcher();
                     return;
                 }
 
@@ -105,6 +124,7 @@ namespace Anfeta.UI.Views
                     if (notionLoaded && App.LocalIndex.HasData)
                     {
                         await PaintLoadedIndexAsync();
+                        StartNotionChangeWatcher();
 
                         _bootstrappedOnce = true;
                         return;
@@ -132,8 +152,9 @@ namespace Anfeta.UI.Views
 
                     if (notionLoaded && App.LocalIndex.HasData)
                     {
-                        StatusText.Text = $"Estado: Notion cargado ✅ ({App.LocalIndex.Count} páginas)";
-                        ModeText.Text = "Modo: Buscar (Notion)";
+                        await PaintLoadedIndexAsync();
+                        StartNotionChangeWatcher();
+
                         _bootstrappedOnce = true;
                         return;
                     }
@@ -232,11 +253,10 @@ namespace Anfeta.UI.Views
                     .GetAll()
                     .Any(x => x.Source == SearchSource.Notion);
 
-                ModeText.Text = hasNotion
-                    ? "Modo: Buscar (Local + Notion)"
-                    : "Modo: Buscar (Local)";
+                
 
                 await PaintLoadedIndexAsync();
+                StartNotionChangeWatcher();
 
                 _bootstrappedOnce = true;
             }
@@ -288,7 +308,95 @@ namespace Anfeta.UI.Views
         }
 
         #endregion
-        #region
+        #region 
+        private async void BtnRefreshNotion_Click(object sender, RoutedEventArgs e)
+        {
+            await RefreshNotionIncrementalAsync();
+        }
+
+        private async Task RefreshNotionIncrementalAsync()
+        {
+            if (_notionSyncRunning)
+                return;
+
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            var dataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
+            var lastSyncStr = ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] as string;
+
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                StatusText.Text = "Estado: Notion no configurado.";
+                return;
+            }
+
+            _notionSyncRunning = true;
+            BtnRefreshNotion.IsEnabled = false;
+
+            try
+            {
+                StatusText.Text = "Estado: Revisando cambios de Notion...";
+
+                var syncAnchorUtc = DateTimeOffset.UtcNow;
+
+                List<SearchResultRow> changedItems;
+
+                if (!string.IsNullOrWhiteSpace(lastSyncStr) &&
+                    DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
+                {
+                    changedItems = await NotionIndexBuilder.BuildChangedSinceAsync(
+                        token,
+                        dataSourceId,
+                        lastSyncUtc.ToUniversalTime(),
+                        CancellationToken.None);
+                }
+                else
+                {
+                    changedItems = await NotionIndexBuilder.BuildAsync(
+                        token,
+                        dataSourceId,
+                        CancellationToken.None);
+                }
+
+                if (changedItems.Count > 0)
+                {
+                    var current = App.LocalIndex.GetAll().ToList();
+
+                    var changedIds = changedItems
+                        .Select(x => !string.IsNullOrWhiteSpace(x.ExternalId) ? x.ExternalId : x.NodeId)
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    current.RemoveAll(x =>
+                        x.Source == SearchSource.Notion &&
+                        changedIds.Contains(!string.IsNullOrWhiteSpace(x.ExternalId) ? x.ExternalId : x.NodeId));
+
+                    current.AddRange(changedItems);
+
+                    App.LocalIndex.Set(current);
+
+                    await PaintLoadedIndexAsync();
+                }
+
+                ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] =
+                    syncAnchorUtc.ToString("O");
+
+                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+                NotionSyncInfoText.Text = $"Notion actualizado · Última sync: {FormatUtcLocal(syncAnchorUtc.ToString("O"))}";
+
+                StatusText.Text = changedItems.Count > 0
+                    ? $"Estado: Notion actualizado ✅ Cambios aplicados: {changedItems.Count}"
+                    : "Estado: Notion sin cambios ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error actualizando Notion → {ex.Message}";
+            }
+            finally
+            {
+                _notionSyncRunning = false;
+                BtnRefreshNotion.IsEnabled = true;
+            }
+        }
         private async Task<bool> TryLoadNotionIndexOnStartupAsync(CancellationToken ct = default)
         {
             var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
@@ -335,8 +443,10 @@ namespace Anfeta.UI.Views
 
             var query = (SearchBox?.Text ?? string.Empty).Trim();
 
-            // Si hay texto escrito, se busca ese texto.
-            // Si está vacío, muestra el índice cargado normal.
+            BreadcrumbText.Text = string.IsNullOrWhiteSpace(query)
+                ? "Todos los resultados"
+                : $"Buscar: {query}";
+
             await RunLocalSearchAsync(query);
 
             var all = App.LocalIndex.GetAll().ToList();
@@ -344,35 +454,224 @@ namespace Anfeta.UI.Views
             var notionCount = all.Count(x => x.Source == SearchSource.Notion);
             var localCount = all.Count - notionCount;
 
-            BreadcrumbText.Text = string.IsNullOrWhiteSpace(query)
-                ? "Todos los resultados"
-                : $"Buscar: {query}";
-
-            var hasNotion = notionCount > 0;
-            var hasLocal = localCount > 0;
-
-            if (hasNotion && hasLocal)
+            if (notionCount > 0 && localCount > 0)
             {
                 ModeText.Text = "Modo: Buscar (Local + Notion)";
                 StatusText.Text = string.IsNullOrWhiteSpace(query)
                     ? $"Estado: Índice cargado ✅ Local: {localCount} · Notion: {notionCount}"
-                    : $"Estado: Búsqueda local ✅";
+                    : "Estado: Búsqueda local ✅";
             }
-            else if (hasNotion)
+            else if (notionCount > 0)
             {
                 ModeText.Text = "Modo: Buscar (Notion)";
-                StatusText.Text = string.IsNullOrWhiteSpace(query)
-                    ? $"Estado: Notion cargado ✅ ({notionCount} páginas)"
-                    : $"Estado: Notion cargado ✅ ({notionCount} páginas)";
+                StatusText.Text = $"Estado: Notion cargado ✅ ({notionCount} páginas)";
             }
             else
             {
                 ModeText.Text = "Modo: Buscar (Local)";
-                StatusText.Text = string.IsNullOrWhiteSpace(query)
-                    ? $"Estado: Índice local cargado ✅ ({localCount} items)"
-                    : $"Estado: Búsqueda local ✅";
+                StatusText.Text = $"Estado: Índice local cargado ✅ ({localCount} items)";
             }
         }
-        #endregion
+        #endregion 
+        private void StartNotionChangeWatcher()
+        {
+            if (_notionChangeTimer != null)
+                return;
+
+            _notionChangeTimer = DispatcherQueue.CreateTimer();
+            _notionChangeTimer.Interval = TimeSpan.FromMinutes(2);
+
+            _notionChangeTimer.Tick += async (_, _) =>
+            {
+                await CheckNotionChangesAsync();
+            };
+
+            _notionChangeTimer.Start();
+
+            _ = CheckNotionChangesAsync();
+        }
+
+        private async Task CheckNotionChangesAsync()
+        {
+            if (_notionSyncRunning)
+                return;
+
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            var dataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
+            var lastSyncStr = ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] as string;
+
+            if (string.IsNullOrWhiteSpace(token) ||
+                string.IsNullOrWhiteSpace(dataSourceId) ||
+                string.IsNullOrWhiteSpace(lastSyncStr) ||
+                !DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
+            {
+                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+                NotionSyncInfoText.Text = "";
+                return;
+            }
+
+            try
+            {
+                var hasChanges = await NotionIndexBuilder.HasChangesSinceAsync(
+                    token,
+                    dataSourceId,
+                    lastSyncUtc.ToUniversalTime(),
+                    CancellationToken.None);
+
+                BtnRefreshNotion.Visibility = hasChanges
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+                BtnRefreshNotionText.Text = hasChanges
+                    ? "Actualizar"
+                    : "Notion";
+
+                NotionSyncInfoText.Text = hasChanges
+                    ? "Cambios disponibles"
+                    : $"Sync {FormatUtcLocal(lastSyncStr)}";
+            }
+            catch
+            {
+                // No bloqueamos el buscador si falla una revisión silenciosa.
+            }
+        }
+        private async void BtnCheckNotionDeleted_Click(object sender, RoutedEventArgs e)
+        {
+            await CheckNotionDeletedPagesAsync();
+        }
+
+        private async Task CheckNotionDeletedPagesAsync()
+        {
+            if (_notionSyncRunning)
+                return;
+
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            var dataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
+
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                StatusText.Text = "Estado: Notion no configurado.";
+                return;
+            }
+
+            _notionSyncRunning = true;
+
+            try
+            {
+                StatusText.Text = "Estado: Revisando páginas eliminadas en Notion...";
+
+                var freshNotionItems = await NotionIndexBuilder.BuildAsync(
+                    token,
+                    dataSourceId,
+                    CancellationToken.None);
+
+                var freshIds = freshNotionItems
+                    .Select(GetNotionRowId)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var current = App.LocalIndex.GetAll().ToList();
+
+                var deletedIds = current
+                    .Where(x => x.Source == SearchSource.Notion)
+                    .Select(GetNotionRowId)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Where(x => !freshIds.Contains(x))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (deletedIds.Count == 0)
+                {
+                    StatusText.Text = "Estado: No se detectaron páginas eliminadas ✅";
+                    return;
+                }
+
+                current.RemoveAll(x =>
+                    x.Source == SearchSource.Notion &&
+                    deletedIds.Contains(GetNotionRowId(x)));
+
+                App.LocalIndex.Set(current);
+
+                await PaintLoadedIndexAsync();
+
+                StatusText.Text = $"Estado: Se quitaron {deletedIds.Count} páginas eliminadas de Notion ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error revisando eliminadas → {ex.Message}";
+            }
+            finally
+            {
+                _notionSyncRunning = false;
+            }
+        }
+
+        private static string GetNotionRowId(SearchResultRow row)
+        {
+            if (!string.IsNullOrWhiteSpace(row.ExternalId))
+                return row.ExternalId.Trim();
+
+            if (!string.IsNullOrWhiteSpace(row.NodeId))
+                return row.NodeId.Trim();
+
+            return "";
+        }
+        private async void BtnFullResyncNotion_Click(object sender, RoutedEventArgs e)
+        {
+            await FullResyncNotionAsync();
+        }
+
+        private async Task FullResyncNotionAsync()
+        {
+            if (_notionSyncRunning)
+                return;
+
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            var dataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
+
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                StatusText.Text = "Estado: Notion no configurado.";
+                return;
+            }
+
+            _notionSyncRunning = true;
+
+            try
+            {
+                StatusText.Text = "Estado: Resync completo de Notion...";
+
+                var freshNotionItems = await NotionIndexBuilder.BuildAsync(
+                    token,
+                    dataSourceId,
+                    CancellationToken.None);
+
+                var currentWithoutNotion = App.LocalIndex
+                    .GetAll()
+                    .Where(x => x.Source != SearchSource.Notion)
+                    .ToList();
+
+                currentWithoutNotion.AddRange(freshNotionItems);
+
+                App.LocalIndex.Set(currentWithoutNotion);
+
+                var now = DateTimeOffset.UtcNow.ToString("O");
+                ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] = now;
+
+                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+                NotionSyncInfoText.Text = $"Sync {FormatUtcLocal(now)}";
+
+                await PaintLoadedIndexAsync();
+
+                StatusText.Text = $"Estado: Resync Notion completo ✅ ({freshNotionItems.Count} páginas)";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error en resync Notion → {ex.Message}";
+            }
+            finally
+            {
+                _notionSyncRunning = false;
+            }
+        }
     }
 }

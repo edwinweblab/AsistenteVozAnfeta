@@ -47,7 +47,7 @@ namespace Anfeta.UI.Views
             _searchCts?.Cancel();
         }
 
-        private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+        private async void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
         {
             if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput && !_allowProgrammaticSearch)
                 return;
@@ -78,7 +78,7 @@ namespace Anfeta.UI.Views
             {
                 CancelPendingSearch();
 
-                // Muy importante: guardar que el query quedó vacío.
+                // Guardar que el query quedó vacío.
                 SetTabTitle("");
                 NotifyWorkspaceChanged();
 
@@ -95,25 +95,11 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                var folderToShow =
-                    (!string.IsNullOrWhiteSpace(_currentFolder) && Directory.Exists(_currentFolder))
-                        ? _currentFolder
-                        : DROPBOX_ROOT;
-
-                if (!string.IsNullOrWhiteSpace(folderToShow) && Directory.Exists(folderToShow))
-                {
-                    _mode = ViewMode.Explorer;
-                    ModeText.Text = "Modo: Explorar (Local)";
-                    _ = BrowseFolderAsync(folderToShow, pushHistory: false);
-                    return;
-                }
-
-                // Si no hay carpeta local, pero sí hay índice, muestra Notion completo.
-                _mode = ViewMode.Explorer;
-                ModeText.Text = "Modo: Buscar (Notion)";
+                // Si hay índice cargado, mostrar todos los resultados.
+                // Aquí entran Notion, local o local + Notion.
                 BreadcrumbText.Text = "Todos los resultados";
 
-                _ = RunLocalSearchAsync("");
+                await PaintLoadedIndexAsync();
 
                 return;
             }

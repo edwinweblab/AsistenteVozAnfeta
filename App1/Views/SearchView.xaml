@@ -20,68 +20,74 @@
             <!--  Row 3 StatusBar  -->
         </Grid.RowDefinitions>
 
-
         <!--
-            ═══════════════════════════════════════════════════════
-            ROW 0 · TOP BAR
-            ═══════════════════════════════════════════════════════
-        -->
+    ═══════════════════════════════════════════════════════
+    ROW 0 · TOP BAR
+    ═══════════════════════════════════════════════════════
+-->
         <Grid
-            Grid.Row="0"
-            Padding="8,0"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-            BorderThickness="0,0,0,1"
-            ColumnSpacing="6">
+    Grid.Row="0"
+    Padding="8,0"
+    Background="{ThemeResource LayerFillColorDefaultBrush}"
+    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+    BorderThickness="0,0,0,1"
+    ColumnSpacing="6">
 
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <!--  SearchBox  -->
+                <!-- SearchBox -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Micrófono  -->
+                <!-- Micrófono -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Ayuda ?  -->
+                <!-- Ayuda -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Separador  -->
+                <!-- Separador -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Toggle Filtros  -->
+                <!-- Filtros -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Toggle Detalles  -->
+                <!-- Detalles -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Separador  -->
+                <!-- Actualizar Notion -->
+                <ColumnDefinition Width="Auto" />
+                <!-- Última sync -->
+                <ColumnDefinition Width="Auto" />
+                <!-- Separador -->
                 <ColumnDefinition Width="160" />
-                <!--  SortCombo  -->
+                <!-- SortCombo -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Menú ⋯  -->
+                <!-- Menú -->
             </Grid.ColumnDefinitions>
 
-            <!--  Búsqueda  -->
+            <!-- Búsqueda -->
             <AutoSuggestBox
-                x:Name="SearchBox"
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
-                QueryIcon="Find"
-                QuerySubmitted="SearchBox_QuerySubmitted"
-                TextChanged="SearchBox_TextChanged" />
+        x:Name="SearchBox"
+        Grid.Column="0"
+        VerticalAlignment="Center"
+        PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
+        QueryIcon="Find"
+        QuerySubmitted="SearchBox_QuerySubmitted"
+        TextChanged="SearchBox_TextChanged" />
 
-            <!--  Micrófono  -->
+            <!-- Micrófono -->
             <Grid
-                Grid.Column="1"
-                Width="70"
-                Height="32"
-                VerticalAlignment="Center">
+        Grid.Column="1"
+        Width="70"
+        Height="32"
+        VerticalAlignment="Center">
+
                 <muxc:SplitButton
-                    x:Name="VoiceSplit"
-                    Height="32"
-                    Padding="6,0"
-                    HorizontalContentAlignment="Center"
-                    Click="VoiceSplit_Click"
-                    CornerRadius="7"
-                    ToolTipService.ToolTip="Voz">
+            x:Name="VoiceSplit"
+            Height="32"
+            Padding="6,0"
+            HorizontalContentAlignment="Center"
+            Click="VoiceSplit_Click"
+            CornerRadius="7"
+            ToolTipService.ToolTip="Voz">
+
                     <muxc:SplitButton.Content>
                         <SymbolIcon Symbol="Microphone" />
                     </muxc:SplitButton.Content>
+
                     <muxc:SplitButton.Flyout>
                         <MenuFlyout>
                             <MenuFlyoutItem Click="VoiceMenu_Listen_Click" Text="Escuchar ahora" />
@@ -89,77 +95,110 @@
                         </MenuFlyout>
                     </muxc:SplitButton.Flyout>
                 </muxc:SplitButton>
+
                 <ProgressRing
-                    x:Name="VoiceRing"
-                    Width="14"
-                    Height="14"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    IsActive="False"
-                    Visibility="Collapsed" />
+            x:Name="VoiceRing"
+            Width="14"
+            Height="14"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            IsActive="False"
+            Visibility="Collapsed" />
             </Grid>
 
-            <!--  Ayuda  -->
+            <!-- Ayuda -->
             <Button
-                x:Name="BtnHelp"
-                Grid.Column="2"
-                Width="32"
-                Height="32"
-                VerticalAlignment="Center"
-                Click="MenuHelp_Click"
-                Content="?"
-                CornerRadius="6"
-                FontWeight="SemiBold"
-                ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
+        x:Name="BtnHelp"
+        Grid.Column="2"
+        Width="32"
+        Height="32"
+        VerticalAlignment="Center"
+        Click="MenuHelp_Click"
+        Content="?"
+        CornerRadius="6"
+        FontWeight="SemiBold"
+        ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
 
-            <!--  Sep  -->
+            <!-- Separador -->
             <Border
-                Grid.Column="3"
-                Width="1"
-                Height="18"
-                VerticalAlignment="Center"
-                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+        Grid.Column="3"
+        Width="1"
+        Height="18"
+        VerticalAlignment="Center"
+        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-            <!--  Toggle Filtros (panel izq)  -->
+            <!-- Toggle Filtros -->
             <ToggleButton
-                x:Name="ToggleFoldersPane"
-                Grid.Column="4"
-                Height="32"
-                VerticalAlignment="Center"
-                Click="ToggleFoldersPane_Click"
-                Content="Filtros"
-                CornerRadius="6"
-                IsChecked="True"
-                ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
+        x:Name="ToggleFoldersPane"
+        Grid.Column="4"
+        Height="32"
+        VerticalAlignment="Center"
+        Click="ToggleFoldersPane_Click"
+        Content="Filtros"
+        CornerRadius="6"
+        IsChecked="True"
+        ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
 
-            <!--  Toggle Detalles (panel der)  -->
+            <!-- Toggle Detalles -->
             <ToggleButton
-                x:Name="ToggleDetailsPane"
-                Grid.Column="5"
-                Height="32"
-                VerticalAlignment="Center"
-                Click="ToggleDetailsPane_Click"
-                Content="Detalles"
-                CornerRadius="6"
-                IsChecked="True"
-                ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
+        x:Name="ToggleDetailsPane"
+        Grid.Column="5"
+        Height="32"
+        VerticalAlignment="Center"
+        Click="ToggleDetailsPane_Click"
+        Content="Detalles"
+        CornerRadius="6"
+        IsChecked="True"
+        ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
 
-            <!--  Sep  -->
+            <!-- Actualizar Notion -->
+            <Button
+        x:Name="BtnRefreshNotion"
+        Grid.Column="6"
+        Height="32"
+        Padding="12,0"
+        VerticalAlignment="Center"
+        Background="#FFB020"
+        Click="BtnRefreshNotion_Click"
+        CornerRadius="8"
+        Foreground="Black"
+        Visibility="Collapsed">
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE895;" />
+                    <TextBlock x:Name="BtnRefreshNotionText" Text="Actualizar Notion" />
+                </StackPanel>
+            </Button>
+
+            <!-- Última sincronización Notion -->
+            <TextBlock
+    x:Name="NotionSyncInfoText"
+    Grid.Column="7"
+    MaxWidth="130"
+    VerticalAlignment="Center"
+    FontSize="11"
+    Foreground="#AFAFAF"
+    Text=""
+    TextTrimming="CharacterEllipsis"
+    ToolTipService.ToolTip="{Binding Text, ElementName=NotionSyncInfoText}" />
+
+            <!-- Separador -->
             <Border
-                Grid.Column="6"
-                Width="1"
-                Height="18"
-                VerticalAlignment="Center"
-                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+        Grid.Column="8"
+        Width="1"
+        Height="18"
+        VerticalAlignment="Center"
+        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-            <!--  Ordenar por  -->
+            <!-- Ordenar por -->
             <ComboBox
-                x:Name="SortCombo"
-                Grid.Column="7"
-                Height="32"
-                VerticalAlignment="Center"
-                PlaceholderText="Ordenar por"
-                SelectionChanged="SortCombo_SelectionChanged">
+        x:Name="SortCombo"
+        Grid.Column="9"
+        Height="32"
+        VerticalAlignment="Center"
+        PlaceholderText="Ordenar por"
+        SelectionChanged="SortCombo_SelectionChanged">
+
                 <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
                 <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
                 <ComboBoxItem Content="Modificado (nuevo)" Tag="mod_desc" />
@@ -168,23 +207,28 @@
                 <ComboBoxItem Content="Tamaño (menor)" Tag="size_asc" />
             </ComboBox>
 
-            <!--  Menú ⋯  -->
+            <!-- Menú ⋯ -->
             <Button
-                Grid.Column="8"
-                Width="36"
-                Height="32"
-                VerticalAlignment="Center"
-                Content="⋯"
-                CornerRadius="6">
+        Grid.Column="10"
+        Width="36"
+        Height="32"
+        VerticalAlignment="Center"
+        Content="⋯"
+        CornerRadius="6">
+
                 <Button.Flyout>
                     <MenuFlyout>
                         <MenuFlyoutItem Click="NewSavedFilter_Click" Text="Nuevo filtro" />
                         <MenuFlyoutSeparator />
                         <MenuFlyoutItem Click="ImportFiltersCsv_Click" Text="Importar CSV" />
+
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Click="BtnRefreshNotion_Click" Text="Actualizar cambios Notion" />
+                        <MenuFlyoutItem Click="BtnCheckNotionDeleted_Click" Text="Revisar páginas eliminadas" />
+                        <MenuFlyoutItem Click="BtnFullResyncNotion_Click" Text="Resync completo Notion" />
                     </MenuFlyout>
                 </Button.Flyout>
             </Button>
-
         </Grid>
 
 
