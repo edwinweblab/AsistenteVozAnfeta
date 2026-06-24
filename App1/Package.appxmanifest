@@ -11,7 +11,7 @@
 	<Identity
 	  Name="c6d297e3-90b3-45d7-8116-b599de47cc6a"
 	  Publisher="CN=nanoc"
-	  Version="1.0.0.0" />
+	  Version="1.0.2.0" />
 
 	<mp:PhoneIdentity PhoneProductId="c6d297e3-90b3-45d7-8116-b599de47cc6a" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

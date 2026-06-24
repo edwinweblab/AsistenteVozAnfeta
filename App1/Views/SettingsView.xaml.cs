@@ -321,8 +321,26 @@ namespace Anfeta.UI.Views
         private void LoadCurrentHotkey()
         {
             TxtHotkeyDisplay.Text = _appState.GetHotkeyDisplayString();
+            TxtSearchHotkeyDisplay.Text = _appState.GetSearchHotkeyDisplayString();
         }
+        private async void BtnChangeSearchHotkey_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Anfeta.UI.Dialogs.HotkeyPickerDialog(
+                _appState,
+                _settingsService,
+                Anfeta.UI.Dialogs.HotkeyTarget.Search)
+            {
+                XamlRoot = this.XamlRoot
+            };
 
+            var result = await dialog.ShowAsync();
+
+            if (result == ContentDialogResult.Primary)
+            {
+                TxtSearchHotkeyDisplay.Text = _appState.GetSearchHotkeyDisplayString();
+                ShowStatus("Atajo del buscador actualizado correctamente", InfoBarSeverity.Success);
+            }
+        }
         /// Abre el diálogo para cambiar el atajo de teclado global.
         private async void BtnChangeHotkey_Click(object sender, RoutedEventArgs e)
         {

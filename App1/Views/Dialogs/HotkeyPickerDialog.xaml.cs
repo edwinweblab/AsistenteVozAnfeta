@@ -7,8 +7,13 @@ using System;
 using System.Runtime.InteropServices;
 using Windows.System;
 
-namespace Anfeta.UI.Dialogs
+namespace Anfeta.UI.Dialogs 
 {
+    public enum HotkeyTarget
+    {
+        Microphone,
+        Search
+    }
     public sealed partial class HotkeyPickerDialog : ContentDialog
     {
         private readonly AppStateService _appState;
@@ -16,26 +21,40 @@ namespace Anfeta.UI.Dialogs
         private readonly GlobalHotkeyService _hotkeyService;
         private uint _capturedModifiers;
         private uint _capturedKey;
-
+        private readonly HotkeyTarget _target = HotkeyTarget.Microphone;
+        
         public HotkeyPickerDialog()
         {
             this.InitializeComponent();
         }
 
-        public HotkeyPickerDialog(AppStateService appState, SettingsService settingsService) : this()
+        public HotkeyPickerDialog(
+        AppStateService appState,
+        SettingsService settingsService,
+        HotkeyTarget target = HotkeyTarget.Microphone) : this()
         {
             _appState = appState;
             _settingsService = settingsService;
+            _target = target;
+
             _hotkeyService = App.AppHost.Services.GetRequiredService<GlobalHotkeyService>();
 
-            TxtPreview.Text = _appState.GetHotkeyDisplayString();
-            _capturedModifiers = _appState.HotkeyModifiers;
-            _capturedKey = _appState.HotkeyKey;
+            if (_target == HotkeyTarget.Search)
+            {
+                TxtPreview.Text = _appState.GetSearchHotkeyDisplayString();
+                _capturedModifiers = _appState.SearchHotkeyModifiers;
+                _capturedKey = _appState.SearchHotkeyKey;
+            }
+            else
+            {
+                TxtPreview.Text = _appState.GetHotkeyDisplayString();
+                _capturedModifiers = _appState.HotkeyModifiers;
+                _capturedKey = _appState.HotkeyKey;
+            }
 
             PrimaryButtonClick += OnSave;
             Closed += OnClosed;
 
-            // AGREGAR ESTO:
             Loaded += (s, e) =>
             {
                 var stackPanel = Content as StackPanel;
@@ -138,49 +157,37 @@ namespace Anfeta.UI.Dialogs
                 return;
             }
 
-            _settingsService.SaveHotkey(_capturedModifiers, _capturedKey);
+            if (_target == HotkeyTarget.Search)
+                _settingsService.SaveSearchHotkey(_capturedModifiers, _capturedKey);
+            else
+                _settingsService.SaveHotkey(_capturedModifiers, _capturedKey);
         }
 
         // Verifica si el hotkey está disponible intentando registrarlo temporalmente
         private bool IsHotkeyAvailable(uint modifiers, uint key)
         {
-            IntPtr dummyHwnd = IntPtr.Zero;
-            const int TEST_ID = 9999;
+            const int TEST_ID = 9909;
 
             try
             {
-                // Crear ventana temporal para probar
-                var hInstance = GetModuleHandle(null);
-                var wndClass = new WNDCLASSEX
-                {
-                    cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
-                    lpfnWndProc = Marshal.GetFunctionPointerForDelegate(new WndProcDelegate(DefWindowProc)),
-                    hInstance = hInstance,
-                    lpszClassName = "TempHotkeyTest"
-                };
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
 
-                RegisterClassEx(ref wndClass);
-                IntPtr HWND_MESSAGE = new IntPtr(-3);
-                dummyHwnd = CreateWindowEx(0, "TempHotkeyTest", "", 0, 0, 0, 0, 0,
-                    HWND_MESSAGE, IntPtr.Zero, hInstance, IntPtr.Zero);
+                if (hwnd == IntPtr.Zero)
+                    return false;
 
-                if (dummyHwnd == IntPtr.Zero) return false;
-
-                // Intentar registrar
-                bool registered = RegisterHotKey(dummyHwnd, TEST_ID, modifiers, key);
+                var registered = RegisterHotKey(hwnd, TEST_ID, modifiers, key);
 
                 if (registered)
                 {
-                    UnregisterHotKey(dummyHwnd, TEST_ID);
+                    UnregisterHotKey(hwnd, TEST_ID);
                     return true;
                 }
 
                 return false;
             }
-            finally
+            catch
             {
-                if (dummyHwnd != IntPtr.Zero)
-                    DestroyWindow(dummyHwnd);
+                return false;
             }
         }
 

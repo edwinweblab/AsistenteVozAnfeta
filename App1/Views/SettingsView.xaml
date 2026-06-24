@@ -585,10 +585,12 @@
                             Height="18"
                             Background="{StaticResource AnfetaAccentBrush}"
                             CornerRadius="2" />
+
                         <FontIcon
                             FontSize="14"
                             Foreground="{StaticResource AnfetaAccentBrush}"
                             Glyph="&#xE92E;" />
+
                         <TextBlock
                             VerticalAlignment="Center"
                             CharacterSpacing="100"
@@ -598,43 +600,51 @@
                             Text="ATAJOS DE TECLADO" />
                     </StackPanel>
 
+                    <!--  CARD: Activar micrófono  -->
                     <Border Style="{StaticResource CardStyle}">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="4" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
+
                             <Border
                                 Grid.Column="0"
                                 Background="{StaticResource AnfetaAccentBrush}"
                                 CornerRadius="12,0,0,12"
                                 Opacity="0.5" />
+
                             <StackPanel
                                 Grid.Column="1"
                                 Padding="18,16"
                                 Spacing="14">
+
                                 <StackPanel Spacing="3">
                                     <TextBlock
                                         FontSize="13"
                                         FontWeight="SemiBold"
                                         Foreground="#FFFFFF"
                                         Text="Activar micrófono" />
+
                                     <TextBlock
                                         FontSize="11"
                                         Foreground="#D4C9C0"
                                         Text="Presiona esta combinación desde cualquier app para iniciar la escucha."
                                         TextWrapping="Wrap" />
                                 </StackPanel>
+
                                 <StackPanel
                                     VerticalAlignment="Center"
                                     Orientation="Horizontal"
                                     Spacing="14">
+
                                     <Border
                                         Padding="14,10"
                                         Background="#060A10"
                                         BorderBrush="#30FFFFFF"
                                         BorderThickness="1"
                                         CornerRadius="8">
+
                                         <TextBlock
                                             x:Name="TxtHotkeyDisplay"
                                             FontSize="15"
@@ -642,13 +652,83 @@
                                             Foreground="{StaticResource AnfetaAccentBrush}"
                                             Text="Ctrl + Alt + V" />
                                     </Border>
+
                                     <Button
                                         x:Name="BtnChangeHotkey"
                                         Width="40"
                                         Height="40"
                                         Click="BtnChangeHotkey_Click"
                                         Style="{StaticResource SecondaryButtonStyle}"
-                                        ToolTipService.ToolTip="Cambiar atajo de teclado">
+                                        ToolTipService.ToolTip="Cambiar atajo de micrófono">
+
+                                        <FontIcon FontSize="15" Glyph="&#xE70F;" />
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!--  CARD: Abrir buscador  -->
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border
+                                Grid.Column="0"
+                                Background="{StaticResource AnfetaAccentBrush}"
+                                CornerRadius="12,0,0,12"
+                                Opacity="0.5" />
+
+                            <StackPanel
+                                Grid.Column="1"
+                                Padding="18,16"
+                                Spacing="14">
+
+                                <StackPanel Spacing="3">
+                                    <TextBlock
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Foreground="#FFFFFF"
+                                        Text="Abrir buscador" />
+
+                                    <TextBlock
+                                        FontSize="11"
+                                        Foreground="#D4C9C0"
+                                        Text="Presiona esta combinación desde cualquier app para abrir el módulo Buscador y empezar a escribir."
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="14">
+
+                                    <Border
+                                        Padding="14,10"
+                                        Background="#060A10"
+                                        BorderBrush="#30FFFFFF"
+                                        BorderThickness="1"
+                                        CornerRadius="8">
+
+                                        <TextBlock
+                                            x:Name="TxtSearchHotkeyDisplay"
+                                            FontSize="15"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource AnfetaAccentBrush}"
+                                            Text="Ctrl + Alt + B" />
+                                    </Border>
+
+                                    <Button
+                                        x:Name="BtnChangeSearchHotkey"
+                                        Width="40"
+                                        Height="40"
+                                        Click="BtnChangeSearchHotkey_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        ToolTipService.ToolTip="Cambiar atajo del buscador">
+
                                         <FontIcon FontSize="15" Glyph="&#xE70F;" />
                                     </Button>
                                 </StackPanel>
