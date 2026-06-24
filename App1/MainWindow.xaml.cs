@@ -11,12 +11,15 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using Windows.UI;
+using Anfeta.UI.Services;
+using System.Threading.Tasks;
 
 namespace Anfeta.UI
 {
     public sealed partial class MainWindow : Window
     {
         private readonly ShellViewModel _shell;
+        private GlobalHotkeyService? _hotkeyService;
 
         public MainWindow()
         {
@@ -63,7 +66,8 @@ namespace Anfeta.UI
 
             SubscribeDropboxState();
             CheckGoogleCalendarStatusOnStartup();
-
+            _hotkeyService = App.AppHost.Services.GetRequiredService<GlobalHotkeyService>();
+            _hotkeyService.SearchHotkeyPressed += OnSearchHotkeyPressed;
             this.Closed += MainWindow_Closed;
 
             Debug.WriteLine("MAINWINDOW: constructor OK");
@@ -249,7 +253,35 @@ namespace Anfeta.UI
         {
             DropboxIndexCoordinator.StateChanged -= OnDropboxStateChanged;
             Debug.WriteLine("MAINWINDOW: Closed");
+            if (_hotkeyService != null)
+                _hotkeyService.SearchHotkeyPressed -= OnSearchHotkeyPressed;
             ((App)Application.Current).CleanupAndExit();
+        }
+        public void OpenSearchFromHotkey()
+        {
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                Activate();
+
+                var searchItem = FindNavItem("Search");
+
+                if (searchItem != null)
+                    AppNav.SelectedItem = searchItem;
+
+                if (ContentFrame.CurrentSourcePageType != typeof(SearchTabsView))
+                    ContentFrame.Navigate(typeof(SearchTabsView));
+
+                await Task.Delay(250);
+
+                SearchFocusBridge.RequestFocus();
+            });
+        }
+        private void OnSearchHotkeyPressed(object? sender, EventArgs e)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                OpenSearchFromHotkey();
+            });
         }
     }
 }

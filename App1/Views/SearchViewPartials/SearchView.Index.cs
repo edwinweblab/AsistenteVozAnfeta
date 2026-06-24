@@ -343,18 +343,18 @@ namespace Anfeta.UI.Views
                 if (!string.IsNullOrWhiteSpace(lastSyncStr) &&
                     DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
                 {
-                    changedItems = await NotionIndexBuilder.BuildChangedSinceAsync(
-                        token,
-                        dataSourceId,
-                        lastSyncUtc.ToUniversalTime(),
-                        CancellationToken.None);
+                    changedItems = await NotionIndexBuilder.BuildManyChangedSinceAsync(
+                      token,
+                      NotionDataSources.Default,
+                      lastSyncUtc.ToUniversalTime(),
+                      CancellationToken.None);
                 }
                 else
                 {
-                    changedItems = await NotionIndexBuilder.BuildAsync(
-                        token,
-                        dataSourceId,
-                        CancellationToken.None);
+                    changedItems = await NotionIndexBuilder.BuildManyAsync(
+                      token,
+                      NotionDataSources.Default,
+                      CancellationToken.None);
                 }
 
                 if (changedItems.Count > 0)
@@ -409,10 +409,10 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text = "Estado: Sincronizando Notion...";
 
-                var notionItems = await NotionIndexBuilder.BuildAsync(
-                    token,
-                    dataSourceId,
-                    ct);
+                var notionItems = await NotionIndexBuilder.BuildManyAsync(
+                token,
+                NotionDataSources.Default,
+                ct);
 
                 var currentWithoutNotion = App.LocalIndex
                     .GetAll()
@@ -512,11 +512,11 @@ namespace Anfeta.UI.Views
 
             try
             {
-                var hasChanges = await NotionIndexBuilder.HasChangesSinceAsync(
-                    token,
-                    dataSourceId,
-                    lastSyncUtc.ToUniversalTime(),
-                    CancellationToken.None);
+                var hasChanges = await NotionIndexBuilder.HasAnyChangesSinceAsync(
+                 token,
+                 NotionDataSources.Default,
+                 lastSyncUtc.ToUniversalTime(),
+                 CancellationToken.None);
 
                 BtnRefreshNotion.Visibility = hasChanges
                     ? Visibility.Visible
@@ -560,10 +560,10 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text = "Estado: Revisando páginas eliminadas en Notion...";
 
-                var freshNotionItems = await NotionIndexBuilder.BuildAsync(
-                    token,
-                    dataSourceId,
-                    CancellationToken.None);
+                var freshNotionItems = await NotionIndexBuilder.BuildManyAsync(
+                  token,
+                  NotionDataSources.Default,
+                  CancellationToken.None);
 
                 var freshIds = freshNotionItems
                     .Select(GetNotionRowId)
@@ -640,10 +640,10 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text = "Estado: Resync completo de Notion...";
 
-                var freshNotionItems = await NotionIndexBuilder.BuildAsync(
-                    token,
-                    dataSourceId,
-                    CancellationToken.None);
+                var freshNotionItems = await NotionIndexBuilder.BuildManyAsync(
+                 token,
+                 NotionDataSources.Default,
+                 CancellationToken.None);
 
                 var currentWithoutNotion = App.LocalIndex
                     .GetAll()

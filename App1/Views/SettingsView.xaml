@@ -146,21 +146,21 @@
                 <StackPanel Spacing="14">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <Border
-            Width="3"
-            Height="18"
-            Background="{StaticResource AnfetaAccentBrush}"
-            CornerRadius="2" />
+                            Width="3"
+                            Height="18"
+                            Background="{StaticResource AnfetaAccentBrush}"
+                            CornerRadius="2" />
                         <FontIcon
-            FontSize="14"
-            Foreground="{StaticResource AnfetaAccentBrush}"
-            Glyph="&#xE8A5;" />
+                            FontSize="14"
+                            Foreground="{StaticResource AnfetaAccentBrush}"
+                            Glyph="&#xE8A5;" />
                         <TextBlock
-            VerticalAlignment="Center"
-            CharacterSpacing="100"
-            FontSize="11"
-            FontWeight="SemiBold"
-            Foreground="#FFFFFF"
-            Text="NOTION" />
+                            VerticalAlignment="Center"
+                            CharacterSpacing="100"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="#FFFFFF"
+                            Text="NOTION" />
                     </StackPanel>
 
                     <Border Style="{StaticResource CardStyle}">
@@ -171,63 +171,138 @@
                             </Grid.ColumnDefinitions>
 
                             <Border
-                Grid.Column="0"
-                Background="{StaticResource AnfetaAccentBrush}"
-                CornerRadius="12,0,0,12"
-                Opacity="0.6" />
+                                Grid.Column="0"
+                                Background="{StaticResource AnfetaAccentBrush}"
+                                CornerRadius="12,0,0,12"
+                                Opacity="0.6" />
 
                             <StackPanel
-                Grid.Column="1"
-                Padding="18,16"
-                Spacing="14">
+                                Grid.Column="1"
+                                Padding="18,16"
+                                Spacing="14">
 
                                 <StackPanel Spacing="3">
                                     <TextBlock
-                        FontSize="13"
-                        FontWeight="SemiBold"
-                        Foreground="#FFFFFF"
-                        Text="Base de datos de Notion" />
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Foreground="#FFFFFF"
+                                        Text="Base de datos de Notion" />
                                     <TextBlock
-                        FontSize="11"
-                        Foreground="#D4C9C0"
-                        Text="ANFETA leerá páginas de Notion y las agregará al buscador."
-                        TextWrapping="Wrap" />
+                                        FontSize="11"
+                                        Foreground="#D4C9C0"
+                                        Text="ANFETA leerá páginas de Notion y las agregará al buscador."
+                                        TextWrapping="Wrap" />
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock
-                        FontSize="11"
-                        Foreground="#D4C9C0"
-                        Text="Token de integración" />
+                                        FontSize="11"
+                                        Foreground="#D4C9C0"
+                                        Text="Token de integración" />
                                     <PasswordBox
-                        x:Name="NotionTokenBox"
-                        Height="40"
-                        PlaceholderText="ntn_..." />
+                                        x:Name="NotionTokenBox"
+                                        Height="40"
+                                        PlaceholderText="ntn_..." />
                                 </StackPanel>
 
-                                <StackPanel Spacing="6">
+                                <StackPanel Spacing="8">
                                     <TextBlock
-                        FontSize="11"
-                        Foreground="#D4C9C0"
-                        Text="Data Source ID" />
-                                    <TextBox
-                        x:Name="NotionDataSourceIdBox"
-                        Height="40"
-                        PlaceholderText="2eeabd7d-91b7-8193-a131-000b08cd54e2" />
+                                        FontSize="11"
+                                        Foreground="#D4C9C0"
+                                        Text="Bases incluidas" />
+
+                                    <Border
+                                        Padding="12"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        CornerRadius="8">
+
+                                        <GridView
+                                            x:Name="NotionSourcesList"
+                                            MaxHeight="220"
+                                            IsItemClickEnabled="False"
+                                            SelectionMode="None">
+
+                                            <GridView.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <ItemsWrapGrid Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </GridView.ItemsPanel>
+
+                                            <GridView.ItemContainerStyle>
+                                                <Style TargetType="GridViewItem">
+                                                    <Setter Property="Padding" Value="0" />
+                                                    <Setter Property="Margin" Value="0,0,10,10" />
+                                                    <Setter Property="MinWidth" Value="0" />
+                                                    <Setter Property="MinHeight" Value="0" />
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                                </Style>
+                                            </GridView.ItemContainerStyle>
+
+                                            <GridView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border
+                                                        Width="330"
+                                                        Padding="10"
+                                                        Background="#252525"
+                                                        BorderBrush="#333333"
+                                                        BorderThickness="1"
+                                                        CornerRadius="8">
+
+                                                        <Grid ColumnSpacing="10">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+
+                                                            <Border
+                                                                Grid.Column="0"
+                                                                Width="22"
+                                                                Height="22"
+                                                                VerticalAlignment="Top"
+                                                                Background="#2E7D32"
+                                                                CornerRadius="11">
+                                                                <FontIcon
+                                                                    FontSize="12"
+                                                                    Foreground="White"
+                                                                    Glyph="&#xE73E;" />
+                                                            </Border>
+
+                                                            <StackPanel Grid.Column="1" Spacing="2">
+
+                                                                <TextBlock
+                                                                    FontSize="12"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="White"
+                                                                    Text="{Binding Name}"
+                                                                    TextTrimming="CharacterEllipsis" />
+
+                                                                <TextBlock
+                                                                    FontSize="10"
+                                                                    Foreground="#AFAFAF"
+                                                                    Text="{Binding DataSourceId}"
+                                                                    TextTrimming="CharacterEllipsis" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </GridView.ItemTemplate>
+                                        </GridView>
+                                    </Border>
                                 </StackPanel>
 
                                 <TextBlock
-                    x:Name="NotionStatusText"
-                    FontSize="11"
-                    Foreground="#D4C9C0"
-                    Text="Notion no configurado."
-                    TextWrapping="Wrap" />
+                                    x:Name="NotionStatusText"
+                                    FontSize="11"
+                                    Foreground="#D4C9C0"
+                                    Text="Notion no configurado."
+                                    TextWrapping="Wrap" />
 
                                 <StackPanel Orientation="Horizontal" Spacing="10">
                                     <Button
-                        x:Name="BtnSaveNotion"
-                        Click="BtnSaveNotion_Click"
-                        Style="{StaticResource SecondaryButtonStyle}">
+                                        x:Name="BtnSaveNotion"
+                                        Click="BtnSaveNotion_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE74E;" />
                                             <TextBlock Text="Guardar" />
@@ -235,9 +310,9 @@
                                     </Button>
 
                                     <Button
-                        x:Name="BtnTestNotion"
-                        Click="BtnTestNotion_Click"
-                        Style="{StaticResource SecondaryButtonStyle}">
+                                        x:Name="BtnTestNotion"
+                                        Click="BtnTestNotion_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE9D9;" />
                                             <TextBlock Text="Probar conexión" />
@@ -245,9 +320,9 @@
                                     </Button>
 
                                     <Button
-                        x:Name="BtnSyncNotion"
-                        Click="BtnSyncNotion_Click"
-                        Style="{StaticResource SecondaryButtonStyle}">
+                                        x:Name="BtnSyncNotion"
+                                        Click="BtnSyncNotion_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE895;" />
                                             <TextBlock Text="Sincronizar Notion" />
@@ -255,9 +330,9 @@
                                     </Button>
 
                                     <Button
-                        x:Name="BtnResetNotion"
-                        Click="BtnResetNotion_Click"
-                        Style="{StaticResource SecondaryButtonStyle}">
+                                        x:Name="BtnResetNotion"
+                                        Click="BtnResetNotion_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE74D;" />
                                             <TextBlock Text="Limpiar" />

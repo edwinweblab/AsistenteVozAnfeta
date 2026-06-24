@@ -245,6 +245,7 @@ namespace Anfeta.UI.Views
             // ApplyChipFilters: solo actúa cuando el usuario clickea un chip
             // sin escribir query (p. ej. _extFilter viene del chip PDF, DOCX, etc.)
             items = ApplyChipFilters(items);
+            items = ApplyNotionBaseFilter(items);
             items = ApplySortKey(items);
 
             foreach (var it in items.Take(500))
@@ -311,6 +312,7 @@ namespace Anfeta.UI.Views
             }
 
             items = ApplyChipFilters(items);
+            items = ApplyNotionBaseFilter(items);
             items = ApplySortKey(items);
 
             foreach (var it in items.Take(500))

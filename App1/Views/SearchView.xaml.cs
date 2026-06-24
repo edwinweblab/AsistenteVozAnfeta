@@ -271,6 +271,7 @@ namespace Anfeta.UI.Views
             if (!_isIndexStateHooked)
             {
                 DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
+                SearchFocusBridge.FocusRequested += OnSearchFocusRequested;
                 _isIndexStateHooked = true;
             }
 
@@ -302,10 +303,54 @@ namespace Anfeta.UI.Views
             if (_isIndexStateHooked)
             {
                 DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
+                SearchFocusBridge.FocusRequested -= OnSearchFocusRequested;
                 _isIndexStateHooked = false;
             }
         }
+        private void OnSearchFocusRequested()
+        {
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(150);
 
+                SearchBox.Focus(FocusState.Programmatic);
+                SelectTextInsideSearchBox();
+            });
+        }
+
+        private void SelectTextInsideSearchBox()
+        {
+            var textBox = FindVisualChild<TextBox>(SearchBox);
+
+            if (textBox != null)
+            {
+                textBox.Focus(FocusState.Programmatic);
+                textBox.SelectAll();
+            }
+        }
+
+        private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+        {
+            if (parent == null)
+                return null;
+
+            var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
+
+            for (int i = 0; i < count; i++)
+            {
+                var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+
+                if (child is T typedChild)
+                    return typedChild;
+
+                var result = FindVisualChild<T>(child);
+
+                if (result != null)
+                    return result;
+            }
+
+            return null;
+        }
         #endregion
 
         #region ===== UI Reset / State =====

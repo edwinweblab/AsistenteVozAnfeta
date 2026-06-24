@@ -33,6 +33,11 @@ namespace Anfeta.UI.Services
 
             if (_settings.Values.ContainsKey("HotkeyKey"))
                 _appState.HotkeyKey = (uint)(int)_settings.Values["HotkeyKey"];
+            if (_settings.Values.ContainsKey("SearchHotkeyModifiers"))
+                _appState.SearchHotkeyModifiers = (uint)(int)_settings.Values["SearchHotkeyModifiers"];
+
+            if (_settings.Values.ContainsKey("SearchHotkeyKey"))
+                _appState.SearchHotkeyKey = (uint)(int)_settings.Values["SearchHotkeyKey"];
         }
 
         /// <summary>Guarda dispositivo de entrada y su nombre</summary>
@@ -60,6 +65,14 @@ namespace Anfeta.UI.Services
             _appState.HotkeyKey = key;
             _settings.Values["HotkeyModifiers"] = (int)modifiers;
             _settings.Values["HotkeyKey"] = (int)key;
+        }
+        public void SaveSearchHotkey(uint modifiers, uint key)
+        {
+            _appState.SearchHotkeyModifiers = modifiers;
+            _appState.SearchHotkeyKey = key;
+
+            _settings.Values["SearchHotkeyModifiers"] = (int)modifiers;
+            _settings.Values["SearchHotkeyKey"] = (int)key;
         }
     }
 }

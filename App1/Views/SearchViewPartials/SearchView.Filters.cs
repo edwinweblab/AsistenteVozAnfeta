@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -16,6 +17,7 @@ namespace Anfeta.UI.Views
 {
     public sealed partial class SearchView
     {
+        private string _activeNotionBaseFilter = "";
         #region ===== Filters / Sort =====
 
         private async void ChipFilter_Click(object sender, RoutedEventArgs e)
@@ -707,5 +709,45 @@ namespace Anfeta.UI.Views
         }
 
         #endregion
+
+        private List<Anfeta.UI.Models.Weblab.SearchResultRow> ApplyNotionBaseFilter(
+            IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> rows)
+        {
+            var list = rows?.ToList() ?? new List<Anfeta.UI.Models.Weblab.SearchResultRow>();
+
+            if (string.IsNullOrWhiteSpace(_activeNotionBaseFilter))
+                return list;
+
+            return list
+                .Where(x =>
+                    x.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
+                    string.Equals(
+                        x.ExternalSourceName,
+                        _activeNotionBaseFilter,
+                        StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        private async void ChipBaseFilter_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not ToggleButton clicked)
+                return;
+
+            var selectedBase = (clicked.Tag as string ?? string.Empty).Trim();
+
+            _activeNotionBaseFilter = selectedBase;
+
+            ChipBaseAll.IsChecked = clicked == ChipBaseAll;
+            ChipBaseRevisiones.IsChecked = clicked == ChipBaseRevisiones;
+            ChipBaseClientes.IsChecked = clicked == ChipBaseClientes;
+            ChipBaseDominios.IsChecked = clicked == ChipBaseDominios;
+            ChipBaseProgramas.IsChecked = clicked == ChipBaseProgramas;
+            ChipBaseCobrar.IsChecked = clicked == ChipBaseCobrar;
+            ChipBaseCorreos.IsChecked = clicked == ChipBaseCorreos;
+
+            if (clicked == ChipBaseAll)
+                _activeNotionBaseFilter = "";
+
+            await PaintLoadedIndexAsync();
+        }
     }
 }

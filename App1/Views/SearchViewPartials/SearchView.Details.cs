@@ -29,12 +29,16 @@ namespace Anfeta.UI.Views
 
             if (IsNotionRow(row))
             {
+                var baseName = string.IsNullOrWhiteSpace(row.ExternalSourceName)
+                     ? "Notion"
+                     : row.ExternalSourceName;
+
                 DetailsMeta.Text =
                     $"Tipo: {row.Type}\n" +
                     $"Origen: Notion\n" +
+                    $"Base: {baseName}\n" +
                     $"Estado: Página de Notion\n" +
                     $"Modificado: {(!string.IsNullOrWhiteSpace(row.ServerModified) ? row.ServerModified : "—")}";
-
                 StatusText.Text = "Estado: Página de Notion seleccionada ✅";
                 return;
             }
@@ -261,7 +265,7 @@ namespace Anfeta.UI.Views
             return row.Source == SearchSource.Notion ||
                    string.Equals(row.Type, "NOTION_PAGE", StringComparison.OrdinalIgnoreCase);
         }
-        
+
         #endregion
 
 

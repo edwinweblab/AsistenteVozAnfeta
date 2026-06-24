@@ -517,17 +517,18 @@ namespace Anfeta.UI.Views
         private void LoadNotionSettingsIntoUI()
         {
             var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
-            var dataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
             var lastSync = ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] as string;
 
             NotionTokenBox.Password = token ?? string.Empty;
-            NotionDataSourceIdBox.Text = dataSourceId ?? string.Empty;
+            NotionSourcesList.ItemsSource = NotionDataSources.Default;
 
-            if (!string.IsNullOrWhiteSpace(dataSourceId))
+            var enabledBases = NotionDataSources.Default.Count(x => x.Enabled);
+
+            if (!string.IsNullOrWhiteSpace(token))
             {
                 NotionStatusText.Text = string.IsNullOrWhiteSpace(lastSync)
-                    ? $"Configurado: {dataSourceId}"
-                    : $"Configurado: {dataSourceId} · Última sincronización: {FormatUtcLocal(lastSync)}";
+                    ? $"Configurado: {enabledBases} bases"
+                    : $"Configurado: {enabledBases} bases · Última sincronización: {FormatUtcLocal(lastSync)}";
             }
             else
             {
@@ -538,7 +539,10 @@ namespace Anfeta.UI.Views
         private bool TryGetNotionInputs(out string token, out string dataSourceId)
         {
             token = (NotionTokenBox.Password ?? string.Empty).Trim();
-            dataSourceId = (NotionDataSourceIdBox.Text ?? string.Empty).Trim();
+
+            dataSourceId = NotionDataSources.Default
+                .FirstOrDefault(x => x.Enabled && !string.IsNullOrWhiteSpace(x.DataSourceId))
+                ?.DataSourceId ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -548,7 +552,7 @@ namespace Anfeta.UI.Views
 
             if (string.IsNullOrWhiteSpace(dataSourceId))
             {
-                ShowStatus("Agrega el Data Source ID de Notion.", InfoBarSeverity.Warning);
+                ShowStatus("No hay bases de Notion configuradas.", InfoBarSeverity.Warning);
                 return false;
             }
 
@@ -561,9 +565,13 @@ namespace Anfeta.UI.Views
                 return;
 
             ApplicationData.Current.LocalSettings.Values[LS_NotionToken] = token;
+
+            // Se guarda solo por compatibilidad con código viejo que aún revisa esta llave.
             ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] = dataSourceId;
 
-            NotionStatusText.Text = $"Configurado: {dataSourceId}";
+            var enabledBases = NotionDataSources.Default.Count(x => x.Enabled);
+
+            NotionStatusText.Text = $"Configurado: {enabledBases} bases";
             ShowStatus("Configuración de Notion guardada.", InfoBarSeverity.Success);
         }
 
@@ -578,13 +586,13 @@ namespace Anfeta.UI.Views
             {
                 ShowStatus("Probando conexión con Notion...", InfoBarSeverity.Informational);
 
-                var items = await NotionIndexBuilder.BuildAsync(
-                    token,
-                    dataSourceId,
-                    CancellationToken.None,
-                    maxItems: 5);
+                var items = await NotionIndexBuilder.BuildManyAsync(
+                token,
+                NotionDataSources.Default,
+                CancellationToken.None,
+                maxItemsPerSource: 2);
 
-                ShowStatus($"Conexión Notion correcta ✅ Páginas de prueba: {items.Count}", InfoBarSeverity.Success);
+                ShowStatus($"Conexión Notion correcta ✅ Bases: {NotionDataSources.Default.Count} · Páginas de prueba: {items.Count}", InfoBarSeverity.Success);
             }
             catch (Exception ex)
             {
@@ -614,10 +622,10 @@ namespace Anfeta.UI.Views
             {
                 ShowStatus("Sincronizando páginas de Notion...", InfoBarSeverity.Informational);
 
-                var notionItems = await NotionIndexBuilder.BuildAsync(
-                    token,
-                    dataSourceId,
-                    ct);
+                var notionItems = await NotionIndexBuilder.BuildManyAsync(
+                token,
+                NotionDataSources.Default,
+                ct);
 
                 var currentWithoutNotion = App.LocalIndex
                     .GetAll()
@@ -633,10 +641,10 @@ namespace Anfeta.UI.Views
                 var now = DateTimeOffset.UtcNow.ToString("O");
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] = now;
 
-                NotionStatusText.Text = $"Configurado: {dataSourceId} · Última sincronización: {FormatUtcLocal(now)}";
-
+                NotionStatusText.Text = $"Configurado: {NotionDataSources.Default.Count} bases · Última sincronización: {FormatUtcLocal(now)}";
+                
                 ShowStatus(
-                    $"Notion sincronizado ✅ Páginas: {notionItems.Count} · Índice total: {App.LocalIndex.Count}",
+                    $"Notion sincronizado ✅ Bases: {NotionDataSources.Default.Count} · Páginas: {notionItems.Count} · Índice total: {App.LocalIndex.Count}",
                     InfoBarSeverity.Success);
             }
             catch (OperationCanceledException)
@@ -690,7 +698,6 @@ namespace Anfeta.UI.Views
                 }
 
                 NotionTokenBox.Password = string.Empty;
-                NotionDataSourceIdBox.Text = string.Empty;
                 NotionStatusText.Text = "Notion no configurado.";
 
                 ShowStatus("Configuración de Notion limpiada.", InfoBarSeverity.Informational);

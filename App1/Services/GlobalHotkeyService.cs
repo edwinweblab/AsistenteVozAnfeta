@@ -7,21 +7,22 @@ namespace Anfeta.UI.Services
     public sealed class GlobalHotkeyService : IDisposable
     {
         private const int WM_HOTKEY = 0x0312;
-        private const int HOTKEY_ID = 9001;
-
+        private const int MIC_HOTKEY_ID = 9001;
+        private const int SEARCH_HOTKEY_ID = 9002;
         private readonly AppStateService _appState;
         private readonly SettingsService _settingsService;
         private IntPtr _hwnd = IntPtr.Zero;
         private bool _registered;
         private WndProcDelegate? _wndProc;
         private GCHandle _wndProcHandle;
-
+        private bool _searchRegistered;
         // Backup del último hotkey que funcionó
         private uint _lastWorkingModifiers;
         private uint _lastWorkingKey;
 
         public event EventHandler? HotkeyPressed;
         public event EventHandler<string>? RegistrationFailed;
+        public event EventHandler? SearchHotkeyPressed;
 
         public GlobalHotkeyService(AppStateService appState, SettingsService settingsService)
         {
@@ -39,6 +40,11 @@ namespace Anfeta.UI.Services
                 {
                     UpdateHotkey();
                 }
+                if (e.PropertyName == nameof(AppStateService.SearchHotkeyModifiers) ||
+                    e.PropertyName == nameof(AppStateService.SearchHotkeyKey))
+                {
+                    UpdateHotkey();
+                }
             };
         }
 
@@ -52,10 +58,14 @@ namespace Anfeta.UI.Services
         private void RegisterCurrentHotkey()
         {
             if (_hwnd == IntPtr.Zero) return;
-
-            _registered = RegisterHotKey(_hwnd, HOTKEY_ID, _appState.HotkeyModifiers, _appState.HotkeyKey);
+            _registered = RegisterHotKey(_hwnd, MIC_HOTKEY_ID, _appState.HotkeyModifiers, _appState.HotkeyKey);
             Debug.WriteLine($"[HOTKEY] Intento registro: Mods={_appState.HotkeyModifiers} Key={_appState.HotkeyKey} => {_registered}");
-
+            _searchRegistered = RegisterHotKey(
+                _hwnd,
+                SEARCH_HOTKEY_ID,
+                _appState.SearchHotkeyModifiers,
+                _appState.SearchHotkeyKey);
+            Debug.WriteLine($"[HOTKEY] Search registro: Mods={_appState.SearchHotkeyModifiers} Key={_appState.SearchHotkeyKey} => {_searchRegistered}");
             if (!_registered)
             {
                 var err = Marshal.GetLastWin32Error();
@@ -90,12 +100,16 @@ namespace Anfeta.UI.Services
 
         private void UpdateHotkey()
         {
-            if (_hwnd == IntPtr.Zero) return;
-
             if (_registered)
             {
-                UnregisterHotKey(_hwnd, HOTKEY_ID);
+                UnregisterHotKey(_hwnd, MIC_HOTKEY_ID);
                 _registered = false;
+            }
+
+            if (_searchRegistered)
+            {
+                UnregisterHotKey(_hwnd, SEARCH_HOTKEY_ID);
+                _searchRegistered = false;
             }
 
             RegisterCurrentHotkey();
@@ -103,17 +117,23 @@ namespace Anfeta.UI.Services
 
         public void Stop()
         {
-            if (_hwnd == IntPtr.Zero) return;
+            if (_hwnd == IntPtr.Zero)
+                return;
 
             if (_registered)
             {
-                UnregisterHotKey(_hwnd, HOTKEY_ID);
+                UnregisterHotKey(_hwnd, MIC_HOTKEY_ID);
                 _registered = false;
+            }
+
+            if (_searchRegistered)
+            {
+                UnregisterHotKey(_hwnd, SEARCH_HOTKEY_ID);
+                _searchRegistered = false;
             }
 
             DestroyMessageWindow();
         }
-
         private void CreateMessageWindow()
         {
             _wndProc = WndProc;
@@ -167,27 +187,61 @@ namespace Anfeta.UI.Services
 
         private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
         {
-            if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
+            if (msg == WM_HOTKEY)
             {
-                Debug.WriteLine("[HOTKEY] Detectado");
-                HotkeyPressed?.Invoke(this, EventArgs.Empty);
+                var id = wParam.ToInt32();
+
+                if (id == MIC_HOTKEY_ID)
+                {
+                    Debug.WriteLine("[HOTKEY] Micrófono detectado");
+                    HotkeyPressed?.Invoke(this, EventArgs.Empty);
+                }
+                else if (id == SEARCH_HOTKEY_ID)
+                {
+                    Debug.WriteLine("[HOTKEY] Buscador detectado");
+                    SearchHotkeyPressed?.Invoke(this, EventArgs.Empty);
+                }
             }
 
             return DefWindowProc(hWnd, msg, wParam, lParam);
         }
-
         public void Pause()
         {
-            if (_hwnd == IntPtr.Zero || !_registered) return;
+            if (_hwnd == IntPtr.Zero)
+                return;
 
-            UnregisterHotKey(_hwnd, HOTKEY_ID);
-            _registered = false;
-            Debug.WriteLine("[HOTKEY] Pausado temporalmente");
+            if (_registered)
+            {
+                UnregisterHotKey(_hwnd, MIC_HOTKEY_ID);
+                _registered = false;
+            }
+
+            if (_searchRegistered)
+            {
+                UnregisterHotKey(_hwnd, SEARCH_HOTKEY_ID);
+                _searchRegistered = false;
+            }
         }
 
         public void Resume()
         {
-            if (_hwnd == IntPtr.Zero || _registered) return;
+            if (_hwnd == IntPtr.Zero)
+                return;
+
+            if (_registered && _searchRegistered)
+                return;
+
+            if (_registered)
+            {
+                UnregisterHotKey(_hwnd, MIC_HOTKEY_ID);
+                _registered = false;
+            }
+
+            if (_searchRegistered)
+            {
+                UnregisterHotKey(_hwnd, SEARCH_HOTKEY_ID);
+                _searchRegistered = false;
+            }
 
             RegisterCurrentHotkey();
             Debug.WriteLine("[HOTKEY] Reanudado");

@@ -10,7 +10,9 @@ namespace Anfeta.UI.Services
         private string _inputDeviceName = "No configurado";
         private string _outputDeviceName = "No configurado";
         private uint _hotkeyModifiers = 0x0003; // Ctrl+Alt
-        private uint _hotkeyKey = 0x56;   // V
+        private uint _hotkeyKey = 0x56;   // V 
+        private uint _searchHotkeyModifiers = 0x0003; // Ctrl + Alt
+        private uint _searchHotkeyKey = 0x42;         // B
 
         // Email del usuario autenticado. Poblado desde el JWT al arranque.
         private string? _currentUserEmail;
@@ -97,6 +99,31 @@ namespace Anfeta.UI.Services
                 field = value;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
             }
+        }
+        public uint SearchHotkeyModifiers
+        {
+            get => _searchHotkeyModifiers;
+            set => SetField(ref _searchHotkeyModifiers, value);
+        }
+
+        public uint SearchHotkeyKey
+        {
+            get => _searchHotkeyKey;
+            set => SetField(ref _searchHotkeyKey, value);
+        }
+        public string GetSearchHotkeyDisplayString()
+        {
+            var parts = new System.Collections.Generic.List<string>();
+
+            if ((_searchHotkeyModifiers & 0x0002) != 0) parts.Add("Ctrl");
+            if ((_searchHotkeyModifiers & 0x0001) != 0) parts.Add("Alt");
+            if ((_searchHotkeyModifiers & 0x0004) != 0) parts.Add("Shift");
+            if ((_searchHotkeyModifiers & 0x0008) != 0) parts.Add("Win");
+
+            var keyName = ((System.Windows.Forms.Keys)_searchHotkeyKey).ToString();
+            parts.Add(keyName);
+
+            return string.Join(" + ", parts);
         }
     }
 }

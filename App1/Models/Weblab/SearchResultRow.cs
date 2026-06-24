@@ -30,6 +30,7 @@ namespace Anfeta.UI.Models.Weblab
         public string ExternalUrl { get; set; } = "";
         public string SearchText { get; set; } = "";
         public string Description { get; set; } = "";
+        public string ExternalSourceName { get; set; } = "";
 
         private string _name = "";
         public string Name

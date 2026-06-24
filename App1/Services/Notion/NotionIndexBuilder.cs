@@ -17,11 +17,12 @@ namespace Anfeta.UI.Services.Notion
         private const string NotionVersion = "2026-03-11";
 
         public static async Task<List<SearchResultRow>> BuildAsync(
-        string token,
-        string dataSourceId,
-        CancellationToken ct = default,
-        int? maxItems = null,
-        DateTimeOffset? lastEditedAfterUtc = null) 
+            string token,
+            string dataSourceId,
+            CancellationToken ct = default,
+            int? maxItems = null,
+            DateTimeOffset? lastEditedAfterUtc = null,
+            string sourceName = "Notion")
         {
             if (string.IsNullOrWhiteSpace(token))
                 throw new ArgumentException("Token de Notion vacío.");
@@ -122,7 +123,7 @@ namespace Anfeta.UI.Services.Notion
                     foreach (var page in pages.EnumerateArray())
                     {
                         ct.ThrowIfCancellationRequested();
-                        results.Add(MapPageToSearchRow(page));
+                        results.Add(MapPageToSearchRow(page, sourceName));
 
                         if (maxItems.HasValue && results.Count >= maxItems.Value)
                             break;
@@ -144,11 +145,11 @@ namespace Anfeta.UI.Services.Notion
             return results;
         }
         public static Task<List<SearchResultRow>> BuildChangedSinceAsync(
-    string token,
-    string dataSourceId,
-    DateTimeOffset lastSyncUtc,
-    CancellationToken ct = default,
-    int? maxItems = null)
+            string token,
+            string dataSourceId,
+            DateTimeOffset lastSyncUtc,
+            CancellationToken ct = default,
+            int? maxItems = null)
         {
             return BuildAsync(
                 token,
@@ -173,7 +174,7 @@ namespace Anfeta.UI.Services.Notion
 
             return changes.Count > 0;
         }
-        private static SearchResultRow MapPageToSearchRow(JsonElement page)
+        private static SearchResultRow MapPageToSearchRow(JsonElement page, string sourceName)
         {
             var pageId = GetString(page, "id");
             var pageUrl = GetString(page, "url");
@@ -208,25 +209,9 @@ namespace Anfeta.UI.Services.Notion
 
             var searchParts = new[]
             {
+                sourceName,
                 title,
-                description,
-                hasProps ? GetPropText(props, "Nombre Sync") : "",
-                hasProps ? GetPropText(props, "Texto proyecto") : "",
-                hasProps ? GetPropText(props, "Dominio") : "",
-                hasProps ? GetPropText(props, "Estado entregable") : "",
-                hasProps ? GetPropText(props, "Estado operativo") : "",
-                hasProps ? GetPropText(props, "Estado de Cobro") : "",
-                hasProps ? GetPropText(props, "Tipo de Proyecto") : "",
-                hasProps ? GetPropText(props, "TAGS Keywords (buscador tartamudo)") : "",
-                hasProps ? GetPropText(props, "tags etiquetas") : "",
-                hasProps ? GetPropText(props, "Comentario") : "",
-                hasProps ? GetPropText(props, "Drive File ID") : "",
-                hasProps ? GetPropText(props, "Drive_URL") : "",
-                hasProps ? GetPropText(props, "Formula Proyecto/Revisión") : "",
-                hasProps ? GetPropText(props, "Actividad Programada") : "",
-                hasProps ? GetPropText(props, "Assignee/ Ejecutor Principal") : "",
-                pageId,
-                pageUrl
+                description
             };
 
             return new SearchResultRow
@@ -234,7 +219,8 @@ namespace Anfeta.UI.Services.Notion
                 NodeId = pageId,
                 ExternalId = pageId,
                 ExternalUrl = pageUrl,
-                Name = title.Trim(),
+                ExternalSourceName = sourceName,
+                Name = FormatDisplayName(title, sourceName),
                 Target = pageUrl,
                 Type = "NOTION_PAGE",
                 Size = 0,
@@ -245,6 +231,20 @@ namespace Anfeta.UI.Services.Notion
             };
         }
 
+        private static string FormatDisplayName(string title, string sourceName)
+        {
+            var cleanTitle = string.IsNullOrWhiteSpace(title)
+                ? "Página Notion"
+                : title.Trim();
+
+            if (string.IsNullOrWhiteSpace(sourceName))
+                return cleanTitle;
+
+            if (cleanTitle.StartsWith($"[{sourceName}]", StringComparison.OrdinalIgnoreCase))
+                return cleanTitle;
+
+            return $"[{sourceName}] {cleanTitle}";
+        }
         private static string GetPropText(JsonElement props, string propName)
         {
             foreach (var prop in props.EnumerateObject())
@@ -477,6 +477,74 @@ namespace Anfeta.UI.Services.Notion
                 return "";
 
             return id.Length <= 8 ? id : id[..8];
+        }
+        public static async Task<List<SearchResultRow>> BuildManyAsync(
+            string token,
+            IEnumerable<NotionDataSourceConfig> dataSources,
+            CancellationToken ct = default,
+            int? maxItemsPerSource = null,
+            DateTimeOffset? lastEditedAfterUtc = null)
+        {
+            var all = new List<SearchResultRow>();
+
+            foreach (var source in dataSources.Where(x =>
+                         x.Enabled &&
+                         !string.IsNullOrWhiteSpace(x.DataSourceId)))
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var rows = await BuildAsync(
+                    token,
+                    source.DataSourceId,
+                    ct,
+                    maxItemsPerSource,
+                    lastEditedAfterUtc,
+                    source.Name);
+
+                all.AddRange(rows);
+            }
+
+            return all;
+        }
+        public static async Task<bool> HasAnyChangesSinceAsync(
+            string token,
+            IEnumerable<NotionDataSourceConfig> dataSources,
+            DateTimeOffset lastSyncUtc,
+            CancellationToken ct = default)
+        {
+            foreach (var source in dataSources.Where(x =>
+                         x.Enabled &&
+                         !string.IsNullOrWhiteSpace(x.DataSourceId)))
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var changes = await BuildAsync(
+                    token,
+                    source.DataSourceId,
+                    ct,
+                    maxItems: 1,
+                    lastEditedAfterUtc: lastSyncUtc,
+                    sourceName: source.Name);
+
+                if (changes.Count > 0)
+                    return true;
+            }
+
+            return false;
+        }
+        public static Task<List<SearchResultRow>> BuildManyChangedSinceAsync(
+            string token,
+            IEnumerable<NotionDataSourceConfig> dataSources,
+            DateTimeOffset lastSyncUtc,
+            CancellationToken ct = default,
+            int? maxItemsPerSource = null)
+        {
+            return BuildManyAsync(
+                token,
+                dataSources,
+                ct,
+                maxItemsPerSource,
+                lastEditedAfterUtc: lastSyncUtc);
         }
     }
 }

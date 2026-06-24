@@ -21,68 +21,68 @@
         </Grid.RowDefinitions>
 
         <!--
-    ═══════════════════════════════════════════════════════
-    ROW 0 · TOP BAR
-    ═══════════════════════════════════════════════════════
--->
+            ═══════════════════════════════════════════════════════
+            ROW 0 · TOP BAR
+            ═══════════════════════════════════════════════════════
+        -->
         <Grid
-    Grid.Row="0"
-    Padding="8,0"
-    Background="{ThemeResource LayerFillColorDefaultBrush}"
-    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-    BorderThickness="0,0,0,1"
-    ColumnSpacing="6">
+            Grid.Row="0"
+            Padding="8,0"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1"
+            ColumnSpacing="6">
 
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <!-- SearchBox -->
+                <!--  SearchBox  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Micrófono -->
+                <!--  Micrófono  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Ayuda -->
+                <!--  Ayuda  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Separador -->
+                <!--  Separador  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Filtros -->
+                <!--  Filtros  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Detalles -->
+                <!--  Detalles  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Actualizar Notion -->
+                <!--  Actualizar Notion  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Última sync -->
+                <!--  Última sync  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Separador -->
+                <!--  Separador  -->
                 <ColumnDefinition Width="160" />
-                <!-- SortCombo -->
+                <!--  SortCombo  -->
                 <ColumnDefinition Width="Auto" />
-                <!-- Menú -->
+                <!--  Menú  -->
             </Grid.ColumnDefinitions>
 
-            <!-- Búsqueda -->
+            <!--  Búsqueda  -->
             <AutoSuggestBox
-        x:Name="SearchBox"
-        Grid.Column="0"
-        VerticalAlignment="Center"
-        PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
-        QueryIcon="Find"
-        QuerySubmitted="SearchBox_QuerySubmitted"
-        TextChanged="SearchBox_TextChanged" />
+                x:Name="SearchBox"
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
+                QueryIcon="Find"
+                QuerySubmitted="SearchBox_QuerySubmitted"
+                TextChanged="SearchBox_TextChanged" />
 
-            <!-- Micrófono -->
+            <!--  Micrófono  -->
             <Grid
-        Grid.Column="1"
-        Width="70"
-        Height="32"
-        VerticalAlignment="Center">
+                Grid.Column="1"
+                Width="70"
+                Height="32"
+                VerticalAlignment="Center">
 
                 <muxc:SplitButton
-            x:Name="VoiceSplit"
-            Height="32"
-            Padding="6,0"
-            HorizontalContentAlignment="Center"
-            Click="VoiceSplit_Click"
-            CornerRadius="7"
-            ToolTipService.ToolTip="Voz">
+                    x:Name="VoiceSplit"
+                    Height="32"
+                    Padding="6,0"
+                    HorizontalContentAlignment="Center"
+                    Click="VoiceSplit_Click"
+                    CornerRadius="7"
+                    ToolTipService.ToolTip="Voz">
 
                     <muxc:SplitButton.Content>
                         <SymbolIcon Symbol="Microphone" />
@@ -97,72 +97,72 @@
                 </muxc:SplitButton>
 
                 <ProgressRing
-            x:Name="VoiceRing"
-            Width="14"
-            Height="14"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            IsActive="False"
-            Visibility="Collapsed" />
+                    x:Name="VoiceRing"
+                    Width="14"
+                    Height="14"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    IsActive="False"
+                    Visibility="Collapsed" />
             </Grid>
 
-            <!-- Ayuda -->
+            <!--  Ayuda  -->
             <Button
-        x:Name="BtnHelp"
-        Grid.Column="2"
-        Width="32"
-        Height="32"
-        VerticalAlignment="Center"
-        Click="MenuHelp_Click"
-        Content="?"
-        CornerRadius="6"
-        FontWeight="SemiBold"
-        ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
+                x:Name="BtnHelp"
+                Grid.Column="2"
+                Width="32"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="MenuHelp_Click"
+                Content="?"
+                CornerRadius="6"
+                FontWeight="SemiBold"
+                ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
 
-            <!-- Separador -->
+            <!--  Separador  -->
             <Border
-        Grid.Column="3"
-        Width="1"
-        Height="18"
-        VerticalAlignment="Center"
-        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                Grid.Column="3"
+                Width="1"
+                Height="18"
+                VerticalAlignment="Center"
+                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-            <!-- Toggle Filtros -->
+            <!--  Toggle Filtros  -->
             <ToggleButton
-        x:Name="ToggleFoldersPane"
-        Grid.Column="4"
-        Height="32"
-        VerticalAlignment="Center"
-        Click="ToggleFoldersPane_Click"
-        Content="Filtros"
-        CornerRadius="6"
-        IsChecked="True"
-        ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
+                x:Name="ToggleFoldersPane"
+                Grid.Column="4"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="ToggleFoldersPane_Click"
+                Content="Filtros"
+                CornerRadius="6"
+                IsChecked="True"
+                ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
 
-            <!-- Toggle Detalles -->
+            <!--  Toggle Detalles  -->
             <ToggleButton
-        x:Name="ToggleDetailsPane"
-        Grid.Column="5"
-        Height="32"
-        VerticalAlignment="Center"
-        Click="ToggleDetailsPane_Click"
-        Content="Detalles"
-        CornerRadius="6"
-        IsChecked="True"
-        ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
+                x:Name="ToggleDetailsPane"
+                Grid.Column="5"
+                Height="32"
+                VerticalAlignment="Center"
+                Click="ToggleDetailsPane_Click"
+                Content="Detalles"
+                CornerRadius="6"
+                IsChecked="True"
+                ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
 
-            <!-- Actualizar Notion -->
+            <!--  Actualizar Notion  -->
             <Button
-        x:Name="BtnRefreshNotion"
-        Grid.Column="6"
-        Height="32"
-        Padding="12,0"
-        VerticalAlignment="Center"
-        Background="#FFB020"
-        Click="BtnRefreshNotion_Click"
-        CornerRadius="8"
-        Foreground="Black"
-        Visibility="Collapsed">
+                x:Name="BtnRefreshNotion"
+                Grid.Column="6"
+                Height="32"
+                Padding="12,0"
+                VerticalAlignment="Center"
+                Background="#FFB020"
+                Click="BtnRefreshNotion_Click"
+                CornerRadius="8"
+                Foreground="Black"
+                Visibility="Collapsed">
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon FontSize="14" Glyph="&#xE895;" />
@@ -170,34 +170,34 @@
                 </StackPanel>
             </Button>
 
-            <!-- Última sincronización Notion -->
+            <!--  Última sincronización Notion  -->
             <TextBlock
-    x:Name="NotionSyncInfoText"
-    Grid.Column="7"
-    MaxWidth="130"
-    VerticalAlignment="Center"
-    FontSize="11"
-    Foreground="#AFAFAF"
-    Text=""
-    TextTrimming="CharacterEllipsis"
-    ToolTipService.ToolTip="{Binding Text, ElementName=NotionSyncInfoText}" />
+                x:Name="NotionSyncInfoText"
+                Grid.Column="7"
+                MaxWidth="130"
+                VerticalAlignment="Center"
+                FontSize="11"
+                Foreground="#AFAFAF"
+                Text=""
+                TextTrimming="CharacterEllipsis"
+                ToolTipService.ToolTip="{Binding Text, ElementName=NotionSyncInfoText}" />
 
-            <!-- Separador -->
+            <!--  Separador  -->
             <Border
-        Grid.Column="8"
-        Width="1"
-        Height="18"
-        VerticalAlignment="Center"
-        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                Grid.Column="8"
+                Width="1"
+                Height="18"
+                VerticalAlignment="Center"
+                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-            <!-- Ordenar por -->
+            <!--  Ordenar por  -->
             <ComboBox
-        x:Name="SortCombo"
-        Grid.Column="9"
-        Height="32"
-        VerticalAlignment="Center"
-        PlaceholderText="Ordenar por"
-        SelectionChanged="SortCombo_SelectionChanged">
+                x:Name="SortCombo"
+                Grid.Column="9"
+                Height="32"
+                VerticalAlignment="Center"
+                PlaceholderText="Ordenar por"
+                SelectionChanged="SortCombo_SelectionChanged">
 
                 <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
                 <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
@@ -207,14 +207,14 @@
                 <ComboBoxItem Content="Tamaño (menor)" Tag="size_asc" />
             </ComboBox>
 
-            <!-- Menú ⋯ -->
+            <!--  Menú ⋯  -->
             <Button
-        Grid.Column="10"
-        Width="36"
-        Height="32"
-        VerticalAlignment="Center"
-        Content="⋯"
-        CornerRadius="6">
+                Grid.Column="10"
+                Width="36"
+                Height="32"
+                VerticalAlignment="Center"
+                Content="⋯"
+                CornerRadius="6">
 
                 <Button.Flyout>
                     <MenuFlyout>
@@ -253,54 +253,7 @@
                 Orientation="Horizontal"
                 Spacing="4">
 
-                <ToggleButton
-                    x:Name="ChipPdf"
-                    Height="22"
-                    Padding="10,0"
-                    Click="ChipFilter_Click"
-                    Content="PDF"
-                    CornerRadius="11" />
-
-                <ToggleButton
-                    x:Name="ChipDocx"
-                    Height="22"
-                    Padding="10,0"
-                    Click="ChipFilter_Click"
-                    Content="DOCX"
-                    CornerRadius="11" />
-
-                <ToggleButton
-                    x:Name="ChipXlsx"
-                    Height="22"
-                    Padding="10,0"
-                    Click="ChipFilter_Click"
-                    Content="XLSX"
-                    CornerRadius="11" />
-
-                <ToggleButton
-                    x:Name="ChipImg"
-                    Height="22"
-                    Padding="10,0"
-                    Click="ChipFilter_Click"
-                    Content="IMG"
-                    CornerRadius="11" />
-
-                <ToggleButton
-                    x:Name="ChipUrl"
-                    Height="22"
-                    Padding="10,0"
-                    Click="ChipFilter_Click"
-                    Content="URL"
-                    CornerRadius="11" />
-
-                <!--  Separador visual  -->
-                <Border
-                    Width="1"
-                    Height="14"
-                    Margin="4,0"
-                    VerticalAlignment="Center"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
+                <!--  Favoritos se queda  -->
                 <ToggleButton
                     x:Name="ChipBookmarks"
                     Height="22"
@@ -309,22 +262,85 @@
                     Content="⭐ Favoritos"
                     CornerRadius="11" />
 
+                <Border
+                    Width="1"
+                    Height="14"
+                    Margin="4,0"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                <!--  Filtros por base Notion  -->
                 <ToggleButton
-                    x:Name="ChipRecent"
+                    x:Name="ChipBaseAll"
                     Height="22"
                     Padding="10,0"
-                    Click="ChipFilter_Click"
-                    Content="Recientes"
-                    CornerRadius="11" />
+                    Click="ChipBaseFilter_Click"
+                    Content="Todo"
+                    CornerRadius="11"
+                    Tag="" />
 
                 <ToggleButton
-                    x:Name="ChipFolders"
+                    x:Name="ChipBaseRevisiones"
                     Height="22"
                     Padding="10,0"
-                    Click="ChipFilter_Click"
-                    Content="Solo carpetas"
-                    CornerRadius="11" />
+                    Click="ChipBaseFilter_Click"
+                    Content="Revisiones"
+                    CornerRadius="11"
+                    Tag="Revisiones" />
 
+                <ToggleButton
+                    x:Name="ChipBaseClientes"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipBaseFilter_Click"
+                    Content="Clientes"
+                    CornerRadius="11"
+                    Tag="Clientes" />
+
+                <ToggleButton
+                    x:Name="ChipBaseDominios"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipBaseFilter_Click"
+                    Content="Dominios"
+                    CornerRadius="11"
+                    Tag="Dominios" />
+
+                <ToggleButton
+                    x:Name="ChipBaseProgramas"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipBaseFilter_Click"
+                    Content="Programas"
+                    CornerRadius="11"
+                    Tag="Programas y proyectos" />
+
+                <ToggleButton
+                    x:Name="ChipBaseCobrar"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipBaseFilter_Click"
+                    Content="Cobrar/Pagar"
+                    CornerRadius="11"
+                    Tag="Cobrar y pagar" />
+
+                <ToggleButton
+                    x:Name="ChipBaseCorreos"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipBaseFilter_Click"
+                    Content="Correos"
+                    CornerRadius="11"
+                    Tag="Correos Contraseñas" />
+            </StackPanel>
+            <StackPanel Visibility="Collapsed">
+                <ToggleButton x:Name="ChipPdf" />
+                <ToggleButton x:Name="ChipDocx" />
+                <ToggleButton x:Name="ChipXlsx" />
+                <ToggleButton x:Name="ChipImg" />
+                <ToggleButton x:Name="ChipUrl" />
+                <ToggleButton x:Name="ChipRecent" />
+                <ToggleButton x:Name="ChipFolders" />
             </StackPanel>
 
             <!--
@@ -897,50 +913,48 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                         <ListView.ContextFlyout>
-                            <MenuFlyout
-        x:Name="ResultsContextFlyout"
-        Opening="ResultsContextFlyout_Opening">
+                            <MenuFlyout x:Name="ResultsContextFlyout" Opening="ResultsContextFlyout_Opening">
 
                                 <MenuFlyoutItem
-            x:Name="CtxMenuOpenItem"
-            Click="CtxOpen_Click"
-            Text="Abrir" />
+                                    x:Name="CtxMenuOpenItem"
+                                    Click="CtxOpen_Click"
+                                    Text="Abrir" />
 
                                 <MenuFlyoutItem
-            x:Name="CtxMenuOpenExplorerItem"
-            Click="CtxOpenPath_Click"
-            Text="Abrir en Explorador Local" />
+                                    x:Name="CtxMenuOpenExplorerItem"
+                                    Click="CtxOpenPath_Click"
+                                    Text="Abrir en Explorador Local" />
 
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
-            x:Name="CtxMenuCopyPathItem"
-            Click="CtxCopyPath_Click"
-            Text="Copiar ruta" />
+                                    x:Name="CtxMenuCopyPathItem"
+                                    Click="CtxCopyPath_Click"
+                                    Text="Copiar ruta" />
 
                                 <MenuFlyoutItem
-            x:Name="CtxMenuCopyLinkItem"
-            Click="CtxCopyLink_Click"
-            Text="Copiar link" />
+                                    x:Name="CtxMenuCopyLinkItem"
+                                    Click="CtxCopyLink_Click"
+                                    Text="Copiar link" />
 
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
-            x:Name="CtxMenuRenameItem"
-            Click="CtxRename_Click"
-            Text="Renombrar…" />
+                                    x:Name="CtxMenuRenameItem"
+                                    Click="CtxRename_Click"
+                                    Text="Renombrar…" />
 
                                 <MenuFlyoutItem
-            x:Name="CtxMenuDeleteItem"
-            Click="CtxDelete_Click"
-            Text="Eliminar" />
+                                    x:Name="CtxMenuDeleteItem"
+                                    Click="CtxDelete_Click"
+                                    Text="Eliminar" />
 
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
-            x:Name="CtxMenuBookmarkItem"
-            Click="CtxBookmark_Click"
-            Text="Agregar a Favoritos" />
+                                    x:Name="CtxMenuBookmarkItem"
+                                    Click="CtxBookmark_Click"
+                                    Text="Agregar a Favoritos" />
                             </MenuFlyout>
                         </ListView.ContextFlyout>
                     </ListView>
@@ -1200,15 +1214,15 @@
                             CornerRadius="6"
                             FontSize="11" />
                         <Button
-    x:Name="BtnDetailsLocation"
-    Grid.Column="1"
-    Height="26"
-    HorizontalAlignment="Stretch"
-    VerticalAlignment="Center"
-    Click="BtnDetailsLink_Click"
-    Content="Ubicación"
-    CornerRadius="6"
-    FontSize="11" />
+                            x:Name="BtnDetailsLocation"
+                            Grid.Column="1"
+                            Height="26"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            Click="BtnDetailsLink_Click"
+                            Content="Ubicación"
+                            CornerRadius="6"
+                            FontSize="11" />
                         <Button
                             Grid.Column="2"
                             Width="28"
@@ -1219,25 +1233,21 @@
                             CornerRadius="6"
                             FontSize="13">
                             <Button.Flyout>
-                                <MenuFlyout
-        x:Name="DetailsMoreFlyout"
-        Opening="DetailsMoreFlyout_Opening">
+                                <MenuFlyout x:Name="DetailsMoreFlyout" Opening="DetailsMoreFlyout_Opening">
 
-                                    <MenuFlyoutItem
-            Click="BtnDetailsInfo_Click"
-            Text="Info" />
+                                    <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
 
                                     <MenuFlyoutSeparator />
 
                                     <MenuFlyoutItem
-            x:Name="DetailsRenameItem"
-            Click="CtxRename_Click"
-            Text="Renombrar..." />
+                                        x:Name="DetailsRenameItem"
+                                        Click="CtxRename_Click"
+                                        Text="Renombrar..." />
 
                                     <MenuFlyoutItem
-            x:Name="DetailsDeleteItem"
-            Click="CtxDelete_Click"
-            Text="Eliminar" />
+                                        x:Name="DetailsDeleteItem"
+                                        Click="CtxDelete_Click"
+                                        Text="Eliminar" />
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>
