@@ -65,6 +65,7 @@ namespace Anfeta.UI.Views
         {
             if (SortCombo.SelectedItem is ComboBoxItem cbi && cbi.Tag is string tag)
                 _sortKey = tag;
+            UpdateColumnSortIndicators();
 
             if (_onlyBookmarks)
                 await ShowBookmarksAsync();
@@ -788,6 +789,61 @@ namespace Anfeta.UI.Views
                 _activeNotionBaseFilter = "";
 
             await PaintLoadedIndexAsync();
+        }
+        private async void HeaderNameSort_Click(object sender, RoutedEventArgs e)
+        {
+            _sortKey = _sortKey == "name_asc" ? "name_desc" : "name_asc";
+
+            UpdateColumnSortIndicators();
+
+            if (_onlyBookmarks)
+                await ShowBookmarksAsync();
+            else
+                await RunLocalSearchAsync(SearchBox.Text ?? "");
+
+            FinishUi();
+        }
+
+        private async void HeaderModifiedSort_Click(object sender, RoutedEventArgs e)
+        {
+            _sortKey = _sortKey == "mod_desc" ? "mod_asc" : "mod_desc";
+
+            UpdateColumnSortIndicators();
+
+            if (_onlyBookmarks)
+                await ShowBookmarksAsync();
+            else
+                await RunLocalSearchAsync(SearchBox.Text ?? "");
+
+            FinishUi();
+        }
+
+        private void UpdateColumnSortIndicators()
+        {
+            if (NameSortArrow == null || ModifiedSortArrow == null)
+                return;
+
+            NameSortArrow.Text = "";
+            ModifiedSortArrow.Text = "";
+
+            switch (_sortKey)
+            {
+                case "name_asc":
+                    NameSortArrow.Text = "▲";
+                    break;
+
+                case "name_desc":
+                    NameSortArrow.Text = "▼";
+                    break;
+
+                case "mod_desc":
+                    ModifiedSortArrow.Text = "▼";
+                    break;
+
+                case "mod_asc":
+                    ModifiedSortArrow.Text = "▲";
+                    break;
+            }
         }
     }
 }

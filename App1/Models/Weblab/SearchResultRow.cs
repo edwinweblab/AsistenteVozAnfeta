@@ -106,6 +106,69 @@ namespace Anfeta.UI.Models.Weblab
             }
         }
 
+
+        [JsonIgnore]
+        public string PathColumn
+        {
+            get
+            {
+                if (Source == SearchSource.Notion)
+                {
+                    if (!string.IsNullOrWhiteSpace(ExternalSourceName))
+                        return ExternalSourceName.Trim();
+
+                    return "Notion";
+                }
+
+                var folder = System.IO.Path.GetDirectoryName(Target ?? string.Empty);
+                return string.IsNullOrWhiteSpace(folder) ? "Archivos locales" : folder;
+            }
+        }
+
+        [JsonIgnore]
+        public string DateModifiedColumn
+        {
+            get
+            {
+                if (DateTime.TryParse(ServerModified, out var dt))
+                    return dt.ToString("dd/MM/yyyy");
+
+                return "-";
+            }
+        }
+
+        [JsonIgnore]
+        public string SizeColumn
+        {
+            get
+            {
+                if (Source == SearchSource.Notion)
+                    return "-";
+
+                return FormatSize(Size);
+            }
+        }
+
+        private static string FormatSize(long bytes)
+        {
+            if (bytes <= 0)
+                return "";
+
+            string[] units = { "B", "KB", "MB", "GB", "TB" };
+            double size = bytes;
+            int unit = 0;
+
+            while (size >= 1024 && unit < units.Length - 1)
+            {
+                size /= 1024;
+                unit++;
+            }
+
+            return unit == 0
+                ? $"{bytes} B"
+                : $"{size:0.#} {units[unit]}";
+        }
+
         private string BuildDisplayName()
         {
             var clean = (Name ?? string.Empty).Trim();

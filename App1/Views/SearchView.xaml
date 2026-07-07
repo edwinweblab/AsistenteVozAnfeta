@@ -8,12 +8,6 @@
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
-    <Page.Resources>
-        <CollectionViewSource
-            x:Name="GroupedResultsSource"
-            IsSourceGrouped="True" />
-    </Page.Resources>
-
     <Grid x:Name="RootLayout" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="42" />
@@ -56,10 +50,6 @@
                 <!--  Actualizar Notion  -->
                 <ColumnDefinition Width="Auto" />
                 <!--  Última sync  -->
-                <ColumnDefinition Width="Auto" />
-                <!--  Separador  -->
-                <ColumnDefinition Width="160" />
-                <!--  SortCombo  -->
                 <ColumnDefinition Width="Auto" />
                 <!--  Menú  -->
             </Grid.ColumnDefinitions>
@@ -188,34 +178,9 @@
                 TextTrimming="CharacterEllipsis"
                 ToolTipService.ToolTip="{Binding Text, ElementName=NotionSyncInfoText}" />
 
-            <!--  Separador  -->
-            <Border
-                Grid.Column="8"
-                Width="1"
-                Height="18"
-                VerticalAlignment="Center"
-                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-            <!--  Ordenar por  -->
-            <ComboBox
-                x:Name="SortCombo"
-                Grid.Column="9"
-                Height="32"
-                VerticalAlignment="Center"
-                PlaceholderText="Ordenar por"
-                SelectionChanged="SortCombo_SelectionChanged">
-
-                <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
-                <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
-                <ComboBoxItem Content="Modificado (nuevo)" Tag="mod_desc" />
-                <ComboBoxItem Content="Modificado (antiguo)" Tag="mod_asc" />
-                <ComboBoxItem Content="Tamaño (mayor)" Tag="size_desc" />
-                <ComboBoxItem Content="Tamaño (menor)" Tag="size_asc" />
-            </ComboBox>
-
             <!--  Menú ⋯  -->
             <Button
-                Grid.Column="10"
+                Grid.Column="8"
                 Width="36"
                 Height="32"
                 VerticalAlignment="Center"
@@ -235,6 +200,17 @@
                     </MenuFlyout>
                 </Button.Flyout>
             </Button>
+
+            <!--  SortCombo oculto: se conserva solo para compatibilidad con el code-behind.  -->
+            <ComboBox
+                x:Name="SortCombo"
+                Visibility="Collapsed"
+                SelectionChanged="SortCombo_SelectionChanged">
+                <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
+                <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
+                <ComboBoxItem Content="Modificado (nuevo)" Tag="mod_desc" />
+                <ComboBoxItem Content="Modificado (antiguo)" Tag="mod_asc" />
+            </ComboBox>
         </Grid>
 
 
@@ -776,6 +752,8 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="30" />
                     <!--  Cabecera: breadcrumb + voz  -->
+                    <RowDefinition Height="28" />
+                    <!--  Encabezado de columnas estilo Everything  -->
                     <RowDefinition Height="*" />
                     <!--  Lista de resultados  -->
                     <RowDefinition Height="30" />
@@ -853,8 +831,90 @@
                     </StackPanel>
                 </Grid>
 
-                <!--  Lista de resultados  -->
-                <Grid Grid.Row="1">
+                <!--  Encabezados de columnas estilo Everything  -->
+                <Grid
+                    Grid.Row="1"
+                    Padding="10,0"
+                    Background="#202020"
+                    BorderBrush="#3A3A3A"
+                    BorderThickness="0,0,0,1"
+                    ColumnSpacing="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="130" />
+                        <ColumnDefinition Width="36" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        Foreground="#D6D6D6"
+                        Text="Path" />
+
+                    <!--  Ordenar por nombre A-Z / Z-A  -->
+                    <Button
+                        x:Name="HeaderNameSortButton"
+                        Grid.Column="1"
+                        Padding="0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="HeaderNameSort_Click"
+                        ToolTipService.ToolTip="Ordenar por nombre">
+                        <StackPanel
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="5">
+                            <TextBlock
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="#D6D6D6"
+                                Text="Name" />
+                            <TextBlock
+                                x:Name="NameSortArrow"
+                                FontSize="10"
+                                Foreground="#D6D6D6"
+                                Text="▲" />
+                        </StackPanel>
+                    </Button>
+
+                    <!--  Ordenar por fecha reciente / antigua  -->
+                    <Button
+                        x:Name="HeaderModifiedSortButton"
+                        Grid.Column="2"
+                        Padding="0"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="HeaderModifiedSort_Click"
+                        ToolTipService.ToolTip="Ordenar por fecha modificada">
+                        <StackPanel
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="5">
+                            <TextBlock
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="#D6D6D6"
+                                Text="Date Modified" />
+                            <TextBlock
+                                x:Name="ModifiedSortArrow"
+                                FontSize="10"
+                                Foreground="#D6D6D6"
+                                Text="" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!--  Lista de resultados estilo Everything  -->
+                <Grid Grid.Row="2">
                     <ProgressRing
                         x:Name="LoadingRing"
                         HorizontalAlignment="Center"
@@ -864,108 +924,112 @@
 
                     <ListView
                         x:Name="ResultsList"
-                        ItemsSource="{Binding Source={StaticResource GroupedResultsSource}}"
                         DoubleTapped="ResultsList_DoubleTapped"
+                        ItemsSource="{x:Bind Results, Mode=OneWay}"
                         RightTapped="ResultsList_RightTapped"
                         SelectionChanged="ResultsList_SelectionChanged"
                         SelectionMode="Single">
-                        <ListView.GroupStyle>
-                            <GroupStyle>
-                                <GroupStyle.HeaderTemplate>
-                                    <DataTemplate>
-                                        <Border
-                                            Margin="0,10,0,4"
-                                            Padding="12,6"
-                                            Background="#252525"
-                                            BorderBrush="#3A3A3A"
-                                            BorderThickness="0,0,0,1"
-                                            CornerRadius="6">
 
-                                            <TextBlock
-                                                FontSize="12"
-                                                FontWeight="SemiBold"
-                                                Foreground="#FFFFFF"
-                                                Text="{Binding HeaderText}" />
-                                        </Border>
-                                    </DataTemplate>
-                                </GroupStyle.HeaderTemplate>
-                            </GroupStyle>
-                        </ListView.GroupStyle>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
-                                <Setter Property="Padding" Value="10,4" />
-                                <Setter Property="MinHeight" Value="54" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="MinHeight" Value="28" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="BorderBrush" Value="#2F2F2F" />
+                                <Setter Property="BorderThickness" Value="0,0,0,1" />
                             </Style>
                         </ListView.ItemContainerStyle>
+
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchResultRow">
-                                <Border
-                                    Padding="10,8"
-                                    Background="#242424"
-                                    BorderBrush="#353535"
-                                    BorderThickness="1"
-                                    CornerRadius="7">
+                                <Grid
+                                    Height="28"
+                                    Padding="10,0"
+                                    ColumnSpacing="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="36" />
+                                    </Grid.ColumnDefinitions>
 
-                                    <Grid ColumnSpacing="10">
+                                    <!--  Path: en Notion muestra la base correspondiente  -->
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        VerticalAlignment="Center"
+                                        FontFamily="Consolas"
+                                        FontSize="12"
+                                        Foreground="#B8B8B8"
+                                        Text="{x:Bind PathColumn, Mode=OneWay}"
+                                        MaxLines="1"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="NoWrap" />
+
+                                    <!--  Name  -->
+                                    <Grid
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        ColumnSpacing="7">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
 
-                                        <IconSourceElement
+                                        <FontIcon
                                             Grid.Column="0"
-                                            Width="18"
-                                            Height="18"
-                                            Margin="0,2,0,0"
-                                            VerticalAlignment="Top"
-                                            IconSource="{x:Bind Icon, Mode=OneWay}" />
-
-                                        <StackPanel
-                                            Grid.Column="1"
-                                            Spacing="3"
-                                            VerticalAlignment="Center">
-
-                                            <TextBlock
-                                                x:Name="NameText"
-                                                DataContextChanged="NameText_DataContextChanged"
-                                                FontSize="12.5"
-                                                FontWeight="SemiBold"
-                                                TextTrimming="CharacterEllipsis" />
-
-                                            <TextBlock
-                                                FontSize="11"
-                                                Foreground="#AFAFAF"
-                                                Text="{x:Bind ResultSummary, Mode=OneWay}"
-                                                TextTrimming="CharacterEllipsis" />
-
-                                            <TextBlock
-                                                FontSize="10"
-                                                Foreground="#777777"
-                                                Text="{x:Bind ModifiedLabel, Mode=OneWay}"
-                                                TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-
-                                        <Button
-                                            Grid.Column="2"
-                                            Width="30"
-                                            Height="28"
-                                            Padding="0"
-                                            HorizontalContentAlignment="Center"
-                                            VerticalContentAlignment="Center"
-                                            Background="Transparent"
-                                            BorderThickness="0"
-                                            Click="BtnStar_Click"
-                                            Content="{x:Bind StarGlyph, Mode=OneWay}"
+                                            Width="14"
+                                            Height="14"
+                                            VerticalAlignment="Center"
+                                            FontFamily="Segoe MDL2 Assets"
                                             FontSize="12"
-                                            Tag="{x:Bind}"
-                                            ToolTipService.ToolTip="Agregar / quitar Favorito" />
+                                            Foreground="#B8B8B8"
+                                            Glyph="&#xE774;" />
+
+                                        <TextBlock
+                                            x:Name="NameText"
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            DataContextChanged="NameText_DataContextChanged"
+                                            FontFamily="Consolas"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Foreground="#F2F2F2"
+                                            MaxLines="1"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap" />
                                     </Grid>
-                                </Border>
+
+                                    <!--  Date Modified  -->
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        VerticalAlignment="Center"
+                                        FontFamily="Consolas"
+                                        FontSize="12"
+                                        Foreground="#B8B8B8"
+                                        Text="{x:Bind DateModifiedColumn, Mode=OneWay}"
+                                        MaxLines="1"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="NoWrap" />
+
+                                    <!--  Favorito  -->
+                                    <Button
+                                        Grid.Column="3"
+                                        Width="28"
+                                        Height="24"
+                                        Padding="0"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Click="BtnStar_Click"
+                                        Content="{x:Bind StarGlyph, Mode=OneWay}"
+                                        FontSize="11"
+                                        Tag="{x:Bind}"
+                                        ToolTipService.ToolTip="Agregar / quitar Favorito" />
+                                </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
+
                         <ListView.ContextFlyout>
                             <MenuFlyout x:Name="ResultsContextFlyout" Opening="ResultsContextFlyout_Opening">
 
@@ -1025,7 +1089,7 @@
 
                 <!--  Paginación — altura fija 30px para que nunca se corte  -->
                 <Grid
-                    Grid.Row="2"
+                    Grid.Row="3"
                     Padding="8,0"
                     Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"

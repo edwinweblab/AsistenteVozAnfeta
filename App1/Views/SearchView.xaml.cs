@@ -61,7 +61,7 @@ namespace Anfeta.UI.Views
         private bool _onlyBookmarks = false;
         private bool _onlyFolders = false;
         private string? _extFilter = null;
-        private string _sortKey = "name_asc";
+        private string _sortKey = "mod_desc";
 
         // debounce / tokens
         private DispatcherTimer? _searchDebounceTimer;
@@ -249,7 +249,7 @@ namespace Anfeta.UI.Views
             // La suscripción a StateChanged vive SOLO en SearchView_Loaded bajo _isIndexStateHooked.
             // No se suscribe aquí para evitar handler duplicado y memory leak.
 
-            GroupedResultsSource.Source = _resultGroups;
+            ResultsList.ItemsSource = Results;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
 
             Loaded += SearchView_Loaded;
@@ -279,6 +279,7 @@ namespace Anfeta.UI.Views
 
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
+            UpdateColumnSortIndicators();
             // Suscripción única controlada por flag — evita duplicados si Loaded se dispara más de una vez
             if (!_isIndexStateHooked)
             {
@@ -404,14 +405,8 @@ namespace Anfeta.UI.Views
         #endregion
         private void RefreshResultsListView()
         {
-            _resultGroups.Clear();
-
-            var rows = Results.ToList();
-
-            foreach (var group in BuildResultGroups(rows))
-                _resultGroups.Add(group);
-
-            GroupedResultsSource.Source = _resultGroups;
+            ResultsList.ItemsSource = null;
+            ResultsList.ItemsSource = Results;
         }
 
         private IEnumerable<SearchResultGroup> BuildResultGroups(List<SearchResultRow> rows)

@@ -371,9 +371,71 @@ namespace Anfeta.UI.Views
         {
             return _sortKey switch
             {
-                "name_desc" => items.OrderByDescending(x => x.Name),
-                _ => items.OrderBy(x => x.Name)
+                "name_desc" => items
+                    .OrderByDescending(x => x.DisplayName ?? x.Name),
+
+                "mod_desc" => items
+                    .OrderByDescending(x => ParseModifiedForSort(x.ServerModified)),
+
+                "mod_asc" => items
+                    .OrderBy(x => ParseModifiedForSort(x.ServerModified)),
+
+                _ => items
+                    .OrderBy(x => x.DisplayName ?? x.Name)
             };
+        }
+
+
+        private int GetSearchRelevanceRank(
+            Anfeta.UI.Models.Weblab.SearchResultRow row,
+            string query)
+        {
+            var name = row.DisplayName ?? row.Name ?? "";
+            var normalizedName = NormalizeForRank(name);
+            var normalizedQuery = NormalizeForRank(query);
+
+            var fullText = string.Join(" ", new[]
+            {
+        row.DisplayName,
+        row.Name,
+        row.PathColumn,
+        row.SearchText,
+        row.Description,
+        row.Target
+    }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+            var terms = SplitAutoAndTerms(query);
+
+            if (string.Equals(normalizedName, normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                return 0;
+
+            if (normalizedName.StartsWith(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                return 1;
+
+            if (terms.Count > 0 && terms.All(t => name.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                return 2;
+
+            if (terms.Count > 0 && terms.All(t => fullText.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                return 3;
+
+            if (name.Contains(query, StringComparison.OrdinalIgnoreCase))
+                return 4;
+
+            return 9;
+        }
+
+        private static string NormalizeForRank(string value)
+        {
+            return System.Text.RegularExpressions.Regex
+                .Replace((value ?? "").ToLowerInvariant(), @"[^a-z0-9áéíóúñ]+", "");
+        }
+
+        private static DateTime ParseModifiedForSort(string? value)
+        {
+            if (DateTime.TryParse(value, out var dt))
+                return dt;
+
+            return DateTime.MinValue;
         }
 
         #endregion
