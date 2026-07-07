@@ -13,7 +13,8 @@ using System.Linq;
 using Windows.UI;
 using Anfeta.UI.Services;
 using System.Threading.Tasks;
-
+using System.Runtime.InteropServices;
+using WinRT.Interop;
 namespace Anfeta.UI
 {
     public sealed partial class MainWindow : Window
@@ -257,11 +258,26 @@ namespace Anfeta.UI
                 _hotkeyService.SearchHotkeyPressed -= OnSearchHotkeyPressed;
             ((App)Application.Current).CleanupAndExit();
         }
-        public void OpenSearchFromHotkey()
+        public void ToggleSearchFromHotkey()
         {
             DispatcherQueue.TryEnqueue(async () =>
             {
+                var hwnd = WindowNative.GetWindowHandle(this);
+
+                if (hwnd == IntPtr.Zero)
+                    return;
+
+                // Si ANFETA está abierta y al frente, el mismo comando la minimiza.
+                if (IsAppForeground(hwnd) && !IsIconic(hwnd))
+                {
+                    ShowWindow(hwnd, SW_MINIMIZE);
+                    return;
+                }
+
+                // Si está minimizada o detrás de otra app, la restaura y la manda al buscador.
+                ShowWindow(hwnd, SW_RESTORE);
                 Activate();
+                SetForegroundWindow(hwnd);
 
                 var searchItem = FindNavItem("Search");
 
@@ -278,10 +294,26 @@ namespace Anfeta.UI
         }
         private void OnSearchHotkeyPressed(object? sender, EventArgs e)
         {
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                OpenSearchFromHotkey();
-            });
+            ToggleSearchFromHotkey();
         }
+        private static bool IsAppForeground(IntPtr hwnd)
+        {
+            return GetForegroundWindow() == hwnd;
+        }
+
+        private const int SW_MINIMIZE = 6;
+        private const int SW_RESTORE = 9;
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
     }
 }

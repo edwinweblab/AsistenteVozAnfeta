@@ -41,6 +41,8 @@ namespace Anfeta.UI.Models.Weblab
                 if (_name == value) return;
                 _name = value ?? "";
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(DisplayName));
+                OnPropertyChanged(nameof(ResultSummary));
             }
         }
 
@@ -56,6 +58,7 @@ namespace Anfeta.UI.Models.Weblab
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(FullPath));
                 OnPropertyChanged(nameof(TargetNorm));
+                OnPropertyChanged(nameof(ResultSummary));
             }
         }
         public string FullPath
@@ -82,11 +85,90 @@ namespace Anfeta.UI.Models.Weblab
         public SearchSource Source { get; set; }
 
         // ----------------------------
+        // Helpers visuales para resultados
+        // ----------------------------
+
+        [JsonIgnore]
+        public string DisplayName => BuildDisplayName();
+
+        [JsonIgnore]
+        public string ResultSummary => BuildResultSummary();
+
+        [JsonIgnore]
+        public string ModifiedLabel
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(ServerModified))
+                    return "";
+
+                return $"Modificado: {ServerModified}";
+            }
+        }
+
+        private string BuildDisplayName()
+        {
+            var clean = (Name ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(clean))
+                return "Sin título";
+
+            clean = StripSourcePrefix(clean, ExternalSourceName);
+
+            return clean.Trim();
+        }
+
+        private string BuildResultSummary()
+        {
+            if (Source == SearchSource.Notion)
+            {
+                var desc = StripSourcePrefix(Description, ExternalSourceName);
+                if (!string.IsNullOrWhiteSpace(desc))
+                    return desc.Trim();
+
+                if (!string.IsNullOrWhiteSpace(ExternalUrl))
+                    return ExternalUrl.Trim();
+
+                return "Página de Notion";
+            }
+
+            if (!string.IsNullOrWhiteSpace(Target))
+                return Target.Trim();
+
+            return Type ?? string.Empty;
+        }
+
+        private static string StripSourcePrefix(string? value, string? sourceName)
+        {
+            var text = (value ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(sourceName))
+            {
+                var prefix = $"[{sourceName.Trim()}]";
+                if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    text = text.Substring(prefix.Length).Trim();
+            }
+
+            // Fallback por si viene [Clientes], [Revisiones], etc.
+            if (text.StartsWith("["))
+            {
+                var close = text.IndexOf(']');
+                if (close > 0 && close < 45)
+                    text = text.Substring(close + 1).Trim();
+            }
+
+            return text;
+        }
+
+        // ----------------------------
         // Helpers para Rename/Delete
         // ----------------------------
 
         /// <summary>Alias claro para Target.</summary>
-        
+
 
         /// <summary>True si representa carpeta.</summary>
         public bool IsFolder => string.Equals(Type, "FOLDER", StringComparison.OrdinalIgnoreCase);

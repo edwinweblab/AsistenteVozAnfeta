@@ -424,8 +424,9 @@ namespace Anfeta.UI.Views
         private void NameText_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
         {
             if (sender is not TextBlock tb) return;
+
             if (args.NewValue is SearchResultRow row)
-                ApplyHighlightToTextBlock(tb, row.Name ?? "");
+                ApplyHighlightToTextBlock(tb, row.DisplayName ?? "");
             else
                 tb.Text = "";
         }

@@ -8,6 +8,12 @@
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
+    <Page.Resources>
+        <CollectionViewSource
+            x:Name="GroupedResultsSource"
+            IsSourceGrouped="True" />
+    </Page.Resources>
+
     <Grid x:Name="RootLayout" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="42" />
@@ -858,58 +864,106 @@
 
                     <ListView
                         x:Name="ResultsList"
+                        ItemsSource="{Binding Source={StaticResource GroupedResultsSource}}"
                         DoubleTapped="ResultsList_DoubleTapped"
                         RightTapped="ResultsList_RightTapped"
                         SelectionChanged="ResultsList_SelectionChanged"
                         SelectionMode="Single">
+                        <ListView.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border
+                                            Margin="0,10,0,4"
+                                            Padding="12,6"
+                                            Background="#252525"
+                                            BorderBrush="#3A3A3A"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="6">
+
+                                            <TextBlock
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Foreground="#FFFFFF"
+                                                Text="{Binding HeaderText}" />
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListView.GroupStyle>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
-                                <Setter Property="Padding" Value="10,0" />
-                                <Setter Property="MinHeight" Value="26" />
+                                <Setter Property="Padding" Value="10,4" />
+                                <Setter Property="MinHeight" Value="54" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="BorderBrush" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                <Setter Property="BorderThickness" Value="0" />
                             </Style>
                         </ListView.ItemContainerStyle>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchResultRow">
-                                <Grid Height="26" ColumnSpacing="6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel
-                                        Grid.Column="0"
-                                        VerticalAlignment="Center"
-                                        Orientation="Horizontal"
-                                        Spacing="7">
+                                <Border
+                                    Padding="10,8"
+                                    Background="#242424"
+                                    BorderBrush="#353535"
+                                    BorderThickness="1"
+                                    CornerRadius="7">
+
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
                                         <IconSourceElement
-                                            Width="14"
-                                            Height="14"
+                                            Grid.Column="0"
+                                            Width="18"
+                                            Height="18"
+                                            Margin="0,2,0,0"
+                                            VerticalAlignment="Top"
                                             IconSource="{x:Bind Icon, Mode=OneWay}" />
-                                        <TextBlock
-                                            x:Name="NameText"
-                                            VerticalAlignment="Center"
-                                            DataContextChanged="NameText_DataContextChanged"
+
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            Spacing="3"
+                                            VerticalAlignment="Center">
+
+                                            <TextBlock
+                                                x:Name="NameText"
+                                                DataContextChanged="NameText_DataContextChanged"
+                                                FontSize="12.5"
+                                                FontWeight="SemiBold"
+                                                TextTrimming="CharacterEllipsis" />
+
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="#AFAFAF"
+                                                Text="{x:Bind ResultSummary, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis" />
+
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="#777777"
+                                                Text="{x:Bind ModifiedLabel, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+
+                                        <Button
+                                            Grid.Column="2"
+                                            Width="30"
+                                            Height="28"
+                                            Padding="0"
+                                            HorizontalContentAlignment="Center"
+                                            VerticalContentAlignment="Center"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Click="BtnStar_Click"
+                                            Content="{x:Bind StarGlyph, Mode=OneWay}"
                                             FontSize="12"
-                                            FontWeight="SemiBold"
-                                            TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
-                                    <Button
-                                        Grid.Column="1"
-                                        Width="28"
-                                        Height="22"
-                                        Padding="0"
-                                        HorizontalContentAlignment="Center"
-                                        VerticalContentAlignment="Center"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Click="BtnStar_Click"
-                                        Content="{x:Bind StarGlyph, Mode=OneWay}"
-                                        FontSize="11"
-                                        Tag="{x:Bind}"
-                                        ToolTipService.ToolTip="Agregar / quitar Favorito" />
-                                </Grid>
+                                            Tag="{x:Bind}"
+                                            ToolTipService.ToolTip="Agregar / quitar Favorito" />
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                         <ListView.ContextFlyout>

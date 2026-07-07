@@ -12,7 +12,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
-
+using System.Text.RegularExpressions;
 namespace Anfeta.UI.Views
 {
     public sealed partial class SearchView
@@ -277,6 +277,46 @@ namespace Anfeta.UI.Views
             return MatchesSavedFilterText(target, query);
         }
 
+        private bool MatchesAutoAndQueryOnRow(
+    Anfeta.UI.Models.Weblab.SearchResultRow row,
+    string query)
+        {
+            if (row is null)
+                return false;
+
+            var terms = SplitAutoAndTerms(query);
+
+            if (terms.Count == 0)
+                return true;
+
+            // AND automático:
+            // Todas las palabras deben existir en el resultado.
+            return terms.All(term => MatchesSavedFilterOnRow(row, term));
+        }
+
+        private static List<string> SplitAutoAndTerms(string query)
+        {
+            var q = (query ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(q))
+                return new List<string>();
+
+            // Soporta:
+            // cliente monterrey diseño
+            // "cliente monterrey" diseño
+            var matches = Regex.Matches(q, "\"([^\"]+)\"|'([^']+)'|(\\S+)");
+
+            return matches
+                .Cast<Match>()
+                .Select(m =>
+                    m.Groups[1].Success ? m.Groups[1].Value :
+                    m.Groups[2].Success ? m.Groups[2].Value :
+                    m.Groups[3].Value)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
         // Handlers XAML
         private async void NewSavedFilter_Click(object sender, RoutedEventArgs e)
             => await ShowCreateSavedFilterDialogAsync();

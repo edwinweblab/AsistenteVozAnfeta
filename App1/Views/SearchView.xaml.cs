@@ -78,6 +78,7 @@ namespace Anfeta.UI.Views
 
         // collections
         public ObservableCollection<SearchResultRow> Results { get; } = new();
+        private readonly ObservableCollection<SearchResultGroup> _resultGroups = new();
         private ObservableCollection<FolderNode> _treeRoots = new();
         private readonly Stack<string> _backStack = new();
         private readonly Stack<string> _forwardStack = new();
@@ -223,7 +224,18 @@ namespace Anfeta.UI.Views
             public bool HasDummyChild { get; set; } = false;
             public bool IsLoaded { get; set; } = false;
         }
+        private sealed class SearchResultGroup : ObservableCollection<SearchResultRow>
+        {
+            public string Key { get; }
 
+            public string HeaderText => $"{Key} · {Count} resultados";
+
+            public SearchResultGroup(string key, IEnumerable<SearchResultRow> items)
+                : base(items)
+            {
+                Key = key;
+            }
+        }
         #endregion
 
         #region ===== Constructor / Lifecycle =====
@@ -237,7 +249,7 @@ namespace Anfeta.UI.Views
             // La suscripción a StateChanged vive SOLO en SearchView_Loaded bajo _isIndexStateHooked.
             // No se suscribe aquí para evitar handler duplicado y memory leak.
 
-            ResultsList.ItemsSource = Results;
+            GroupedResultsSource.Source = _resultGroups;
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
 
             Loaded += SearchView_Loaded;
@@ -364,9 +376,9 @@ namespace Anfeta.UI.Views
             _backStack.Clear();
             _forwardStack.Clear();
             _treeRoots.Clear();
-
+            
             Results.Clear();
-            ResultsList.ItemsSource = Results;
+            RefreshResultsListView();
 
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
             EmptyTreeHint.Visibility = Visibility.Visible;
@@ -390,5 +402,63 @@ namespace Anfeta.UI.Views
         }
 
         #endregion
+        private void RefreshResultsListView()
+        {
+            _resultGroups.Clear();
+
+            var rows = Results.ToList();
+
+            foreach (var group in BuildResultGroups(rows))
+                _resultGroups.Add(group);
+
+            GroupedResultsSource.Source = _resultGroups;
+        }
+
+        private IEnumerable<SearchResultGroup> BuildResultGroups(List<SearchResultRow> rows)
+        {
+            if (rows.Count == 0)
+                return Enumerable.Empty<SearchResultGroup>();
+
+            var order = new[]
+            {
+        "Clientes",
+        "Dominios",
+        "Revisiones",
+        "Programas y proyectos",
+        "Cobrar y pagar",
+        "Correos Contraseñas",
+        "Archivos locales",
+        "Notion",
+        "Otros"
+    };
+
+            return rows
+                .GroupBy(GetResultGroupName)
+                .OrderBy(g =>
+                {
+                    var index = Array.FindIndex(order, x =>
+                        string.Equals(x, g.Key, StringComparison.OrdinalIgnoreCase));
+
+                    return index >= 0 ? index : int.MaxValue;
+                })
+                .ThenBy(g => g.Key)
+                .Select(g => new SearchResultGroup(g.Key, g));
+        }
+
+        private string GetResultGroupName(SearchResultRow row)
+        {
+            if (row.Source == SearchSource.Notion)
+            {
+                if (!string.IsNullOrWhiteSpace(row.ExternalSourceName))
+                    return row.ExternalSourceName;
+
+                return "Notion";
+            }
+
+            if (row.Source == SearchSource.Local || row.Source == SearchSource.Dropbox)
+                return "Archivos locales";
+
+            return "Otros";
+        }
     }
 }

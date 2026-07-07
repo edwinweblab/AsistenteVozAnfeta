@@ -201,7 +201,11 @@ namespace Anfeta.UI.Views
             items = items.Where(x => !IsExcludedPath(x.Target));
 
             var parsed = AdvancedQueryV3.Parse(rawQuery);
-            UpdateHighlightTerms(rawQuery, parsed);
+
+            if (!LooksAdvanced(rawQuery))
+                UpdateHighlightTermsForAutoAnd(rawQuery);
+            else
+                UpdateHighlightTerms(rawQuery, parsed);
 
             if (!string.IsNullOrWhiteSpace(rawQuery))
             {
@@ -209,7 +213,7 @@ namespace Anfeta.UI.Views
 
                 if (!LooksAdvanced(rawQuery))
                 {
-                    items = items.Where(x => MatchesSavedFilterOnRow(x, rawQuery));
+                    items = items.Where(x => MatchesAutoAndQueryOnRow(x, rawQuery));
                 }
                 else
                 {
@@ -254,9 +258,7 @@ namespace Anfeta.UI.Views
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
                 Results.Add(it);
             }
-
-            ResultsList.ItemsSource = null;
-            ResultsList.ItemsSource = Results;
+            RefreshResultsListView();
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -279,7 +281,11 @@ namespace Anfeta.UI.Views
             token.ThrowIfCancellationRequested();
 
             var parsed = AdvancedQueryV3.Parse(rawQuery);
-            UpdateHighlightTerms(rawQuery, parsed);
+
+            if (!LooksAdvanced(rawQuery))
+                UpdateHighlightTermsForAutoAnd(rawQuery);
+            else
+                UpdateHighlightTerms(rawQuery, parsed);
 
             if (!string.IsNullOrWhiteSpace(rawQuery))
             {
@@ -287,7 +293,7 @@ namespace Anfeta.UI.Views
 
                 if (!LooksAdvanced(rawQuery))
                 {
-                    items = items.Where(x => MatchesSavedFilterOnRow(x, rawQuery));
+                    items = items.Where(x => MatchesAutoAndQueryOnRow(x, rawQuery));
                 }
                 else
                 {
@@ -322,9 +328,7 @@ namespace Anfeta.UI.Views
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
                 Results.Add(it);
             }
-
-            ResultsList.ItemsSource = null;
-            ResultsList.ItemsSource = Results;
+            RefreshResultsListView();
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -333,6 +337,15 @@ namespace Anfeta.UI.Views
             await Task.CompletedTask;
         }
 
+        private void UpdateHighlightTermsForAutoAnd(string rawQuery)
+        {
+            _highlightTerms = SplitAutoAndTerms(rawQuery)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(x => x.Length)
+                .ToList();
+        }
         // Helpers compartidos con Filters
         private IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> ApplyChipFilters(
             IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> items)
