@@ -15,6 +15,7 @@ namespace Anfeta.UI.Services.Notion
     {
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
+        private const int HttpTimeoutSeconds = 30;
 
         public static async Task<List<SearchResultRow>> BuildAsync(
             string token,
@@ -37,7 +38,7 @@ namespace Anfeta.UI.Services.Notion
             using var http = new HttpClient
             {
                 BaseAddress = new Uri(NotionBaseUrl),
-                Timeout = TimeSpan.FromSeconds(90)
+                Timeout = TimeSpan.FromSeconds(HttpTimeoutSeconds)
             };
 
             http.DefaultRequestHeaders.Authorization =
@@ -493,15 +494,28 @@ namespace Anfeta.UI.Services.Notion
             {
                 ct.ThrowIfCancellationRequested();
 
-                var rows = await BuildAsync(
-                    token,
-                    source.DataSourceId,
-                    ct,
-                    maxItemsPerSource,
-                    lastEditedAfterUtc,
-                    source.Name);
+                try
+                {
+                    var rows = await BuildAsync(
+                        token,
+                        source.DataSourceId,
+                        ct,
+                        maxItemsPerSource,
+                        lastEditedAfterUtc,
+                        source.Name);
 
-                all.AddRange(rows);
+                    all.AddRange(rows);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Error consultando la base de Notion '{source.Name}': {ex.Message}",
+                        ex);
+                }
             }
 
             return all;

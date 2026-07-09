@@ -8,16 +8,18 @@
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
-    <Grid x:Name="RootLayout" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid x:Name="RootLayout" Background="#151515">
         <Grid.RowDefinitions>
             <RowDefinition Height="42" />
             <!--  Row 0 TopBar  -->
+            <RowDefinition Height="0" />
+            <!--  Row 1 reservado para compatibilidad; sin contenido fijo  -->
             <RowDefinition Height="32" />
-            <!--  Row 1 ChipStrip  -->
+            <!--  Row 2 ChipStrip  -->
             <RowDefinition Height="*" />
-            <!--  Row 2 Body  -->
+            <!--  Row 3 Body  -->
             <RowDefinition Height="22" />
-            <!--  Row 3 StatusBar  -->
+            <!--  Row 4 StatusBar  -->
         </Grid.RowDefinitions>
 
         <!--
@@ -37,6 +39,8 @@
                 <ColumnDefinition Width="*" />
                 <!--  SearchBox  -->
                 <ColumnDefinition Width="Auto" />
+                <!--  Guardar búsqueda  -->
+                <ColumnDefinition Width="Auto" />
                 <!--  Micrófono  -->
                 <ColumnDefinition Width="Auto" />
                 <!--  Ayuda  -->
@@ -47,7 +51,7 @@
                 <ColumnDefinition Width="Auto" />
                 <!--  Detalles  -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Actualizar Notion  -->
+                <!--  Actualización Notion automática: botón oculto por compatibilidad con código existente  -->
                 <ColumnDefinition Width="Auto" />
                 <!--  Última sync  -->
                 <ColumnDefinition Width="Auto" />
@@ -59,14 +63,235 @@
                 x:Name="SearchBox"
                 Grid.Column="0"
                 VerticalAlignment="Center"
+                GotFocus="SearchBox_GotFocus"
                 PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
                 QueryIcon="Find"
                 QuerySubmitted="SearchBox_QuerySubmitted"
-                TextChanged="SearchBox_TextChanged" />
+                Tapped="SearchBox_Tapped"
+                TextChanged="SearchBox_TextChanged">
+
+                <FlyoutBase.AttachedFlyout>
+                    <Flyout
+                        x:Name="QuickCommandsInputFlyout"
+                        Closed="QuickCommandsInputFlyout_Closed"
+                        Opened="QuickCommandsInputFlyout_Opened"
+                        Placement="BottomEdgeAlignedLeft"
+                        ShouldConstrainToRootBounds="False"
+                        ShowMode="Transient">
+
+                        <Flyout.FlyoutPresenterStyle>
+                            <Style TargetType="FlyoutPresenter">
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="MinWidth" Value="760" />
+                                <Setter Property="MaxWidth" Value="1600" />
+                            </Style>
+                        </Flyout.FlyoutPresenterStyle>
+
+                        <Border
+                            x:Name="QuickCommandsInputHost"
+                            Width="760"
+                            MaxHeight="360"
+                            Padding="10"
+                            Background="#1F1F1F"
+                            BorderBrush="#3B3B3B"
+                            BorderThickness="1"
+                            CornerRadius="12">
+
+                            <ScrollViewer
+                                MaxHeight="330"
+                                HorizontalScrollBarVisibility="Disabled"
+                                VerticalScrollBarVisibility="Auto">
+
+                                <StackPanel Spacing="9">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock
+                                            x:Name="QuickPredictiveHeaderText"
+                                            FontFamily="Segoe UI"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Foreground="White"
+                                            Text="Sugerencias predictivas" />
+
+                                        <GridView
+                                            x:Name="QuickPredictiveFlyoutList"
+                                            MaxHeight="165"
+                                            IsItemClickEnabled="True"
+                                            ItemClick="QuickPredictiveFlyoutList_ItemClick"
+                                            SelectionMode="None">
+
+                                            <GridView.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <ItemsWrapGrid Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </GridView.ItemsPanel>
+
+                                            <GridView.ItemContainerStyle>
+                                                <Style TargetType="GridViewItem">
+                                                    <Setter Property="Padding" Value="0" />
+                                                    <Setter Property="Margin" Value="0,0,6,6" />
+                                                    <Setter Property="MinWidth" Value="0" />
+                                                    <Setter Property="MinHeight" Value="0" />
+                                                    <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                                                    <Setter Property="IsTabStop" Value="False" />
+                                                    <Setter Property="UseSystemFocusVisuals" Value="False" />
+                                                </Style>
+                                            </GridView.ItemContainerStyle>
+
+                                            <GridView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border
+                                                        Width="152"
+                                                        Padding="8,5"
+                                                        Background="#243242"
+                                                        BorderBrush="#3E5268"
+                                                        BorderThickness="1"
+                                                        CornerRadius="10">
+
+                                                        <StackPanel Spacing="2">
+                                                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                                                <FontIcon
+                                                                    FontSize="9"
+                                                                    Foreground="#D5E8FF"
+                                                                    Glyph="{Binding IconGlyph}" />
+
+                                                                <TextBlock
+                                                                    MaxWidth="112"
+                                                                    VerticalAlignment="Center"
+                                                                    FontFamily="Segoe UI"
+                                                                    FontSize="11"
+                                                                    FontWeight="SemiBold"
+                                                                    Foreground="White"
+                                                                    Text="{Binding Title}"
+                                                                    TextTrimming="CharacterEllipsis"
+                                                                    TextWrapping="NoWrap" />
+                                                            </StackPanel>
+
+                                                            <TextBlock
+                                                                MaxWidth="124"
+                                                                Margin="15,0,0,0"
+                                                                FontFamily="Segoe UI"
+                                                                FontSize="9"
+                                                                Foreground="#AFC2D6"
+                                                                Text="{Binding Subtitle}"
+                                                                TextTrimming="CharacterEllipsis"
+                                                                TextWrapping="NoWrap" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </GridView.ItemTemplate>
+                                        </GridView>
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="5">
+                                        <TextBlock
+                                            x:Name="QuickSavedHeaderText"
+                                            FontFamily="Segoe UI"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Foreground="White"
+                                            Text="Búsquedas guardadas" />
+
+                                        <GridView
+                                            x:Name="QuickCommandsFlyoutList"
+                                            MaxHeight="105"
+                                            IsItemClickEnabled="True"
+                                            ItemClick="QuickCommandsFlyoutList_ItemClick"
+                                            SelectionMode="None">
+
+                                            <GridView.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <ItemsWrapGrid Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </GridView.ItemsPanel>
+
+                                            <GridView.ItemContainerStyle>
+                                                <Style TargetType="GridViewItem">
+                                                    <Setter Property="Padding" Value="0" />
+                                                    <Setter Property="Margin" Value="0,0,6,6" />
+                                                    <Setter Property="MinWidth" Value="0" />
+                                                    <Setter Property="MinHeight" Value="0" />
+                                                    <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                                                    <Setter Property="IsTabStop" Value="False" />
+                                                    <Setter Property="UseSystemFocusVisuals" Value="False" />
+                                                </Style>
+                                            </GridView.ItemContainerStyle>
+
+                                            <GridView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border
+                                                        Width="150"
+                                                        Padding="8,5"
+                                                        Background="#292929"
+                                                        BorderBrush="#404040"
+                                                        BorderThickness="1"
+                                                        CornerRadius="10"
+                                                        RightTapped="QuickCommandChip_RightTapped">
+
+                                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                                            <FontIcon
+                                                                FontSize="9"
+                                                                Foreground="#D0D0D0"
+                                                                Glyph="&#xE8A5;" />
+
+                                                            <TextBlock
+                                                                MaxWidth="113"
+                                                                VerticalAlignment="Center"
+                                                                FontFamily="Segoe UI"
+                                                                FontSize="11"
+                                                                Foreground="White"
+                                                                Text="{Binding Title}"
+                                                                TextTrimming="CharacterEllipsis"
+                                                                TextWrapping="NoWrap" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </GridView.ItemTemplate>
+                                        </GridView>
+                                    </StackPanel>
+
+                                    <TextBlock
+                                        x:Name="QuickFlyoutHintText"
+                                        FontFamily="Segoe UI"
+                                        FontSize="10"
+                                        Foreground="#9E9E9E"
+                                        Text="Escribe zrevision, zclientes, zdominios, zproyectos, zpagar o zcorreos · Clic derecho en guardadas para editar" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Flyout>
+                </FlyoutBase.AttachedFlyout>
+            </AutoSuggestBox>
+
+            <!--  Guardar búsqueda como chip rápido  -->
+            <Button
+                x:Name="BtnSaveCurrentSearchTop"
+                Grid.Column="1"
+                Width="34"
+                Height="32"
+                Padding="0"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                VerticalAlignment="Center"
+                Background="#2F2F2F"
+                BorderBrush="#3A3A3A"
+                Click="BtnSaveSearch_Click"
+                CornerRadius="7"
+                Foreground="White"
+                ToolTipService.ToolTip="Guardar búsqueda como chip rápido">
+                <FontIcon
+                    Width="16"
+                    Height="16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="14"
+                    Glyph="&#xE74E;" />
+            </Button>
 
             <!--  Micrófono  -->
             <Grid
-                Grid.Column="1"
+                Grid.Column="2"
                 Width="70"
                 Height="32"
                 VerticalAlignment="Center">
@@ -105,7 +330,7 @@
             <!--  Ayuda  -->
             <Button
                 x:Name="BtnHelp"
-                Grid.Column="2"
+                Grid.Column="3"
                 Width="32"
                 Height="32"
                 VerticalAlignment="Center"
@@ -117,7 +342,7 @@
 
             <!--  Separador  -->
             <Border
-                Grid.Column="3"
+                Grid.Column="4"
                 Width="1"
                 Height="18"
                 VerticalAlignment="Center"
@@ -126,7 +351,7 @@
             <!--  Toggle Filtros  -->
             <ToggleButton
                 x:Name="ToggleFoldersPane"
-                Grid.Column="4"
+                Grid.Column="5"
                 Height="32"
                 VerticalAlignment="Center"
                 Click="ToggleFoldersPane_Click"
@@ -138,7 +363,7 @@
             <!--  Toggle Detalles  -->
             <ToggleButton
                 x:Name="ToggleDetailsPane"
-                Grid.Column="5"
+                Grid.Column="6"
                 Height="32"
                 VerticalAlignment="Center"
                 Click="ToggleDetailsPane_Click"
@@ -150,7 +375,7 @@
             <!--  Actualizar Notion  -->
             <Button
                 x:Name="BtnRefreshNotion"
-                Grid.Column="6"
+                Grid.Column="7"
                 Height="32"
                 Padding="12,0"
                 VerticalAlignment="Center"
@@ -162,15 +387,15 @@
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon FontSize="14" Glyph="&#xE895;" />
-                    <TextBlock x:Name="BtnRefreshNotionText" Text="Actualizar Notion" />
+                    <TextBlock x:Name="BtnRefreshNotionText" Text="Notion" />
                 </StackPanel>
             </Button>
 
             <!--  Última sincronización Notion  -->
             <TextBlock
                 x:Name="NotionSyncInfoText"
-                Grid.Column="7"
-                MaxWidth="130"
+                Grid.Column="8"
+                MaxWidth="220"
                 VerticalAlignment="Center"
                 FontSize="11"
                 Foreground="#AFAFAF"
@@ -180,7 +405,7 @@
 
             <!--  Menú ⋯  -->
             <Button
-                Grid.Column="8"
+                Grid.Column="9"
                 Width="36"
                 Height="32"
                 VerticalAlignment="Center"
@@ -194,9 +419,61 @@
                         <MenuFlyoutItem Click="ImportFiltersCsv_Click" Text="Importar CSV" />
 
                         <MenuFlyoutSeparator />
-                        <MenuFlyoutItem Click="BtnRefreshNotion_Click" Text="Actualizar cambios Notion" />
                         <MenuFlyoutItem Click="BtnCheckNotionDeleted_Click" Text="Revisar páginas eliminadas" />
                         <MenuFlyoutItem Click="BtnFullResyncNotion_Click" Text="Resync completo Notion" />
+
+                        <MenuFlyoutSeparator />
+
+                        <MenuFlyoutSubItem Text="Color de fondo">
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="gray"
+                                Text="Gris oscuro" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="blue"
+                                Text="Azul noche" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="purple"
+                                Text="Morado oscuro" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="green"
+                                Text="Verde oscuro" />
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="navy"
+                                Text="Azul profundo" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="midnight"
+                                Text="Azul medianoche" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="violet"
+                                Text="Violeta oscuro" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="wine"
+                                Text="Vino oscuro" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="slate"
+                                Text="Pizarra oscuro" />
+
+                            <MenuFlyoutItem
+                                Click="ThemePreset_Click"
+                                Tag="coffee"
+                                Text="Café oscuro" />
+                        </MenuFlyoutSubItem>
                     </MenuFlyout>
                 </Button.Flyout>
             </Button>
@@ -204,8 +481,8 @@
             <!--  SortCombo oculto: se conserva solo para compatibilidad con el code-behind.  -->
             <ComboBox
                 x:Name="SortCombo"
-                Visibility="Collapsed"
-                SelectionChanged="SortCombo_SelectionChanged">
+                SelectionChanged="SortCombo_SelectionChanged"
+                Visibility="Collapsed">
                 <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
                 <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
                 <ComboBoxItem Content="Modificado (nuevo)" Tag="mod_desc" />
@@ -216,14 +493,21 @@
 
         <!--
             ═══════════════════════════════════════════════════════
-            ROW 1 · CHIP STRIP
+            ROW 1 · RESERVADO
+            Las búsquedas guardadas ahora se muestran como panel temporal
+            al interactuar con el input.
+            ═══════════════════════════════════════════════════════
+        -->
+        <!--
+            ═══════════════════════════════════════════════════════
+            ROW 2 · CHIP STRIP
             Chips visibles. FilterTypeCombo eliminado (redundante).
             Los chips ocultos (Visibility=Collapsed) se conservan
             como fallback para el code-behind si los necesita.
             ═══════════════════════════════════════════════════════
         -->
         <Grid
-            Grid.Row="1"
+            Grid.Row="2"
             Padding="8,0"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
@@ -275,7 +559,7 @@
                     Height="22"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
-                    Content="Clientes"
+                    Content="zClientes"
                     CornerRadius="11"
                     Tag="Clientes" />
 
@@ -284,7 +568,7 @@
                     Height="22"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
-                    Content="Dominios"
+                    Content="zDominios"
                     CornerRadius="11"
                     Tag="Dominios" />
 
@@ -293,7 +577,7 @@
                     Height="22"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
-                    Content="Programas"
+                    Content="zProyectos"
                     CornerRadius="11"
                     Tag="Programas y proyectos" />
 
@@ -302,7 +586,7 @@
                     Height="22"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
-                    Content="Cobrar/Pagar"
+                    Content="zPAGAR - zCOBRAR"
                     CornerRadius="11"
                     Tag="Cobrar y pagar" />
 
@@ -311,7 +595,7 @@
                     Height="22"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
-                    Content="Correos"
+                    Content="zCorreos"
                     CornerRadius="11"
                     Tag="Correos Contraseñas" />
             </StackPanel>
@@ -350,10 +634,10 @@
 
         <!--
             ═══════════════════════════════════════════════════════
-            ROW 2 · BODY   Left | div | Center | div | Right
+            ROW 3 · BODY   Left | div | Center | div | Right
             ═══════════════════════════════════════════════════════
         -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="FoldersPaneCol" Width="220" />
                 <ColumnDefinition Width="1" />
@@ -860,8 +1144,8 @@
                         Grid.Column="1"
                         Padding="0"
                         HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
                         VerticalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
                         Background="Transparent"
                         BorderThickness="0"
                         Click="HeaderNameSort_Click"
@@ -889,8 +1173,8 @@
                         Grid.Column="2"
                         Padding="0"
                         HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Stretch"
                         VerticalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
                         Background="Transparent"
                         BorderThickness="0"
                         Click="HeaderModifiedSort_Click"
@@ -957,11 +1241,11 @@
                                     <TextBlock
                                         Grid.Column="0"
                                         VerticalAlignment="Center"
-                                        FontFamily="Consolas"
+                                        FontFamily="Segoe UI"
                                         FontSize="12"
                                         Foreground="#B8B8B8"
-                                        Text="{x:Bind PathColumn, Mode=OneWay}"
                                         MaxLines="1"
+                                        Text="{x:Bind PathColumn, Mode=OneWay}"
                                         TextTrimming="CharacterEllipsis"
                                         TextWrapping="NoWrap" />
 
@@ -990,7 +1274,7 @@
                                             Grid.Column="1"
                                             VerticalAlignment="Center"
                                             DataContextChanged="NameText_DataContextChanged"
-                                            FontFamily="Consolas"
+                                            FontFamily="Segoe UI"
                                             FontSize="12"
                                             FontWeight="SemiBold"
                                             Foreground="#F2F2F2"
@@ -1003,11 +1287,11 @@
                                     <TextBlock
                                         Grid.Column="2"
                                         VerticalAlignment="Center"
-                                        FontFamily="Consolas"
+                                        FontFamily="Segoe UI"
                                         FontSize="12"
                                         Foreground="#B8B8B8"
-                                        Text="{x:Bind DateModifiedColumn, Mode=OneWay}"
                                         MaxLines="1"
+                                        Text="{x:Bind DateModifiedColumn, Mode=OneWay}"
                                         TextTrimming="CharacterEllipsis"
                                         TextWrapping="NoWrap" />
 
@@ -1379,11 +1663,11 @@
 
         <!--
             ═══════════════════════════════════════════════════════
-            ROW 3 · STATUS BAR  — altura fija 22px, siempre visible
+            ROW 4 · STATUS BAR  — altura fija 22px, siempre visible
             ═══════════════════════════════════════════════════════
         -->
         <Grid
-            Grid.Row="3"
+            Grid.Row="4"
             Padding="10,0"
             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"

@@ -114,14 +114,19 @@ namespace Anfeta.UI.Models.Weblab
             {
                 if (Source == SearchSource.Notion)
                 {
-                    if (!string.IsNullOrWhiteSpace(ExternalSourceName))
-                        return ExternalSourceName.Trim();
-
-                    return "Notion";
+                    return ExternalSourceName switch
+                    {
+                        "Cobrar y pagar" => "zPAGAR - zCOBRAR",
+                        "Dominios" => "zDOMINIOS",
+                        "Clientes" => "zCLIENTES",
+                        "Programas y proyectos" => "zPROYECTOS",
+                        "Correos Contraseñas" => "zCORREOS",
+                        "Revisiones" => "Revisiones",
+                        _ => string.IsNullOrWhiteSpace(ExternalSourceName) ? "Notion" : ExternalSourceName
+                    };
                 }
 
-                var folder = System.IO.Path.GetDirectoryName(Target ?? string.Empty);
-                return string.IsNullOrWhiteSpace(folder) ? "Archivos locales" : folder;
+                return "Local";
             }
         }
 

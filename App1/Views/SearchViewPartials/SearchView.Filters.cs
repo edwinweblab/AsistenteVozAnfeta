@@ -136,7 +136,7 @@ namespace Anfeta.UI.Views
 
                     case "recent":
                         ChipRecent.IsChecked = true;
-                        StatusText.Text = "Estado: filtro 'Recientes' aÃºn no tiene lÃ³gica implementada";
+                        StatusText.Text = "Estado: filtro 'Recientes' aún no tiene lÃ³gica implementada";
                         break;
 
                     default: return;
@@ -360,7 +360,7 @@ namespace Anfeta.UI.Views
                 var dialog = new ContentDialog
                 {
                     Title = "Borrar todos los filtros",
-                    Content = "Â¿Seguro que quieres eliminar todos los filtros guardados?",
+                    Content = "¿Seguro que quieres eliminar todos los filtros guardados?",
                     PrimaryButtonText = "Borrar",
                     CloseButtonText = "Cancelar",
                     DefaultButton = ContentDialogButton.Close,
@@ -465,6 +465,50 @@ namespace Anfeta.UI.Views
         }
 
         private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _savedSearches = new();
+        private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _visibleSavedSearches = new();
+        private readonly System.Collections.ObjectModel.ObservableCollection<PredictiveSuggestion> _predictiveSuggestions = new();
+        private bool _quickFlyoutOpen;
+        private bool _quickFlyoutFocusRestoreQueued;
+
+        private sealed class PredictiveSuggestion
+        {
+            public string Title { get; set; } = "";
+            public string Subtitle { get; set; } = "";
+            public string Query { get; set; } = "";
+            public string Kind { get; set; } = "";
+            public string IconGlyph { get; set; } = "\uE8A5";
+        }
+
+        private sealed class NotionBaseShortcut
+        {
+            public string PrimaryAlias { get; set; } = "";
+            public string SourceName { get; set; } = "";
+            public string PathLabel { get; set; } = "";
+            public string DisplayLabel { get; set; } = "";
+            public string[] Aliases { get; set; } = Array.Empty<string>();
+        }
+
+        private sealed class NotionBaseScope
+        {
+            public bool HasBase { get; set; }
+            public string PrimaryAlias { get; set; } = "";
+            public string SourceName { get; set; } = "";
+            public string PathLabel { get; set; } = "";
+            public string DisplayLabel { get; set; } = "";
+            public string Remainder { get; set; } = "";
+        }
+
+        private static readonly string[] PredictiveStopWords =
+        {
+            "de", "del", "la", "las", "el", "los", "un", "una", "unos", "unas",
+            "y", "o", "u", "a", "en", "con", "por", "para", "al", "que", "se",
+            "su", "sus", "mi", "mis", "tu", "tus", "es", "son", "sin", "como",
+            "web", "www", "com", "mx", "https", "http", "notion", "pagina", "página",
+            "revision", "revisiones", "cliente", "clientes", "dominio", "dominios",
+            "proyecto", "proyectos", "programa", "programas", "correo", "correos",
+            "pagar", "cobrar", "contraseña", "contraseñas", "zrevision", "zrev",
+            "zclientes", "zdominios", "zproyectos", "zcorreos", "zpagar", "zcobrar"
+        };
 
         private void RefreshCommandsSidebarUi()
         {
@@ -496,11 +540,994 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private void SearchBox_GotFocus(object sender, RoutedEventArgs e)
+        {
+            RefreshQuickFlyoutContent();
+            ShowQuickCommandsInputFlyout();
+        }
+
+        private void SearchBox_Tapped(object sender, TappedRoutedEventArgs e)
+        {
+            RefreshQuickFlyoutContent();
+            ShowQuickCommandsInputFlyout();
+        }
+
+        private void RefreshQuickFlyoutContent(string? input = null)
+        {
+            var q = (input ?? SearchBox?.Text ?? string.Empty).Trim();
+
+            RebuildVisibleSavedSearches(q);
+            RebuildPredictiveSuggestions(q);
+            UpdateQuickFlyoutVisibility();
+
+            if (_quickFlyoutOpen)
+                ResizeQuickCommandsFlyout();
+        }
+
+        private void ShowQuickCommandsInputFlyout()
+        {
+            RefreshQuickFlyoutContent();
+
+            if (!ShouldShowQuickFlyout(SearchBox?.Text ?? string.Empty))
+                return;
+
+            ResizeQuickCommandsFlyout();
+
+            if (!_quickFlyoutOpen)
+                FlyoutBase.ShowAttachedFlyout(SearchBox);
+
+            QueueSearchBoxFocusRestore();
+        }
+
+        private bool ShouldShowQuickFlyout(string query)
+        {
+            if (_visibleSavedSearches.Count == 0 && _predictiveSuggestions.Count == 0)
+                return false;
+
+            var q = (query ?? string.Empty).Trim();
+
+            return string.IsNullOrWhiteSpace(q) ||
+                   q.StartsWith("z", StringComparison.OrdinalIgnoreCase) ||
+                   _predictiveSuggestions.Count > 0 ||
+                   _visibleSavedSearches.Count > 0;
+        }
+
+
+        private void SyncBaseChipsFromQuery(string query)
+        {
+            if (ChipBaseAll == null)
+                return;
+
+            var scope = ResolveNotionBaseScope(query ?? string.Empty);
+
+            if (scope.HasBase)
+            {
+                SetNotionBaseChipChecks(scope.SourceName);
+                return;
+            }
+
+            SetNotionBaseChipChecks(_activeNotionBaseFilter ?? string.Empty);
+        }
+
+        private void SetNotionBaseChipChecks(string sourceName)
+        {
+            var selected = (sourceName ?? string.Empty).Trim();
+
+            if (ChipBaseAll != null)
+                ChipBaseAll.IsChecked = string.IsNullOrWhiteSpace(selected);
+
+            if (ChipBaseRevisiones != null)
+                ChipBaseRevisiones.IsChecked = string.Equals(selected, "Revisiones", StringComparison.OrdinalIgnoreCase);
+
+            if (ChipBaseClientes != null)
+                ChipBaseClientes.IsChecked = string.Equals(selected, "Clientes", StringComparison.OrdinalIgnoreCase);
+
+            if (ChipBaseDominios != null)
+                ChipBaseDominios.IsChecked = string.Equals(selected, "Dominios", StringComparison.OrdinalIgnoreCase);
+
+            if (ChipBaseProgramas != null)
+                ChipBaseProgramas.IsChecked = string.Equals(selected, "Programas y proyectos", StringComparison.OrdinalIgnoreCase);
+
+            if (ChipBaseCobrar != null)
+                ChipBaseCobrar.IsChecked = string.Equals(selected, "Cobrar y pagar", StringComparison.OrdinalIgnoreCase);
+
+            if (ChipBaseCorreos != null)
+                ChipBaseCorreos.IsChecked = string.Equals(selected, "Correos Contraseñas", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ResizeQuickCommandsFlyout()
+        {
+            if (QuickCommandsInputHost == null || SearchBox == null)
+                return;
+
+            var desiredWidth = Math.Max(760, SearchBox.ActualWidth);
+            var rootWidth = XamlRoot?.Size.Width ?? 0;
+
+            if (rootWidth > 0)
+                desiredWidth = Math.Min(desiredWidth, Math.Max(520, rootWidth - 48));
+
+            QuickCommandsInputHost.Width = desiredWidth;
+            QuickCommandsInputHost.MinWidth = desiredWidth;
+            QuickCommandsInputHost.MaxWidth = desiredWidth;
+        }
+
+        private void QuickCommandsInputFlyout_Opened(object sender, object e)
+        {
+            _quickFlyoutOpen = true;
+            QueueSearchBoxFocusRestore();
+        }
+
+        private void QuickCommandsInputFlyout_Closed(object sender, object e)
+        {
+            _quickFlyoutOpen = false;
+        }
+
+        private void QueueSearchBoxFocusRestore()
+        {
+            if (_quickFlyoutFocusRestoreQueued)
+                return;
+
+            _quickFlyoutFocusRestoreQueued = true;
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _quickFlyoutFocusRestoreQueued = false;
+
+                if (SearchBox == null)
+                    return;
+
+                var textBox = FindVisualChild<TextBox>(SearchBox);
+                if (textBox != null)
+                {
+                    var caret = Math.Max(0, Math.Min(textBox.SelectionStart, textBox.Text?.Length ?? 0));
+                    textBox.Focus(FocusState.Programmatic);
+                    textBox.SelectionStart = caret;
+                    textBox.SelectionLength = 0;
+                    return;
+                }
+
+                SearchBox.Focus(FocusState.Programmatic);
+            });
+        }
+
+        private void RebuildVisibleSavedSearches(string query)
+        {
+            _visibleSavedSearches.Clear();
+
+            IEnumerable<SavedSearch> items = _savedSearches;
+            var q = NormalizeSuggestionText(query);
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                items = items.Where(x =>
+                    NormalizeSuggestionText(x.Title).Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    NormalizeSuggestionText(x.Query).Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+
+            foreach (var item in items.Take(24))
+                _visibleSavedSearches.Add(item);
+
+            if (QuickCommandsFlyoutList != null)
+            {
+                QuickCommandsFlyoutList.ItemsSource = null;
+                QuickCommandsFlyoutList.ItemsSource = _visibleSavedSearches;
+            }
+        }
+
+        private void RebuildPredictiveSuggestions(string query)
+        {
+            _predictiveSuggestions.Clear();
+
+            var q = (query ?? string.Empty).Trim();
+            var normalized = NormalizeSuggestionText(q);
+            var scope = ResolveNotionBaseScope(q);
+
+            if (string.IsNullOrWhiteSpace(q))
+            {
+                AddBaseShortcutSuggestions("");
+                BindPredictiveSuggestions();
+                return;
+            }
+
+            if (scope.HasBase)
+            {
+                AddScopedPredictiveSuggestions(scope);
+                BindPredictiveSuggestions();
+                return;
+            }
+
+            if (normalized.StartsWith("z", StringComparison.OrdinalIgnoreCase))
+            {
+                AddBaseShortcutSuggestions(q);
+                BindPredictiveSuggestions();
+                return;
+            }
+
+            AddGlobalPredictiveSuggestions(q);
+            BindPredictiveSuggestions();
+        }
+
+        private void BindPredictiveSuggestions()
+        {
+            if (QuickPredictiveFlyoutList != null)
+            {
+                QuickPredictiveFlyoutList.ItemsSource = null;
+                QuickPredictiveFlyoutList.ItemsSource = _predictiveSuggestions;
+            }
+        }
+
+        private void UpdateQuickFlyoutVisibility()
+        {
+            var hasPredictive = _predictiveSuggestions.Count > 0;
+            var hasSaved = _visibleSavedSearches.Count > 0;
+
+            if (QuickPredictiveHeaderText != null)
+            {
+                var scope = ResolveNotionBaseScope(SearchBox?.Text ?? "");
+                QuickPredictiveHeaderText.Text = scope.HasBase
+                    ? $"Sugerencias de {scope.PathLabel}"
+                    : "Sugerencias predictivas";
+                QuickPredictiveHeaderText.Visibility = hasPredictive ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (QuickPredictiveFlyoutList != null)
+                QuickPredictiveFlyoutList.Visibility = hasPredictive ? Visibility.Visible : Visibility.Collapsed;
+
+            if (QuickSavedHeaderText != null)
+                QuickSavedHeaderText.Visibility = hasSaved ? Visibility.Visible : Visibility.Collapsed;
+
+            if (QuickCommandsFlyoutList != null)
+                QuickCommandsFlyoutList.Visibility = hasSaved ? Visibility.Visible : Visibility.Collapsed;
+
+            if (QuickFlyoutHintText != null)
+            {
+                QuickFlyoutHintText.Text = hasPredictive || hasSaved
+                    ? "Clic para buscar · Clic derecho en guardadas para editar o eliminar"
+                    : "Escribe zrevision, zclientes, zdominios, zproyectos, zpagar o zcorreos";
+            }
+        }
+
+        private async void QuickCommandsFlyoutList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is not SavedSearch cmd)
+                return;
+
+            await ExecuteQuickQueryAsync(cmd.Query);
+        }
+
+        private async void QuickPredictiveFlyoutList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is not PredictiveSuggestion suggestion)
+                return;
+
+            if (string.Equals(suggestion.Kind, "Base", StringComparison.OrdinalIgnoreCase))
+            {
+                await ExecuteQuickQueryAsync(suggestion.Query);
+                return;
+            }
+
+            await ExecutePredictiveTermAsync(suggestion);
+        }
+
+        private async Task ExecuteQuickQueryAsync(string candidateQuery, bool hideFlyout = true)
+        {
+            var finalQuery = BuildMergedQuickQueryFromCurrent(candidateQuery);
+
+            if (string.IsNullOrWhiteSpace(finalQuery))
+                return;
+
+            if (hideFlyout)
+                QuickCommandsInputFlyout?.Hide();
+
+            SearchBox.Text = finalQuery;
+            MoveSearchBoxCaretToEnd();
+
+            await RunSearchAsync(finalQuery);
+        }
+
+        private async Task ExecutePredictiveTermAsync(PredictiveSuggestion suggestion, bool hideFlyout = true)
+        {
+            var insertText = (suggestion.Query ?? suggestion.Title ?? string.Empty).Trim();
+            var finalQuery = BuildQueryByAppendingPredictiveTerm(SearchBox?.Text ?? string.Empty, insertText);
+
+            if (string.IsNullOrWhiteSpace(finalQuery))
+                return;
+
+            if (hideFlyout)
+                QuickCommandsInputFlyout?.Hide();
+
+            SearchBox.Text = finalQuery;
+            MoveSearchBoxCaretToEnd();
+
+            await RunSearchAsync(finalQuery);
+        }
+
+        private string BuildQueryByAppendingPredictiveTerm(string currentQuery, string insertText)
+        {
+            var current = NormalizeSpacesForQuery(currentQuery);
+            var insert = NormalizeSpacesForQuery(insertText);
+
+            if (string.IsNullOrWhiteSpace(insert))
+                return current;
+
+            if (string.IsNullOrWhiteSpace(current))
+                return insert;
+
+            var currentTerms = SplitAutoAndTerms(current)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+
+            var insertTerms = SplitAutoAndTerms(insert)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+
+            if (insertTerms.Count == 0)
+                return current;
+
+            var seen = currentTerms
+                .Select(NormalizeSuggestionText)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var term in insertTerms)
+            {
+                var clean = (term ?? string.Empty).Trim();
+                var norm = NormalizeSuggestionText(clean);
+
+                if (string.IsNullOrWhiteSpace(norm))
+                    continue;
+
+                if (seen.Contains(norm))
+                    continue;
+
+                if (currentTerms.Count > 0)
+                {
+                    var lastIndex = currentTerms.Count - 1;
+                    var last = currentTerms[lastIndex] ?? string.Empty;
+                    var lastNorm = NormalizeSuggestionText(last);
+
+                    // Autocompleta solo la última palabra escrita.
+                    // Ejemplo: "zrevision br" + "bria" => "zrevision bria".
+                    if (!string.IsNullOrWhiteSpace(lastNorm) &&
+                        lastNorm.Length >= 2 &&
+                        !IsKnownBaseAlias(lastNorm) &&
+                        norm.StartsWith(lastNorm, StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentTerms[lastIndex] = clean;
+                        seen.Add(norm);
+                        continue;
+                    }
+                }
+
+                currentTerms.Add(clean);
+                seen.Add(norm);
+            }
+
+            return NormalizeSpacesForQuery(string.Join(" ", currentTerms));
+        }
+
+        private string BuildMergedQuickQueryFromCurrent(string candidateQuery)
+        {
+            var current = NormalizeSpacesForQuery(SearchBox?.Text ?? string.Empty);
+            var candidate = NormalizeSpacesForQuery(candidateQuery);
+
+            if (string.IsNullOrWhiteSpace(candidate))
+                return current;
+
+            if (string.IsNullOrWhiteSpace(current))
+                return candidate;
+
+            var currentNorm = NormalizeSuggestionText(current);
+            var candidateNorm = NormalizeSuggestionText(candidate);
+
+            if (string.Equals(currentNorm, candidateNorm, StringComparison.OrdinalIgnoreCase))
+                return current;
+
+            // Si el usuario escribió algo parcial como "zrev" y eligió "zrevision",
+            // se completa el comando en vez de duplicarlo.
+            if (candidateNorm.StartsWith(currentNorm + " ", StringComparison.OrdinalIgnoreCase))
+                return candidate;
+
+            // Evita que al seleccionar "Ver todo zrevision" se borre lo que ya escribió:
+            // "zrevision neft" + "zrevision" => "zrevision neft".
+            if (currentNorm.StartsWith(candidateNorm + " ", StringComparison.OrdinalIgnoreCase))
+                return current;
+
+            var candidateScope = ResolveNotionBaseScope(candidate);
+            var currentScope = ResolveNotionBaseScope(current);
+
+            if (candidateScope.HasBase)
+            {
+                var candidateRemainder = ExtractOriginalRemainderForScope(candidate, candidateScope);
+                var candidateIsBaseOnly = string.IsNullOrWhiteSpace(candidateRemainder);
+
+                if (currentScope.HasBase &&
+                    string.Equals(currentScope.SourceName, candidateScope.SourceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var currentRemainder = ExtractOriginalRemainderForScope(current, currentScope);
+
+                    if (candidateIsBaseOnly)
+                    {
+                        // Completa alias cortos: "zrev" => "zrevision".
+                        if (string.IsNullOrWhiteSpace(currentRemainder))
+                            return candidateScope.PrimaryAlias;
+
+                        // Mantiene lo escrito: "zrevision neft" + "zrevision" => "zrevision neft".
+                        return NormalizeSpacesForQuery($"{candidateScope.PrimaryAlias} {currentRemainder}");
+                    }
+
+                    var mergedRemainder = MergeQueryTerms(currentRemainder, candidateRemainder);
+                    return NormalizeSpacesForQuery($"{candidateScope.PrimaryAlias} {mergedRemainder}");
+                }
+
+                if (IsCurrentPartialAliasForScope(current, candidateScope))
+                    return candidateIsBaseOnly
+                        ? candidateScope.PrimaryAlias
+                        : candidate;
+
+                if (currentScope.HasBase)
+                    return MergeQueryTerms(current, candidate);
+
+                if (candidateIsBaseOnly)
+                    return NormalizeSpacesForQuery($"{candidateScope.PrimaryAlias} {current}");
+
+                var mergedWithoutBase = MergeQueryTerms(current, candidateRemainder);
+                return NormalizeSpacesForQuery($"{candidateScope.PrimaryAlias} {mergedWithoutBase}");
+            }
+
+            return MergeQueryTerms(current, candidate);
+        }
+
+        private string ExtractOriginalRemainderForScope(string query, NotionBaseScope scope)
+        {
+            var q = (query ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(q) || scope is null || !scope.HasBase)
+                return string.Empty;
+
+            var aliases = GetAliasesForScope(scope)
+                .OrderByDescending(x => x.Length)
+                .ToList();
+
+            foreach (var alias in aliases)
+            {
+                if (q.Equals(alias, StringComparison.OrdinalIgnoreCase))
+                    return string.Empty;
+
+                if (q.StartsWith(alias + " ", StringComparison.OrdinalIgnoreCase))
+                    return q.Substring(alias.Length).Trim();
+            }
+
+            return scope.Remainder ?? string.Empty;
+        }
+
+        private static IEnumerable<string> GetAliasesForScope(NotionBaseScope scope)
+        {
+            if (scope is null || !scope.HasBase)
+                return Enumerable.Empty<string>();
+
+            var shortcut = GetNotionBaseShortcuts()
+                .FirstOrDefault(x =>
+                    string.Equals(x.SourceName, scope.SourceName, StringComparison.OrdinalIgnoreCase));
+
+            if (shortcut is null)
+                return new[] { scope.PrimaryAlias };
+
+            return new[] { shortcut.PrimaryAlias }
+                .Concat(shortcut.Aliases ?? Array.Empty<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCurrentPartialAliasForScope(string current, NotionBaseScope scope)
+        {
+            var q = NormalizeSuggestionText(current);
+
+            if (string.IsNullOrWhiteSpace(q) || q.Contains(' '))
+                return false;
+
+            return GetAliasesForScope(scope)
+                .Select(NormalizeSuggestionText)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Any(alias =>
+                    alias.StartsWith(q, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(alias, q, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string MergeQueryTerms(params string[] pieces)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var piece in pieces ?? Array.Empty<string>())
+            {
+                foreach (var term in SplitAutoAndTerms(piece ?? string.Empty))
+                {
+                    var clean = (term ?? string.Empty).Trim();
+                    var norm = NormalizeSuggestionText(clean);
+
+                    if (string.IsNullOrWhiteSpace(norm))
+                        continue;
+
+                    if (seen.Add(norm))
+                        result.Add(clean);
+                }
+            }
+
+            return NormalizeSpacesForQuery(string.Join(" ", result));
+        }
+
+        private static string NormalizeSpacesForQuery(string value)
+        {
+            return Regex.Replace((value ?? string.Empty).Trim(), @"\s+", " ");
+        }
+
+        private void MoveSearchBoxCaretToEnd()
+        {
+            var textBox = FindVisualChild<TextBox>(SearchBox);
+
+            if (textBox != null)
+            {
+                textBox.Focus(FocusState.Programmatic);
+                textBox.SelectionStart = textBox.Text?.Length ?? 0;
+                textBox.SelectionLength = 0;
+                return;
+            }
+
+            SearchBox.Focus(FocusState.Programmatic);
+        }
+
+        private void QuickCommandChip_RightTapped(object sender, RightTappedRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe)
+                return;
+
+            if (fe.DataContext is not SavedSearch cmd)
+                return;
+
+            var flyout = new MenuFlyout();
+
+            var run = new MenuFlyoutItem { Text = "Buscar" };
+            run.Click += async (_, __) =>
+            {
+                await ExecuteQuickQueryAsync(cmd.Query);
+            };
+
+            var edit = new MenuFlyoutItem { Text = "Editar" };
+            edit.Click += (_, __) =>
+            {
+                QuickCommandsInputFlyout?.Hide();
+
+                var fakeButton = new Button { Tag = cmd };
+                BtnEditSidebarCommand_Click(fakeButton, new RoutedEventArgs());
+            };
+
+            var delete = new MenuFlyoutItem { Text = "Eliminar" };
+            delete.Click += (_, __) =>
+            {
+                QuickCommandsInputFlyout?.Hide();
+
+                var fakeButton = new Button { Tag = cmd };
+                BtnDeleteSidebarCommand_Click(fakeButton, new RoutedEventArgs());
+            };
+
+            flyout.Items.Add(run);
+            flyout.Items.Add(new MenuFlyoutSeparator());
+            flyout.Items.Add(edit);
+            flyout.Items.Add(delete);
+
+            flyout.ShowAt(fe, e.GetPosition(fe));
+            e.Handled = true;
+        }
+
+        private void AddBaseShortcutSuggestions(string partial)
+        {
+            var q = NormalizeSuggestionText(partial);
+
+            foreach (var item in GetNotionBaseShortcuts())
+            {
+                var haystack = NormalizeSuggestionText(string.Join(" ", new[]
+                {
+                    item.PrimaryAlias,
+                    item.DisplayLabel,
+                    item.PathLabel,
+                    item.SourceName,
+                    string.Join(" ", item.Aliases)
+                }));
+
+                if (!string.IsNullOrWhiteSpace(q) && !haystack.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                _predictiveSuggestions.Add(new PredictiveSuggestion
+                {
+                    Title = item.PrimaryAlias,
+                    Subtitle = $"Filtrar {item.PathLabel}",
+                    Query = item.PrimaryAlias,
+                    Kind = "Base",
+                    IconGlyph = "\uE8B7"
+                });
+            }
+        }
+
+        private void AddScopedPredictiveSuggestions(NotionBaseScope scope)
+        {
+            var rows = App.LocalIndex.HasData
+                ? App.LocalIndex.GetAll()
+                    .Where(x =>
+                        x.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
+                        string.Equals(x.ExternalSourceName, scope.SourceName, StringComparison.OrdinalIgnoreCase))
+                    .ToList()
+                : new List<Anfeta.UI.Models.Weblab.SearchResultRow>();
+
+            var remainder = (scope.Remainder ?? string.Empty).Trim();
+            var currentQuery = SearchBox?.Text ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(remainder))
+            {
+                _predictiveSuggestions.Add(new PredictiveSuggestion
+                {
+                    Title = $"Ver todo {scope.PathLabel}",
+                    Subtitle = $"{rows.Count} páginas en esta base",
+                    Query = scope.PrimaryAlias,
+                    Kind = "Base",
+                    IconGlyph = ""
+                });
+            }
+
+            if (rows.Count == 0)
+                return;
+
+            // El predictivo ya no mete títulos completos de páginas.
+            // Solo propone palabras/temas que pueden seguir a lo escrito.
+            foreach (var topic in BuildFrequentTopicSuggestions(rows, remainder, currentQuery).Take(28))
+            {
+                _predictiveSuggestions.Add(new PredictiveSuggestion
+                {
+                    Title = topic.Text,
+                    Subtitle = $"{scope.PathLabel} · aparece {topic.Count}x",
+                    Query = topic.Text,
+                    Kind = "Topic",
+                    IconGlyph = ""
+                });
+            }
+        }
+
+        private void AddGlobalPredictiveSuggestions(string query)
+        {
+            if (!App.LocalIndex.HasData)
+                return;
+
+            var q = NormalizeSuggestionText(query);
+            if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+                return;
+
+            var matchingRows = App.LocalIndex.GetAll()
+                .Where(x => x.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion)
+                .Where(x => RowMatchesPredictiveText(x, query))
+                .OrderBy(x => GetPathOrderRank(x))
+                .ThenBy(x => x.DisplayName ?? x.Name)
+                .ToList();
+
+            if (matchingRows.Count == 0)
+                return;
+
+            foreach (var topic in BuildFrequentTopicSuggestions(matchingRows, string.Empty, query).Take(28))
+            {
+                _predictiveSuggestions.Add(new PredictiveSuggestion
+                {
+                    Title = topic.Text,
+                    Subtitle = $"Sugerencia · aparece {topic.Count}x",
+                    Query = topic.Text,
+                    Kind = "Topic",
+                    IconGlyph = ""
+                });
+            }
+        }
+
+        private NotionBaseScope ResolveNotionBaseScope(string query)
+        {
+            var q = (query ?? string.Empty).Trim();
+            var normalized = NormalizeSuggestionText(q);
+
+            if (string.IsNullOrWhiteSpace(normalized))
+                return new NotionBaseScope();
+
+            foreach (var shortcut in GetNotionBaseShortcuts())
+            {
+                var aliases = new[] { shortcut.PrimaryAlias }
+                    .Concat(shortcut.Aliases ?? Array.Empty<string>())
+                    .Select(NormalizeSuggestionText)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderByDescending(x => x.Length);
+
+                foreach (var alias in aliases)
+                {
+                    if (normalized.Equals(alias, StringComparison.OrdinalIgnoreCase) ||
+                        normalized.StartsWith(alias + " ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var remainder = normalized.Length == alias.Length
+                            ? ""
+                            : normalized.Substring(alias.Length).Trim();
+
+                        return new NotionBaseScope
+                        {
+                            HasBase = true,
+                            PrimaryAlias = shortcut.PrimaryAlias,
+                            SourceName = shortcut.SourceName,
+                            PathLabel = shortcut.PathLabel,
+                            DisplayLabel = shortcut.DisplayLabel,
+                            Remainder = remainder
+                        };
+                    }
+                }
+            }
+
+            return new NotionBaseScope();
+        }
+
+        private static List<NotionBaseShortcut> GetNotionBaseShortcuts()
+        {
+            return new List<NotionBaseShortcut>
+            {
+                new NotionBaseShortcut
+                {
+                    PrimaryAlias = "zrevision",
+                    SourceName = "Revisiones",
+                    PathLabel = "Revisiones",
+                    DisplayLabel = "Revisiones",
+                    Aliases = new[] { "zrevisiones", "zrev", "revision", "revisiones" }
+                },
+                new NotionBaseShortcut
+                {
+                    PrimaryAlias = "zclientes",
+                    SourceName = "Clientes",
+                    PathLabel = "zCLIENTES",
+                    DisplayLabel = "Clientes",
+                    Aliases = new[] { "zcliente", "clientes", "cliente" }
+                },
+                new NotionBaseShortcut
+                {
+                    PrimaryAlias = "zdominios",
+                    SourceName = "Dominios",
+                    PathLabel = "zDOMINIOS",
+                    DisplayLabel = "Dominios",
+                    Aliases = new[] { "zdominio", "zd", "dominios", "dominio" }
+                },
+                new NotionBaseShortcut
+                {
+                    PrimaryAlias = "zproyectos",
+                    SourceName = "Programas y proyectos",
+                    PathLabel = "zPROYECTOS",
+                    DisplayLabel = "Proyectos",
+                    Aliases = new[] { "zproyecto", "zprogramas", "zprograma", "zproy", "zprog", "proyectos", "programas" }
+                },
+                new NotionBaseShortcut
+                {
+                    PrimaryAlias = "zcorreos",
+                    SourceName = "Correos Contraseñas",
+                    PathLabel = "zCORREOS",
+                    DisplayLabel = "Correos",
+                    Aliases = new[] { "zcorreo", "zpass", "zpasswords", "zcontraseñas", "correos", "contraseñas" }
+                },
+                new NotionBaseShortcut
+                {
+                    PrimaryAlias = "zpagar",
+                    SourceName = "Cobrar y pagar",
+                    PathLabel = "zPAGAR - zCOBRAR",
+                    DisplayLabel = "Cobrar y pagar",
+                    Aliases = new[] { "zcobrar", "zpago", "zcobro", "pagar", "cobrar" }
+                }
+            };
+        }
+
+        private NotionBaseShortcut? GetShortcutForSource(string sourceName)
+        {
+            return GetNotionBaseShortcuts()
+                .FirstOrDefault(x => string.Equals(x.SourceName, sourceName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool RowMatchesPredictiveText(Anfeta.UI.Models.Weblab.SearchResultRow row, string query)
+        {
+            var terms = SplitAutoAndTerms(query);
+            if (terms.Count == 0)
+                return true;
+
+            var text = NormalizeSuggestionText(GetPredictiveSearchText(row));
+
+            return terms
+                .Select(NormalizeSuggestionText)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .All(term => text.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetPredictiveTitle(Anfeta.UI.Models.Weblab.SearchResultRow row)
+        {
+            var title = (row.DisplayName ?? row.Name ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(title) ? "Sin título" : title;
+        }
+
+        private static string GetPredictiveSearchText(Anfeta.UI.Models.Weblab.SearchResultRow row)
+        {
+            return string.Join(" ", new[]
+            {
+                row.DisplayName,
+                row.Name,
+                row.PathColumn,
+                row.ExternalSourceName,
+                row.SearchText,
+                row.Description,
+                row.Target
+            }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        }
+
+        private static string BuildScopedQuery(string alias, string value)
+        {
+            var cleanAlias = (alias ?? string.Empty).Trim();
+            var cleanValue = (value ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(cleanAlias))
+                return cleanValue;
+
+            if (string.IsNullOrWhiteSpace(cleanValue))
+                return cleanAlias;
+
+            return $"{cleanAlias} {cleanValue}";
+        }
+
+        private sealed class TopicCount
+        {
+            public string Text { get; set; } = "";
+            public int Count { get; set; }
+        }
+
+        private List<TopicCount> BuildFrequentTopicSuggestions(
+            IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> rows,
+            string rowFilter,
+            string excludedQuery = "")
+        {
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var filter = NormalizeSuggestionText(rowFilter);
+            var excludedTerms = BuildPredictiveExcludedTerms(excludedQuery);
+
+            foreach (var row in rows)
+            {
+                if (!string.IsNullOrWhiteSpace(filter) && !RowMatchesPredictiveText(row, rowFilter))
+                    continue;
+
+                var title = NormalizeSuggestionText(GetPredictiveTitle(row));
+                if (string.IsNullOrWhiteSpace(title))
+                    continue;
+
+                var words = title
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Where(IsUsefulPredictiveWord)
+                    .Where(x => !excludedTerms.Contains(NormalizeSuggestionText(x)))
+                    .ToList();
+
+                var local = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var word in words)
+                    local.Add(word);
+
+                for (int i = 0; i < words.Count - 1; i++)
+                {
+                    var phrase = $"{words[i]} {words[i + 1]}";
+                    var phraseParts = phrase
+                        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(NormalizeSuggestionText)
+                        .ToList();
+
+                    if (phraseParts.Any(x => excludedTerms.Contains(x)))
+                        continue;
+
+                    local.Add(phrase);
+                }
+
+                foreach (var item in local)
+                {
+                    if (!string.IsNullOrWhiteSpace(filter) &&
+                        !item.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Si el usuario ya escribió un término, no obligamos a que la sugerencia
+                        // contenga ese mismo texto; la fila ya fue filtrada arriba.
+                    }
+
+                    counts[item] = counts.TryGetValue(item, out var current)
+                        ? current + 1
+                        : 1;
+                }
+            }
+
+            var minCount = string.IsNullOrWhiteSpace(filter) ? 2 : 1;
+
+            return counts
+                .Where(x => x.Value >= minCount)
+                .OrderByDescending(x => x.Value)
+                .ThenBy(x => x.Key)
+                .Select(x => new TopicCount
+                {
+                    Text = x.Key,
+                    Count = x.Value
+                })
+                .ToList();
+        }
+
+        private static HashSet<string> BuildPredictiveExcludedTerms(string query)
+        {
+            var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var term in SplitAutoAndTerms(query ?? string.Empty))
+            {
+                var norm = NormalizeSuggestionText(term);
+                if (!string.IsNullOrWhiteSpace(norm))
+                    excluded.Add(norm);
+            }
+
+            foreach (var shortcut in GetNotionBaseShortcuts())
+            {
+                foreach (var alias in new[] { shortcut.PrimaryAlias }
+                    .Concat(shortcut.Aliases ?? Array.Empty<string>()))
+                {
+                    var norm = NormalizeSuggestionText(alias);
+                    if (!string.IsNullOrWhiteSpace(norm))
+                        excluded.Add(norm);
+                }
+
+                foreach (var label in new[] { shortcut.SourceName, shortcut.PathLabel, shortcut.DisplayLabel })
+                {
+                    foreach (var part in SplitAutoAndTerms(label ?? string.Empty))
+                    {
+                        var norm = NormalizeSuggestionText(part);
+                        if (!string.IsNullOrWhiteSpace(norm))
+                            excluded.Add(norm);
+                    }
+                }
+            }
+
+            return excluded;
+        }
+
+        private static bool IsKnownBaseAlias(string normalizedTerm)
+        {
+            var norm = NormalizeSuggestionText(normalizedTerm);
+            if (string.IsNullOrWhiteSpace(norm))
+                return false;
+
+            return GetNotionBaseShortcuts()
+                .SelectMany(x => new[] { x.PrimaryAlias }.Concat(x.Aliases ?? Array.Empty<string>()))
+                .Select(NormalizeSuggestionText)
+                .Any(x => string.Equals(x, norm, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsUsefulPredictiveWord(string word)
+        {
+            var w = (word ?? string.Empty).Trim();
+
+            if (w.Length < 3)
+                return false;
+
+            return !PredictiveStopWords.Contains(w, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeSuggestionText(string value)
+        {
+            var text = (value ?? string.Empty).ToLowerInvariant();
+            text = Regex.Replace(text, @"[^\p{L}\p{Nd}]+", " ");
+            text = Regex.Replace(text, @"\s+", " ").Trim();
+            return text;
+        }
+
         private void LoadSavedSearches()
         {
             _savedSearches.Clear();
             var raw = ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] as string;
-            if (string.IsNullOrWhiteSpace(raw)) return;
+
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                RefreshSavedSearchesUi();
+                return;
+            }
 
             try
             {
@@ -517,6 +1544,8 @@ namespace Anfeta.UI.Views
             {
                 ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = "";
             }
+
+            RefreshSavedSearchesUi();
         }
 
         private void SaveSavedSearches()
@@ -533,6 +1562,9 @@ namespace Anfeta.UI.Views
                 CommandsSidebarList.ItemsSource = null;
                 CommandsSidebarList.ItemsSource = _savedSearches;
             }
+
+            RefreshQuickFlyoutContent(SearchBox?.Text ?? string.Empty);
+
             RefreshCommandsSidebarUi();
         }
 
@@ -556,8 +1588,8 @@ namespace Anfeta.UI.Views
             var existing = _savedSearches.FirstOrDefault(x => x.Id == cmd.Id);
             if (existing == null) return;
 
-            var titleBox = new TextBox { PlaceholderText = "TÃ­tulo", Text = existing.Title ?? "" };
-            var descBox = new TextBox { PlaceholderText = "DescripciÃ³n (opcional)", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Text = existing.Description ?? "" };
+            var titleBox = new TextBox { PlaceholderText = "Título", Text = existing.Title ?? "" };
+            var descBox = new TextBox { PlaceholderText = "Descripción (opcional)", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Text = existing.Description ?? "" };
             var queryBox = new TextBox { Text = existing.Query ?? "" };
 
             var panel = new StackPanel
@@ -585,13 +1617,13 @@ namespace Anfeta.UI.Views
 
             if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newQuery))
             {
-                StatusText.Text = "Estado: TÃ­tulo y Query son obligatorios.";
+                StatusText.Text = "Estado: Título y Query son obligatorios.";
                 return;
             }
             if (_savedSearches.Any(x => x.Id != existing.Id &&
                 string.Equals(x.Query, newQuery, StringComparison.OrdinalIgnoreCase)))
             {
-                StatusText.Text = "Estado: Ya existe otro comando con esa bÃºsqueda.";
+                StatusText.Text = "Estado: Ya existe otro comando con esa búsqueda.";
                 return;
             }
 
@@ -601,60 +1633,50 @@ namespace Anfeta.UI.Views
 
             SaveSavedSearches();
             RefreshSavedSearchesUi();
-            StatusText.Text = "Estado: Comando actualizado âœ…";
+            StatusText.Text = "Estado: Comando actualizado ✅";
         }
 
-        private async void BtnSaveSearch_Click(object sender, RoutedEventArgs e)
+        private void BtnSaveSearch_Click(object sender, RoutedEventArgs e)
         {
             var currentQuery = (SearchBox.Text ?? "").Trim();
+
             if (string.IsNullOrWhiteSpace(currentQuery))
             {
-                StatusText.Text = "Estado: Escribe una bÃºsqueda antes de guardar.";
+                StatusText.Text = "Estado: Escribe una búsqueda antes de guardar.";
                 return;
             }
 
-            var titleBox = new TextBox { PlaceholderText = "TÃ­tulo (ej: Reportes PDF)", Text = currentQuery.Length > 24 ? currentQuery.Substring(0, 24) : currentQuery };
-            var descBox = new TextBox { PlaceholderText = "DescripciÃ³n (opcional)", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap };
-            var queryBox = new TextBox { Text = currentQuery };
+            var exists = _savedSearches.Any(x =>
+                string.Equals(x.Query, currentQuery, StringComparison.OrdinalIgnoreCase));
 
-            var panel = new StackPanel
+            if (exists)
             {
-                Spacing = 8,
-                Children = { new TextBlock { Text = "Guardar bÃºsqueda como comando", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold }, titleBox, descBox, new TextBlock { Text = "Query:" }, queryBox }
-            };
-
-            var dialog = new ContentDialog
-            {
-                Title = "Nuevo comando",
-                Content = panel,
-                PrimaryButtonText = "Guardar",
-                CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = this.XamlRoot
-            };
-
-            var result = await dialog.ShowAsync();
-            if (result != ContentDialogResult.Primary) return;
-
-            var finalTitle = (titleBox.Text ?? "").Trim();
-            var finalQuery = (queryBox.Text ?? "").Trim();
-            var finalDesc = (descBox.Text ?? "").Trim();
-
-            if (string.IsNullOrWhiteSpace(finalTitle) || string.IsNullOrWhiteSpace(finalQuery))
-            {
-                StatusText.Text = "Estado: TÃ­tulo y Query son obligatorios.";
-                return;
-            }
-            if (_savedSearches.Any(x => string.Equals(x.Query, finalQuery, StringComparison.OrdinalIgnoreCase)))
-            {
-                StatusText.Text = "Estado: Ya existe un comando con esa bÃºsqueda.";
+                StatusText.Text = "Estado: Esa búsqueda ya está guardada.";
                 return;
             }
 
-            _savedSearches.Add(new SavedSearch { Title = finalTitle, Description = finalDesc, Query = finalQuery });
+            _savedSearches.Add(new SavedSearch
+            {
+                Title = BuildQuickSearchTitle(currentQuery),
+                Description = "",
+                Query = currentQuery
+            });
+
             SaveSavedSearches();
             RefreshSavedSearchesUi();
-            StatusText.Text = "Estado: Comando guardado ðŸ’¾";
+
+            StatusText.Text = $"Estado: Búsqueda guardada ✅ {currentQuery}";
+        }
+        private static string BuildQuickSearchTitle(string query)
+        {
+            var title = (query ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(title))
+                return "Búsqueda rápida";
+
+            return title.Length > 42
+                ? title.Substring(0, 42).Trim() + "..."
+                : title;
         }
 
         private void LoadSidebarExpandedStates()
@@ -705,7 +1727,7 @@ namespace Anfeta.UI.Views
                 var dialog = new ContentDialog
                 {
                     Title = "Borrar todos los comandos",
-                    Content = "Â¿Seguro que quieres eliminar todos los comandos guardados?",
+                    Content = "¿Seguro que quieres eliminar todos los comandos guardados?",
                     PrimaryButtonText = "Borrar",
                     CloseButtonText = "Cancelar",
                     DefaultButton = ContentDialogButton.Close,
@@ -777,16 +1799,10 @@ namespace Anfeta.UI.Views
 
             _activeNotionBaseFilter = selectedBase;
 
-            ChipBaseAll.IsChecked = clicked == ChipBaseAll;
-            ChipBaseRevisiones.IsChecked = clicked == ChipBaseRevisiones;
-            ChipBaseClientes.IsChecked = clicked == ChipBaseClientes;
-            ChipBaseDominios.IsChecked = clicked == ChipBaseDominios;
-            ChipBaseProgramas.IsChecked = clicked == ChipBaseProgramas;
-            ChipBaseCobrar.IsChecked = clicked == ChipBaseCobrar;
-            ChipBaseCorreos.IsChecked = clicked == ChipBaseCorreos;
-
             if (clicked == ChipBaseAll)
                 _activeNotionBaseFilter = "";
+
+            SetNotionBaseChipChecks(_activeNotionBaseFilter);
 
             await PaintLoadedIndexAsync();
         }

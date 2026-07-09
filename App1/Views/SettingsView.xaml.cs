@@ -602,15 +602,27 @@ namespace Anfeta.UI.Views
 
             try
             {
-                ShowStatus("Probando conexión con Notion...", InfoBarSeverity.Informational);
+                var enabledBases = NotionDataSources.Default.Count(x => x.Enabled);
+                ShowStatus($"Probando conexión con Notion... ({enabledBases} bases)", InfoBarSeverity.Informational);
+
+                // Evita que la prueba se quede varios minutos si Notion o una base no responde.
+                using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
                 var items = await NotionIndexBuilder.BuildManyAsync(
-                token,
-                NotionDataSources.Default,
-                CancellationToken.None,
-                maxItemsPerSource: 2);
+                    token,
+                    NotionDataSources.Default,
+                    testCts.Token,
+                    maxItemsPerSource: 1);
 
-                ShowStatus($"Conexión Notion correcta ✅ Bases: {NotionDataSources.Default.Count} · Páginas de prueba: {items.Count}", InfoBarSeverity.Success);
+                ShowStatus(
+                    $"Conexión Notion correcta ✅ Bases: {enabledBases} · Páginas de prueba: {items.Count}",
+                    InfoBarSeverity.Success);
+            }
+            catch (OperationCanceledException)
+            {
+                ShowStatus(
+                    "Tiempo agotado probando Notion. Revisa conexión, token o permisos de las bases.",
+                    InfoBarSeverity.Warning);
             }
             catch (Exception ex)
             {
@@ -660,7 +672,7 @@ namespace Anfeta.UI.Views
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] = now;
 
                 NotionStatusText.Text = $"Configurado: {NotionDataSources.Default.Count} bases · Última sincronización: {FormatUtcLocal(now)}";
-                
+
                 ShowStatus(
                     $"Notion sincronizado ✅ Bases: {NotionDataSources.Default.Count} · Páginas: {notionItems.Count} · Índice total: {App.LocalIndex.Count}",
                     InfoBarSeverity.Success);

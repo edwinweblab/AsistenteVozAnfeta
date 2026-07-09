@@ -38,6 +38,7 @@ using Windows.UI;
 using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 
+
 namespace Anfeta.UI.Views
 {
     public sealed partial class SearchView : Page, ISearchCommandSink
@@ -61,7 +62,7 @@ namespace Anfeta.UI.Views
         private bool _onlyBookmarks = false;
         private bool _onlyFolders = false;
         private string? _extFilter = null;
-        private string _sortKey = "mod_desc";
+        private string _sortKey = "name_asc";
 
         // debounce / tokens
         private DispatcherTimer? _searchDebounceTimer;
@@ -155,6 +156,8 @@ namespace Anfeta.UI.Views
         // importar filtros
         private readonly EverythingCsvFilterImporter _csvFilterImporter = new();
         private readonly FilePickerService _filePickerService = new();
+        //colores predefinidos 
+        private const string LS_SearchBackgroundTheme = "SearchBackgroundTheme";
 
         #endregion
 
@@ -279,6 +282,7 @@ namespace Anfeta.UI.Views
 
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
+            LoadSearchBackgroundTheme();
             UpdateColumnSortIndicators();
             // Suscripción única controlada por flag — evita duplicados si Loaded se dispara más de una vez
             if (!_isIndexStateHooked)
@@ -294,6 +298,7 @@ namespace Anfeta.UI.Views
             LoadExcludedFolders();
             RefreshExcludedFoldersUi();
             LoadSavedSearches();
+            RefreshSavedSearchesUi();
             CommandsSidebarList.ItemsSource = _savedSearches;
             RefreshCommandsSidebarUi();
             LoadSidebarExpandedStates();
@@ -377,7 +382,7 @@ namespace Anfeta.UI.Views
             _backStack.Clear();
             _forwardStack.Clear();
             _treeRoots.Clear();
-            
+
             Results.Clear();
             RefreshResultsListView();
 
@@ -416,16 +421,16 @@ namespace Anfeta.UI.Views
 
             var order = new[]
             {
-        "Clientes",
-        "Dominios",
-        "Revisiones",
-        "Programas y proyectos",
-        "Cobrar y pagar",
-        "Correos Contraseñas",
-        "Archivos locales",
-        "Notion",
-        "Otros"
-    };
+                "Clientes",
+                "Dominios",
+                "Revisiones",
+                "Programas y proyectos",
+                "Cobrar y pagar",
+                "Correos Contraseñas",
+                "Archivos locales",
+                "Notion",
+                "Otros"
+            };
 
             return rows
                 .GroupBy(GetResultGroupName)
@@ -455,5 +460,49 @@ namespace Anfeta.UI.Views
 
             return "Otros";
         }
+
+        #region
+        private void LoadSearchBackgroundTheme()
+        {
+            var theme = ApplicationData.Current.LocalSettings.Values[LS_SearchBackgroundTheme] as string;
+
+            if (string.IsNullOrWhiteSpace(theme))
+                theme = "gray";
+
+            ApplySearchBackgroundTheme(theme);
+        }
+
+        private void ApplySearchBackgroundTheme(string theme)
+        {
+            Color bgColor = theme switch
+            {
+                "blue" => Color.FromArgb(255, 15, 23, 42),
+                "purple" => Color.FromArgb(255, 30, 24, 46),
+                "green" => Color.FromArgb(255, 16, 32, 28),
+
+                "navy" => Color.FromArgb(255, 10, 22, 40),
+                "midnight" => Color.FromArgb(255, 12, 18, 32),
+                "violet" => Color.FromArgb(255, 35, 27, 55),
+                "wine" => Color.FromArgb(255, 45, 20, 32),
+                "slate" => Color.FromArgb(255, 24, 31, 42),
+                "coffee" => Color.FromArgb(255, 32, 26, 22),
+
+                _ => Color.FromArgb(255, 21, 21, 21),
+            };
+
+            RootLayout.Background = new SolidColorBrush(bgColor);
+
+            ApplicationData.Current.LocalSettings.Values[LS_SearchBackgroundTheme] = theme;
+        }
+
+        private void ThemePreset_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuFlyoutItem item)
+                return;
+
+            var theme = item.Tag as string ?? "gray";
+            ApplySearchBackgroundTheme(theme);
+        }
+        #endregion
     }
 }
