@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Input;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -244,6 +245,28 @@ namespace Anfeta.UI
             DotDropbox.Fill = new SolidColorBrush(Color.FromArgb(255, dotR, dotG, dotB));
             IconDropbox.Foreground = new SolidColorBrush(Color.FromArgb(255, textR, textG, textB));
             TxtDropbox.Foreground = new SolidColorBrush(Color.FromArgb(255, textR, textG, textB));
+        }
+
+        private async void NewSearchTab_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+        {
+            args.Handled = true;
+
+            var searchItem = FindNavItem("Search");
+            if (searchItem != null)
+                AppNav.SelectedItem = searchItem;
+
+            if (ContentFrame.CurrentSourcePageType != typeof(SearchTabsView))
+            {
+                ContentFrame.Navigate(typeof(SearchTabsView));
+                await Task.Delay(100);
+            }
+
+            if (ContentFrame.Content is SearchTabsView tabsView)
+            {
+                var view = tabsView.AddNewSearchTab();
+                await Task.Delay(50);
+                SearchFocusBridge.RequestFocus();
+            }
         }
 
         // ═══════════════════════════════════════════

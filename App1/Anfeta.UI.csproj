@@ -61,6 +61,7 @@
 	<ItemGroup>
 		<PackageReference Include="AudioSwitcher.AudioApi.CoreAudio" Version="3.0.3" />
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+		<PackageReference Include="Dropbox.Api" Version="7.0.0" />
 		<PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.1" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
 		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />

@@ -36,10 +36,14 @@ namespace Anfeta.UI.Views
         }
         private void Tabs_AddTabButtonClick(TabView sender, object args)
         {
+            AddNewSearchTab();
+        }
+
+        public SearchView AddNewSearchTab()
+        {
             _tabCounter++;
 
             var view = new SearchView();
-
             var tab = new TabViewItem
             {
                 Header = $"Buscar {_tabCounter}",
@@ -48,10 +52,17 @@ namespace Anfeta.UI.Views
             };
 
             HookTabTitle(tab, view);
-
-            sender.TabItems.Add(tab);
-            sender.SelectedItem = tab;
+            Tabs.TabItems.Add(tab);
+            Tabs.SelectedItem = tab;
             SaveWorkspace();
+
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                await WaitForLoadedAsync(view);
+                await view.ApplyDefaultTagIfEmptyAsync();
+            });
+
+            return view;
         }
 
         private void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)

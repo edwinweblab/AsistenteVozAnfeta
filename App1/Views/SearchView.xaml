@@ -513,8 +513,14 @@
             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
             BorderThickness="0,0,0,1">
 
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
             <!--  Chips visibles en una WrapPanel horizontal  -->
             <StackPanel
+                Grid.Column="0"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
                 Spacing="4">
@@ -598,6 +604,64 @@
                     Content="zCorreos"
                     CornerRadius="11"
                     Tag="Correos Contraseñas" />
+            </StackPanel>
+
+            <!-- Configuración rápida del módulo -->
+            <StackPanel
+                Grid.Column="1"
+                Margin="12,0,0,0"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="6">
+
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Opacity="0.65"
+                    Text="Tag inicial" />
+
+                <ComboBox
+                    x:Name="DefaultTagCombo"
+                    Width="150"
+                    Height="26"
+                    FontSize="11"
+                    SelectionChanged="DefaultTagCombo_SelectionChanged">
+                    <ComboBoxItem Content="Ninguno" Tag="" />
+                    <ComboBoxItem Content="prtuzREVISION" Tag="prtuzREVISION" />
+                    <ComboBoxItem Content="zclientes" Tag="zclientes" />
+                    <ComboBoxItem Content="zdominios" Tag="zdominios" />
+                    <ComboBoxItem Content="zproyectos" Tag="zproyectos" />
+                    <ComboBoxItem Content="zpagar" Tag="zpagar" />
+                    <ComboBoxItem Content="zcorreos" Tag="zcorreos" />
+                    <ComboBoxItem Content="Personalizado" Tag="__custom__" />
+                </ComboBox>
+
+                <TextBox
+                    x:Name="CustomDefaultTagBox"
+                    Width="125"
+                    Height="26"
+                    FontSize="11"
+                    PlaceholderText="Tag personalizado"
+                    TextChanged="CustomDefaultTagBox_TextChanged"
+                    Visibility="Collapsed" />
+
+                <TextBlock
+                    Margin="4,0,0,0"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Opacity="0.65"
+                    Text="Texto" />
+
+                <ComboBox
+                    x:Name="TextScaleCombo"
+                    Width="92"
+                    Height="26"
+                    FontSize="11"
+                    SelectionChanged="TextScaleCombo_SelectionChanged">
+                    <ComboBoxItem Content="Pequeño" Tag="small" />
+                    <ComboBoxItem Content="Normal" Tag="normal" />
+                    <ComboBoxItem Content="Grande" Tag="large" />
+                </ComboBox>
             </StackPanel>
             <StackPanel Visibility="Collapsed">
                 <ToggleButton x:Name="ChipPdf" />
@@ -727,7 +791,7 @@
                                 <ListView.ItemContainerStyle>
                                     <Style TargetType="ListViewItem">
                                         <Setter Property="Padding" Value="10,0" />
-                                        <Setter Property="MinHeight" Value="28" />
+                                        <Setter Property="MinHeight" Value="22" />
                                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                     </Style>
                                 </ListView.ItemContainerStyle>
@@ -1117,17 +1181,21 @@
 
                 <!--  Encabezados de columnas estilo Everything  -->
                 <Grid
+                    x:Name="ResultsHeaderGrid"
                     Grid.Row="1"
-                    Padding="10,0"
+                    Padding="8,0"
                     Background="#202020"
                     BorderBrush="#3A3A3A"
                     BorderThickness="0,0,0,1"
                     ColumnSpacing="0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="150" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="130" />
-                        <ColumnDefinition Width="36" />
+                        <ColumnDefinition x:Name="HeaderPathColumn" Width="150" />
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition x:Name="HeaderNameColumn" Width="*" />
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition x:Name="HeaderDateColumn" Width="130" />
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition x:Name="HeaderStarColumn" Width="36" />
                     </Grid.ColumnDefinitions>
 
                     <TextBlock
@@ -1138,10 +1206,20 @@
                         Foreground="#D6D6D6"
                         Text="Path" />
 
+                    <Thumb
+                        x:Name="PathNameSplitter"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="Transparent"
+                        DragCompleted="ColumnSplitter_DragCompleted"
+                        DragDelta="PathNameSplitter_DragDelta"
+                        ToolTipService.ToolTip="Arrastra para ajustar Path" />
+
                     <!--  Ordenar por nombre A-Z / Z-A  -->
                     <Button
                         x:Name="HeaderNameSortButton"
-                        Grid.Column="1"
+                        Grid.Column="2"
                         Padding="0"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch"
@@ -1167,10 +1245,20 @@
                         </StackPanel>
                     </Button>
 
+                    <Thumb
+                        x:Name="NameDateSplitter"
+                        Grid.Column="3"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="Transparent"
+                        DragCompleted="ColumnSplitter_DragCompleted"
+                        DragDelta="NameDateSplitter_DragDelta"
+                        ToolTipService.ToolTip="Arrastra para ajustar Name y Date Modified" />
+
                     <!--  Ordenar por fecha reciente / antigua  -->
                     <Button
                         x:Name="HeaderModifiedSortButton"
-                        Grid.Column="2"
+                        Grid.Column="4"
                         Padding="0"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch"
@@ -1195,6 +1283,26 @@
                                 Text="" />
                         </StackPanel>
                     </Button>
+
+                    <Thumb
+                        x:Name="DateStarSplitter"
+                        Grid.Column="5"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="Transparent"
+                        DragCompleted="ColumnSplitter_DragCompleted"
+                        DragDelta="DateStarSplitter_DragDelta"
+                        ToolTipService.ToolTip="Arrastra para ajustar Date Modified y Favorito" />
+
+                    <TextBlock
+                        Grid.Column="6"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontFamily="Segoe MDL2 Assets"
+                        FontSize="11"
+                        Foreground="#D6D6D6"
+                        Text="&#xE734;"
+                        ToolTipService.ToolTip="Favorito" />
                 </Grid>
 
                 <!--  Lista de resultados estilo Everything  -->
@@ -1219,21 +1327,24 @@
                                 <Setter Property="Padding" Value="0" />
                                 <Setter Property="MinHeight" Value="28" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="BorderBrush" Value="#2F2F2F" />
-                                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                <Setter Property="BorderThickness" Value="0" />
                             </Style>
                         </ListView.ItemContainerStyle>
 
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchResultRow">
                                 <Grid
-                                    Height="28"
-                                    Padding="10,0"
-                                    ColumnSpacing="0">
+                                    Height="22"
+                                    Padding="8,0"
+                                    ColumnSpacing="0"
+                                    Tag="ResultColumns">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="5" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="5" />
                                         <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="5" />
                                         <ColumnDefinition Width="36" />
                                     </Grid.ColumnDefinitions>
 
@@ -1251,7 +1362,7 @@
 
                                     <!--  Name  -->
                                     <Grid
-                                        Grid.Column="1"
+                                        Grid.Column="2"
                                         VerticalAlignment="Center"
                                         ColumnSpacing="7">
                                         <Grid.ColumnDefinitions>
@@ -1285,7 +1396,7 @@
 
                                     <!--  Date Modified  -->
                                     <TextBlock
-                                        Grid.Column="2"
+                                        Grid.Column="4"
                                         VerticalAlignment="Center"
                                         FontFamily="Segoe UI"
                                         FontSize="12"
@@ -1297,10 +1408,11 @@
 
                                     <!--  Favorito  -->
                                     <Button
-                                        Grid.Column="3"
-                                        Width="28"
-                                        Height="24"
+                                        Grid.Column="6"
+                                        Width="26"
+                                        Height="20"
                                         Padding="0"
+                                        HorizontalAlignment="Center"
                                         HorizontalContentAlignment="Center"
                                         VerticalContentAlignment="Center"
                                         Background="Transparent"

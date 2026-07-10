@@ -18,6 +18,7 @@ using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
@@ -158,6 +159,24 @@ namespace Anfeta.UI.Views
         private readonly FilePickerService _filePickerService = new();
         //colores predefinidos 
         private const string LS_SearchBackgroundTheme = "SearchBackgroundTheme";
+        private const string LS_SearchTextScale = "Search.TextScale";
+        private const string LS_DefaultSearchTag = "Search.DefaultTag";
+        private const string LS_ResultPathColumnWidth = "Search.ResultColumns.Path";
+        private const string LS_ResultDateColumnWidth = "Search.ResultColumns.Date";
+        private const string LS_ResultStarColumnWidth = "Search.ResultColumns.Star";
+        private const double RESULT_PATH_MIN = 70;
+        private const double RESULT_PATH_MAX = 420;
+        private const double RESULT_DATE_MIN = 90;
+        private const double RESULT_DATE_MAX = 280;
+        private const double RESULT_STAR_MIN = 32;
+        private const double RESULT_STAR_MAX = 90;
+        private const string CUSTOM_TAG_VALUE = "__custom__";
+        private readonly Dictionary<FrameworkElement, double> _originalFontSizes = new();
+        private double _textScale = 1.0;
+        private bool _loadingModulePreferences;
+        private bool _defaultTagAppliedOnce;
+        private string _lastAppliedDefaultTag = string.Empty;
+        private DateTime _lastTextScaleVisualPassUtc = DateTime.MinValue;
 
         #endregion
 
@@ -256,6 +275,7 @@ namespace Anfeta.UI.Views
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
 
             Loaded += SearchView_Loaded;
+            RootLayout.LayoutUpdated += RootLayout_LayoutUpdated;
 
             _voiceSplitDefaultBg = VoiceSplit.Background;
             _voiceSplitDefaultFg = VoiceSplit.Foreground;
@@ -283,6 +303,8 @@ namespace Anfeta.UI.Views
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
             LoadSearchBackgroundTheme();
+            LoadModulePreferences();
+            LoadResultColumnWidths();
             UpdateColumnSortIndicators();
             // Suscripción única controlada por flag — evita duplicados si Loaded se dispara más de una vez
             if (!_isIndexStateHooked)
@@ -314,6 +336,8 @@ namespace Anfeta.UI.Views
 
             await ApplyIndexStateAsync();
             await EnsureIndexBootstrappedAsync();
+            await ApplyDefaultTagIfEmptyAsync();
+            ApplyTextScaleToVisualTree();
         }
 
         private void SearchView_Unloaded(object sender, RoutedEventArgs e)
@@ -412,6 +436,11 @@ namespace Anfeta.UI.Views
         {
             ResultsList.ItemsSource = null;
             ResultsList.ItemsSource = Results;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                ApplyTextScaleToVisualTree();
+                ApplyResultColumnWidthsToVisualTree();
+            });
         }
 
         private IEnumerable<SearchResultGroup> BuildResultGroups(List<SearchResultRow> rows)
@@ -460,6 +489,411 @@ namespace Anfeta.UI.Views
 
             return "Otros";
         }
+
+        #region ===== Module Preferences: text size / default tag =====
+
+        private void LoadModulePreferences()
+        {
+            _loadingModulePreferences = true;
+
+            try
+            {
+                var values = ApplicationData.Current.LocalSettings.Values;
+                var scaleKey = values[LS_SearchTextScale] as string ?? "normal";
+                _textScale = scaleKey switch
+                {
+                    "small" => 0.90,
+                    "large" => 1.20,
+                    _ => 1.0
+                };
+
+                SelectComboItemByTag(TextScaleCombo, scaleKey);
+
+                var savedTag = (values[LS_DefaultSearchTag] as string ?? string.Empty).Trim();
+                _lastAppliedDefaultTag = savedTag;
+                var predefined = new[]
+                {
+                    string.Empty, "prtuzREVISION", "zclientes", "zdominios",
+                    "zproyectos", "zpagar", "zcorreos"
+                };
+
+                if (predefined.Any(x => string.Equals(x, savedTag, StringComparison.OrdinalIgnoreCase)))
+                {
+                    SelectComboItemByTag(DefaultTagCombo, savedTag);
+                    CustomDefaultTagBox.Visibility = Visibility.Collapsed;
+                    CustomDefaultTagBox.Text = string.Empty;
+                }
+                else
+                {
+                    SelectComboItemByTag(DefaultTagCombo, CUSTOM_TAG_VALUE);
+                    CustomDefaultTagBox.Visibility = Visibility.Visible;
+                    CustomDefaultTagBox.Text = savedTag;
+                }
+            }
+            finally
+            {
+                _loadingModulePreferences = false;
+            }
+        }
+
+        private static void SelectComboItemByTag(ComboBox combo, string tag)
+        {
+            if (combo == null) return;
+
+            foreach (var item in combo.Items.OfType<ComboBoxItem>())
+            {
+                if (string.Equals(item.Tag?.ToString() ?? string.Empty, tag ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+            }
+
+            if (combo.Items.Count > 0)
+                combo.SelectedIndex = 0;
+        }
+
+        private async void DefaultTagCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_loadingModulePreferences || DefaultTagCombo.SelectedItem is not ComboBoxItem item)
+                return;
+
+            var selected = (item.Tag?.ToString() ?? string.Empty).Trim();
+            var isCustom = string.Equals(selected, CUSTOM_TAG_VALUE, StringComparison.Ordinal);
+            CustomDefaultTagBox.Visibility = isCustom ? Visibility.Visible : Visibility.Collapsed;
+
+            if (isCustom)
+            {
+                CustomDefaultTagBox.Focus(FocusState.Programmatic);
+                CustomDefaultTagBox.SelectAll();
+                return;
+            }
+
+            var previousTag = _lastAppliedDefaultTag;
+            SaveDefaultTag(selected);
+            _lastAppliedDefaultTag = selected;
+            await ApplyDefaultTagToCurrentSearchAsync(previousTag, selected, focusSearchBox: true);
+        }
+
+        private async void CustomDefaultTagBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_loadingModulePreferences || DefaultTagCombo.SelectedItem is not ComboBoxItem item)
+                return;
+
+            if (!string.Equals(item.Tag?.ToString(), CUSTOM_TAG_VALUE, StringComparison.Ordinal))
+                return;
+
+            var previousTag = _lastAppliedDefaultTag;
+            var customTag = (CustomDefaultTagBox.Text ?? string.Empty).Trim();
+
+            SaveDefaultTag(customTag);
+            _lastAppliedDefaultTag = customTag;
+            await ApplyDefaultTagToCurrentSearchAsync(previousTag, customTag, focusSearchBox: false);
+        }
+
+        private async Task ApplyDefaultTagToCurrentSearchAsync(
+            string? previousTag,
+            string? newTag,
+            bool focusSearchBox)
+        {
+            var current = (SearchBox?.Text ?? string.Empty).Trim();
+            var previous = (previousTag ?? string.Empty).Trim();
+            var selected = (newTag ?? string.Empty).Trim();
+            var remainder = current;
+
+            if (!string.IsNullOrWhiteSpace(previous))
+            {
+                if (current.Equals(previous, StringComparison.OrdinalIgnoreCase))
+                    remainder = string.Empty;
+                else if (current.StartsWith(previous + " ", StringComparison.OrdinalIgnoreCase))
+                    remainder = current.Substring(previous.Length).Trim();
+            }
+            else
+            {
+                var currentScope = ResolveNotionBaseScope(current);
+                if (currentScope.HasBase)
+                    remainder = ExtractOriginalRemainderForScope(current, currentScope);
+            }
+
+            var finalQuery = string.IsNullOrWhiteSpace(selected)
+                ? remainder
+                : string.IsNullOrWhiteSpace(remainder)
+                    ? EnsureTagTrailingSpace(selected)
+                    : $"{selected} {remainder}";
+
+            _suppressSuggest = true;
+            SearchBox.Text = finalQuery;
+            _suppressSuggest = false;
+
+            if (focusSearchBox)
+                MoveSearchBoxCaretToEnd();
+
+            SyncBaseChipsFromQuery(finalQuery);
+            SetTabTitle(finalQuery);
+            NotifyWorkspaceChanged();
+
+            if (App.LocalIndex.HasData)
+                await RunSearchAsync(finalQuery.Trim());
+        }
+
+        private void SaveDefaultTag(string? tag)
+        {
+            ApplicationData.Current.LocalSettings.Values[LS_DefaultSearchTag] = (tag ?? string.Empty).Trim();
+        }
+
+        public async Task ApplyDefaultTagIfEmptyAsync(bool force = false)
+        {
+            if (!force && _defaultTagAppliedOnce)
+                return;
+
+            _defaultTagAppliedOnce = true;
+
+            if (!string.IsNullOrWhiteSpace(SearchBox?.Text))
+                return;
+
+            var tag = (ApplicationData.Current.LocalSettings.Values[LS_DefaultSearchTag] as string ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(tag))
+                return;
+
+            var display = EnsureTagTrailingSpace(tag);
+            _suppressSuggest = true;
+            SearchBox.Text = display;
+            _suppressSuggest = false;
+            MoveSearchBoxCaretToEnd();
+            SyncBaseChipsFromQuery(tag);
+
+            if (App.LocalIndex.HasData)
+                await RunSearchAsync(tag);
+        }
+
+        private static string EnsureTagTrailingSpace(string value)
+        {
+            var clean = (value ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(clean) ? string.Empty : clean + " ";
+        }
+
+        private void TextScaleCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_loadingModulePreferences || TextScaleCombo.SelectedItem is not ComboBoxItem item)
+                return;
+
+            var key = item.Tag?.ToString() ?? "normal";
+            _textScale = key switch
+            {
+                "small" => 0.90,
+                "large" => 1.20,
+                _ => 1.0
+            };
+
+            ApplicationData.Current.LocalSettings.Values[LS_SearchTextScale] = key;
+            ApplyTextScaleToVisualTree();
+        }
+
+        private void RootLayout_LayoutUpdated(object? sender, object e)
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastTextScaleVisualPassUtc).TotalMilliseconds < 250)
+                return;
+
+            _lastTextScaleVisualPassUtc = now;
+            ApplyTextScaleToVisualTree();
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void ApplyTextScaleToVisualTree()
+        {
+            if (RootLayout == null)
+                return;
+
+            ApplyTextScaleRecursive(RootLayout);
+
+            if (QuickCommandsInputHost != null)
+                ApplyTextScaleRecursive(QuickCommandsInputHost);
+        }
+
+        private void ApplyTextScaleRecursive(DependencyObject node)
+        {
+            if (node is FrameworkElement element)
+            {
+                switch (element)
+                {
+                    case TextBlock textBlock:
+                        ApplyScaledFontSize(textBlock, textBlock.FontSize);
+                        break;
+                    case Control control:
+                        ApplyScaledFontSize(control, control.FontSize);
+                        break;
+                }
+            }
+
+            var count = VisualTreeHelper.GetChildrenCount(node);
+            for (var i = 0; i < count; i++)
+                ApplyTextScaleRecursive(VisualTreeHelper.GetChild(node, i));
+        }
+
+        private void ApplyScaledFontSize(FrameworkElement element, double currentSize)
+        {
+            if (currentSize <= 0 || double.IsNaN(currentSize) || double.IsInfinity(currentSize))
+                return;
+
+            if (!_originalFontSizes.TryGetValue(element, out var original))
+            {
+                original = currentSize;
+                _originalFontSizes[element] = original;
+            }
+
+            var desired = Math.Round(original * _textScale, 1);
+
+            switch (element)
+            {
+                case TextBlock textBlock when Math.Abs(textBlock.FontSize - desired) > 0.05:
+                    textBlock.FontSize = desired;
+                    break;
+                case Control control when Math.Abs(control.FontSize - desired) > 0.05:
+                    control.FontSize = desired;
+                    break;
+            }
+        }
+
+        #endregion
+
+        #region ===== Result column widths =====
+
+        private void LoadResultColumnWidths()
+        {
+            if (HeaderPathColumn == null || HeaderDateColumn == null || HeaderStarColumn == null)
+                return;
+
+            var values = ApplicationData.Current.LocalSettings.Values;
+
+            HeaderPathColumn.Width = new GridLength(
+                ReadColumnWidth(LS_ResultPathColumnWidth, 150, RESULT_PATH_MIN, RESULT_PATH_MAX));
+
+            HeaderDateColumn.Width = new GridLength(
+                ReadColumnWidth(LS_ResultDateColumnWidth, 130, RESULT_DATE_MIN, RESULT_DATE_MAX));
+
+            HeaderStarColumn.Width = new GridLength(
+                ReadColumnWidth(LS_ResultStarColumnWidth, 36, RESULT_STAR_MIN, RESULT_STAR_MAX));
+
+            HeaderNameColumn.Width = new GridLength(1, GridUnitType.Star);
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private static double ReadColumnWidth(
+            string key,
+            double fallback,
+            double minimum,
+            double maximum)
+        {
+            var values = ApplicationData.Current.LocalSettings.Values;
+
+            if (!values.TryGetValue(key, out var raw) || raw == null)
+                return fallback;
+
+            double parsed = raw switch
+            {
+                double d => d,
+                float f => f,
+                int i => i,
+                long l => l,
+                string s when double.TryParse(
+                    s,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var number) => number,
+                _ => fallback
+            };
+
+            return Math.Clamp(parsed, minimum, maximum);
+        }
+
+        private void PathNameSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+        {
+            var current = HeaderPathColumn.Width.Value;
+            HeaderPathColumn.Width = new GridLength(
+                Math.Clamp(current + e.HorizontalChange, RESULT_PATH_MIN, RESULT_PATH_MAX));
+
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void NameDateSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+        {
+            // Mover el separador a la derecha amplía Name y reduce Date Modified.
+            var current = HeaderDateColumn.Width.Value;
+            HeaderDateColumn.Width = new GridLength(
+                Math.Clamp(current - e.HorizontalChange, RESULT_DATE_MIN, RESULT_DATE_MAX));
+
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void DateStarSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+        {
+            var currentDate = HeaderDateColumn.Width.Value;
+            var currentStar = HeaderStarColumn.Width.Value;
+
+            var minimumDelta = Math.Max(
+                RESULT_DATE_MIN - currentDate,
+                currentStar - RESULT_STAR_MAX);
+
+            var maximumDelta = Math.Min(
+                RESULT_DATE_MAX - currentDate,
+                currentStar - RESULT_STAR_MIN);
+
+            var appliedDelta = Math.Clamp(e.HorizontalChange, minimumDelta, maximumDelta);
+
+            HeaderDateColumn.Width = new GridLength(currentDate + appliedDelta);
+            HeaderStarColumn.Width = new GridLength(currentStar - appliedDelta);
+
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void ColumnSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+        {
+            SaveResultColumnWidths();
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void SaveResultColumnWidths()
+        {
+            var values = ApplicationData.Current.LocalSettings.Values;
+            values[LS_ResultPathColumnWidth] = HeaderPathColumn.Width.Value;
+            values[LS_ResultDateColumnWidth] = HeaderDateColumn.Width.Value;
+            values[LS_ResultStarColumnWidth] = HeaderStarColumn.Width.Value;
+        }
+
+        private void ApplyResultColumnWidthsToVisualTree()
+        {
+            if (RootLayout == null ||
+                HeaderPathColumn == null ||
+                HeaderDateColumn == null ||
+                HeaderStarColumn == null)
+                return;
+
+            ApplyResultColumnWidthsRecursive(RootLayout);
+        }
+
+        private void ApplyResultColumnWidthsRecursive(DependencyObject node)
+        {
+            if (node is Grid grid &&
+                string.Equals(grid.Tag?.ToString(), "ResultColumns", StringComparison.Ordinal) &&
+                grid.ColumnDefinitions.Count >= 7)
+            {
+                grid.ColumnDefinitions[0].Width = new GridLength(HeaderPathColumn.Width.Value);
+                grid.ColumnDefinitions[1].Width = new GridLength(5);
+                grid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
+                grid.ColumnDefinitions[3].Width = new GridLength(5);
+                grid.ColumnDefinitions[4].Width = new GridLength(HeaderDateColumn.Width.Value);
+                grid.ColumnDefinitions[5].Width = new GridLength(5);
+                grid.ColumnDefinitions[6].Width = new GridLength(HeaderStarColumn.Width.Value);
+            }
+
+            var childCount = VisualTreeHelper.GetChildrenCount(node);
+            for (var i = 0; i < childCount; i++)
+                ApplyResultColumnWidthsRecursive(VisualTreeHelper.GetChild(node, i));
+        }
+
+        #endregion
 
         #region
         private void LoadSearchBackgroundTheme()

@@ -5,6 +5,9 @@
     Title="ANFETA - Asistente de Voz Empresarial">
 
     <Grid x:Name="Root">
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="T" Modifiers="Control" Invoked="NewSearchTab_Invoked" />
+        </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />

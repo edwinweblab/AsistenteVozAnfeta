@@ -254,19 +254,19 @@ namespace Anfeta.UI.Views
 
         private bool MatchesSavedFilterOnRow(Anfeta.UI.Models.Weblab.SearchResultRow row, string query)
         {
-            if (row is null) return false;
+            if (row is null)
+                return false;
 
             string target;
 
             if (row.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion)
             {
-                target = string.Join(" ", new[]
-                {
-            row.Name,
-            row.Target,
-            row.SearchText,
-            row.Description
-        }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                // En búsquedas normales de Notion se valida únicamente contra
+                // el nombre visible del resultado. Así, con AND automático,
+                // todas las palabras escritas deben existir en el título.
+                target = row.DisplayName
+                    ?? row.Name
+                    ?? string.Empty;
             }
             else
             {
@@ -507,7 +507,8 @@ namespace Anfeta.UI.Views
             "revision", "revisiones", "cliente", "clientes", "dominio", "dominios",
             "proyecto", "proyectos", "programa", "programas", "correo", "correos",
             "pagar", "cobrar", "contraseña", "contraseñas", "zrevision", "zrev",
-            "zclientes", "zdominios", "zproyectos", "zcorreos", "zpagar", "zcobrar"
+            "zclientes", "zdominios", "zproyectos", "zcorreos", "zpagar", "zcobrar",
+            "prtuzrevision"
         };
 
         private void RefreshCommandsSidebarUi()
@@ -654,6 +655,7 @@ namespace Anfeta.UI.Views
         private void QuickCommandsInputFlyout_Opened(object sender, object e)
         {
             _quickFlyoutOpen = true;
+            ApplyTextScaleToVisualTree();
             QueueSearchBoxFocusRestore();
         }
 
@@ -736,7 +738,7 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            if (normalized.StartsWith("z", StringComparison.OrdinalIgnoreCase))
+            if (IsPartialOrCompleteBaseAlias(normalized))
             {
                 AddBaseShortcutSuggestions(q);
                 BindPredictiveSuggestions();
@@ -745,6 +747,23 @@ namespace Anfeta.UI.Views
 
             AddGlobalPredictiveSuggestions(q);
             BindPredictiveSuggestions();
+        }
+
+
+        private static bool IsPartialOrCompleteBaseAlias(string value)
+        {
+            var normalized = NormalizeSuggestionText(value);
+
+            if (string.IsNullOrWhiteSpace(normalized) || normalized.Contains(' '))
+                return false;
+
+            return GetNotionBaseShortcuts()
+                .SelectMany(x => new[] { x.PrimaryAlias }.Concat(x.Aliases ?? Array.Empty<string>()))
+                .Select(NormalizeSuggestionText)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Any(alias =>
+                    alias.StartsWith(normalized, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(alias, normalized, StringComparison.OrdinalIgnoreCase));
         }
 
         private void BindPredictiveSuggestions()
@@ -819,7 +838,14 @@ namespace Anfeta.UI.Views
             if (hideFlyout)
                 QuickCommandsInputFlyout?.Hide();
 
-            SearchBox.Text = finalQuery;
+            var scope = ResolveNotionBaseScope(finalQuery);
+            var displayQuery = scope.HasBase && string.IsNullOrWhiteSpace(scope.Remainder)
+                ? EnsureTagTrailingSpace(scope.PrimaryAlias)
+                : finalQuery;
+
+            _suppressSuggest = true;
+            SearchBox.Text = displayQuery;
+            _suppressSuggest = false;
             MoveSearchBoxCaretToEnd();
 
             await RunSearchAsync(finalQuery);
@@ -1272,11 +1298,11 @@ namespace Anfeta.UI.Views
             {
                 new NotionBaseShortcut
                 {
-                    PrimaryAlias = "zrevision",
+                    PrimaryAlias = "prtuzREVISION",
                     SourceName = "Revisiones",
                     PathLabel = "Revisiones",
                     DisplayLabel = "Revisiones",
-                    Aliases = new[] { "zrevisiones", "zrev", "revision", "revisiones" }
+                    Aliases = new[] { "zrevision", "zrevisiones", "zrev", "revision", "revisiones", "prtuzrevision" }
                 },
                 new NotionBaseShortcut
                 {

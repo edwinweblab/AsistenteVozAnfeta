@@ -126,8 +126,14 @@ namespace Anfeta.UI.Views
 
         private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
         {
+            CancelPendingSearch();
             sender.ItemsSource = null;
             sender.IsSuggestionListOpen = false;
+            QuickCommandsInputFlyout?.Hide();
+            _predictiveSuggestions.Clear();
+            _visibleSavedSearches.Clear();
+            BindPredictiveSuggestions();
+            UpdateQuickFlyoutVisibility();
             ResetCurrentMatchOptions();
             var ui = (sender.Text ?? "").Trim();
 
