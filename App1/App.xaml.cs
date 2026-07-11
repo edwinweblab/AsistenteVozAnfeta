@@ -2,6 +2,7 @@
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Activity;
 using Anfeta.UI.Services.Auth;
+using Anfeta.UI.Services.Dropbox;
 using Anfeta.UI.Services.Groq;
 using Anfeta.UI.Services.Interpretation;
 using Anfeta.UI.Services.Speech;
@@ -56,6 +57,12 @@ namespace Anfeta.UI
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
+
+                    // =========================
+                    // Dropbox API / OAuth
+                    // =========================
+                    services.AddSingleton<DropboxCredentialStore>();
+                    services.AddSingleton<DropboxAuthService>();
 
                     // VOICE
                     services.AddSingleton<VoiceCommandsRepository>();

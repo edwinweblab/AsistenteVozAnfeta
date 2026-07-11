@@ -5,5 +5,8 @@
         public const string LS_DropboxRoot = "LS_DropboxRoot";
         public const string LS_LastIndexedUtc = "LS_LastIndexedUtc";
         public const string LS_IndexReady = "LS_IndexReady"; // si lo usas
+        public const string LS_DropboxAccountName = "Dropbox.AccountName";
+        public const string LS_DropboxAccountEmail = "Dropbox.AccountEmail";
+        public const string LS_DropboxAccountId = "Dropbox.AccountId";
     }
 }

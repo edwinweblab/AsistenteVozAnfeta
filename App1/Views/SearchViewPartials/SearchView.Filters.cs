@@ -720,6 +720,12 @@ namespace Anfeta.UI.Views
         {
             _predictiveSuggestions.Clear();
 
+            if (_activeSourceScope == SearchSourceScope.Dropbox)
+            {
+                BindPredictiveSuggestions();
+                return;
+            }
+
             var q = (query ?? string.Empty).Trim();
             var normalized = NormalizeSuggestionText(q);
             var scope = ResolveNotionBaseScope(q);
@@ -1799,6 +1805,65 @@ namespace Anfeta.UI.Views
 
         #endregion
 
+        private async void ChipSourceFilter_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is not ToggleButton clicked)
+                return;
+
+            var selected =
+                (clicked.Tag?.ToString() ?? "all")
+                .Trim()
+                .ToLowerInvariant();
+
+            _activeSourceScope = selected switch
+            {
+                "notion" => SearchSourceScope.Notion,
+                "dropbox" => SearchSourceScope.Dropbox,
+                _ => SearchSourceScope.All
+            };
+
+            if (_activeSourceScope == SearchSourceScope.Dropbox)
+            {
+                _activeNotionBaseFilter = string.Empty;
+                SetNotionBaseChipChecks(string.Empty);
+
+                var currentQuery =
+                    (SearchBox.Text ?? string.Empty).Trim();
+
+                var scope = ResolveNotionBaseScope(currentQuery);
+
+                if (scope.HasBase)
+                {
+                    var remainder =
+                        ExtractOriginalRemainderForScope(
+                            currentQuery,
+                            scope);
+
+                    _suppressSuggest = true;
+                    SearchBox.Text = remainder;
+                    _suppressSuggest = false;
+                }
+
+                QuickCommandsInputFlyout?.Hide();
+            }
+
+            SetSourceScopeChipChecks();
+            SaveSourceScopePreference();
+
+            var query =
+                (SearchBox.Text ?? string.Empty).Trim();
+
+            await RunLocalSearchAsync(query);
+
+            ModeText.Text =
+                $"Modo: Buscar ({GetSourceScopeLabel()})";
+
+            StatusText.Text =
+                $"Estado: Filtro global → {GetSourceScopeLabel()} ✅";
+        }
+
         private List<Anfeta.UI.Models.Weblab.SearchResultRow> ApplyNotionBaseFilter(
             IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> rows)
         {
@@ -1821,16 +1886,27 @@ namespace Anfeta.UI.Views
             if (sender is not ToggleButton clicked)
                 return;
 
-            var selectedBase = (clicked.Tag as string ?? string.Empty).Trim();
+            var selectedBase =
+                (clicked.Tag as string ?? string.Empty).Trim();
 
-            _activeNotionBaseFilter = selectedBase;
+            _activeNotionBaseFilter =
+                clicked == ChipBaseAll
+                    ? string.Empty
+                    : selectedBase;
 
-            if (clicked == ChipBaseAll)
-                _activeNotionBaseFilter = "";
+            _activeSourceScope = SearchSourceScope.Notion;
+            SetSourceScopeChipChecks();
+            SaveSourceScopePreference();
 
             SetNotionBaseChipChecks(_activeNotionBaseFilter);
 
-            await PaintLoadedIndexAsync();
+            await RunLocalSearchAsync(
+                (SearchBox.Text ?? string.Empty).Trim());
+
+            ModeText.Text = string.IsNullOrWhiteSpace(
+                _activeNotionBaseFilter)
+                ? "Modo: Buscar (Notion)"
+                : $"Modo: Notion · {_activeNotionBaseFilter}";
         }
         private async void HeaderNameSort_Click(object sender, RoutedEventArgs e)
         {

@@ -3,6 +3,7 @@ using Anfeta.UI.Models.Search;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
+using Anfeta.UI.Services.Dropbox;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Speech;
 using Anfeta.UI.Services.VoiceCommands;
@@ -48,7 +49,10 @@ namespace Anfeta.UI.Views
 
         // enums
         private enum ViewMode { Explorer, Bookmarks }
+        private enum SearchSourceScope { All, Notion, Dropbox }
+
         private ViewMode _mode = ViewMode.Explorer;
+        private SearchSourceScope _activeSourceScope = SearchSourceScope.All;
         private bool _isUpdatingFilterCombo;
 
         // Win32 file attributes (Dropbox / OneDrive placeholders)
@@ -121,6 +125,8 @@ namespace Anfeta.UI.Views
         private readonly Brush _voiceActiveFg = new SolidColorBrush(Colors.White);
 
         // acciones / file ops
+        private readonly DropboxPathMapper _dropboxPathMapper;
+        private readonly DropboxFileService _dropboxFileService;
         private readonly SemaphoreSlim _bootstrapLock = new(1, 1);
         private bool _bootstrappedOnce = false;
         private readonly SemaphoreSlim _mutLock = new(1, 1);
@@ -161,6 +167,7 @@ namespace Anfeta.UI.Views
         private const string LS_SearchBackgroundTheme = "SearchBackgroundTheme";
         private const string LS_SearchTextScale = "Search.TextScale";
         private const string LS_DefaultSearchTag = "Search.DefaultTag";
+        private const string LS_SearchSourceScope = "Search.SourceScope";
         private const string LS_ResultPathColumnWidth = "Search.ResultColumns.Path";
         private const string LS_ResultDateColumnWidth = "Search.ResultColumns.Date";
         private const string LS_ResultStarColumnWidth = "Search.ResultColumns.Star";
@@ -286,6 +293,10 @@ namespace Anfeta.UI.Views
             _voiceEngine = sp.GetRequiredService<VoiceCommandEngine>();
             _voiceOrchestrator = sp.GetRequiredService<VoiceSearchOrchestrator>();
             _voicePost = sp.GetRequiredService<IVoicePostActionService>();
+
+            var dropboxAuth = sp.GetRequiredService<DropboxAuthService>();
+            _dropboxPathMapper = new DropboxPathMapper();
+            _dropboxFileService = new DropboxFileService(dropboxAuth);
 
             StatusText.Text = "Estado: Dropbox Local";
             ModeText.Text = "Modo: Buscar";
@@ -509,6 +520,20 @@ namespace Anfeta.UI.Views
 
                 SelectComboItemByTag(TextScaleCombo, scaleKey);
 
+                var savedSourceScope =
+                    (values[LS_SearchSourceScope] as string ?? "all")
+                    .Trim()
+                    .ToLowerInvariant();
+
+                _activeSourceScope = savedSourceScope switch
+                {
+                    "notion" => SearchSourceScope.Notion,
+                    "dropbox" => SearchSourceScope.Dropbox,
+                    _ => SearchSourceScope.All
+                };
+
+                SetSourceScopeChipChecks();
+
                 var savedTag = (values[LS_DefaultSearchTag] as string ?? string.Empty).Trim();
                 _lastAppliedDefaultTag = savedTag;
                 var predefined = new[]
@@ -671,6 +696,65 @@ namespace Anfeta.UI.Views
         {
             var clean = (value ?? string.Empty).Trim();
             return string.IsNullOrWhiteSpace(clean) ? string.Empty : clean + " ";
+        }
+
+        private void SaveSourceScopePreference()
+        {
+            var value = _activeSourceScope switch
+            {
+                SearchSourceScope.Notion => "notion",
+                SearchSourceScope.Dropbox => "dropbox",
+                _ => "all"
+            };
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_SearchSourceScope] = value;
+        }
+
+        private void SetSourceScopeChipChecks()
+        {
+            if (ChipSourceAll != null)
+                ChipSourceAll.IsChecked =
+                    _activeSourceScope == SearchSourceScope.All;
+
+            if (ChipSourceNotion != null)
+                ChipSourceNotion.IsChecked =
+                    _activeSourceScope == SearchSourceScope.Notion;
+
+            if (ChipSourceDropbox != null)
+                ChipSourceDropbox.IsChecked =
+                    _activeSourceScope == SearchSourceScope.Dropbox;
+        }
+
+        private string GetSourceScopeLabel()
+        {
+            return _activeSourceScope switch
+            {
+                SearchSourceScope.Notion => "Notion",
+                SearchSourceScope.Dropbox => "Dropbox",
+                _ => "Todo"
+            };
+        }
+
+        private IEnumerable<SearchResultRow> ApplyGlobalSourceFilter(
+            IEnumerable<SearchResultRow> rows)
+        {
+            var sourceRows =
+                rows ?? Enumerable.Empty<SearchResultRow>();
+
+            return _activeSourceScope switch
+            {
+                SearchSourceScope.Notion =>
+                    sourceRows.Where(x =>
+                        x.Source == SearchSource.Notion),
+
+                SearchSourceScope.Dropbox =>
+                    sourceRows.Where(x =>
+                        x.Source == SearchSource.Local ||
+                        x.Source == SearchSource.Dropbox),
+
+                _ => sourceRows
+            };
         }
 
         private void TextScaleCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

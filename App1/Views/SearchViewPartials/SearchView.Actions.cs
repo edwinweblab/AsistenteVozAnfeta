@@ -1,6 +1,7 @@
 ﻿using Anfeta.UI.Models;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Services.Speech;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -19,6 +20,8 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
+using Windows.Storage.Pickers;
+using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 
 namespace Anfeta.UI.Views
@@ -241,32 +244,898 @@ namespace Anfeta.UI.Views
         private async void CtxDelete_Click(object sender, RoutedEventArgs e)
         {
             var rows = GetSelectedRowsOrCtx(sender);
-            if (rows.Count == 0) return;
+            if (rows.Count == 0)
+                return;
 
-            if (rows.Any(IsNotionRow))
+            var notionRows = rows.Where(IsNotionRow).ToList();
+            var localRows = rows.Where(x => !IsNotionRow(x)).ToList();
+
+            if (notionRows.Count > 0 && localRows.Count > 0)
             {
-                StatusText.Text = "Estado: Eliminar no aplica para páginas de Notion desde este buscador.";
+                StatusText.Text =
+                    "Estado: No se pueden mezclar páginas de Notion y archivos locales en la misma eliminación.";
                 return;
             }
 
-            var ok = await ConfirmDeleteAsync(rows);
-            if (!ok) return;
+            if (notionRows.Count > 0)
+            {
+                await MoveNotionPagesToTrashAsync(notionRows);
+                return;
+            }
+
+            var ok = await ConfirmDeleteAsync(localRows);
+            if (!ok)
+                return;
 
             try
             {
-                if (rows.Count == 1)
-                    await ApplyFileChangeAsync(FileChangeKind.Delete, rows[0]);
+                if (localRows.Count == 1)
+                    await ApplyFileChangeAsync(FileChangeKind.Delete, localRows[0]);
                 else
-                    await ApplyBatchDeleteAsync(rows);
+                    await ApplyBatchDeleteAsync(localRows);
 
-                StatusText.Text = rows.Count == 1
+                StatusText.Text = localRows.Count == 1
                     ? "Estado: Eliminado ✅"
-                    : $"Estado: Eliminados {rows.Count} ✅";
+                    : $"Estado: Eliminados {localRows.Count} ✅";
             }
             catch (Exception ex)
             {
                 StatusText.Text = $"Error al eliminar: {ex.Message}";
             }
+        }
+
+        private async Task MoveNotionPagesToTrashAsync(
+            List<SearchResultRow> rows)
+        {
+            var validRows = rows
+                .Where(x => IsNotionRow(x) &&
+                            !string.IsNullOrWhiteSpace(x.ExternalId))
+                .ToList();
+
+            if (validRows.Count == 0)
+            {
+                StatusText.Text =
+                    "Estado: No se encontraron páginas válidas de Notion.";
+                return;
+            }
+
+            var preview = string.Join(
+                "\n",
+                validRows.Take(6).Select(x => $"• {x.DisplayName}"));
+
+            if (validRows.Count > 6)
+                preview += $"\n• … y {validRows.Count - 6} más";
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = validRows.Count == 1
+                    ? "Mover página a la papelera"
+                    : $"Mover {validRows.Count} páginas a la papelera",
+                Content =
+                    $"{preview}\n\n" +
+                    "Las páginas dejarán de aparecer en sus bases y en ANFETA, " +
+                    "pero podrán recuperarse desde la papelera de Notion.",
+                PrimaryButtonText = "Mover a papelera",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Close
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            var token = GetSavedNotionToken();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura y guarda primero el token de Notion.";
+                return;
+            }
+
+            LoadingRing.IsActive = true;
+            LoadingRing.Visibility = Visibility.Visible;
+
+            var service = new NotionPageActionsService();
+            var removedIds = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
+            var success = 0;
+            var failed = 0;
+            string? lastError = null;
+
+            try
+            {
+                foreach (var row in validRows)
+                {
+                    try
+                    {
+                        StatusText.Text =
+                            $"Estado: Moviendo a papelera → {row.DisplayName}";
+
+                        using var cts =
+                            new CancellationTokenSource(TimeSpan.FromSeconds(45));
+
+                        await service.MovePageToTrashAsync(
+                            token,
+                            row.ExternalId,
+                            cts.Token);
+
+                        removedIds.Add(row.ExternalId);
+                        success++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        lastError = ex.Message;
+                    }
+                }
+
+                if (removedIds.Count > 0)
+                    await RemoveNotionRowsFromIndexAsync(removedIds);
+
+                StatusText.Text = failed == 0
+                    ? $"Estado: Movidas a papelera ✅ ({success})"
+                    : $"Estado: Movidas ✅ ({success}) · Fallaron ❌ ({failed})" +
+                      (string.IsNullOrWhiteSpace(lastError)
+                          ? string.Empty
+                          : $" · Último: {lastError}");
+            }
+            finally
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private async void CtxCreateDropboxFolder_Click(object sender, RoutedEventArgs e)
+        {
+            if (!TryResolveDropboxDestination(sender, out var destinationLocal, out var destinationRemote, out var error))
+            {
+                StatusText.Text = $"Estado: {error}";
+                return;
+            }
+
+            var folderName = await PromptCreateDropboxFolderAsync(destinationLocal);
+            if (string.IsNullOrWhiteSpace(folderName))
+                return;
+
+            if (!TryValidateDropboxFolderName(folderName, out error))
+            {
+                StatusText.Text = $"Estado: {error}";
+                return;
+            }
+
+            var cleanName = folderName.Trim();
+            var remoteFolderPath = _dropboxPathMapper.CombineDropboxPath(
+                destinationRemote,
+                cleanName);
+
+            var expectedLocalPath = Path.Combine(destinationLocal, cleanName);
+
+            try
+            {
+                LoadingRing.IsActive = true;
+                LoadingRing.Visibility = Visibility.Visible;
+                StatusText.Text = "Estado: Creando carpeta en Dropbox...";
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+                await _dropboxFileService.CreateFolderAsync(remoteFolderPath, cts.Token);
+
+                var appearedLocally = await WaitForLocalFolderAsync(
+                    expectedLocalPath,
+                    TimeSpan.FromSeconds(20));
+
+                await AddCreatedFolderToIndexAsync(expectedLocalPath);
+                await RefreshDropboxFolderUiAsync(destinationLocal);
+
+                StatusText.Text = appearedLocally
+                    ? "Estado: Carpeta creada en Dropbox ✅"
+                    : "Estado: Carpeta creada en Dropbox ✅ Esperando sincronización local...";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text = "Estado: Dropbox tardó demasiado en responder.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error creando carpeta → {ex.Message}";
+            }
+            finally
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private bool TryResolveDropboxDestination(
+            object sender,
+            out string localFolder,
+            out string dropboxFolder,
+            out string error)
+        {
+            localFolder = string.Empty;
+            dropboxFolder = string.Empty;
+            error = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+            {
+                error = "Configura primero la carpeta raíz de Dropbox.";
+                return false;
+            }
+
+            var row = GetCtxRowOrSelected(sender);
+
+            if (row != null && IsNotionRow(row))
+            {
+                error = "Esta acción no aplica para páginas de Notion.";
+                return false;
+            }
+
+            if (row != null)
+            {
+                localFolder = row.IsFolder
+                    ? row.Target
+                    : Path.GetDirectoryName(row.Target) ?? string.Empty;
+            }
+            else
+            {
+                localFolder =
+                    !string.IsNullOrWhiteSpace(_currentFolderPath)
+                        ? _currentFolderPath
+                        : !string.IsNullOrWhiteSpace(_currentFolder)
+                            ? _currentFolder
+                            : DROPBOX_ROOT;
+            }
+
+            if (string.IsNullOrWhiteSpace(localFolder) || !Directory.Exists(localFolder))
+            {
+                error = "No se encontró una carpeta local válida como destino.";
+                return false;
+            }
+
+            if (!_dropboxPathMapper.TryToDropboxPath(
+                    DROPBOX_ROOT,
+                    localFolder,
+                    out dropboxFolder,
+                    out error))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private async Task<string?> PromptCreateDropboxFolderAsync(string destinationLocal)
+        {
+            var nameBox = new TextBox
+            {
+                Width = 360,
+                PlaceholderText = "Nombre de la carpeta"
+            };
+
+            var pathText = new TextBlock
+            {
+                Text = $"Se creará dentro de:\n{destinationLocal}",
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.75
+            };
+
+            var content = new StackPanel { Spacing = 10 };
+            content.Children.Add(pathText);
+            content.Children.Add(nameBox);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Crear carpeta en Dropbox",
+                Content = content,
+                PrimaryButtonText = "Crear",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                IsPrimaryButtonEnabled = false
+            };
+
+            nameBox.TextChanged += (_, __) =>
+            {
+                dialog.IsPrimaryButtonEnabled =
+                    !string.IsNullOrWhiteSpace(nameBox.Text);
+            };
+
+            dialog.Opened += (_, __) =>
+            {
+                nameBox.Focus(FocusState.Programmatic);
+            };
+
+            return await dialog.ShowAsync() == ContentDialogResult.Primary
+                ? nameBox.Text
+                : null;
+        }
+
+        private static bool TryValidateDropboxFolderName(
+            string folderName,
+            out string error)
+        {
+            error = string.Empty;
+            var clean = (folderName ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(clean))
+            {
+                error = "Escribe un nombre para la carpeta.";
+                return false;
+            }
+
+            if (clean is "." or "..")
+            {
+                error = "Ese nombre de carpeta no es válido.";
+                return false;
+            }
+
+            if (clean.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                clean.Contains('/') ||
+                clean.Contains('\\'))
+            {
+                error = "El nombre contiene caracteres no permitidos.";
+                return false;
+            }
+
+            if (clean.EndsWith(".", StringComparison.Ordinal) ||
+                clean.EndsWith(" ", StringComparison.Ordinal))
+            {
+                error = "El nombre no puede terminar con punto o espacio.";
+                return false;
+            }
+
+            var reserved = new[]
+            {
+                "CON", "PRN", "AUX", "NUL",
+                "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+            };
+
+            if (reserved.Contains(clean, StringComparer.OrdinalIgnoreCase))
+            {
+                error = "Ese nombre está reservado por Windows.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static async Task<bool> WaitForLocalFolderAsync(
+            string localPath,
+            TimeSpan timeout)
+        {
+            var started = DateTime.UtcNow;
+
+            while (DateTime.UtcNow - started < timeout)
+            {
+                if (Directory.Exists(localPath))
+                    return true;
+
+                await Task.Delay(500);
+            }
+
+            return Directory.Exists(localPath);
+        }
+
+        private async Task AddCreatedFolderToIndexAsync(string localPath)
+        {
+            var snapshot = App.LocalIndex.GetAll();
+
+            if (!snapshot.Any(x =>
+                    x.Source != SearchSource.Notion &&
+                    string.Equals(x.Target, localPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                snapshot.Add(new SearchResultRow
+                {
+                    Name = Path.GetFileName(localPath),
+                    Target = localPath,
+                    Type = "FOLDER",
+                    Source = SearchSource.Local
+                });
+
+                App.LocalIndex.Set(snapshot);
+                await LocalIndexPersistence.SaveAsync(
+                    DROPBOX_ROOT,
+                    snapshot,
+                    CancellationToken.None);
+            }
+        }
+
+        private async Task RefreshDropboxFolderUiAsync(string parentFolder)
+        {
+            BuildTreeRoot();
+
+            if (_isBrowsing &&
+                string.Equals(_currentFolder, parentFolder, StringComparison.OrdinalIgnoreCase) &&
+                Directory.Exists(parentFolder))
+            {
+                await BrowseFolderAsync(parentFolder, pushHistory: false);
+                return;
+            }
+
+            var query = (SearchBox.Text ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(query))
+                await RunSearchAsync(query);
+        }
+
+        private async void CtxUploadNotionFile_Click(object sender, RoutedEventArgs e)
+        {
+            const string notionTokenKey = "Notion.Token";
+
+            var token =
+                ApplicationData.Current.LocalSettings.Values[notionTokenKey] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura y guarda primero el token de Notion en Configuración.";
+                return;
+            }
+
+            IReadOnlyList<StorageFile> pickedFiles;
+
+            try
+            {
+                var picker = new FileOpenPicker
+                {
+                    SuggestedStartLocation = PickerLocationId.Downloads
+                };
+
+                picker.FileTypeFilter.Add("*");
+
+                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                InitializeWithWindow.Initialize(picker, hwnd);
+
+                pickedFiles = await picker.PickMultipleFilesAsync();
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo abrir el selector → {ex.Message}";
+                return;
+            }
+
+            if (pickedFiles == null || pickedFiles.Count == 0)
+                return;
+
+            var validFiles = pickedFiles
+                .Where(x =>
+                    x != null &&
+                    !string.IsNullOrWhiteSpace(x.Path) &&
+                    File.Exists(x.Path))
+                .ToList();
+
+            if (validFiles.Count == 0)
+            {
+                StatusText.Text =
+                    "Estado: Ningún archivo seleccionado tiene una ruta local válida.";
+                return;
+            }
+
+            var suggestedTitle = validFiles.Count == 1
+                ? Path.GetFileNameWithoutExtension(validFiles[0].Name)
+                : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
+
+            var pageTitle = await PromptNotionRevisionTitleAsync(
+                validFiles,
+                suggestedTitle);
+
+            if (string.IsNullOrWhiteSpace(pageTitle))
+                return;
+
+            try
+            {
+                LoadingRing.IsActive = true;
+                LoadingRing.Visibility = Visibility.Visible;
+
+                var progress = new Progress<NotionFileUploadProgress>(p =>
+                {
+                    StatusText.Text =
+                        $"Estado: Subiendo {p.Completed} de {p.Total} → {p.FileName}";
+                });
+
+                using var cts =
+                    new CancellationTokenSource(TimeSpan.FromMinutes(15));
+
+                var service = new NotionFilePageService();
+
+                var created = await service.CreateRevisionFromFilesAsync(
+                    token,
+                    validFiles.Select(x => x.Path).ToList(),
+                    pageTitle,
+                    progress,
+                    cts.Token);
+
+                await AddCreatedNotionPageToIndexAsync(
+                    created.PageId,
+                    created.PageUrl,
+                    created.Title);
+
+                StatusText.Text =
+                    $"Estado: Página creada en Revisiones ✅ " +
+                    $"({created.Title}) · {validFiles.Count} archivo(s)";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: La carga a Notion tardó demasiado o fue cancelada.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: Error creando página en Notion → {ex.Message}";
+            }
+            finally
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private async Task<string?> PromptNotionRevisionTitleAsync(
+            IReadOnlyList<StorageFile> files,
+            string suggestedTitle)
+        {
+            var titleBox = new TextBox
+            {
+                Width = 430,
+                Text = suggestedTitle,
+                PlaceholderText = "Título de la página"
+            };
+
+            var fileList = new TextBlock
+            {
+                Text = string.Join(
+                    Environment.NewLine,
+                    files.Take(12).Select(x => $"• {x.Name}")) +
+                    (files.Count > 12
+                        ? $"{Environment.NewLine}• … y {files.Count - 12} más"
+                        : string.Empty),
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.82
+            };
+
+            var fileScroll = new ScrollViewer
+            {
+                Content = fileList,
+                MaxHeight = 210,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+
+            var content = new StackPanel
+            {
+                Spacing = 10
+            };
+
+            content.Children.Add(new TextBlock
+            {
+                Text = $"Archivos seleccionados: {files.Count}",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            });
+
+            content.Children.Add(fileScroll);
+
+            content.Children.Add(new TextBlock
+            {
+                Text = "Destino: Notion → Revisiones",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            });
+
+            content.Children.Add(new TextBlock
+            {
+                Text = "Todos los archivos quedarán dentro de una sola página.",
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.75
+            });
+
+            content.Children.Add(new TextBlock
+            {
+                Text = "Título de la página:"
+            });
+
+            content.Children.Add(titleBox);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = files.Count == 1
+                    ? "Subir archivo a Notion"
+                    : "Subir varios archivos a Notion",
+                Content = content,
+                PrimaryButtonText = "Subir y crear página",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                IsPrimaryButtonEnabled =
+                    !string.IsNullOrWhiteSpace(suggestedTitle)
+            };
+
+            titleBox.TextChanged += (_, __) =>
+            {
+                dialog.IsPrimaryButtonEnabled =
+                    !string.IsNullOrWhiteSpace(titleBox.Text);
+            };
+
+            dialog.Opened += (_, __) =>
+            {
+                titleBox.Focus(FocusState.Programmatic);
+                titleBox.SelectAll();
+            };
+
+            return await dialog.ShowAsync() ==
+                   ContentDialogResult.Primary
+                ? titleBox.Text.Trim()
+                : null;
+        }
+
+        private async Task AddCreatedNotionPageToIndexAsync(
+            string pageId,
+            string pageUrl,
+            string title)
+        {
+            var now = DateTime.Now;
+            var row = new SearchResultRow
+            {
+                NodeId = pageId,
+                ExternalId = pageId,
+                ExternalUrl = pageUrl,
+                ExternalSourceName = "Revisiones",
+                Name = $"[Revisiones] {title}",
+                Target = pageUrl,
+                Type = "NOTION_PAGE",
+                Size = 0,
+                ServerModified = now.ToString("yyyy-MM-dd HH:mm"),
+                Source = SearchSource.Notion,
+                Description = string.Empty,
+                SearchText = $"Revisiones {title}"
+            };
+
+            var snapshot = App.LocalIndex.GetAll();
+            var existing = snapshot.FirstOrDefault(x =>
+                x.Source == SearchSource.Notion &&
+                string.Equals(
+                    x.ExternalId,
+                    pageId,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (existing == null)
+                snapshot.Add(row);
+
+            App.LocalIndex.Set(snapshot);
+
+            var root = ApplicationData.Current.LocalSettings.Values[
+                LS_DropboxRoot] as string;
+
+            if (!string.IsNullOrWhiteSpace(root) &&
+                Directory.Exists(root) &&
+                snapshot.Count > 0)
+            {
+                await LocalIndexPersistence.SaveAsync(
+                    root,
+                    snapshot,
+                    CancellationToken.None);
+            }
+
+            var query = (SearchBox.Text ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                await RunSearchAsync(query);
+            }
+            else
+            {
+                Results.Insert(0, row);
+                RefreshResultsListView();
+            }
+        }
+
+        private enum DropboxDuplicateChoice
+        {
+            Cancel,
+            Replace,
+            AutoRename
+        }
+
+        private async void CtxUploadDropboxFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (!TryResolveDropboxDestination(
+                    sender,
+                    out var destinationLocal,
+                    out var destinationRemote,
+                    out var error))
+            {
+                StatusText.Text = $"Estado: {error}";
+                return;
+            }
+
+            StorageFile? pickedFile;
+
+            try
+            {
+                var picker = new FileOpenPicker
+                {
+                    SuggestedStartLocation = PickerLocationId.Downloads
+                };
+                picker.FileTypeFilter.Add("*");
+
+                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                InitializeWithWindow.Initialize(picker, hwnd);
+
+                pickedFile = await picker.PickSingleFileAsync();
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: No se pudo abrir el selector → {ex.Message}";
+                return;
+            }
+
+            if (pickedFile == null)
+                return;
+
+            if (string.IsNullOrWhiteSpace(pickedFile.Path) || !File.Exists(pickedFile.Path))
+            {
+                StatusText.Text = "Estado: El archivo seleccionado no tiene una ruta local válida.";
+                return;
+            }
+
+            var originalName = pickedFile.Name;
+            var remoteFilePath = _dropboxPathMapper.CombineDropboxPath(
+                destinationRemote,
+                originalName);
+
+            var overwrite = false;
+            var autorename = false;
+
+            try
+            {
+                using var checkCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var exists = await _dropboxFileService.ExistsAsync(
+                    remoteFilePath,
+                    checkCts.Token);
+
+                if (exists)
+                {
+                    var choice = await PromptDropboxDuplicateChoiceAsync(originalName);
+
+                    if (choice == DropboxDuplicateChoice.Cancel)
+                    {
+                        StatusText.Text = "Estado: Subida cancelada.";
+                        return;
+                    }
+
+                    overwrite = choice == DropboxDuplicateChoice.Replace;
+                    autorename = choice == DropboxDuplicateChoice.AutoRename;
+                }
+
+                LoadingRing.IsActive = true;
+                LoadingRing.Visibility = Visibility.Visible;
+                StatusText.Text = "Estado: Subiendo archivo a Dropbox...";
+
+                using var uploadCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                var uploaded = await _dropboxFileService.UploadFileAsync(
+                    pickedFile.Path,
+                    remoteFilePath,
+                    overwrite,
+                    autorename,
+                    uploadCts.Token);
+
+                var expectedLocalPath = Path.Combine(
+                    destinationLocal,
+                    uploaded.Name);
+
+                var appearedLocally = await WaitForLocalFileAsync(
+                    expectedLocalPath,
+                    TimeSpan.FromSeconds(25));
+
+                await AddUploadedFileToIndexAsync(
+                    expectedLocalPath,
+                    uploaded.Name,
+                    uploaded.Size,
+                    uploaded.ServerModifiedUtc);
+
+                await RefreshDropboxFolderUiAsync(destinationLocal);
+
+                StatusText.Text = appearedLocally
+                    ? $"Estado: Archivo subido a Dropbox ✅ ({uploaded.Name})"
+                    : $"Estado: Archivo subido ✅ ({uploaded.Name}) Esperando sincronización local...";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text = "Estado: La subida tardó demasiado o fue cancelada.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error subiendo archivo → {ex.Message}";
+            }
+            finally
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private async Task<DropboxDuplicateChoice> PromptDropboxDuplicateChoiceAsync(
+            string fileName)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "El archivo ya existe",
+                Content =
+                    $"Ya existe “{fileName}” en esta carpeta de Dropbox.\n\n" +
+                    "Puedes reemplazarlo o subir una copia con un nombre automático.",
+                PrimaryButtonText = "Reemplazar",
+                SecondaryButtonText = "Renombrar automáticamente",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Close
+            };
+
+            var result = await dialog.ShowAsync();
+
+            return result switch
+            {
+                ContentDialogResult.Primary => DropboxDuplicateChoice.Replace,
+                ContentDialogResult.Secondary => DropboxDuplicateChoice.AutoRename,
+                _ => DropboxDuplicateChoice.Cancel
+            };
+        }
+
+        private static async Task<bool> WaitForLocalFileAsync(
+            string localPath,
+            TimeSpan timeout)
+        {
+            var started = DateTime.UtcNow;
+
+            while (DateTime.UtcNow - started < timeout)
+            {
+                if (File.Exists(localPath))
+                    return true;
+
+                await Task.Delay(500);
+            }
+
+            return File.Exists(localPath);
+        }
+
+        private async Task AddUploadedFileToIndexAsync(
+            string localPath,
+            string fileName,
+            long size,
+            DateTime serverModifiedUtc)
+        {
+            var snapshot = App.LocalIndex.GetAll();
+            var existing = snapshot.FirstOrDefault(x =>
+                x.Source != SearchSource.Notion &&
+                string.Equals(x.Target, localPath, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null)
+            {
+                existing.Name = fileName;
+                existing.Size = size;
+                existing.ServerModified = serverModifiedUtc
+                    .ToLocalTime()
+                    .ToString("yyyy-MM-dd HH:mm");
+            }
+            else
+            {
+                snapshot.Add(new SearchResultRow
+                {
+                    Name = fileName,
+                    Target = localPath,
+                    Type = "FILE",
+                    Size = size,
+                    ServerModified = serverModifiedUtc
+                        .ToLocalTime()
+                        .ToString("yyyy-MM-dd HH:mm"),
+                    Source = SearchSource.Local
+                });
+            }
+
+            App.LocalIndex.Set(snapshot);
+            await LocalIndexPersistence.SaveAsync(
+                DROPBOX_ROOT,
+                snapshot,
+                CancellationToken.None);
         }
 
         private async void CtxBookmark_Click(object sender, RoutedEventArgs e)
@@ -460,43 +1329,224 @@ namespace Anfeta.UI.Views
         private async void CtxRename_Click(object sender, RoutedEventArgs e)
         {
             var selected = ResultsList.SelectedItems?
-                .OfType<SearchResultRow>().ToList() ?? new List<SearchResultRow>();
+                .OfType<SearchResultRow>()
+                .ToList() ?? new List<SearchResultRow>();
 
             if (selected.Count == 0)
             {
-                var row = GetCtxRowFromFlyout(sender) ?? ResultsList.SelectedItem as SearchResultRow;
-                if (row == null) return;
+                var row =
+                    GetCtxRowFromFlyout(sender) ??
+                    ResultsList.SelectedItem as SearchResultRow;
+
+                if (row == null)
+                    return;
+
                 selected.Add(row);
             }
-            if (selected.Any(IsNotionRow))
+
+            var notionRows = selected.Where(IsNotionRow).ToList();
+            var localRows = selected.Where(x => !IsNotionRow(x)).ToList();
+
+            if (notionRows.Count > 0 && localRows.Count > 0)
             {
-                StatusText.Text = "Estado: Renombrar no aplica para páginas de Notion desde este buscador.";
+                StatusText.Text =
+                    "Estado: No se pueden mezclar páginas de Notion y archivos locales al renombrar.";
                 return;
             }
-            if (selected.Count == 1)
-            {
-                var row = selected[0];
-                var newName = await PromptRenameAsync(row.Name);
-                if (string.IsNullOrWhiteSpace(newName) ||
-                    string.Equals(newName, row.Name, StringComparison.Ordinal)) return;
 
-                var dir = Path.GetDirectoryName(row.Target) ?? DROPBOX_ROOT;
-                var newFullPath = Path.Combine(dir, newName.Trim());
+            if (notionRows.Count > 0)
+            {
+                if (notionRows.Count > 1)
+                {
+                    StatusText.Text =
+                        "Estado: Renombrar páginas de Notion funciona una por una.";
+                    return;
+                }
+
+                await RenameNotionPageAsync(notionRows[0]);
+                return;
+            }
+
+            if (localRows.Count == 1)
+            {
+                var row = localRows[0];
+                var newName = await PromptRenameAsync(row.Name);
+
+                if (string.IsNullOrWhiteSpace(newName) ||
+                    string.Equals(
+                        newName,
+                        row.Name,
+                        StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                var dir =
+                    Path.GetDirectoryName(row.Target) ??
+                    DROPBOX_ROOT;
+
+                var newFullPath =
+                    Path.Combine(dir, newName.Trim());
 
                 try
                 {
-                    await ApplyFileChangeAsync(FileChangeKind.Rename, row, newFullPath);
+                    await ApplyFileChangeAsync(
+                        FileChangeKind.Rename,
+                        row,
+                        newFullPath);
+
                     StatusText.Text = "Estado: Renombrado ✅";
                 }
                 catch (Exception ex)
                 {
-                    StatusText.Text = $"Error al renombrar: {ex.Message}";
+                    StatusText.Text =
+                        $"Error al renombrar: {ex.Message}";
                 }
+
                 return;
             }
 
-            try { await ShowBatchRenameDialogAsync(selected); }
-            catch (Exception ex) { StatusText.Text = $"Error en renombrado múltiple: {ex.Message}"; }
+            try
+            {
+                await ShowBatchRenameDialogAsync(localRows);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Error en renombrado múltiple: {ex.Message}";
+            }
+        }
+
+        private async Task RenameNotionPageAsync(SearchResultRow row)
+        {
+            if (!TryResolveNotionDataSource(
+                    row,
+                    out var dataSourceId,
+                    out var sourceName))
+            {
+                StatusText.Text =
+                    "Estado: No se pudo identificar la base de esta página.";
+                return;
+            }
+
+            var currentTitle = row.DisplayName;
+            var newTitle = await PromptNotionRenameAsync(
+                currentTitle,
+                sourceName);
+
+            if (string.IsNullOrWhiteSpace(newTitle) ||
+                string.Equals(
+                    currentTitle,
+                    newTitle.Trim(),
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var token = GetSavedNotionToken();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura y guarda primero el token de Notion.";
+                return;
+            }
+
+            try
+            {
+                LoadingRing.IsActive = true;
+                LoadingRing.Visibility = Visibility.Visible;
+                StatusText.Text =
+                    $"Estado: Renombrando página en {sourceName}...";
+
+                using var cts =
+                    new CancellationTokenSource(TimeSpan.FromSeconds(45));
+
+                var service = new NotionPageActionsService();
+
+                await service.RenamePageAsync(
+                    token,
+                    row.ExternalId,
+                    dataSourceId,
+                    newTitle.Trim(),
+                    cts.Token);
+
+                await UpdateNotionRowTitleAsync(
+                    row.ExternalId,
+                    sourceName,
+                    newTitle.Trim());
+
+                StatusText.Text =
+                    $"Estado: Página renombrada en {sourceName} ✅";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: Notion tardó demasiado en responder.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: Error renombrando página → {ex.Message}";
+            }
+            finally
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private async Task<string?> PromptNotionRenameAsync(
+            string currentTitle,
+            string sourceName)
+        {
+            var titleBox = new TextBox
+            {
+                Width = 390,
+                Text = currentTitle,
+                PlaceholderText = "Nuevo título"
+            };
+
+            var content = new StackPanel
+            {
+                Spacing = 10
+            };
+
+            content.Children.Add(new TextBlock
+            {
+                Text = $"Base: {sourceName}",
+                Opacity = 0.75
+            });
+
+            content.Children.Add(titleBox);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Renombrar página de Notion",
+                Content = content,
+                PrimaryButtonText = "Guardar nombre",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                IsPrimaryButtonEnabled =
+                    !string.IsNullOrWhiteSpace(currentTitle)
+            };
+
+            titleBox.TextChanged += (_, __) =>
+            {
+                dialog.IsPrimaryButtonEnabled =
+                    !string.IsNullOrWhiteSpace(titleBox.Text);
+            };
+
+            dialog.Opened += (_, __) =>
+            {
+                titleBox.Focus(FocusState.Programmatic);
+                titleBox.SelectAll();
+            };
+
+            return await dialog.ShowAsync() ==
+                   ContentDialogResult.Primary
+                ? titleBox.Text.Trim()
+                : null;
         }
 
         private async Task ShowBatchRenameDialogAsync(List<SearchResultRow> rows)
@@ -853,8 +1903,26 @@ namespace Anfeta.UI.Views
                 ? "Copiar link de Notion"
                 : "Copiar link";
 
-            CtxMenuRenameItem.IsEnabled = !isNotion;
-            CtxMenuDeleteItem.IsEnabled = !isNotion;
+            var canUseDropboxActions = CanCreateDropboxFolderHere(row);
+
+            var hasNotionToken =
+                !string.IsNullOrWhiteSpace(
+                    ApplicationData.Current.LocalSettings.Values["Notion.Token"] as string);
+
+            CtxMenuCreateDropboxFolderItem.IsEnabled = canUseDropboxActions;
+            CtxMenuUploadDropboxFileItem.IsEnabled = canUseDropboxActions;
+            CtxMenuUploadNotionFileItem.IsEnabled = hasNotionToken;
+
+            CtxMenuRenameItem.Text = isNotion
+                ? "Renombrar página..."
+                : "Renombrar...";
+
+            CtxMenuDeleteItem.Text = isNotion
+                ? "Mover a papelera..."
+                : "Eliminar";
+
+            CtxMenuRenameItem.IsEnabled = row != null;
+            CtxMenuDeleteItem.IsEnabled = row != null;
 
             if (row != null)
             {
@@ -868,14 +1936,190 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private bool CanCreateDropboxFolderHere(SearchResultRow? row)
+        {
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+                return false;
+
+            if (row != null)
+            {
+                if (IsNotionRow(row))
+                    return false;
+
+                var selectedDestination = row.IsFolder
+                    ? row.Target
+                    : Path.GetDirectoryName(row.Target) ?? string.Empty;
+
+                return !string.IsNullOrWhiteSpace(selectedDestination) &&
+                       Directory.Exists(selectedDestination) &&
+                       _dropboxPathMapper.IsInsideDropboxRoot(
+                           DROPBOX_ROOT,
+                           selectedDestination);
+            }
+
+            var currentDestination =
+                !string.IsNullOrWhiteSpace(_currentFolderPath)
+                    ? _currentFolderPath
+                    : !string.IsNullOrWhiteSpace(_currentFolder)
+                        ? _currentFolder
+                        : DROPBOX_ROOT;
+
+            return !string.IsNullOrWhiteSpace(currentDestination) &&
+                   Directory.Exists(currentDestination) &&
+                   _dropboxPathMapper.IsInsideDropboxRoot(
+                       DROPBOX_ROOT,
+                       currentDestination);
+        }
+
         private void DetailsMoreFlyout_Opening(object sender, object e)
         {
             var row = ResultsList.SelectedItem as SearchResultRow;
             var isNotion = row != null && IsNotionRow(row);
 
-            DetailsRenameItem.IsEnabled = !isNotion;
-            DetailsDeleteItem.IsEnabled = !isNotion;
+            var canUseDropboxActions = CanCreateDropboxFolderHere(row);
+
+            var hasNotionToken =
+                !string.IsNullOrWhiteSpace(
+                    ApplicationData.Current.LocalSettings.Values["Notion.Token"] as string);
+
+            DetailsCreateDropboxFolderItem.IsEnabled = canUseDropboxActions;
+            DetailsUploadDropboxFileItem.IsEnabled = canUseDropboxActions;
+            DetailsUploadNotionFileItem.IsEnabled = hasNotionToken;
+
+            DetailsRenameItem.Text = isNotion
+                ? "Renombrar página..."
+                : "Renombrar...";
+
+            DetailsDeleteItem.Text = isNotion
+                ? "Mover a papelera..."
+                : "Eliminar";
+
+            DetailsRenameItem.IsEnabled = row != null;
+            DetailsDeleteItem.IsEnabled = row != null;
         }
+
+        private static string GetSavedNotionToken()
+            => ApplicationData.Current.LocalSettings.Values[
+                "Notion.Token"] as string ?? string.Empty;
+
+        private static bool TryResolveNotionDataSource(
+            SearchResultRow row,
+            out string dataSourceId,
+            out string sourceName)
+        {
+            dataSourceId = string.Empty;
+
+            var requestedSourceName =
+                (row.ExternalSourceName ?? string.Empty).Trim();
+
+            sourceName = requestedSourceName;
+
+            if (string.IsNullOrWhiteSpace(requestedSourceName))
+                return false;
+
+            var source = NotionDataSources.Default.FirstOrDefault(x =>
+                string.Equals(
+                    x.Name,
+                    requestedSourceName,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (source == null ||
+                string.IsNullOrWhiteSpace(source.DataSourceId))
+            {
+                return false;
+            }
+
+            dataSourceId = source.DataSourceId;
+            sourceName = source.Name;
+            return true;
+        }
+
+        private async Task UpdateNotionRowTitleAsync(
+            string pageId,
+            string sourceName,
+            string newTitle)
+        {
+            var snapshot = App.LocalIndex.GetAll();
+
+            var row = snapshot.FirstOrDefault(x =>
+                x.Source == SearchSource.Notion &&
+                string.Equals(
+                    x.ExternalId,
+                    pageId,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (row != null)
+            {
+                row.ExternalSourceName = sourceName;
+                row.Name = $"[{sourceName}] {newTitle}";
+                row.SearchText = string.Join(
+                    " ",
+                    new[] { sourceName, newTitle, row.Description }
+                        .Where(x => !string.IsNullOrWhiteSpace(x)));
+                row.ServerModified =
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+            }
+
+            App.LocalIndex.Set(snapshot);
+            await PersistCombinedIndexIfPossibleAsync(snapshot);
+
+            var query = (SearchBox.Text ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(query))
+                await RunSearchAsync(query);
+            else
+                RefreshResultsListView();
+        }
+
+        private async Task RemoveNotionRowsFromIndexAsync(
+            HashSet<string> pageIds)
+        {
+            var snapshot = App.LocalIndex
+                .GetAll()
+                .Where(x =>
+                    x.Source != SearchSource.Notion ||
+                    !pageIds.Contains(x.ExternalId))
+                .ToList();
+
+            App.LocalIndex.Set(snapshot);
+            await PersistCombinedIndexIfPossibleAsync(snapshot);
+
+            foreach (var row in Results
+                .Where(x =>
+                    x.Source == SearchSource.Notion &&
+                    pageIds.Contains(x.ExternalId))
+                .ToList())
+            {
+                Results.Remove(row);
+            }
+
+            ResultsList.SelectedItem = null;
+
+            var query = (SearchBox.Text ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(query))
+                await RunSearchAsync(query);
+            else
+                RefreshResultsListView();
+        }
+
+        private static async Task PersistCombinedIndexIfPossibleAsync(
+            List<SearchResultRow> snapshot)
+        {
+            var root = ApplicationData.Current.LocalSettings.Values[
+                LS_DropboxRoot] as string;
+
+            if (!string.IsNullOrWhiteSpace(root) &&
+                Directory.Exists(root) &&
+                snapshot.Count > 0)
+            {
+                await LocalIndexPersistence.SaveAsync(
+                    root,
+                    snapshot,
+                    CancellationToken.None);
+            }
+        }
+
         #endregion
 
 

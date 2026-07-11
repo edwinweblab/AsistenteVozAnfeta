@@ -18,6 +18,7 @@ using Windows.UI;
 using WinRT.Interop;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Notion;
+using Anfeta.UI.Services.Dropbox;
 using System.Collections.Generic;
 using System.Linq;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
@@ -29,6 +30,7 @@ namespace Anfeta.UI.Views
         private readonly AudioService _audioService;
         private readonly SettingsService _settingsService;
         private readonly AppStateService _appState;
+        private readonly DropboxAuthService _dropboxAuthService;
         private readonly DispatcherTimer _statusTimer;
 
         // Dropbox
@@ -42,6 +44,7 @@ namespace Anfeta.UI.Views
 
             _audioService = new AudioService();
             _appState = App.AppHost.Services.GetRequiredService<AppStateService>();
+            _dropboxAuthService = App.AppHost.Services.GetRequiredService<DropboxAuthService>();
             _settingsService = new SettingsService(_appState);
 
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -64,6 +67,7 @@ namespace Anfeta.UI.Views
             LoadCurrentHotkey();
             LoadDropboxRootIntoUI();
             LoadNotionSettingsIntoUI();
+            await LoadDropboxApiStateAsync();
 
             _ = Task.Run(async () =>
             {
@@ -360,6 +364,233 @@ namespace Anfeta.UI.Views
         // ─────────────────────────────────────────────────────────
         // DROPBOX
         // ─────────────────────────────────────────────────────────
+
+        private async Task LoadDropboxApiStateAsync()
+        {
+            try
+            {
+                var hasConnection = await _dropboxAuthService.HasSavedConnectionAsync();
+
+                if (!hasConnection)
+                {
+                    SetDropboxApiDisconnectedUi();
+                    return;
+                }
+
+                var values = ApplicationData.Current.LocalSettings.Values;
+                var savedName = values[LS_DropboxAccountName] as string;
+                var savedEmail = values[LS_DropboxAccountEmail] as string;
+
+                DropboxApiStatusText.Text = "Dropbox vinculado";
+                DropboxApiAccountText.Text =
+                    string.IsNullOrWhiteSpace(savedName) && string.IsNullOrWhiteSpace(savedEmail)
+                        ? "Cuenta guardada. Usa Probar conexión para validarla."
+                        : $"{savedName} · {savedEmail}".Trim(' ', '·');
+
+                BtnConnectDropbox.IsEnabled = false;
+                BtnTestDropboxConnection.IsEnabled = true;
+                BtnDisconnectDropbox.IsEnabled = true;
+                DropboxAuthorizationPanel.Visibility = Visibility.Collapsed;
+            }
+            catch (Exception ex)
+            {
+                SetDropboxApiDisconnectedUi();
+                ShowStatus($"No se pudo leer la conexión Dropbox -> {ex.Message}", InfoBarSeverity.Warning);
+            }
+        }
+
+        private async void BtnConnectDropbox_Click(object sender, RoutedEventArgs e)
+        {
+            SetDropboxApiButtonsEnabled(false);
+
+            try
+            {
+                DropboxAuthorizationCodeBox.Text = string.Empty;
+                DropboxAuthorizationPanel.Visibility = Visibility.Visible;
+                DropboxApiStatusText.Text = "Esperando autorización...";
+                DropboxApiAccountText.Text = "Completa el proceso en el navegador.";
+
+                await _dropboxAuthService.BeginAuthorizationAsync();
+
+                BtnCompleteDropboxAuthorization.IsEnabled = true;
+                ShowStatus(
+                    "Dropbox abierto en el navegador. Autoriza y pega el código en ANFETA.",
+                    InfoBarSeverity.Informational);
+            }
+            catch (Exception ex)
+            {
+                DropboxAuthorizationPanel.Visibility = Visibility.Collapsed;
+                SetDropboxApiDisconnectedUi();
+                ShowStatus($"Error iniciando Dropbox -> {ex.Message}", InfoBarSeverity.Error);
+            }
+            finally
+            {
+                BtnConnectDropbox.IsEnabled =
+                    DropboxAuthorizationPanel.Visibility != Visibility.Visible;
+            }
+        }
+
+        private async void BtnCompleteDropboxAuthorization_Click(object sender, RoutedEventArgs e)
+        {
+            var code = (DropboxAuthorizationCodeBox.Text ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                ShowStatus("Pega el código de autorización de Dropbox.", InfoBarSeverity.Warning);
+                return;
+            }
+
+            SetDropboxApiButtonsEnabled(false);
+            BtnCompleteDropboxAuthorization.IsEnabled = false;
+
+            try
+            {
+                DropboxApiStatusText.Text = "Conectando Dropbox...";
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+                var account = await _dropboxAuthService.CompleteAuthorizationAsync(code, cts.Token);
+
+                SaveDropboxAccount(account.DisplayName, account.Email, account.AccountId);
+                ApplyDropboxConnectedUi(account.DisplayName, account.Email);
+
+                DropboxAuthorizationCodeBox.Text = string.Empty;
+                DropboxAuthorizationPanel.Visibility = Visibility.Collapsed;
+
+                ShowStatus("Dropbox vinculado correctamente ✅", InfoBarSeverity.Success);
+            }
+            catch (OperationCanceledException)
+            {
+                ShowStatus("Tiempo agotado conectando Dropbox.", InfoBarSeverity.Warning);
+                BtnCompleteDropboxAuthorization.IsEnabled = true;
+            }
+            catch (Exception ex)
+            {
+                DropboxApiStatusText.Text = "Error de conexión";
+                DropboxApiAccountText.Text = ex.Message;
+                BtnCompleteDropboxAuthorization.IsEnabled = true;
+                ShowStatus($"Error Dropbox -> {ex.Message}", InfoBarSeverity.Error);
+            }
+            finally
+            {
+                var connected = await _dropboxAuthService.HasSavedConnectionAsync();
+                BtnConnectDropbox.IsEnabled = !connected;
+                BtnTestDropboxConnection.IsEnabled = connected;
+                BtnDisconnectDropbox.IsEnabled = connected;
+            }
+        }
+
+        private async void BtnTestDropboxConnection_Click(object sender, RoutedEventArgs e)
+        {
+            SetDropboxApiButtonsEnabled(false);
+
+            try
+            {
+                DropboxApiStatusText.Text = "Probando conexión...";
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var account = await _dropboxAuthService.TestConnectionAsync(cts.Token);
+
+                SaveDropboxAccount(account.DisplayName, account.Email, account.AccountId);
+                ApplyDropboxConnectedUi(account.DisplayName, account.Email);
+
+                ShowStatus("Conexión con Dropbox correcta ✅", InfoBarSeverity.Success);
+            }
+            catch (OperationCanceledException)
+            {
+                DropboxApiStatusText.Text = "Tiempo agotado";
+                ShowStatus("Dropbox tardó demasiado en responder.", InfoBarSeverity.Warning);
+            }
+            catch (Exception ex)
+            {
+                DropboxApiStatusText.Text = "Error de conexión";
+                DropboxApiAccountText.Text = ex.Message;
+                ShowStatus($"Error Dropbox -> {ex.Message}", InfoBarSeverity.Error);
+            }
+            finally
+            {
+                var connected = await _dropboxAuthService.HasSavedConnectionAsync();
+                BtnConnectDropbox.IsEnabled = !connected;
+                BtnTestDropboxConnection.IsEnabled = connected;
+                BtnDisconnectDropbox.IsEnabled = connected;
+            }
+        }
+
+        private async void BtnDisconnectDropbox_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Desvincular Dropbox",
+                Content = "ANFETA eliminará de este equipo la credencial guardada de Dropbox. No borrará archivos ni carpetas.",
+                PrimaryButtonText = "Desvincular",
+                CloseButtonText = "Cancelar",
+                XamlRoot = this.XamlRoot
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            try
+            {
+                await _dropboxAuthService.DisconnectAsync();
+                ClearDropboxAccount();
+                SetDropboxApiDisconnectedUi();
+
+                ShowStatus("Dropbox desvinculado.", InfoBarSeverity.Informational);
+            }
+            catch (Exception ex)
+            {
+                ShowStatus($"Error desvinculando Dropbox -> {ex.Message}", InfoBarSeverity.Error);
+            }
+        }
+
+        private void ApplyDropboxConnectedUi(string displayName, string email)
+        {
+            DropboxApiStatusText.Text = "Dropbox vinculado ✅";
+            DropboxApiAccountText.Text =
+                string.IsNullOrWhiteSpace(email)
+                    ? displayName
+                    : $"{displayName} · {email}";
+
+            BtnConnectDropbox.IsEnabled = false;
+            BtnTestDropboxConnection.IsEnabled = true;
+            BtnDisconnectDropbox.IsEnabled = true;
+            DropboxAuthorizationPanel.Visibility = Visibility.Collapsed;
+        }
+
+        private void SetDropboxApiDisconnectedUi()
+        {
+            DropboxApiStatusText.Text = "Dropbox no vinculado.";
+            DropboxApiAccountText.Text = "Sin cuenta conectada.";
+            DropboxAuthorizationCodeBox.Text = string.Empty;
+            DropboxAuthorizationPanel.Visibility = Visibility.Collapsed;
+
+            BtnConnectDropbox.IsEnabled = true;
+            BtnTestDropboxConnection.IsEnabled = false;
+            BtnDisconnectDropbox.IsEnabled = false;
+        }
+
+        private void SetDropboxApiButtonsEnabled(bool enabled)
+        {
+            BtnConnectDropbox.IsEnabled = enabled;
+            BtnTestDropboxConnection.IsEnabled = enabled;
+            BtnDisconnectDropbox.IsEnabled = enabled;
+        }
+
+        private static void SaveDropboxAccount(string name, string email, string accountId)
+        {
+            var values = ApplicationData.Current.LocalSettings.Values;
+            values[LS_DropboxAccountName] = name ?? string.Empty;
+            values[LS_DropboxAccountEmail] = email ?? string.Empty;
+            values[LS_DropboxAccountId] = accountId ?? string.Empty;
+        }
+
+        private static void ClearDropboxAccount()
+        {
+            var values = ApplicationData.Current.LocalSettings.Values;
+            values.Remove(LS_DropboxAccountName);
+            values.Remove(LS_DropboxAccountEmail);
+            values.Remove(LS_DropboxAccountId);
+        }
 
         /// Carga en el TextBox la ruta de Dropbox guardada en LocalSettings.
         private void LoadDropboxRootIntoUI()

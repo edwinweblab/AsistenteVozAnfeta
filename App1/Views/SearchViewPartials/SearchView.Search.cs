@@ -183,7 +183,8 @@ namespace Anfeta.UI.Views
                 BreadcrumbText.Text = string.IsNullOrWhiteSpace(uiQuery)
                     ? DROPBOX_ROOT
                     : $"Buscar: {uiQuery}";
-                ModeText.Text = "Modo: Buscar (Local + Notion)";
+                ModeText.Text =
+                    $"Modo: Buscar ({GetSourceScopeLabel()})";
 
                 await RunLocalSearchAsync(effectiveQuery ?? uiQuery);
                 StatusText.Text = "Estado: Búsqueda local ✅";
@@ -204,6 +205,7 @@ namespace Anfeta.UI.Views
             var rawQuery = (query ?? "").Trim();
             IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> items = App.LocalIndex.GetAll();
             items = items.Where(x => !IsExcludedPath(x.Target));
+            items = ApplyGlobalSourceFilter(items);
 
             var scope = ResolveNotionBaseScope(rawQuery);
             var queryForSearch = scope.HasBase ? scope.Remainder : rawQuery;
@@ -299,6 +301,7 @@ namespace Anfeta.UI.Views
             var rawQuery = (query ?? "").Trim();
             IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> items = App.LocalIndex.GetAll();
             items = items.Where(x => !IsExcludedPath(x.Target));
+            items = ApplyGlobalSourceFilter(items);
             token.ThrowIfCancellationRequested();
 
             var scope = ResolveNotionBaseScope(rawQuery);
@@ -390,9 +393,15 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            var sourceLabel = GetSourceScopeLabel();
+
             BreadcrumbText.Text = string.IsNullOrWhiteSpace(original)
-                ? "Todos los resultados"
-                : $"Buscar: {original}";
+                ? sourceLabel == "Todo"
+                    ? "Todos los resultados"
+                    : $"Origen: {sourceLabel}"
+                : sourceLabel == "Todo"
+                    ? $"Buscar: {original}"
+                    : $"Origen: {sourceLabel} · Buscar: {original}";
         }
 
         private void UpdateHighlightTermsForAutoAnd(string rawQuery)
