@@ -1342,12 +1342,49 @@
 
                 <!--  Lista de resultados estilo Everything  -->
                 <Grid Grid.Row="2">
-                    <ProgressRing
-                        x:Name="LoadingRing"
+                    <Border
+                        x:Name="LoadingOverlay"
+                        Canvas.ZIndex="50"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        IsActive="False"
-                        Visibility="Collapsed" />
+                        Padding="22,16"
+                        Background="#E61B1F23"
+                        BorderBrush="#5B8DEF"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Visibility="Collapsed">
+                        <StackPanel
+                            MinWidth="280"
+                            MaxWidth="520"
+                            Orientation="Horizontal"
+                            Spacing="14">
+                            <ProgressRing
+                                x:Name="LoadingRing"
+                                Width="34"
+                                Height="34"
+                                VerticalAlignment="Center"
+                                IsActive="False"
+                                Visibility="Collapsed" />
+
+                            <StackPanel
+                                VerticalAlignment="Center"
+                                Spacing="3">
+                                <TextBlock
+                                    x:Name="LoadingTitleText"
+                                    FontSize="14"
+                                    FontWeight="SemiBold"
+                                    Text="{Binding Text, ElementName=StatusText}"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    x:Name="LoadingDetailText"
+                                    FontSize="12"
+                                    Opacity="0.72"
+                                    Text="Espera un momento mientras ANFETA termina la operación."
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
 
                     <ListView
                         x:Name="ResultsList"

@@ -35,9 +35,24 @@ namespace Anfeta.UI.Views
                 _searchCts = new CancellationTokenSource();
                 var token = _searchCts.Token;
 
-                try { await RunLocalSearchAsync(q, token); }
+                try
+                {
+                    ShowLoadingState(
+                        "Estado: Buscando resultados...",
+                        $"Buscando: {q}");
+
+                    await RunLocalSearchAsync(q, token);
+                    StatusText.Text = $"Estado: Búsqueda lista ✅ ({Results.Count} resultados)";
+                }
                 catch (OperationCanceledException) { }
-                catch (Exception ex) { StatusText.Text = $"Estado: Error buscando → {ex.Message}"; }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: Error buscando → {ex.Message}";
+                }
+                finally
+                {
+                    HideLoadingState();
+                }
             };
         }
 
@@ -175,8 +190,9 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            LoadingRing.IsActive = true;
-            LoadingRing.Visibility = Visibility.Visible;
+            ShowLoadingState(
+                "Estado: Buscando resultados...",
+                $"Origen: {GetSourceScopeLabel()}");
 
             try
             {
@@ -191,8 +207,7 @@ namespace Anfeta.UI.Views
             }
             finally
             {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
+                HideLoadingState();
             }
         }
 

@@ -127,6 +127,7 @@ namespace Anfeta.UI.Views
         // acciones / file ops
         private readonly DropboxPathMapper _dropboxPathMapper;
         private readonly DropboxFileService _dropboxFileService;
+        private readonly DropboxSyncService _dropboxSyncService;
         private readonly SemaphoreSlim _bootstrapLock = new(1, 1);
         private bool _bootstrappedOnce = false;
         private readonly SemaphoreSlim _mutLock = new(1, 1);
@@ -184,6 +185,9 @@ namespace Anfeta.UI.Views
         private bool _defaultTagAppliedOnce;
         private string _lastAppliedDefaultTag = string.Empty;
         private DateTime _lastTextScaleVisualPassUtc = DateTime.MinValue;
+
+        // estado visual global de carga
+        private int _busyOperationCount;
 
         #endregion
 
@@ -297,6 +301,7 @@ namespace Anfeta.UI.Views
             var dropboxAuth = sp.GetRequiredService<DropboxAuthService>();
             _dropboxPathMapper = new DropboxPathMapper();
             _dropboxFileService = new DropboxFileService(dropboxAuth);
+            _dropboxSyncService = new DropboxSyncService(dropboxAuth);
 
             StatusText.Text = "Estado: Dropbox Local";
             ModeText.Text = "Modo: Buscar";
@@ -349,6 +354,11 @@ namespace Anfeta.UI.Views
             await EnsureIndexBootstrappedAsync();
             await ApplyDefaultTagIfEmptyAsync();
             ApplyTextScaleToVisualTree();
+
+            // Seguridad final del arranque:
+            // algunas operaciones iniciales pueden anidarse y dejar pendiente
+            // el contador visual aunque la carga ya haya terminado.
+            ForceHideLoadingState();
         }
 
         private void SearchView_Unloaded(object sender, RoutedEventArgs e)
@@ -359,6 +369,8 @@ namespace Anfeta.UI.Views
                 SearchFocusBridge.FocusRequested -= OnSearchFocusRequested;
                 _isIndexStateHooked = false;
             }
+
+            StopDropboxChangeWatcher();
         }
         private void OnSearchFocusRequested()
         {
@@ -406,6 +418,81 @@ namespace Anfeta.UI.Views
         }
         #endregion
 
+        #region ===== Estado visual de carga =====
+
+        private void ShowLoadingState(
+            string status,
+            string? detail = null)
+        {
+            _busyOperationCount++;
+
+            if (StatusText != null && !string.IsNullOrWhiteSpace(status))
+                StatusText.Text = status;
+
+            if (LoadingDetailText != null)
+            {
+                LoadingDetailText.Text = string.IsNullOrWhiteSpace(detail)
+                    ? "Espera un momento mientras ANFETA termina la operación."
+                    : detail;
+            }
+
+            if (LoadingRing != null)
+            {
+                LoadingRing.IsActive = true;
+                LoadingRing.Visibility = Visibility.Visible;
+            }
+
+            if (LoadingOverlay != null)
+                LoadingOverlay.Visibility = Visibility.Visible;
+        }
+
+        private void UpdateLoadingState(
+            string status,
+            string? detail = null)
+        {
+            if (StatusText != null && !string.IsNullOrWhiteSpace(status))
+                StatusText.Text = status;
+
+            if (LoadingDetailText != null &&
+                !string.IsNullOrWhiteSpace(detail))
+            {
+                LoadingDetailText.Text = detail;
+            }
+        }
+
+        private void HideLoadingState()
+        {
+            // El indicador visual siempre se cierra al terminar la operación
+            // actual. Esto evita que un contador desbalanceado por cargas
+            // anidadas deje el overlay visible permanentemente.
+            _busyOperationCount = 0;
+
+            if (LoadingRing != null)
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+
+            if (LoadingOverlay != null)
+                LoadingOverlay.Visibility = Visibility.Collapsed;
+        }
+
+        private void ForceHideLoadingState()
+        {
+            _busyOperationCount = 0;
+
+            if (LoadingRing != null)
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+            }
+
+            if (LoadingOverlay != null)
+                LoadingOverlay.Visibility = Visibility.Collapsed;
+        }
+
+        #endregion
+
         #region ===== UI Reset / State =====
 
         private void ResetSearchModuleState()
@@ -436,8 +523,7 @@ namespace Anfeta.UI.Views
 
         private void FinishUi()
         {
-            LoadingRing.IsActive = false;
-            LoadingRing.Visibility = Visibility.Collapsed;
+            ForceHideLoadingState();
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             CountText.Text = $"{Results.Count} resultados";
         }

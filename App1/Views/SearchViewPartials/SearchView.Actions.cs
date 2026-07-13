@@ -332,8 +332,9 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            LoadingRing.IsActive = true;
-            LoadingRing.Visibility = Visibility.Visible;
+            ShowLoadingState(
+                "Estado: Moviendo páginas a la papelera...",
+                $"{validRows.Count} página(s) de Notion");
 
             var service = new NotionPageActionsService();
             var removedIds = new HashSet<string>(
@@ -382,8 +383,7 @@ namespace Anfeta.UI.Views
             }
             finally
             {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
+                HideLoadingState();
             }
         }
 
@@ -414,9 +414,9 @@ namespace Anfeta.UI.Views
 
             try
             {
-                LoadingRing.IsActive = true;
-                LoadingRing.Visibility = Visibility.Visible;
-                StatusText.Text = "Estado: Creando carpeta en Dropbox...";
+                ShowLoadingState(
+                    "Estado: Creando carpeta en Dropbox...",
+                    $"Destino: {destinationLocal}");
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
                 await _dropboxFileService.CreateFolderAsync(remoteFolderPath, cts.Token);
@@ -442,8 +442,7 @@ namespace Anfeta.UI.Views
             }
             finally
             {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
+                HideLoadingState();
             }
         }
 
@@ -726,13 +725,15 @@ namespace Anfeta.UI.Views
 
             try
             {
-                LoadingRing.IsActive = true;
-                LoadingRing.Visibility = Visibility.Visible;
+                ShowLoadingState(
+                    $"Estado: Preparando {validFiles.Count} archivo(s) para Notion...",
+                    "Destino: Notion → Revisiones");
 
                 var progress = new Progress<NotionFileUploadProgress>(p =>
                 {
-                    StatusText.Text =
-                        $"Estado: Subiendo {p.Completed} de {p.Total} → {p.FileName}";
+                    UpdateLoadingState(
+                        $"Estado: Subiendo {p.Completed} de {p.Total} → {p.FileName}",
+                        "Creando una sola página en Revisiones.");
                 });
 
                 using var cts =
@@ -768,8 +769,7 @@ namespace Anfeta.UI.Views
             }
             finally
             {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
+                HideLoadingState();
             }
         }
 
@@ -936,7 +936,9 @@ namespace Anfeta.UI.Views
             AutoRename
         }
 
-        private async void CtxUploadDropboxFile_Click(object sender, RoutedEventArgs e)
+        private async void CtxUploadDropboxFile_Click(
+            object sender,
+            RoutedEventArgs e)
         {
             if (!TryResolveDropboxDestination(
                     sender,
@@ -948,7 +950,7 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            StorageFile? pickedFile;
+            IReadOnlyList<StorageFile> pickedFiles;
 
             try
             {
@@ -956,101 +958,170 @@ namespace Anfeta.UI.Views
                 {
                     SuggestedStartLocation = PickerLocationId.Downloads
                 };
+
                 picker.FileTypeFilter.Add("*");
 
-                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                var hwnd =
+                    WindowNative.GetWindowHandle(App.MainWindowInstance);
+
                 InitializeWithWindow.Initialize(picker, hwnd);
 
-                pickedFile = await picker.PickSingleFileAsync();
+                pickedFiles = await picker.PickMultipleFilesAsync();
             }
             catch (Exception ex)
             {
-                StatusText.Text = $"Estado: No se pudo abrir el selector → {ex.Message}";
+                StatusText.Text =
+                    $"Estado: No se pudo abrir el selector → {ex.Message}";
                 return;
             }
 
-            if (pickedFile == null)
+            if (pickedFiles == null || pickedFiles.Count == 0)
                 return;
 
-            if (string.IsNullOrWhiteSpace(pickedFile.Path) || !File.Exists(pickedFile.Path))
+            var validFiles = pickedFiles
+                .Where(x =>
+                    x != null &&
+                    !string.IsNullOrWhiteSpace(x.Path) &&
+                    File.Exists(x.Path))
+                .ToList();
+
+            if (validFiles.Count == 0)
             {
-                StatusText.Text = "Estado: El archivo seleccionado no tiene una ruta local válida.";
+                StatusText.Text =
+                    "Estado: Ningún archivo seleccionado tiene una ruta local válida.";
                 return;
             }
 
-            var originalName = pickedFile.Name;
-            var remoteFilePath = _dropboxPathMapper.CombineDropboxPath(
-                destinationRemote,
-                originalName);
+            var uploadedCount = 0;
+            var skippedCount = 0;
+            var failedCount = 0;
+            string? lastError = null;
 
-            var overwrite = false;
-            var autorename = false;
+            ShowLoadingState(
+                $"Estado: Preparando {validFiles.Count} archivo(s) para Dropbox...",
+                $"Destino: {destinationLocal}");
 
             try
             {
-                using var checkCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                var exists = await _dropboxFileService.ExistsAsync(
-                    remoteFilePath,
-                    checkCts.Token);
-
-                if (exists)
+                for (var index = 0; index < validFiles.Count; index++)
                 {
-                    var choice = await PromptDropboxDuplicateChoiceAsync(originalName);
+                    var pickedFile = validFiles[index];
+                    var position = index + 1;
+                    var originalName = pickedFile.Name;
 
-                    if (choice == DropboxDuplicateChoice.Cancel)
+                    var remoteFilePath =
+                        _dropboxPathMapper.CombineDropboxPath(
+                            destinationRemote,
+                            originalName);
+
+                    var overwrite = false;
+                    var autorename = false;
+
+                    try
                     {
-                        StatusText.Text = "Estado: Subida cancelada.";
-                        return;
-                    }
+                        UpdateLoadingState(
+                            $"Estado: Revisando {position} de {validFiles.Count} → {originalName}",
+                            "Comprobando si ya existe en la carpeta de Dropbox.");
 
-                    overwrite = choice == DropboxDuplicateChoice.Replace;
-                    autorename = choice == DropboxDuplicateChoice.AutoRename;
+                        using var checkCts =
+                            new CancellationTokenSource(
+                                TimeSpan.FromSeconds(30));
+
+                        var exists =
+                            await _dropboxFileService.ExistsAsync(
+                                remoteFilePath,
+                                checkCts.Token);
+
+                        if (exists)
+                        {
+                            // Ocultamos temporalmente el overlay para que el diálogo
+                            // de duplicado quede completamente accesible.
+                            LoadingOverlay.Visibility = Visibility.Collapsed;
+
+                            var choice =
+                                await PromptDropboxDuplicateChoiceAsync(
+                                    originalName);
+
+                            LoadingOverlay.Visibility = Visibility.Visible;
+
+                            if (choice == DropboxDuplicateChoice.Cancel)
+                            {
+                                skippedCount++;
+                                continue;
+                            }
+
+                            overwrite =
+                                choice == DropboxDuplicateChoice.Replace;
+
+                            autorename =
+                                choice == DropboxDuplicateChoice.AutoRename;
+                        }
+
+                        UpdateLoadingState(
+                            $"Estado: Subiendo {position} de {validFiles.Count} → {originalName}",
+                            $"Destino: {destinationLocal}");
+
+                        using var uploadCts =
+                            new CancellationTokenSource(
+                                TimeSpan.FromMinutes(10));
+
+                        var uploaded =
+                            await _dropboxFileService.UploadFileAsync(
+                                pickedFile.Path,
+                                remoteFilePath,
+                                overwrite,
+                                autorename,
+                                uploadCts.Token);
+
+                        var expectedLocalPath = Path.Combine(
+                            destinationLocal,
+                            uploaded.Name);
+
+                        _ = await WaitForLocalFileAsync(
+                            expectedLocalPath,
+                            TimeSpan.FromSeconds(25));
+
+                        await AddUploadedFileToIndexAsync(
+                            expectedLocalPath,
+                            uploaded.Name,
+                            uploaded.Size,
+                            uploaded.ServerModifiedUtc);
+
+                        uploadedCount++;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        failedCount++;
+                        lastError =
+                            $"{originalName}: la operación tardó demasiado.";
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        lastError = $"{originalName}: {ex.Message}";
+                    }
                 }
 
-                LoadingRing.IsActive = true;
-                LoadingRing.Visibility = Visibility.Visible;
-                StatusText.Text = "Estado: Subiendo archivo a Dropbox...";
-
-                using var uploadCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-                var uploaded = await _dropboxFileService.UploadFileAsync(
-                    pickedFile.Path,
-                    remoteFilePath,
-                    overwrite,
-                    autorename,
-                    uploadCts.Token);
-
-                var expectedLocalPath = Path.Combine(
-                    destinationLocal,
-                    uploaded.Name);
-
-                var appearedLocally = await WaitForLocalFileAsync(
-                    expectedLocalPath,
-                    TimeSpan.FromSeconds(25));
-
-                await AddUploadedFileToIndexAsync(
-                    expectedLocalPath,
-                    uploaded.Name,
-                    uploaded.Size,
-                    uploaded.ServerModifiedUtc);
+                UpdateLoadingState(
+                    "Estado: Actualizando resultados...",
+                    "Refrescando la carpeta y el índice de ANFETA.");
 
                 await RefreshDropboxFolderUiAsync(destinationLocal);
 
-                StatusText.Text = appearedLocally
-                    ? $"Estado: Archivo subido a Dropbox ✅ ({uploaded.Name})"
-                    : $"Estado: Archivo subido ✅ ({uploaded.Name}) Esperando sincronización local...";
-            }
-            catch (OperationCanceledException)
-            {
-                StatusText.Text = "Estado: La subida tardó demasiado o fue cancelada.";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Estado: Error subiendo archivo → {ex.Message}";
+                StatusText.Text =
+                    failedCount == 0
+                        ? $"Estado: Dropbox actualizado ✅ " +
+                          $"Subidos: {uploadedCount} · Omitidos: {skippedCount}"
+                        : $"Estado: Dropbox actualizado parcialmente ⚠️ " +
+                          $"Subidos: {uploadedCount} · Omitidos: {skippedCount} · " +
+                          $"Fallaron: {failedCount}" +
+                          (string.IsNullOrWhiteSpace(lastError)
+                              ? string.Empty
+                              : $" · Último: {lastError}");
             }
             finally
             {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
+                HideLoadingState();
             }
         }
 
@@ -1453,10 +1524,9 @@ namespace Anfeta.UI.Views
 
             try
             {
-                LoadingRing.IsActive = true;
-                LoadingRing.Visibility = Visibility.Visible;
-                StatusText.Text =
-                    $"Estado: Renombrando página en {sourceName}...";
+                ShowLoadingState(
+                    $"Estado: Renombrando página en {sourceName}...",
+                    row.DisplayName);
 
                 using var cts =
                     new CancellationTokenSource(TimeSpan.FromSeconds(45));
@@ -1490,8 +1560,7 @@ namespace Anfeta.UI.Views
             }
             finally
             {
-                LoadingRing.IsActive = false;
-                LoadingRing.Visibility = Visibility.Collapsed;
+                HideLoadingState();
             }
         }
 
@@ -1882,7 +1951,14 @@ namespace Anfeta.UI.Views
 
         private void ResultsContextFlyout_Opening(object sender, object e)
         {
-            var row = ResultsList.SelectedItem as SearchResultRow;
+            var flyoutRow =
+                (sender as MenuFlyout)?.Target is FrameworkElement target
+                    ? target.DataContext as SearchResultRow
+                    : null;
+
+            var row = flyoutRow ??
+                      ResultsList.SelectedItem as SearchResultRow;
+
             var isNotion = row != null && IsNotionRow(row);
 
             CtxMenuOpenItem.Text = isNotion
@@ -1910,7 +1986,13 @@ namespace Anfeta.UI.Views
                     ApplicationData.Current.LocalSettings.Values["Notion.Token"] as string);
 
             CtxMenuCreateDropboxFolderItem.IsEnabled = canUseDropboxActions;
+            CtxMenuCreateDropboxFolderItem.Visibility =
+                isNotion ? Visibility.Collapsed : Visibility.Visible;
+
             CtxMenuUploadDropboxFileItem.IsEnabled = canUseDropboxActions;
+            CtxMenuUploadDropboxFileItem.Visibility =
+                isNotion ? Visibility.Collapsed : Visibility.Visible;
+
             CtxMenuUploadNotionFileItem.IsEnabled = hasNotionToken;
 
             CtxMenuRenameItem.Text = isNotion
@@ -1983,7 +2065,13 @@ namespace Anfeta.UI.Views
                     ApplicationData.Current.LocalSettings.Values["Notion.Token"] as string);
 
             DetailsCreateDropboxFolderItem.IsEnabled = canUseDropboxActions;
+            DetailsCreateDropboxFolderItem.Visibility =
+                isNotion ? Visibility.Collapsed : Visibility.Visible;
+
             DetailsUploadDropboxFileItem.IsEnabled = canUseDropboxActions;
+            DetailsUploadDropboxFileItem.Visibility =
+                isNotion ? Visibility.Collapsed : Visibility.Visible;
+
             DetailsUploadNotionFileItem.IsEnabled = hasNotionToken;
 
             DetailsRenameItem.Text = isNotion
