@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -15,7 +16,8 @@ namespace Anfeta.UI.Services.Notion
     {
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
-        private const int HttpTimeoutSeconds = 30;
+        private const int HttpTimeoutSeconds = 120;
+        private const int MaxRetryAttempts = 4;
 
         public static async Task<List<SearchResultRow>> BuildAsync(
             string token,
@@ -99,14 +101,10 @@ namespace Anfeta.UI.Services.Notion
 
                 var jsonBody = JsonSerializer.Serialize(payload);
 
-                using var content = new StringContent(
-                    jsonBody,
-                    Encoding.UTF8,
-                    "application/json");
-
-                using var response = await http.PostAsync(
+                using var response = await SendQueryWithRetryAsync(
+                    http,
                     $"data_sources/{dataSourceId.Trim()}/query",
-                    content,
+                    jsonBody,
                     ct);
 
                 var json = await response.Content.ReadAsStringAsync(ct);
@@ -175,6 +173,99 @@ namespace Anfeta.UI.Services.Notion
 
             return changes.Count > 0;
         }
+
+        private static async Task<HttpResponseMessage> SendQueryWithRetryAsync(
+            HttpClient http,
+            string requestUri,
+            string jsonBody,
+            CancellationToken cancellationToken)
+        {
+            Exception? lastException = null;
+
+            for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    using var content = new StringContent(
+                        jsonBody,
+                        Encoding.UTF8,
+                        "application/json");
+
+                    var response = await http.PostAsync(
+                        requestUri,
+                        content,
+                        cancellationToken);
+
+                    if (!ShouldRetry(response.StatusCode) ||
+                        attempt == MaxRetryAttempts)
+                    {
+                        return response;
+                    }
+
+                    var delay = GetRetryDelay(response, attempt);
+                    response.Dispose();
+                    await Task.Delay(delay, cancellationToken);
+                }
+                catch (TaskCanceledException ex)
+                    when (!cancellationToken.IsCancellationRequested &&
+                          attempt < MaxRetryAttempts)
+                {
+                    lastException = ex;
+                    await Task.Delay(
+                        GetExponentialDelay(attempt),
+                        cancellationToken);
+                }
+                catch (HttpRequestException ex)
+                    when (attempt < MaxRetryAttempts)
+                {
+                    lastException = ex;
+                    await Task.Delay(
+                        GetExponentialDelay(attempt),
+                        cancellationToken);
+                }
+            }
+
+            throw new HttpRequestException(
+                "Notion no respondió después de varios intentos.",
+                lastException);
+        }
+
+        private static bool ShouldRetry(HttpStatusCode statusCode)
+        {
+            var numeric = (int)statusCode;
+            return statusCode == HttpStatusCode.TooManyRequests ||
+                   numeric == 529 ||
+                   numeric >= 500;
+        }
+
+        private static TimeSpan GetRetryDelay(
+            HttpResponseMessage response,
+            int attempt)
+        {
+            if (response.Headers.RetryAfter?.Delta is TimeSpan delta &&
+                delta > TimeSpan.Zero)
+            {
+                return delta;
+            }
+
+            if (response.Headers.RetryAfter?.Date is DateTimeOffset date)
+            {
+                var wait = date - DateTimeOffset.UtcNow;
+                if (wait > TimeSpan.Zero)
+                    return wait;
+            }
+
+            return GetExponentialDelay(attempt);
+        }
+
+        private static TimeSpan GetExponentialDelay(int attempt)
+        {
+            var seconds = Math.Min(12, Math.Pow(2, attempt - 1));
+            return TimeSpan.FromSeconds(seconds);
+        }
+
         private static SearchResultRow MapPageToSearchRow(JsonElement page, string sourceName)
         {
             var pageId = GetString(page, "id");
@@ -505,6 +596,7 @@ namespace Anfeta.UI.Services.Notion
                         source.Name);
 
                     all.AddRange(rows);
+                    await Task.Delay(350, ct);
                 }
                 catch (OperationCanceledException)
                 {

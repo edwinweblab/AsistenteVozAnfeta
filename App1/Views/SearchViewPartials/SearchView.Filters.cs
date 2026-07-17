@@ -555,10 +555,11 @@ namespace Anfeta.UI.Views
 
         private void RefreshQuickFlyoutContent(string? input = null)
         {
-            var q = (input ?? SearchBox?.Text ?? string.Empty).Trim();
+            var rawInput = input ?? SearchBox?.Text ?? string.Empty;
+            var q = rawInput.Trim();
 
             RebuildVisibleSavedSearches(q);
-            RebuildPredictiveSuggestions(q);
+            RebuildPredictiveSuggestions(rawInput);
             UpdateQuickFlyoutVisibility();
 
             if (_quickFlyoutOpen)
@@ -1156,20 +1157,33 @@ namespace Anfeta.UI.Views
         {
             var q = NormalizeSuggestionText(partial);
 
-            foreach (var item in GetNotionBaseShortcuts())
-            {
-                var haystack = NormalizeSuggestionText(string.Join(" ", new[]
+            var ordered = GetNotionBaseShortcuts()
+                .Select(item => new
                 {
-                    item.PrimaryAlias,
-                    item.DisplayLabel,
-                    item.PathLabel,
-                    item.SourceName,
-                    string.Join(" ", item.Aliases)
-                }));
+                    Item = item,
+                    Aliases = new[] { item.PrimaryAlias }
+                        .Concat(item.Aliases ?? Array.Empty<string>())
+                        .Select(NormalizeSuggestionText)
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .ToList(),
+                    Haystack = NormalizeSuggestionText(string.Join(" ", new[]
+                    {
+                        item.PrimaryAlias,
+                        item.DisplayLabel,
+                        item.PathLabel,
+                        item.SourceName,
+                        string.Join(" ", item.Aliases)
+                    }))
+                })
+                .Where(x => string.IsNullOrWhiteSpace(q) ||
+                            x.Haystack.Contains(q, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(x => string.IsNullOrWhiteSpace(q) ? 0 :
+                    x.Aliases.Any(alias => alias.StartsWith(q, StringComparison.OrdinalIgnoreCase)) ? 0 : 1)
+                .ThenBy(x => x.Item.PrimaryAlias);
 
-                if (!string.IsNullOrWhiteSpace(q) && !haystack.Contains(q, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
+            foreach (var entry in ordered)
+            {
+                var item = entry.Item;
                 _predictiveSuggestions.Add(new PredictiveSuggestion
                 {
                     Title = item.PrimaryAlias,
@@ -1230,7 +1244,7 @@ namespace Anfeta.UI.Views
                 return;
 
             var q = NormalizeSuggestionText(query);
-            if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+            if (string.IsNullOrWhiteSpace(q))
                 return;
 
             var matchingRows = App.LocalIndex.GetAll()
@@ -1473,9 +1487,15 @@ namespace Anfeta.UI.Views
 
             var minCount = string.IsNullOrWhiteSpace(filter) ? 2 : 1;
 
+            var currentToken = GetCurrentPredictiveToken(
+                string.IsNullOrWhiteSpace(rowFilter)
+                    ? excludedQuery
+                    : rowFilter);
+
             return counts
                 .Where(x => x.Value >= minCount)
-                .OrderByDescending(x => x.Value)
+                .OrderBy(x => GetPredictivePrefixRank(x.Key, currentToken))
+                .ThenByDescending(x => x.Value)
                 .ThenBy(x => x.Key)
                 .Select(x => new TopicCount
                 {
@@ -1483,6 +1503,55 @@ namespace Anfeta.UI.Views
                     Count = x.Value
                 })
                 .ToList();
+        }
+
+
+        private static string GetCurrentPredictiveToken(string query)
+        {
+            var raw = query ?? string.Empty;
+
+            // Al escribir un espacio ya no hay una palabra parcial activa:
+            // vuelven a mostrarse las sugerencias frecuentes.
+            if (raw.EndsWith(" ", StringComparison.Ordinal))
+                return string.Empty;
+
+            var terms = SplitAutoAndTerms(raw);
+            return terms.Count == 0
+                ? string.Empty
+                : NormalizeSuggestionText(terms[^1]);
+        }
+
+        private static int GetPredictivePrefixRank(
+            string suggestion,
+            string currentToken)
+        {
+            if (string.IsNullOrWhiteSpace(currentToken))
+                return 0;
+
+            var normalized = NormalizeSuggestionText(suggestion);
+            var words = normalized.Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries);
+
+            if (normalized.StartsWith(
+                    currentToken,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            if (words.Any(word => word.StartsWith(
+                    currentToken,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                return 1;
+            }
+
+            return normalized.Contains(
+                currentToken,
+                StringComparison.OrdinalIgnoreCase)
+                    ? 2
+                    : 3;
         }
 
         private static HashSet<string> BuildPredictiveExcludedTerms(string query)

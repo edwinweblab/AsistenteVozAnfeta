@@ -8,7 +8,14 @@
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
-    <Grid x:Name="RootLayout" Background="#151515">
+    <Grid
+        x:Name="RootLayout"
+        AllowDrop="True"
+        Background="#151515"
+        DragEnter="ResultsDropSurface_DragEnter"
+        DragLeave="ResultsDropSurface_DragLeave"
+        DragOver="ResultsDropSurface_DragOver"
+        Drop="ResultsDropSurface_Drop">
         <Grid.RowDefinitions>
             <RowDefinition Height="42" />
             <!--  Row 0 TopBar  -->
@@ -1340,15 +1347,8 @@
                         ToolTipService.ToolTip="Favorito" />
                 </Grid>
 
-                <!--  Lista de resultados estilo Everything + zona para arrastrar a Notion  -->
-                <Grid
-                    x:Name="ResultsDropSurface"
-                    Grid.Row="2"
-                    AllowDrop="True"
-                    DragEnter="ResultsDropSurface_DragEnter"
-                    DragLeave="ResultsDropSurface_DragLeave"
-                    DragOver="ResultsDropSurface_DragOver"
-                    Drop="ResultsDropSurface_Drop">
+                <!--  Lista de resultados estilo Everything  -->
+                <Grid Grid.Row="2">
                     <Border
                         x:Name="LoadingOverlay"
                         Canvas.ZIndex="50"
@@ -1403,6 +1403,7 @@
                         BorderBrush="#49B6FF"
                         BorderThickness="2"
                         CornerRadius="14"
+                        IsHitTestVisible="False"
                         Visibility="Collapsed">
                         <Grid>
                             <StackPanel
@@ -1425,7 +1426,7 @@
                                     HorizontalAlignment="Center"
                                     FontSize="14"
                                     Opacity="0.76"
-                                    Text="Se creará una página en Revisiones con los archivos adjuntos."
+                                    Text="Se abrirá el flujo para elegir una página o páginas separadas."
                                     TextAlignment="Center"
                                     TextWrapping="Wrap" />
                             </StackPanel>
@@ -1558,6 +1559,10 @@
                                     Text="Abrir en Explorador Local" />
 
                                 <MenuFlyoutSeparator />
+
+                                <MenuFlyoutItem
+                                    Click="CtxCopyName_Click"
+                                    Text="Copiar nombre" />
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuCopyPathItem"
@@ -1888,6 +1893,7 @@
                                 <MenuFlyout x:Name="DetailsMoreFlyout" Opening="DetailsMoreFlyout_Opening">
 
                                     <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
+                                    <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar nombre" />
 
                                     <MenuFlyoutSeparator />
 

@@ -115,12 +115,62 @@ namespace Anfeta.UI.Views
             var rows = GetSelectedRowsOrCtx(sender);
             if (rows.Count == 0) return;
 
-            var text = string.Join(Environment.NewLine, rows.Select(r => r.Name));
+            var text = string.Join(
+                Environment.NewLine,
+                rows.Select(GetCopyableRowName));
             var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
             pkg.SetText(text);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
 
             StatusText.Text = rows.Count == 1 ? "Copiado: nombre ✅" : $"Copiados {rows.Count} nombres ✅";
+        }
+
+        private static string GetCopyableRowName(
+            SearchResultRow row)
+        {
+            var name =
+                (row?.DisplayName ??
+                 row?.Name ??
+                 string.Empty).Trim();
+
+            if (row == null ||
+                row.Source != SearchSource.Notion)
+            {
+                return name;
+            }
+
+            var source =
+                (row.ExternalSourceName ??
+                 string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(source))
+            {
+                var prefix = $"[{source}]";
+
+                if (name.StartsWith(
+                        prefix,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return name
+                        .Substring(prefix.Length)
+                        .TrimStart();
+                }
+            }
+
+            if (name.StartsWith("[", StringComparison.Ordinal))
+            {
+                var closingBracket = name.IndexOf(']');
+
+                if (closingBracket >= 0 &&
+                    closingBracket + 1 < name.Length)
+                {
+                    return name
+                        .Substring(closingBracket + 1)
+                        .TrimStart();
+                }
+            }
+
+            return name;
         }
 
         private void CtxCopyFullPath_Click(object sender, RoutedEventArgs e)
@@ -658,6 +708,17 @@ namespace Anfeta.UI.Views
                 await RunSearchAsync(query);
         }
 
+        private enum NotionUploadLayout
+        {
+            SinglePage,
+            SeparatePages
+        }
+
+        private sealed record NotionUploadOptions(
+            NotionUploadLayout Layout,
+            string PageTitle,
+            IReadOnlyList<string> SeparatePageTitles);
+
         private async void CtxUploadNotionFile_Click(
             object sender,
             RoutedEventArgs e)
@@ -721,6 +782,11 @@ namespace Anfeta.UI.Views
             object sender,
             DragEventArgs e)
         {
+            e.AcceptedOperation =
+                Windows.ApplicationModel.DataTransfer
+                    .DataPackageOperation.Copy;
+            e.Handled = true;
+
             HideNotionDropOverlay();
 
             try
@@ -781,8 +847,11 @@ namespace Anfeta.UI.Views
 
             _isNotionFileDragActive = true;
 
-            if (NotionDropOverlay != null)
-                NotionDropOverlay.Visibility =
+            var dropOverlay =
+                FindName("NotionDropOverlay") as FrameworkElement;
+
+            if (dropOverlay != null)
+                dropOverlay.Visibility =
                     Visibility.Visible;
 
             e.DragUIOverride.Caption =
@@ -791,14 +860,18 @@ namespace Anfeta.UI.Views
             e.DragUIOverride.IsCaptionVisible = true;
             e.DragUIOverride.IsContentVisible = true;
             e.DragUIOverride.IsGlyphVisible = true;
+            e.Handled = true;
         }
 
         private void HideNotionDropOverlay()
         {
             _isNotionFileDragActive = false;
 
-            if (NotionDropOverlay != null)
-                NotionDropOverlay.Visibility =
+            var dropOverlay =
+                FindName("NotionDropOverlay") as FrameworkElement;
+
+            if (dropOverlay != null)
+                dropOverlay.Visibility =
                     Visibility.Collapsed;
         }
 
@@ -840,12 +913,12 @@ namespace Anfeta.UI.Views
                         validFiles[0].Name)
                     : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
 
-            var pageTitle =
-                await PromptNotionRevisionTitleAsync(
+            var options =
+                await PromptNotionRevisionUploadOptionsAsync(
                     validFiles,
                     suggestedTitle);
 
-            if (string.IsNullOrWhiteSpace(pageTitle))
+            if (options == null)
                 return;
 
             try
@@ -854,40 +927,91 @@ namespace Anfeta.UI.Views
                     $"Estado: Preparando {validFiles.Count} archivo(s) para Notion...",
                     $"Origen: {source} · Destino: Notion → Revisiones");
 
-                var progress =
-                    new Progress<NotionFileUploadProgress>(
-                        uploadProgress =>
-                        {
-                            UpdateLoadingState(
-                                $"Estado: Subiendo {uploadProgress.Completed} de {uploadProgress.Total} → {uploadProgress.FileName}",
-                                "Creando una sola página en Revisiones.");
-                        });
-
                 using var cts =
                     new CancellationTokenSource(
-                        TimeSpan.FromMinutes(15));
+                        TimeSpan.FromMinutes(20));
 
                 var service =
                     new NotionFilePageService();
 
-                var created =
-                    await service.CreateRevisionFromFilesAsync(
-                        token,
-                        validFiles
-                            .Select(file => file.Path)
-                            .ToList(),
-                        pageTitle,
-                        progress,
-                        cts.Token);
+                if (options.Layout == NotionUploadLayout.SinglePage)
+                {
+                    var progress =
+                        new Progress<NotionFileUploadProgress>(
+                            uploadProgress =>
+                            {
+                                UpdateLoadingState(
+                                    $"Estado: Subiendo {uploadProgress.Completed} de {uploadProgress.Total} → {uploadProgress.FileName}",
+                                    "Creando una sola página en Revisiones.");
+                            });
 
-                await AddCreatedNotionPageToIndexAsync(
-                    created.PageId,
-                    created.PageUrl,
-                    created.Title);
+                    var created =
+                        await service.CreateRevisionFromFilesAsync(
+                            token,
+                            validFiles
+                                .Select(file => file.Path)
+                                .ToList(),
+                            options.PageTitle,
+                            progress,
+                            cts.Token);
 
-                StatusText.Text =
-                    $"Estado: Página creada en Revisiones ✅ " +
-                    $"({created.Title}) · {validFiles.Count} archivo(s)";
+                    await AddCreatedNotionPageToIndexAsync(
+                        created.PageId,
+                        created.PageUrl,
+                        created.Title);
+
+                    StatusText.Text =
+                        $"Estado: Página creada en Revisiones ✅ " +
+                        $"({created.Title}) · {validFiles.Count} archivo(s)";
+                    return;
+                }
+
+                var createdCount = 0;
+                var failedCount = 0;
+                string? lastError = null;
+
+                for (var index = 0; index < validFiles.Count; index++)
+                {
+                    var file = validFiles[index];
+                    var pageTitle =
+                        options.SeparatePageTitles.Count > index
+                            ? options.SeparatePageTitles[index]
+                            : Path.GetFileNameWithoutExtension(
+                                file.Name);
+
+                    try
+                    {
+                        UpdateLoadingState(
+                            $"Estado: Creando página {index + 1} de {validFiles.Count} → {file.Name}",
+                            "Cada archivo tendrá su propia página en Revisiones.");
+
+                        var created =
+                            await service.CreateRevisionFromFileAsync(
+                                token,
+                                file.Path,
+                                pageTitle,
+                                cts.Token);
+
+                        await AddCreatedNotionPageToIndexAsync(
+                            created.PageId,
+                            created.PageUrl,
+                            created.Title);
+
+                        createdCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        lastError = $"{file.Name}: {ex.Message}";
+                    }
+                }
+
+                StatusText.Text = failedCount == 0
+                    ? $"Estado: Páginas creadas en Revisiones ✅ ({createdCount})"
+                    : $"Estado: Carga parcial ⚠️ Creadas: {createdCount} · Fallaron: {failedCount}" +
+                      (string.IsNullOrWhiteSpace(lastError)
+                          ? string.Empty
+                          : $" · Último: {lastError}");
             }
             catch (OperationCanceledException)
             {
@@ -905,22 +1029,169 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private async Task<string?> PromptNotionRevisionTitleAsync(
+        private async Task<NotionUploadOptions?> PromptNotionRevisionUploadOptionsAsync(
             IReadOnlyList<StorageFile> files,
             string suggestedTitle)
         {
             var titleBox = new TextBox
             {
-                Width = 430,
+                HorizontalAlignment =
+                    HorizontalAlignment.Stretch,
                 Text = suggestedTitle,
                 PlaceholderText = "Título de la página"
             };
+
+            var onePageOption = new RadioButton
+            {
+                Content =
+                    "Todos los archivos en una sola página",
+                GroupName = "NotionUploadLayout",
+                IsChecked = true
+            };
+
+            var separatePagesOption = new RadioButton
+            {
+                Content =
+                    "Crear una página separada por cada archivo",
+                GroupName = "NotionUploadLayout",
+                IsEnabled = files.Count > 1
+            };
+
+            var titleEditors =
+                new List<TextBox>(files.Count);
+
+            var separateTitlesPanel = new StackPanel
+            {
+                Spacing = 8,
+                Visibility = Visibility.Collapsed
+            };
+
+            separateTitlesPanel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Título de cada página:",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
+
+            separateTitlesPanel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Puedes conservar el nombre del archivo o editarlo antes de subir.",
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    Opacity = 0.72
+                });
+
+            var editorsStack = new StackPanel
+            {
+                Spacing = 8
+            };
+
+            for (var index = 0;
+                 index < files.Count;
+                 index++)
+            {
+                var file = files[index];
+
+                var editor = new TextBox
+                {
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch,
+                    Text =
+                        Path.GetFileNameWithoutExtension(
+                            file.Name),
+                    PlaceholderText =
+                        $"Título para {file.Name}",
+                    Tag = index
+                };
+
+                titleEditors.Add(editor);
+
+                var row = new Grid
+                {
+                    ColumnSpacing = 10
+                };
+
+                row.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(180)
+                    });
+
+                row.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(
+                            1,
+                            GridUnitType.Star)
+                    });
+
+                var fileNameText =
+                    new TextBlock
+                    {
+                        Text = file.Name,
+                        VerticalAlignment =
+                            VerticalAlignment.Center,
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis
+                    };
+
+                ToolTipService.SetToolTip(
+                    fileNameText,
+                    file.Name);
+
+                Grid.SetColumn(fileNameText, 0);
+                row.Children.Add(fileNameText);
+
+                Grid.SetColumn(editor, 1);
+                row.Children.Add(editor);
+
+                editorsStack.Children.Add(row);
+            }
+
+            var restoreNamesButton = new Button
+            {
+                Content =
+                    "Restaurar nombres de archivo",
+                HorizontalAlignment =
+                    HorizontalAlignment.Left
+            };
+
+            restoreNamesButton.Click += (_, __) =>
+            {
+                for (var index = 0;
+                     index < titleEditors.Count;
+                     index++)
+                {
+                    titleEditors[index].Text =
+                        Path.GetFileNameWithoutExtension(
+                            files[index].Name);
+                }
+            };
+
+            separateTitlesPanel.Children.Add(
+                restoreNamesButton);
+
+            separateTitlesPanel.Children.Add(
+                new ScrollViewer
+                {
+                    Content = editorsStack,
+                    MaxHeight = 260,
+                    HorizontalScrollBarVisibility =
+                        ScrollBarVisibility.Disabled,
+                    VerticalScrollBarVisibility =
+                        ScrollBarVisibility.Auto
+                });
 
             var fileList = new TextBlock
             {
                 Text = string.Join(
                     Environment.NewLine,
-                    files.Take(12).Select(x => $"• {x.Name}")) +
+                    files.Take(12)
+                        .Select(x => $"• {x.Name}")) +
                     (files.Count > 12
                         ? $"{Environment.NewLine}• … y {files.Count - 12} más"
                         : string.Empty),
@@ -928,45 +1199,67 @@ namespace Anfeta.UI.Views
                 Opacity = 0.82
             };
 
-            var fileScroll = new ScrollViewer
+            var titleSection = new StackPanel
             {
-                Content = fileList,
-                MaxHeight = 210,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+                Spacing = 6
             };
+
+            titleSection.Children.Add(
+                new TextBlock
+                {
+                    Text = "Título de la página:",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
+
+            titleSection.Children.Add(titleBox);
 
             var content = new StackPanel
             {
+                Width = 660,
                 Spacing = 10
             };
 
-            content.Children.Add(new TextBlock
-            {
-                Text = $"Archivos seleccionados: {files.Count}",
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-            });
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        $"Archivos seleccionados: {files.Count}",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
 
-            content.Children.Add(fileScroll);
+            content.Children.Add(
+                new ScrollViewer
+                {
+                    Content = fileList,
+                    MaxHeight = 150,
+                    VerticalScrollBarVisibility =
+                        ScrollBarVisibility.Auto
+                });
 
-            content.Children.Add(new TextBlock
-            {
-                Text = "Destino: Notion → Revisiones",
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-            });
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Destino: Notion → Revisiones",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
 
-            content.Children.Add(new TextBlock
-            {
-                Text = "Todos los archivos quedarán dentro de una sola página.",
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.75
-            });
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "¿Cómo deseas organizar los archivos?",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
 
-            content.Children.Add(new TextBlock
-            {
-                Text = "Título de la página:"
-            });
-
-            content.Children.Add(titleBox);
+            content.Children.Add(onePageOption);
+            content.Children.Add(separatePagesOption);
+            content.Children.Add(titleSection);
+            content.Children.Add(separateTitlesPanel);
 
             var dialog = new ContentDialog
             {
@@ -975,29 +1268,86 @@ namespace Anfeta.UI.Views
                     ? "Subir archivo a Notion"
                     : "Subir varios archivos a Notion",
                 Content = content,
-                PrimaryButtonText = "Subir y crear página",
+                PrimaryButtonText = "Continuar y subir",
                 CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Primary,
+                DefaultButton =
+                    ContentDialogButton.Primary,
                 IsPrimaryButtonEnabled =
-                    !string.IsNullOrWhiteSpace(suggestedTitle)
+                    !string.IsNullOrWhiteSpace(
+                        suggestedTitle),
+                HorizontalContentAlignment =
+                    HorizontalAlignment.Stretch
             };
 
-            titleBox.TextChanged += (_, __) =>
+            dialog.Resources[
+                "ContentDialogMaxWidth"] = 760d;
+
+            dialog.Resources[
+                "ContentDialogMinWidth"] = 760d;
+
+            void RefreshDialogState()
             {
-                dialog.IsPrimaryButtonEnabled =
-                    !string.IsNullOrWhiteSpace(titleBox.Text);
-            };
+                var separate =
+                    separatePagesOption.IsChecked == true;
+
+                titleSection.Visibility = separate
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+
+                separateTitlesPanel.Visibility = separate
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+                dialog.IsPrimaryButtonEnabled = separate
+                    ? titleEditors.All(editor =>
+                        !string.IsNullOrWhiteSpace(
+                            editor.Text))
+                    : !string.IsNullOrWhiteSpace(
+                        titleBox.Text);
+            }
+
+            titleBox.TextChanged +=
+                (_, __) => RefreshDialogState();
+
+            foreach (var editor in titleEditors)
+            {
+                editor.TextChanged +=
+                    (_, __) => RefreshDialogState();
+            }
+
+            onePageOption.Checked +=
+                (_, __) => RefreshDialogState();
+
+            separatePagesOption.Checked +=
+                (_, __) => RefreshDialogState();
 
             dialog.Opened += (_, __) =>
             {
-                titleBox.Focus(FocusState.Programmatic);
+                RefreshDialogState();
+                titleBox.Focus(
+                    FocusState.Programmatic);
                 titleBox.SelectAll();
             };
 
-            return await dialog.ShowAsync() ==
-                   ContentDialogResult.Primary
-                ? titleBox.Text.Trim()
-                : null;
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                return null;
+            }
+
+            var separateTitles = titleEditors
+                .Select(editor =>
+                    (editor.Text ??
+                     string.Empty).Trim())
+                .ToList();
+
+            return new NotionUploadOptions(
+                separatePagesOption.IsChecked == true
+                    ? NotionUploadLayout.SeparatePages
+                    : NotionUploadLayout.SinglePage,
+                (titleBox.Text ??
+                 string.Empty).Trim(),
+                separateTitles);
         }
 
         private async Task AddCreatedNotionPageToIndexAsync(

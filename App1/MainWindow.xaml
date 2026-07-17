@@ -55,6 +55,7 @@
                             Foreground="#8C8075"
                             Text="ANFETA" />
                         <TextBlock
+                            x:Name="BrandVersionTextBlock"
                             FontSize="10"
                             Foreground="#4A3E36"
                             Text="Asistente de Voz" />
@@ -400,9 +401,10 @@
                                 VerticalAlignment="Center"
                                 Fill="#F97316" />
                             <TextBlock
+                                x:Name="VersionTextBlock"
                                 FontSize="11"
                                 Foreground="#8C8075"
-                                Text="Versión Beta" />
+                                Text="ANFETA" />
                         </StackPanel>
                         <TextBlock
                             Margin="11,0,0,0"

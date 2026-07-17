@@ -15,6 +15,8 @@ using Windows.UI;
 using Anfeta.UI.Services;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
+using System.Reflection;
+using Windows.ApplicationModel;
 using WinRT.Interop;
 namespace Anfeta.UI
 {
@@ -26,6 +28,7 @@ namespace Anfeta.UI
         public MainWindow()
         {
             InitializeComponent();
+            ApplyVisibleAppVersion();
 
             _shell = App.AppHost.Services.GetRequiredService<ShellViewModel>();
             Root.DataContext = _shell;
@@ -73,6 +76,37 @@ namespace Anfeta.UI
             this.Closed += MainWindow_Closed;
 
             Debug.WriteLine("MAINWINDOW: constructor OK");
+        }
+
+
+        private void ApplyVisibleAppVersion()
+        {
+            var versionText = GetCurrentAppVersion();
+
+            Title = $"ANFETA - Asistente de Voz Empresarial · v{versionText}";
+
+            if (VersionTextBlock != null)
+                VersionTextBlock.Text = $"ANFETA v{versionText}";
+
+            if (BrandVersionTextBlock != null)
+                BrandVersionTextBlock.Text = $"Asistente de Voz · v{versionText}";
+        }
+
+        private static string GetCurrentAppVersion()
+        {
+            try
+            {
+                var version = Package.Current.Id.Version;
+                return $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}";
+            }
+            catch
+            {
+                return Assembly
+                    .GetExecutingAssembly()
+                    .GetName()
+                    .Version?
+                    .ToString() ?? "0.0.0.0";
+            }
         }
 
         // ═══════════════════════════════════════════
