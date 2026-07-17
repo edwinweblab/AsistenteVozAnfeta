@@ -658,20 +658,10 @@ namespace Anfeta.UI.Views
                 await RunSearchAsync(query);
         }
 
-        private async void CtxUploadNotionFile_Click(object sender, RoutedEventArgs e)
+        private async void CtxUploadNotionFile_Click(
+            object sender,
+            RoutedEventArgs e)
         {
-            const string notionTokenKey = "Notion.Token";
-
-            var token =
-                ApplicationData.Current.LocalSettings.Values[notionTokenKey] as string;
-
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                StatusText.Text =
-                    "Estado: Configura y guarda primero el token de Notion en Configuración.";
-                return;
-            }
-
             IReadOnlyList<StorageFile> pickedFiles;
 
             try
@@ -683,10 +673,16 @@ namespace Anfeta.UI.Views
 
                 picker.FileTypeFilter.Add("*");
 
-                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
-                InitializeWithWindow.Initialize(picker, hwnd);
+                var hwnd =
+                    WindowNative.GetWindowHandle(
+                        App.MainWindowInstance);
 
-                pickedFiles = await picker.PickMultipleFilesAsync();
+                InitializeWithWindow.Initialize(
+                    picker,
+                    hwnd);
+
+                pickedFiles =
+                    await picker.PickMultipleFilesAsync();
             }
             catch (Exception ex)
             {
@@ -695,30 +691,159 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            if (pickedFiles == null || pickedFiles.Count == 0)
-                return;
+            await UploadFilesToNotionRevisionsAsync(
+                pickedFiles,
+                "selector");
+        }
 
-            var validFiles = pickedFiles
-                .Where(x =>
-                    x != null &&
-                    !string.IsNullOrWhiteSpace(x.Path) &&
-                    File.Exists(x.Path))
+        private void ResultsDropSurface_DragEnter(
+            object sender,
+            DragEventArgs e)
+        {
+            HandleNotionFileDragOver(e);
+        }
+
+        private void ResultsDropSurface_DragOver(
+            object sender,
+            DragEventArgs e)
+        {
+            HandleNotionFileDragOver(e);
+        }
+
+        private void ResultsDropSurface_DragLeave(
+            object sender,
+            DragEventArgs e)
+        {
+            HideNotionDropOverlay();
+        }
+
+        private async void ResultsDropSurface_Drop(
+            object sender,
+            DragEventArgs e)
+        {
+            HideNotionDropOverlay();
+
+            try
+            {
+                if (!e.DataView.Contains(
+                        Windows.ApplicationModel.DataTransfer
+                            .StandardDataFormats.StorageItems))
+                {
+                    StatusText.Text =
+                        "Estado: Arrastra archivos desde el Explorador de Windows.";
+                    return;
+                }
+
+                var storageItems =
+                    await e.DataView.GetStorageItemsAsync();
+
+                var files = storageItems
+                    .OfType<StorageFile>()
+                    .ToList();
+
+                if (files.Count == 0)
+                {
+                    StatusText.Text =
+                        "Estado: No se detectaron archivos para subir.";
+                    return;
+                }
+
+                await UploadFilesToNotionRevisionsAsync(
+                    files,
+                    "arrastrar y soltar");
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudieron leer los archivos arrastrados → {ex.Message}";
+            }
+        }
+
+        private void HandleNotionFileDragOver(
+            DragEventArgs e)
+        {
+            var hasStorageItems =
+                e.DataView.Contains(
+                    Windows.ApplicationModel.DataTransfer
+                        .StandardDataFormats.StorageItems);
+
+            e.AcceptedOperation = hasStorageItems
+                ? Windows.ApplicationModel.DataTransfer
+                    .DataPackageOperation.Copy
+                : Windows.ApplicationModel.DataTransfer
+                    .DataPackageOperation.None;
+
+            if (!hasStorageItems)
+            {
+                HideNotionDropOverlay();
+                return;
+            }
+
+            _isNotionFileDragActive = true;
+
+            if (NotionDropOverlay != null)
+                NotionDropOverlay.Visibility =
+                    Visibility.Visible;
+
+            e.DragUIOverride.Caption =
+                "Subir a Notion → Revisiones";
+
+            e.DragUIOverride.IsCaptionVisible = true;
+            e.DragUIOverride.IsContentVisible = true;
+            e.DragUIOverride.IsGlyphVisible = true;
+        }
+
+        private void HideNotionDropOverlay()
+        {
+            _isNotionFileDragActive = false;
+
+            if (NotionDropOverlay != null)
+                NotionDropOverlay.Visibility =
+                    Visibility.Collapsed;
+        }
+
+        private async Task UploadFilesToNotionRevisionsAsync(
+            IReadOnlyList<StorageFile> files,
+            string source)
+        {
+            const string notionTokenKey = "Notion.Token";
+
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    notionTokenKey] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura y guarda primero el token de Notion en Configuración.";
+                return;
+            }
+
+            var validFiles = (files ??
+                    Array.Empty<StorageFile>())
+                .Where(file =>
+                    file != null &&
+                    !string.IsNullOrWhiteSpace(file.Path) &&
+                    File.Exists(file.Path))
                 .ToList();
 
             if (validFiles.Count == 0)
             {
                 StatusText.Text =
-                    "Estado: Ningún archivo seleccionado tiene una ruta local válida.";
+                    "Estado: Ningún archivo tiene una ruta local válida.";
                 return;
             }
 
-            var suggestedTitle = validFiles.Count == 1
-                ? Path.GetFileNameWithoutExtension(validFiles[0].Name)
-                : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
+            var suggestedTitle =
+                validFiles.Count == 1
+                    ? Path.GetFileNameWithoutExtension(
+                        validFiles[0].Name)
+                    : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
 
-            var pageTitle = await PromptNotionRevisionTitleAsync(
-                validFiles,
-                suggestedTitle);
+            var pageTitle =
+                await PromptNotionRevisionTitleAsync(
+                    validFiles,
+                    suggestedTitle);
 
             if (string.IsNullOrWhiteSpace(pageTitle))
                 return;
@@ -727,26 +852,33 @@ namespace Anfeta.UI.Views
             {
                 ShowLoadingState(
                     $"Estado: Preparando {validFiles.Count} archivo(s) para Notion...",
-                    "Destino: Notion → Revisiones");
+                    $"Origen: {source} · Destino: Notion → Revisiones");
 
-                var progress = new Progress<NotionFileUploadProgress>(p =>
-                {
-                    UpdateLoadingState(
-                        $"Estado: Subiendo {p.Completed} de {p.Total} → {p.FileName}",
-                        "Creando una sola página en Revisiones.");
-                });
+                var progress =
+                    new Progress<NotionFileUploadProgress>(
+                        uploadProgress =>
+                        {
+                            UpdateLoadingState(
+                                $"Estado: Subiendo {uploadProgress.Completed} de {uploadProgress.Total} → {uploadProgress.FileName}",
+                                "Creando una sola página en Revisiones.");
+                        });
 
                 using var cts =
-                    new CancellationTokenSource(TimeSpan.FromMinutes(15));
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(15));
 
-                var service = new NotionFilePageService();
+                var service =
+                    new NotionFilePageService();
 
-                var created = await service.CreateRevisionFromFilesAsync(
-                    token,
-                    validFiles.Select(x => x.Path).ToList(),
-                    pageTitle,
-                    progress,
-                    cts.Token);
+                var created =
+                    await service.CreateRevisionFromFilesAsync(
+                        token,
+                        validFiles
+                            .Select(file => file.Path)
+                            .ToList(),
+                        pageTitle,
+                        progress,
+                        cts.Token);
 
                 await AddCreatedNotionPageToIndexAsync(
                     created.PageId,
@@ -1425,66 +1557,59 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            if (notionRows.Count > 0)
+            if (selected.Count > 1)
             {
-                if (notionRows.Count > 1)
-                {
-                    StatusText.Text =
-                        "Estado: Renombrar páginas de Notion funciona una por una.";
-                    return;
-                }
-
-                await RenameNotionPageAsync(notionRows[0]);
-                return;
-            }
-
-            if (localRows.Count == 1)
-            {
-                var row = localRows[0];
-                var newName = await PromptRenameAsync(row.Name);
-
-                if (string.IsNullOrWhiteSpace(newName) ||
-                    string.Equals(
-                        newName,
-                        row.Name,
-                        StringComparison.Ordinal))
-                {
-                    return;
-                }
-
-                var dir =
-                    Path.GetDirectoryName(row.Target) ??
-                    DROPBOX_ROOT;
-
-                var newFullPath =
-                    Path.Combine(dir, newName.Trim());
-
                 try
                 {
-                    await ApplyFileChangeAsync(
-                        FileChangeKind.Rename,
-                        row,
-                        newFullPath);
-
-                    StatusText.Text = "Estado: Renombrado ✅";
+                    await ShowSmartBatchRenameDialogAsync(selected);
                 }
                 catch (Exception ex)
                 {
                     StatusText.Text =
-                        $"Error al renombrar: {ex.Message}";
+                        $"Estado: Error en renombrado múltiple → {ex.Message}";
                 }
 
                 return;
             }
 
+            if (notionRows.Count == 1)
+            {
+                await RenameNotionPageAsync(notionRows[0]);
+                return;
+            }
+
+            var localRow = localRows[0];
+            var newName = await PromptRenameAsync(localRow.Name);
+
+            if (string.IsNullOrWhiteSpace(newName) ||
+                string.Equals(
+                    newName,
+                    localRow.Name,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var directory =
+                Path.GetDirectoryName(localRow.Target) ??
+                DROPBOX_ROOT;
+
+            var newFullPath =
+                Path.Combine(directory, newName.Trim());
+
             try
             {
-                await ShowBatchRenameDialogAsync(localRows);
+                await ApplyFileChangeAsync(
+                    FileChangeKind.Rename,
+                    localRow,
+                    newFullPath);
+
+                StatusText.Text = "Estado: Renombrado ✅";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Error en renombrado múltiple: {ex.Message}";
+                    $"Error al renombrar: {ex.Message}";
             }
         }
 
@@ -1618,219 +1743,717 @@ namespace Anfeta.UI.Views
                 : null;
         }
 
-        private async Task ShowBatchRenameDialogAsync(List<SearchResultRow> rows)
+        private async Task ShowSmartBatchRenameDialogAsync(
+            List<SearchResultRow> rows)
         {
-            var oldBox = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.NoWrap, AcceptsReturn = true, Height = 140, Text = string.Join(Environment.NewLine, rows.Select(r => r.Name)) };
-            var fmtBox = new TextBox { PlaceholderText = "Ej: {name} ({n}){ext}", Text = "{name} ({n}){ext}", MinWidth = 260 };
+            var renameService = new SmartBatchRenameService();
+            var isNotionBatch = rows.All(IsNotionRow);
 
-            var history = LoadBatchRenameHistory();
-            if (history.Count > 0) fmtBox.Text = history[0];
+            var inputs = rows
+                .Select(row => new SmartRenameInput(
+                    row.DisplayName,
+                    row.IsFolder,
+                    IsNotionRow(row)))
+                .ToList();
 
-            var presetsBtn = new Button { Content = "▼", Width = 38, Height = 32 };
-            var fly = new MenuFlyout();
-
-            void RebuildFlyout()
+            var oldNamesBox = new TextBox
             {
-                fly.Items.Clear();
-                fly.Items.Add(new MenuFlyoutItem { Text = "Presets", IsEnabled = false });
-                foreach (var p in BatchRenamePresets)
-                {
-                    var item = new MenuFlyoutItem { Text = p.Title };
-                    item.Click += (_, __) => fmtBox.Text = p.Format;
-                    fly.Items.Add(item);
-                }
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                TextWrapping = isNotionBatch
+                    ? TextWrapping.Wrap
+                    : TextWrapping.NoWrap,
+                Height = 135,
+                Text = string.Join(
+                    Environment.NewLine,
+                    rows.Select(row =>
+                        isNotionBatch
+                            ? $"[{row.ExternalSourceName}] {row.DisplayName}"
+                            : row.Name))
+            };
 
-                fly.Items.Add(new MenuFlyoutSeparator());
+            var oldFormatBox = new TextBox
+            {
+                IsReadOnly = true,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
 
-                var freshHistory = LoadBatchRenameHistory();
-                if (freshHistory.Count == 0)
+            var newFormatBox = new TextBox
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                PlaceholderText = "Ejemplo: 1 prtuzREVISION %1"
+            };
+
+            var previewBox = new TextBox
+            {
+                IsReadOnly = true,
+                AcceptsReturn = true,
+                TextWrapping = isNotionBatch
+                    ? TextWrapping.Wrap
+                    : TextWrapping.NoWrap,
+                Height = 150
+            };
+
+            var keepExtension = new CheckBox
+            {
+                Content = "Mantener extensión",
+                IsChecked = !isNotionBatch,
+                IsEnabled = !isNotionBatch
+            };
+
+            var matchCase = new CheckBox
+            {
+                Content = "Coincidir mayúsculas y minúsculas",
+                IsChecked = false
+            };
+
+            var matchDiacritics = new CheckBox
+            {
+                Content = "Coincidir acentos",
+                IsChecked = false
+            };
+
+            var errorText = new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.90,
+                Visibility = Visibility.Collapsed
+            };
+
+            var helpText = new TextBlock
+            {
+                Text =
+                    "Las partes diferentes se representan con %1, %2, etc. " +
+                    "Puedes agregar texto antes, después o entre las variables.",
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.72
+            };
+
+            var historyButton = new Button
+            {
+                Content = "Formatos ▼",
+                MinWidth = 100
+            };
+
+            var historyFlyout = new MenuFlyout();
+            historyButton.Flyout = historyFlyout;
+
+            SmartRenameAnalysis analysis =
+                renameService.Analyze(
+                    inputs,
+                    keepExtension.IsChecked == true,
+                    matchCase.IsChecked == true,
+                    matchDiacritics.IsChecked == true);
+
+            void RebuildHistory()
+            {
+                historyFlyout.Items.Clear();
+
+                var presets = new[]
                 {
-                    fly.Items.Add(new MenuFlyoutItem { Text = "Historial vacío", IsEnabled = false });
-                }
-                else
+                    ("Agregar 1 al inicio", "1 {old}"),
+                    ("Agregar texto al inicio", "NUEVO {old}"),
+                    ("Agregar texto al final", "{old} FINAL")
+                };
+
+                foreach (var preset in presets)
                 {
-                    fly.Items.Add(new MenuFlyoutItem { Text = "Historial", IsEnabled = false });
-                    foreach (var h in freshHistory)
+                    var item = new MenuFlyoutItem
                     {
-                        var label = h.Length > 42 ? h.Substring(0, 42) + "…" : h;
-                        var item = new MenuFlyoutItem { Text = label };
-                        item.Click += (_, __) => fmtBox.Text = h;
-                        fly.Items.Add(item);
-                    }
+                        Text = preset.Item1
+                    };
 
-                    fly.Items.Add(new MenuFlyoutSeparator());
-                    var clear = new MenuFlyoutItem { Text = "Limpiar historial" };
-                    clear.Click += (_, __) => { SaveBatchRenameHistory(new List<string>()); RebuildFlyout(); };
-                    fly.Items.Add(clear);
+                    item.Click += (_, __) =>
+                    {
+                        newFormatBox.Text =
+                            preset.Item2.Replace(
+                                "{old}",
+                                oldFormatBox.Text ?? string.Empty);
+                    };
+
+                    historyFlyout.Items.Add(item);
+                }
+
+                var history = LoadBatchRenameHistory();
+
+                if (history.Count > 0)
+                {
+                    historyFlyout.Items.Add(new MenuFlyoutSeparator());
+                    historyFlyout.Items.Add(new MenuFlyoutItem
+                    {
+                        Text = "Historial",
+                        IsEnabled = false
+                    });
+
+                    foreach (var format in history)
+                    {
+                        var item = new MenuFlyoutItem
+                        {
+                            Text = format.Length > 55
+                                ? format.Substring(0, 55) + "…"
+                                : format
+                        };
+
+                        item.Click += (_, __) =>
+                        {
+                            newFormatBox.Text = format;
+                        };
+
+                        historyFlyout.Items.Add(item);
+                    }
                 }
             }
 
-            RebuildFlyout();
-            presetsBtn.Flyout = fly;
-            presetsBtn.Click += (_, __) => RebuildFlyout();
+            var dialogWidth = Math.Clamp(
+                ActualWidth - 120,
+                820,
+                1120);
 
-            var keepExt = new CheckBox { Content = "Mantener extensión original", IsChecked = true };
-            var startNumber = new NumberBox { Minimum = 1, Value = 1, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact, Width = 120 };
-            var previewBox = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.NoWrap, AcceptsReturn = true, Height = 140 };
-            var errorText = new TextBlock { Opacity = 0.85, TextWrapping = TextWrapping.Wrap };
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = isNotionBatch
+                    ? $"Renombrar {rows.Count} páginas de Notion"
+                    : $"Renombrar {rows.Count} elementos",
+                PrimaryButtonText = "Aplicar cambios",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch
+            };
+
+            // ContentDialog tiene un máximo predeterminado cercano a 548 px.
+            // Se sobrescriben los recursos localmente para que esta ventana
+            // pueda usar correctamente el diseño comparativo horizontal.
+            dialog.Resources["ContentDialogMaxWidth"] = dialogWidth;
+            dialog.Resources["ContentDialogMinWidth"] = dialogWidth;
+
+            void Reanalyze(bool preserveNewFormat)
+            {
+                var previousOld = oldFormatBox.Text ?? string.Empty;
+                var previousNew = newFormatBox.Text ?? string.Empty;
+
+                analysis = renameService.Analyze(
+                    inputs,
+                    keepExtension.IsChecked == true,
+                    matchCase.IsChecked == true,
+                    matchDiacritics.IsChecked == true);
+
+                oldFormatBox.Text = analysis.OldFormat;
+
+                if (!preserveNewFormat ||
+                    string.IsNullOrWhiteSpace(previousNew) ||
+                    string.Equals(
+                        previousNew,
+                        previousOld,
+                        StringComparison.Ordinal))
+                {
+                    newFormatBox.Text = analysis.OldFormat;
+                }
+
+                RefreshPreview();
+            }
 
             void RefreshPreview()
             {
-                var (preview, error) = BatchRename_Preview(rows, fmtBox.Text, (int)startNumber.Value, keepExt.IsChecked == true);
-                previewBox.Text = string.Join(Environment.NewLine, preview);
-                errorText.Text = error ?? "";
-                errorText.Visibility = string.IsNullOrWhiteSpace(error) ? Visibility.Collapsed : Visibility.Visible;
+                var preview = renameService.Preview(
+                    analysis,
+                    newFormatBox.Text ?? string.Empty,
+                    inputs,
+                    keepExtension.IsChecked == true);
+
+                previewBox.Text = string.Join(
+                    Environment.NewLine,
+                    preview.Names.Select((name, index) =>
+                        isNotionBatch
+                            ? $"[{rows[index].ExternalSourceName}] {name}"
+                            : name));
+
+                errorText.Text = preview.Error ?? string.Empty;
+                errorText.Visibility =
+                    string.IsNullOrWhiteSpace(preview.Error)
+                        ? Visibility.Collapsed
+                        : Visibility.Visible;
+
+                dialog.IsPrimaryButtonEnabled =
+                    string.IsNullOrWhiteSpace(preview.Error) &&
+                    preview.Names.Count == rows.Count &&
+                    !preview.Names
+                        .Select((name, index) =>
+                            string.Equals(
+                                name,
+                                inputs[index].OriginalName,
+                                StringComparison.Ordinal))
+                        .All(x => x);
             }
 
-            fmtBox.TextChanged += (_, __) => RefreshPreview();
-            keepExt.Checked += (_, __) => RefreshPreview();
-            keepExt.Unchecked += (_, __) => RefreshPreview();
-            startNumber.ValueChanged += (_, __) => RefreshPreview();
+            newFormatBox.TextChanged += (_, __) => RefreshPreview();
+            keepExtension.Checked += (_, __) => Reanalyze(true);
+            keepExtension.Unchecked += (_, __) => Reanalyze(true);
+            matchCase.Checked += (_, __) => Reanalyze(false);
+            matchCase.Unchecked += (_, __) => Reanalyze(false);
+            matchDiacritics.Checked += (_, __) => Reanalyze(false);
+            matchDiacritics.Unchecked += (_, __) => Reanalyze(false);
 
-            RefreshPreview();
+            RebuildHistory();
 
-            var root = new StackPanel { Spacing = 10 };
-            root.Children.Add(new TextBlock { Text = "Old filenames:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            root.Children.Add(oldBox);
-
-            var row1 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            row1.Children.Add(new TextBlock { Text = "New format:", VerticalAlignment = VerticalAlignment.Center });
-            row1.Children.Add(fmtBox);
-            row1.Children.Add(presetsBtn);
-            root.Children.Add(row1);
-
-            var row2 = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
-            row2.Children.Add(keepExt);
-            row2.Children.Add(new TextBlock { Text = "Start:", VerticalAlignment = VerticalAlignment.Center });
-            row2.Children.Add(startNumber);
-            root.Children.Add(row2);
-
-            root.Children.Add(new TextBlock { Text = "New filenames (preview):", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            root.Children.Add(previewBox);
-            root.Children.Add(errorText);
-
-            var dlg = new ContentDialog
+            var content = new Grid
             {
-                Title = $"Renombrar ({rows.Count})",
-                Content = root,
-                PrimaryButtonText = "Aplicar",
-                CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Primary,
-                XamlRoot = this.XamlRoot
+                Width = Math.Max(740, dialogWidth - 72),
+                RowSpacing = 10,
+                ColumnSpacing = 16
             };
 
-            void SyncApplyEnabled() => dlg.IsPrimaryButtonEnabled = string.IsNullOrWhiteSpace(errorText.Text);
-
-            dlg.Opened += (_, __) => { RefreshPreview(); SyncApplyEnabled(); };
-            fmtBox.TextChanged += (_, __) => SyncApplyEnabled();
-            keepExt.Checked += (_, __) => SyncApplyEnabled();
-            keepExt.Unchecked += (_, __) => SyncApplyEnabled();
-            startNumber.ValueChanged += (_, __) => SyncApplyEnabled();
-
-            var result = await dlg.ShowAsync();
-            if (result != ContentDialogResult.Primary) return;
-
-            AddFormatToHistory(fmtBox.Text);
-            await ApplyBatchRenameAsync(rows, fmtBox.Text, (int)startNumber.Value, keepExt.IsChecked == true);
-        }
-
-        private (List<string> Preview, string? Error) BatchRename_Preview(List<SearchResultRow> rows, string format, int start, bool keepOriginalExtension)
-        {
-            format = format ?? "";
-            if (string.IsNullOrWhiteSpace(format))
-                return (new List<string>(), "El formato está vacío.");
-
-            var preview = new List<string>(rows.Count);
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            for (int i = 0; i < rows.Count; i++)
-            {
-                var oldName = rows[i].Name ?? "";
-                var (name, ext) = SplitNameExt(oldName);
-                var n = start + i;
-                var newName = ExpandFormat(format, oldName, name, ext, n, rows.Count);
-
-                if (keepOriginalExtension)
+            content.ColumnDefinitions.Add(
+                new ColumnDefinition
                 {
-                    var (nn, _) = SplitNameExt(newName);
-                    newName = nn + ext;
-                }
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
 
-                if (string.IsNullOrWhiteSpace(newName))
-                    return (preview, "El formato produce nombres vacíos.");
-                if (newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-                    return (preview, $"Nombre inválido generado: {newName}");
-                if (!seen.Add(newName))
-                    return (preview, $"Duplicado en el lote: {newName}");
+            content.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
 
-                preview.Add(newName);
+            content.RowDefinitions.Add(
+                new RowDefinition { Height = GridLength.Auto });
+            content.RowDefinitions.Add(
+                new RowDefinition
+                {
+                    Height = new GridLength(
+                        isNotionBatch ? 230 : 190)
+                });
+            content.RowDefinitions.Add(
+                new RowDefinition { Height = GridLength.Auto });
+            content.RowDefinitions.Add(
+                new RowDefinition { Height = GridLength.Auto });
+            content.RowDefinitions.Add(
+                new RowDefinition { Height = GridLength.Auto });
+            content.RowDefinitions.Add(
+                new RowDefinition { Height = GridLength.Auto });
+
+            var originalLabel = new TextBlock
+            {
+                Text = "Nombres originales",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            };
+
+            Grid.SetRow(originalLabel, 0);
+            Grid.SetColumn(originalLabel, 0);
+            content.Children.Add(originalLabel);
+
+            var previewLabel = new TextBlock
+            {
+                Text = "Nombres nuevos (vista previa)",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            };
+
+            Grid.SetRow(previewLabel, 0);
+            Grid.SetColumn(previewLabel, 1);
+            content.Children.Add(previewLabel);
+
+            oldNamesBox.Height = double.NaN;
+            oldNamesBox.MinHeight =
+                isNotionBatch ? 230 : 190;
+            oldNamesBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+            oldNamesBox.VerticalAlignment = VerticalAlignment.Stretch;
+
+            ScrollViewer.SetHorizontalScrollBarVisibility(
+                oldNamesBox,
+                ScrollBarVisibility.Auto);
+
+            Grid.SetRow(oldNamesBox, 1);
+            Grid.SetColumn(oldNamesBox, 0);
+            content.Children.Add(oldNamesBox);
+
+            previewBox.Height = double.NaN;
+            previewBox.MinHeight =
+                isNotionBatch ? 230 : 190;
+            previewBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+            previewBox.VerticalAlignment = VerticalAlignment.Stretch;
+
+            ScrollViewer.SetHorizontalScrollBarVisibility(
+                previewBox,
+                ScrollBarVisibility.Auto);
+
+            Grid.SetRow(previewBox, 1);
+            Grid.SetColumn(previewBox, 1);
+            content.Children.Add(previewBox);
+
+            var oldFormatPanel = new StackPanel
+            {
+                Spacing = 5
+            };
+
+            oldFormatPanel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Formato anterior detectado",
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                });
+
+            oldFormatBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+            oldFormatPanel.Children.Add(oldFormatBox);
+
+            Grid.SetRow(oldFormatPanel, 2);
+            Grid.SetColumn(oldFormatPanel, 0);
+            content.Children.Add(oldFormatPanel);
+
+            var newFormatPanel = new StackPanel
+            {
+                Spacing = 5
+            };
+
+            newFormatPanel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Formato nuevo",
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                });
+
+            var formatGrid = new Grid
+            {
+                ColumnSpacing = 8
+            };
+
+            formatGrid.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
+
+            formatGrid.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = GridLength.Auto
+                });
+
+            newFormatBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+            Grid.SetColumn(newFormatBox, 0);
+            formatGrid.Children.Add(newFormatBox);
+
+            Grid.SetColumn(historyButton, 1);
+            historyButton.VerticalAlignment = VerticalAlignment.Stretch;
+            formatGrid.Children.Add(historyButton);
+
+            newFormatPanel.Children.Add(formatGrid);
+
+            Grid.SetRow(newFormatPanel, 2);
+            Grid.SetColumn(newFormatPanel, 1);
+            content.Children.Add(newFormatPanel);
+
+            helpText.Text = isNotionBatch
+                ? "Las diferencias se representan con %1, %2, etc. " +
+                  "En títulos de Notion se permiten caracteres como /."
+                : "Las diferencias se representan con %1, %2, etc. " +
+                  "Puedes agregar texto antes, después o entre las variables.";
+
+            Grid.SetRow(helpText, 3);
+            Grid.SetColumn(helpText, 0);
+            Grid.SetColumnSpan(helpText, 2);
+            content.Children.Add(helpText);
+
+            var optionsGrid = new Grid
+            {
+                ColumnSpacing = 22
+            };
+
+            optionsGrid.ColumnDefinitions.Add(
+                new ColumnDefinition { Width = GridLength.Auto });
+            optionsGrid.ColumnDefinitions.Add(
+                new ColumnDefinition { Width = GridLength.Auto });
+            optionsGrid.ColumnDefinitions.Add(
+                new ColumnDefinition { Width = GridLength.Auto });
+            optionsGrid.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
+
+            Grid.SetColumn(keepExtension, 0);
+            optionsGrid.Children.Add(keepExtension);
+
+            Grid.SetColumn(matchCase, 1);
+            optionsGrid.Children.Add(matchCase);
+
+            Grid.SetColumn(matchDiacritics, 2);
+            optionsGrid.Children.Add(matchDiacritics);
+
+            Grid.SetRow(optionsGrid, 4);
+            Grid.SetColumn(optionsGrid, 0);
+            Grid.SetColumnSpan(optionsGrid, 2);
+            content.Children.Add(optionsGrid);
+
+            Grid.SetRow(errorText, 5);
+            Grid.SetColumn(errorText, 0);
+            Grid.SetColumnSpan(errorText, 2);
+            content.Children.Add(errorText);
+
+            dialog.Content = content;
+
+            dialog.Opened += (_, __) =>
+            {
+                Reanalyze(false);
+                RefreshPreview();
+                newFormatBox.Focus(FocusState.Programmatic);
+                newFormatBox.SelectAll();
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            var finalPreview = renameService.Preview(
+                analysis,
+                newFormatBox.Text ?? string.Empty,
+                inputs,
+                keepExtension.IsChecked == true);
+
+            if (!string.IsNullOrWhiteSpace(finalPreview.Error) ||
+                finalPreview.Names.Count != rows.Count)
+            {
+                StatusText.Text =
+                    $"Estado: Renombrado cancelado → {finalPreview.Error}";
+                return;
             }
 
-            return (preview, null);
-        }
+            AddFormatToHistory(newFormatBox.Text);
 
-        private static (string Name, string Ext) SplitNameExt(string filename)
-            => (Path.GetFileNameWithoutExtension(filename) ?? filename, Path.GetExtension(filename) ?? "");
-
-        private static string ExpandFormat(string format, string full, string name, string ext, int n, int N)
-        {
-            var s = (format ?? "")
-                .Replace("{full}", full)
-                .Replace("{name}", name)
-                .Replace("{ext}", ext)
-                .Replace("{N}", N.ToString());
-
-            s = Regex.Replace(s, @"\{n(?::(?<fmt>0+))?\}", m =>
+            if (isNotionBatch)
             {
-                var fmt = m.Groups["fmt"].Value;
-                return !string.IsNullOrEmpty(fmt)
-                    ? n.ToString(new string('0', fmt.Length))
-                    : n.ToString();
-            });
-
-            return s;
+                await ApplySmartNotionBatchRenameAsync(
+                    rows,
+                    finalPreview.Names.ToList());
+            }
+            else
+            {
+                await ApplySmartLocalBatchRenameAsync(
+                    rows,
+                    finalPreview.Names.ToList());
+            }
         }
 
-        private async Task ApplyBatchRenameAsync(List<SearchResultRow> rows, string format, int start, bool keepOriginalExtension)
+        private async Task ApplySmartLocalBatchRenameAsync(
+            List<SearchResultRow> rows,
+            List<string> newNames)
         {
-            var (preview, error) = BatchRename_Preview(rows, format, start, keepOriginalExtension);
-            if (!string.IsNullOrWhiteSpace(error)) { StatusText.Text = $"Estado: Rename cancelado ❌ ({error})"; return; }
-
-            int ok = 0, fail = 0;
+            var success = 0;
+            var failed = 0;
             string? lastError = null;
 
-            for (int i = 0; i < rows.Count; i++)
+            ShowLoadingState(
+                $"Estado: Renombrando {rows.Count} elementos...",
+                "Aplicando el formato nuevo a los archivos seleccionados.");
+
+            try
             {
+                for (var index = 0; index < rows.Count; index++)
+                {
+                    var row = rows[index];
+
+                    try
+                    {
+                        UpdateLoadingState(
+                            $"Estado: Renombrando {index + 1} de {rows.Count} → {row.Name}",
+                            newNames[index]);
+
+                        var directory =
+                            Path.GetDirectoryName(row.Target) ??
+                            DROPBOX_ROOT;
+
+                        var newFullPath =
+                            Path.Combine(directory, newNames[index]);
+
+                        if (string.Equals(
+                                row.Target,
+                                newFullPath,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        await ApplyFileChangeAsync(
+                            FileChangeKind.Rename,
+                            row,
+                            newFullPath);
+
+                        success++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        lastError = ex.Message;
+                    }
+                }
+
                 try
                 {
-                    var oldPath = rows[i].Target;
-                    if (string.IsNullOrWhiteSpace(oldPath)) throw new Exception("Target vacío");
-
-                    var newFullPath = Path.Combine(Path.GetDirectoryName(oldPath) ?? DROPBOX_ROOT, preview[i]);
-                    if (string.Equals(oldPath, newFullPath, StringComparison.OrdinalIgnoreCase)) continue;
-
-                    await ApplyFileChangeAsync(FileChangeKind.Rename, rows[i], newFullPath);
-                    ok++;
+                    await RunLocalSearchAsync(
+                        SearchBox.Text,
+                        CancellationToken.None);
                 }
-                catch (Exception ex) { fail++; lastError = ex.Message; }
+                catch
+                {
+                    // El índice ya se actualizó; el refresh no debe invalidar el lote.
+                }
+
+                StatusText.Text = failed == 0
+                    ? $"Estado: Renombrados ✅ ({success})"
+                    : $"Estado: Renombrados ✅ ({success}) · Fallaron ❌ ({failed})" +
+                      (string.IsNullOrWhiteSpace(lastError)
+                          ? string.Empty
+                          : $" · Último: {lastError}");
+            }
+            finally
+            {
+                HideLoadingState();
+            }
+        }
+
+        private async Task ApplySmartNotionBatchRenameAsync(
+            List<SearchResultRow> rows,
+            List<string> newTitles)
+        {
+            var token = GetSavedNotionToken();
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura y guarda primero el token de Notion.";
+                return;
             }
 
-            try { await RunLocalSearchAsync(SearchBox.Text, CancellationToken.None); } catch { }
+            var service = new NotionPageActionsService();
+            var snapshot = App.LocalIndex.GetAll();
+            var success = 0;
+            var failed = 0;
+            string? lastError = null;
 
-            StatusText.Text = fail == 0
-                ? $"Estado: Renombrados ✅ ({ok})"
-                : $"Estado: Renombrados ✅ ({ok}) | Fallaron ❌ ({fail})" + (lastError != null ? $" | Último: {lastError}" : "");
+            ShowLoadingState(
+                $"Estado: Renombrando {rows.Count} páginas de Notion...",
+                "Las páginas pueden pertenecer a bases diferentes.");
+
+            try
+            {
+                for (var index = 0; index < rows.Count; index++)
+                {
+                    var row = rows[index];
+
+                    if (!TryResolveNotionDataSource(
+                            row,
+                            out var dataSourceId,
+                            out var sourceName))
+                    {
+                        failed++;
+                        lastError =
+                            $"{row.DisplayName}: no se identificó la base.";
+                        continue;
+                    }
+
+                    try
+                    {
+                        UpdateLoadingState(
+                            $"Estado: Renombrando {index + 1} de {rows.Count} → {row.DisplayName}",
+                            $"Base: {sourceName}");
+
+                        using var cts =
+                            new CancellationTokenSource(
+                                TimeSpan.FromSeconds(45));
+
+                        await service.RenamePageAsync(
+                            token,
+                            row.ExternalId,
+                            dataSourceId,
+                            newTitles[index],
+                            cts.Token);
+
+                        var indexedRow = snapshot.FirstOrDefault(x =>
+                            x.Source == SearchSource.Notion &&
+                            string.Equals(
+                                x.ExternalId,
+                                row.ExternalId,
+                                StringComparison.OrdinalIgnoreCase));
+
+                        if (indexedRow != null)
+                        {
+                            indexedRow.ExternalSourceName = sourceName;
+                            indexedRow.Name =
+                                $"[{sourceName}] {newTitles[index]}";
+                            indexedRow.SearchText = string.Join(
+                                " ",
+                                new[]
+                                {
+                                    sourceName,
+                                    newTitles[index],
+                                    indexedRow.Description
+                                }.Where(x =>
+                                    !string.IsNullOrWhiteSpace(x)));
+                            indexedRow.ServerModified =
+                                DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+                        }
+
+                        success++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        lastError =
+                            $"{row.DisplayName}: {ex.Message}";
+                    }
+                }
+
+                if (success > 0)
+                {
+                    App.LocalIndex.Set(snapshot);
+                    await PersistCombinedIndexIfPossibleAsync(snapshot);
+
+                    var query =
+                        (SearchBox.Text ?? string.Empty).Trim();
+
+                    if (!string.IsNullOrWhiteSpace(query))
+                        await RunSearchAsync(query);
+                    else
+                        await RunLocalSearchAsync(string.Empty);
+                }
+
+                StatusText.Text = failed == 0
+                    ? $"Estado: Páginas renombradas ✅ ({success})"
+                    : $"Estado: Páginas renombradas ✅ ({success}) · Fallaron ❌ ({failed})" +
+                      (string.IsNullOrWhiteSpace(lastError)
+                          ? string.Empty
+                          : $" · Último: {lastError}");
+            }
+            finally
+            {
+                HideLoadingState();
+            }
         }
 
         private List<string> LoadBatchRenameHistory()
         {
             try
             {
-                var ls = ApplicationData.Current.LocalSettings;
-                if (ls.Values.TryGetValue(LS_BATCH_RENAME_HISTORY, out var obj) && obj is string json && !string.IsNullOrWhiteSpace(json))
-                    return JsonSerializer.Deserialize<List<string>>(json)?.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList() ?? new List<string>();
+                var localSettings =
+                    ApplicationData.Current.LocalSettings;
+
+                if (localSettings.Values.TryGetValue(
+                        LS_BATCH_RENAME_HISTORY,
+                        out var raw) &&
+                    raw is string json &&
+                    !string.IsNullOrWhiteSpace(json))
+                {
+                    return JsonSerializer
+                        .Deserialize<List<string>>(json)?
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Distinct()
+                        .ToList() ??
+                        new List<string>();
+                }
             }
-            catch { }
+            catch
+            {
+                // Historial opcional.
+            }
+
             return new List<string>();
         }
 
@@ -1838,46 +2461,64 @@ namespace Anfeta.UI.Views
         {
             try
             {
-                items = items.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim())
-                    .Distinct().Take(BATCH_RENAME_HISTORY_MAX).ToList();
-                ApplicationData.Current.LocalSettings.Values[LS_BATCH_RENAME_HISTORY] = JsonSerializer.Serialize(items);
+                var clean = items
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x.Trim())
+                    .Distinct()
+                    .Take(BATCH_RENAME_HISTORY_MAX)
+                    .ToList();
+
+                ApplicationData.Current.LocalSettings.Values[
+                    LS_BATCH_RENAME_HISTORY] =
+                    JsonSerializer.Serialize(clean);
             }
-            catch { }
+            catch
+            {
+                // Historial opcional.
+            }
         }
 
         private void AddFormatToHistory(string format)
         {
-            format = (format ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(format)) return;
-            var list = LoadBatchRenameHistory();
-            list.RemoveAll(x => string.Equals(x, format, StringComparison.Ordinal));
-            list.Insert(0, format);
-            SaveBatchRenameHistory(list);
-        }
+            var clean = (format ?? string.Empty).Trim();
 
-        private static readonly (string Title, string Format)[] BatchRenamePresets =
-        {
-            ("Numerar al final",  "{name} ({n}){ext}"),
-            ("Numerar al inicio", "{n:00} - {name}{ext}"),
-            ("Reporte fijo",      "Reporte_{n:000}{ext}"),
-            ("Solo número",       "{n:000}{ext}"),
-            ("Nombre + total",    "{name} {n} de {N}{ext}")
-        };
+            if (string.IsNullOrWhiteSpace(clean))
+                return;
+
+            var history = LoadBatchRenameHistory();
+
+            history.RemoveAll(x =>
+                string.Equals(
+                    x,
+                    clean,
+                    StringComparison.Ordinal));
+
+            history.Insert(0, clean);
+            SaveBatchRenameHistory(history);
+        }
 
         private async Task<string?> PromptRenameAsync(string currentName)
         {
-            var tb = new TextBox { Text = currentName, Width = 320 };
+            var textBox = new TextBox
+            {
+                Text = currentName,
+                Width = 320
+            };
+
             var dialog = new ContentDialog
             {
                 XamlRoot = this.XamlRoot,
                 Title = "Renombrar",
-                Content = tb,
+                Content = textBox,
                 PrimaryButtonText = "Aceptar",
                 CloseButtonText = "Cancelar",
                 DefaultButton = ContentDialogButton.Primary
             };
-            var result = await dialog.ShowAsync();
-            return result == ContentDialogResult.Primary ? tb.Text : null;
+
+            return await dialog.ShowAsync() ==
+                   ContentDialogResult.Primary
+                ? textBox.Text
+                : null;
         }
 
         #endregion

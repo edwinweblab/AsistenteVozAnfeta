@@ -189,6 +189,9 @@ namespace Anfeta.UI.Views
         // estado visual global de carga
         private int _busyOperationCount;
 
+        // arrastrar archivos hacia Notion
+        private bool _isNotionFileDragActive;
+
         #endregion
 
         #region ===== Internal Models =====

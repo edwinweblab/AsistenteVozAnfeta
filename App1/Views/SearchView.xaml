@@ -1340,8 +1340,15 @@
                         ToolTipService.ToolTip="Favorito" />
                 </Grid>
 
-                <!--  Lista de resultados estilo Everything  -->
-                <Grid Grid.Row="2">
+                <!--  Lista de resultados estilo Everything + zona para arrastrar a Notion  -->
+                <Grid
+                    x:Name="ResultsDropSurface"
+                    Grid.Row="2"
+                    AllowDrop="True"
+                    DragEnter="ResultsDropSurface_DragEnter"
+                    DragLeave="ResultsDropSurface_DragLeave"
+                    DragOver="ResultsDropSurface_DragOver"
+                    Drop="ResultsDropSurface_Drop">
                     <Border
                         x:Name="LoadingOverlay"
                         Canvas.ZIndex="50"
@@ -1386,13 +1393,52 @@
                         </StackPanel>
                     </Border>
 
+                    <Border
+                        x:Name="NotionDropOverlay"
+                        Canvas.ZIndex="80"
+                        Margin="18"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="#E620242A"
+                        BorderBrush="#49B6FF"
+                        BorderThickness="2"
+                        CornerRadius="14"
+                        Visibility="Collapsed">
+                        <Grid>
+                            <StackPanel
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                MaxWidth="520"
+                                Spacing="10">
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="42"
+                                    Glyph="&#xE898;" />
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    FontSize="20"
+                                    FontWeight="SemiBold"
+                                    Text="Suelta para subir a Notion"
+                                    TextAlignment="Center" />
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    FontSize="14"
+                                    Opacity="0.76"
+                                    Text="Se creará una página en Revisiones con los archivos adjuntos."
+                                    TextAlignment="Center"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
                     <ListView
                         x:Name="ResultsList"
                         DoubleTapped="ResultsList_DoubleTapped"
                         ItemsSource="{x:Bind Results, Mode=OneWay}"
                         RightTapped="ResultsList_RightTapped"
                         SelectionChanged="ResultsList_SelectionChanged"
-                        SelectionMode="Single">
+                        SelectionMode="Extended">
 
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">

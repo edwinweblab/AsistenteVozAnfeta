@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -14,6 +15,7 @@ namespace Anfeta.UI.Services.Notion
     {
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
+        private static readonly ConcurrentDictionary<string, string> TitlePropertyCache = new(StringComparer.OrdinalIgnoreCase);
 
         public async Task<string> RenamePageAsync(
             string token,
@@ -118,6 +120,15 @@ namespace Anfeta.UI.Services.Notion
             string dataSourceId,
             CancellationToken cancellationToken)
         {
+            var normalizedDataSourceId = NormalizeId(dataSourceId);
+
+            if (TitlePropertyCache.TryGetValue(
+                    normalizedDataSourceId,
+                    out var cachedTitleProperty))
+            {
+                return cachedTitleProperty;
+            }
+
             using var response = await http.GetAsync(
                 $"data_sources/{NormalizeId(dataSourceId)}",
                 cancellationToken);
@@ -150,6 +161,9 @@ namespace Anfeta.UI.Services.Notion
                         "title",
                         StringComparison.OrdinalIgnoreCase))
                 {
+                    TitlePropertyCache[normalizedDataSourceId] =
+                        property.Name;
+
                     return property.Name;
                 }
             }

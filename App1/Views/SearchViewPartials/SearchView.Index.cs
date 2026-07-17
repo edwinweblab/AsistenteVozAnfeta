@@ -335,6 +335,89 @@ namespace Anfeta.UI.Views
             await RefreshNotionIncrementalAsync();
         }
 
+        private static bool ShouldReplaceNotionRow(
+            SearchResultRow existing,
+            SearchResultRow incoming)
+        {
+            if (string.Equals(
+                    existing.DisplayName,
+                    incoming.DisplayName,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var existingModified =
+                ParseNotionModified(existing.ServerModified);
+
+            var incomingModified =
+                ParseNotionModified(incoming.ServerModified);
+
+            // Protección breve para cubrir únicamente el retraso inmediato
+            // después de renombrar desde ANFETA.
+            if (existingModified.HasValue)
+            {
+                var age =
+                    DateTimeOffset.Now -
+                    existingModified.Value.ToLocalTime();
+
+                var existingLooksRecentlyEdited =
+                    age >= TimeSpan.Zero &&
+                    age <= TimeSpan.FromSeconds(45);
+
+                if (existingLooksRecentlyEdited &&
+                    (!incomingModified.HasValue ||
+                     incomingModified.Value <=
+                     existingModified.Value))
+                {
+                    return false;
+                }
+            }
+
+            // Fuera de esa protección corta, Notion vuelve a ser
+            // la fuente definitiva del título.
+            return true;
+        }
+
+        private static DateTimeOffset? ParseNotionModified(
+            string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            if (DateTimeOffset.TryParse(
+                    value,
+                    out var offset))
+            {
+                return offset;
+            }
+
+            if (DateTime.TryParse(
+                    value,
+                    out var dateTime))
+            {
+                var local = DateTime.SpecifyKind(
+                    dateTime,
+                    DateTimeKind.Local);
+
+                return new DateTimeOffset(local);
+            }
+
+            return null;
+        }
+
+        private static string GetNotionIdentity(
+            SearchResultRow row)
+        {
+            if (!string.IsNullOrWhiteSpace(row.ExternalId))
+                return row.ExternalId.Trim();
+
+            if (!string.IsNullOrWhiteSpace(row.NodeId))
+                return row.NodeId.Trim();
+
+            return string.Empty;
+        }
+
         private async Task RefreshNotionIncrementalAsync(bool automatic = false)
         {
             if (_notionSyncRunning)
@@ -389,10 +472,15 @@ namespace Anfeta.UI.Views
                 if (!string.IsNullOrWhiteSpace(lastSyncStr) &&
                     DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
                 {
+                    var overlapAnchor =
+                        lastSyncUtc
+                            .ToUniversalTime()
+                            .Subtract(TimeSpan.FromMinutes(3));
+
                     changedItems = await NotionIndexBuilder.BuildManyChangedSinceAsync(
                         token,
                         NotionDataSources.Default,
-                        lastSyncUtc.ToUniversalTime(),
+                        overlapAnchor,
                         CancellationToken.None);
                 }
                 else
@@ -405,26 +493,55 @@ namespace Anfeta.UI.Views
 
                 if (changedItems.Count > 0)
                 {
-                    var current = App.LocalIndex.GetAll().ToList();
+                    var current =
+                        App.LocalIndex.GetAll().ToList();
 
-                    var changedIds = changedItems
-                        .Select(x => !string.IsNullOrWhiteSpace(x.ExternalId) ? x.ExternalId : x.NodeId)
-                        .Where(x => !string.IsNullOrWhiteSpace(x))
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var appliedChanges = 0;
 
-                    current.RemoveAll(x =>
-                        x.Source == SearchSource.Notion &&
-                        changedIds.Contains(!string.IsNullOrWhiteSpace(x.ExternalId) ? x.ExternalId : x.NodeId));
+                    foreach (var incoming in changedItems)
+                    {
+                        var incomingId =
+                            GetNotionIdentity(incoming);
 
-                    current.AddRange(changedItems);
+                        if (string.IsNullOrWhiteSpace(incomingId))
+                            continue;
 
-                    App.LocalIndex.Set(current);
-                    await PersistCombinedIndexIfPossibleAsync(current);
+                        var existingIndex =
+                            current.FindIndex(row =>
+                                row.Source == SearchSource.Notion &&
+                                string.Equals(
+                                    GetNotionIdentity(row),
+                                    incomingId,
+                                    StringComparison.OrdinalIgnoreCase));
 
-                    // Si el usuario está viendo Dropbox, Notion se actualiza
-                    // internamente sin reemplazar ni repintar la lista actual.
-                    if (_activeSourceScope != SearchSourceScope.Dropbox)
-                        await RefreshCurrentViewPreservingScopeAsync();
+                        if (existingIndex < 0)
+                        {
+                            current.Add(incoming);
+                            appliedChanges++;
+                            continue;
+                        }
+
+                        var existing = current[existingIndex];
+
+                        if (!ShouldReplaceNotionRow(
+                                existing,
+                                incoming))
+                        {
+                            continue;
+                        }
+
+                        current[existingIndex] = incoming;
+                        appliedChanges++;
+                    }
+
+                    if (appliedChanges > 0)
+                    {
+                        App.LocalIndex.Set(current);
+                        await PersistCombinedIndexIfPossibleAsync(current);
+
+                        if (_activeSourceScope != SearchSourceScope.Dropbox)
+                            await RefreshCurrentViewPreservingScopeAsync();
+                    }
                 }
 
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] =
@@ -826,10 +943,15 @@ namespace Anfeta.UI.Views
             {
                 NotionSyncInfoText.Text = "Revisando Notion...";
 
+                var overlapAnchor =
+                    lastSyncUtc
+                        .ToUniversalTime()
+                        .Subtract(TimeSpan.FromMinutes(3));
+
                 var hasChanges = await NotionIndexBuilder.HasAnyChangesSinceAsync(
                     token,
                     NotionDataSources.Default,
-                    lastSyncUtc.ToUniversalTime(),
+                    overlapAnchor,
                     CancellationToken.None);
 
                 if (hasChanges)
