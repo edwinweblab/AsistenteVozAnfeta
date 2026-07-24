@@ -279,6 +279,7 @@ namespace Anfeta.UI.Services.Notion
 
             string title = "";
             string description = "";
+            string projectUpdateStatus = "";
 
             if (hasProps)
             {
@@ -294,6 +295,14 @@ namespace Anfeta.UI.Services.Notion
                     title = GetPropText(props, "ID");
 
                 description = GetPropText(props, "Descripción / Notas");
+
+                projectUpdateStatus = GetPropTextByAliases(
+                    props,
+                    "Estado texto Actualización Proyecto",
+                    "Estado Texto Actualización Proyecto",
+                    "Estado texto actualización proyecto",
+                    "Estado de actualización",
+                    "Estado actualización");
             }
 
             if (string.IsNullOrWhiteSpace(title))
@@ -303,7 +312,8 @@ namespace Anfeta.UI.Services.Notion
             {
                 sourceName,
                 title,
-                description
+                description,
+                projectUpdateStatus
             };
 
             return new SearchResultRow
@@ -319,6 +329,7 @@ namespace Anfeta.UI.Services.Notion
                 ServerModified = FormatDate(lastEdited),
                 Source = SearchSource.Notion,
                 Description = description,
+                ProjectUpdateStatus = projectUpdateStatus,
                 SearchText = string.Join(" ", searchParts.Where(x => !string.IsNullOrWhiteSpace(x)))
             };
         }
@@ -337,6 +348,61 @@ namespace Anfeta.UI.Services.Notion
 
             return $"[{sourceName}] {cleanTitle}";
         }
+        private static string GetPropTextByAliases(
+            JsonElement props,
+            params string[] aliases)
+        {
+            var normalizedAliases = aliases
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(NormalizePropertyName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var prop in props.EnumerateObject())
+            {
+                if (normalizedAliases.Contains(
+                        NormalizePropertyName(prop.Name)))
+                {
+                    return ExtractPropertyText(prop.Value);
+                }
+            }
+
+            return "";
+        }
+
+        private static string NormalizePropertyName(string value)
+        {
+            var normalized = (value ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant()
+                .Normalize(NormalizationForm.FormD);
+
+            var builder = new StringBuilder(normalized.Length);
+
+            foreach (var character in normalized)
+            {
+                var category =
+                    System.Globalization.CharUnicodeInfo
+                        .GetUnicodeCategory(character);
+
+                if (category !=
+                    System.Globalization.UnicodeCategory.NonSpacingMark)
+                {
+                    builder.Append(
+                        char.IsWhiteSpace(character)
+                            ? ' '
+                            : character);
+                }
+            }
+
+            return string.Join(
+                " ",
+                builder.ToString()
+                    .Normalize(NormalizationForm.FormC)
+                    .Split(
+                        ' ',
+                        StringSplitOptions.RemoveEmptyEntries));
+        }
+
         private static string GetPropText(JsonElement props, string propName)
         {
             foreach (var prop in props.EnumerateObject())

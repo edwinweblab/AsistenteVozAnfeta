@@ -1,4 +1,5 @@
 ﻿using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -11,6 +12,58 @@ namespace Anfeta.UI.Models.Weblab
         public event PropertyChangedEventHandler? PropertyChanged;
         private void OnPropertyChanged([CallerMemberName] string? name = null)
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+        private double _thumbnailTileWidth = 150;
+        [JsonIgnore]
+        public double ThumbnailTileWidth
+        {
+            get => _thumbnailTileWidth;
+            set
+            {
+                if (Math.Abs(_thumbnailTileWidth - value) < 0.1) return;
+                _thumbnailTileWidth = value;
+                OnPropertyChanged();
+            }
+        }
+
+        private double _thumbnailTileHeight = 176;
+        [JsonIgnore]
+        public double ThumbnailTileHeight
+        {
+            get => _thumbnailTileHeight;
+            set
+            {
+                if (Math.Abs(_thumbnailTileHeight - value) < 0.1) return;
+                _thumbnailTileHeight = value;
+                OnPropertyChanged();
+            }
+        }
+
+        private double _thumbnailImageHeight = 128;
+        [JsonIgnore]
+        public double ThumbnailImageHeight
+        {
+            get => _thumbnailImageHeight;
+            set
+            {
+                if (Math.Abs(_thumbnailImageHeight - value) < 0.1) return;
+                _thumbnailImageHeight = value;
+                OnPropertyChanged();
+            }
+        }
+
+        private ImageSource? _thumbnail;
+        [JsonIgnore]
+        public ImageSource? Thumbnail
+        {
+            get => _thumbnail;
+            set
+            {
+                if (ReferenceEquals(_thumbnail, value)) return;
+                _thumbnail = value;
+                OnPropertyChanged();
+            }
+        }
 
         private IconSource? _icon;
         [JsonIgnore]
@@ -30,6 +83,7 @@ namespace Anfeta.UI.Models.Weblab
         public string ExternalUrl { get; set; } = "";
         public string SearchText { get; set; } = "";
         public string Description { get; set; } = "";
+        public string ProjectUpdateStatus { get; set; } = "";
         public string ExternalSourceName { get; set; } = "";
 
         private string _name = "";

@@ -21,8 +21,8 @@
             <!--  Row 0 TopBar  -->
             <RowDefinition Height="0" />
             <!--  Row 1 reservado para compatibilidad; sin contenido fijo  -->
-            <RowDefinition Height="32" />
-            <!--  Row 2 ChipStrip  -->
+            <RowDefinition Height="62" />
+            <!--  Row 2 Chips + configuración en dos filas  -->
             <RowDefinition Height="*" />
             <!--  Row 3 Body  -->
             <RowDefinition Height="22" />
@@ -515,25 +515,30 @@
         -->
         <Grid
             Grid.Row="2"
-            Padding="8,0"
+            Padding="8,3"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-            BorderThickness="0,0,0,1">
+            BorderThickness="0,0,0,1"
+            RowSpacing="3">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="26" />
+                <RowDefinition Height="27" />
+            </Grid.RowDefinitions>
 
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+            <!-- Primera fila: chips. Se desplaza horizontalmente si no caben. -->
+            <ScrollViewer
+                Grid.Row="0"
+                HorizontalScrollBarVisibility="Hidden"
+                HorizontalScrollMode="Enabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalScrollMode="Disabled">
+                <StackPanel
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="4">
 
-            <!--  Chips visibles en una WrapPanel horizontal  -->
-            <StackPanel
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="4">
-
-                <!--  Favoritos se queda  -->
-                <ToggleButton
+                    <!--  Favoritos se queda  -->
+                    <ToggleButton
                     x:Name="ChipBookmarks"
                     Height="22"
                     Padding="10,0"
@@ -541,15 +546,15 @@
                     Content="⭐ Favoritos"
                     CornerRadius="11" />
 
-                <Border
+                    <Border
                     Width="1"
                     Height="14"
                     Margin="4,0"
                     VerticalAlignment="Center"
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-                <!--  Filtro global por origen  -->
-                <ToggleButton
+                    <!--  Filtro global por origen  -->
+                    <ToggleButton
                     x:Name="ChipSourceAll"
                     Height="22"
                     Padding="10,0"
@@ -558,7 +563,7 @@
                     CornerRadius="11"
                     Tag="all" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipSourceNotion"
                     Height="22"
                     Padding="10,0"
@@ -567,7 +572,7 @@
                     CornerRadius="11"
                     Tag="notion" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipSourceDropbox"
                     Height="22"
                     Padding="10,0"
@@ -576,15 +581,15 @@
                     CornerRadius="11"
                     Tag="dropbox" />
 
-                <Border
+                    <Border
                     Width="1"
                     Height="14"
                     Margin="4,0"
                     VerticalAlignment="Center"
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-                <!--  Filtros por base Notion  -->
-                <ToggleButton
+                    <!--  Filtros por base Notion  -->
+                    <ToggleButton
                     x:Name="ChipBaseAll"
                     Height="22"
                     Padding="10,0"
@@ -593,7 +598,7 @@
                     CornerRadius="11"
                     Tag="" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipBaseRevisiones"
                     Height="22"
                     Padding="10,0"
@@ -602,7 +607,7 @@
                     CornerRadius="11"
                     Tag="Revisiones" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipBaseClientes"
                     Height="22"
                     Padding="10,0"
@@ -611,7 +616,7 @@
                     CornerRadius="11"
                     Tag="Clientes" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipBaseDominios"
                     Height="22"
                     Padding="10,0"
@@ -620,7 +625,7 @@
                     CornerRadius="11"
                     Tag="Dominios" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipBaseProgramas"
                     Height="22"
                     Padding="10,0"
@@ -629,7 +634,7 @@
                     CornerRadius="11"
                     Tag="Programas y proyectos" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipBaseCobrar"
                     Height="22"
                     Padding="10,0"
@@ -638,7 +643,7 @@
                     CornerRadius="11"
                     Tag="Cobrar y pagar" />
 
-                <ToggleButton
+                    <ToggleButton
                     x:Name="ChipBaseCorreos"
                     Height="22"
                     Padding="10,0"
@@ -646,39 +651,46 @@
                     Content="zCorreos"
                     CornerRadius="11"
                     Tag="Correos Contraseñas" />
-            </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
 
-            <!-- Configuración rápida del módulo -->
-            <StackPanel
-                Grid.Column="1"
-                Margin="12,0,0,0"
-                VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="6">
+            <!-- Segunda fila: configuración visual y filtros auxiliares. -->
+            <ScrollViewer
+                Grid.Row="1"
+                HorizontalAlignment="Stretch"
+                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Enabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalScrollMode="Disabled">
+                <StackPanel
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="6">
 
-                <TextBlock
+                    <TextBlock
                     VerticalAlignment="Center"
                     FontSize="11"
                     Opacity="0.65"
                     Text="Tag inicial" />
 
-                <ComboBox
+                    <ComboBox
                     x:Name="DefaultTagCombo"
                     Width="150"
                     Height="26"
                     FontSize="11"
                     SelectionChanged="DefaultTagCombo_SelectionChanged">
-                    <ComboBoxItem Content="Ninguno" Tag="" />
-                    <ComboBoxItem Content="prtuzREVISION" Tag="prtuzREVISION" />
-                    <ComboBoxItem Content="zclientes" Tag="zclientes" />
-                    <ComboBoxItem Content="zdominios" Tag="zdominios" />
-                    <ComboBoxItem Content="zproyectos" Tag="zproyectos" />
-                    <ComboBoxItem Content="zpagar" Tag="zpagar" />
-                    <ComboBoxItem Content="zcorreos" Tag="zcorreos" />
-                    <ComboBoxItem Content="Personalizado" Tag="__custom__" />
-                </ComboBox>
+                        <ComboBoxItem Content="Ninguno" Tag="" />
+                        <ComboBoxItem Content="prtuzREVISION" Tag="prtuzREVISION" />
+                        <ComboBoxItem Content="zclientes" Tag="zclientes" />
+                        <ComboBoxItem Content="zdominios" Tag="zdominios" />
+                        <ComboBoxItem Content="zproyectos" Tag="zproyectos" />
+                        <ComboBoxItem Content="zpagar" Tag="zpagar" />
+                        <ComboBoxItem Content="zcorreos" Tag="zcorreos" />
+                        <ComboBoxItem Content="Personalizado" Tag="__custom__" />
+                    </ComboBox>
 
-                <TextBox
+                    <TextBox
                     x:Name="CustomDefaultTagBox"
                     Width="125"
                     Height="26"
@@ -687,24 +699,75 @@
                     TextChanged="CustomDefaultTagBox_TextChanged"
                     Visibility="Collapsed" />
 
-                <TextBlock
+                    <TextBlock
                     Margin="4,0,0,0"
                     VerticalAlignment="Center"
                     FontSize="11"
                     Opacity="0.65"
                     Text="Texto" />
 
-                <ComboBox
+                    <ComboBox
                     x:Name="TextScaleCombo"
                     Width="92"
                     Height="26"
                     FontSize="11"
                     SelectionChanged="TextScaleCombo_SelectionChanged">
-                    <ComboBoxItem Content="Pequeño" Tag="small" />
-                    <ComboBoxItem Content="Normal" Tag="normal" />
-                    <ComboBoxItem Content="Grande" Tag="large" />
-                </ComboBox>
-            </StackPanel>
+                        <ComboBoxItem Content="Pequeño" Tag="small" />
+                        <ComboBoxItem Content="Normal" Tag="normal" />
+                        <ComboBoxItem Content="Grande" Tag="large" />
+                    </ComboBox>
+
+                    <TextBlock
+                    Margin="4,0,0,0"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Opacity="0.65"
+                    Text="Agrupar" />
+
+                    <ComboBox
+                    x:Name="GroupResultsCombo"
+                    Width="125"
+                    Height="26"
+                    FontSize="11"
+                    SelectionChanged="GroupResultsCombo_SelectionChanged">
+                        <ComboBoxItem Content="Ninguno" Tag="none" />
+                        <ComboBoxItem Content="Dominio" Tag="domain" />
+                        <ComboBoxItem Content="Nombre asignado" Tag="name" />
+                    </ComboBox>
+
+                    <TextBlock
+                    Margin="8,0,0,0"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Opacity="0.65"
+                    Text="Vista" />
+
+                    <Button
+                    Width="28"
+                    Height="26"
+                    Padding="0"
+                    Click="ResultsViewZoomOut_Click"
+                    Content="−"
+                    ToolTipService.ToolTip="Reducir miniaturas / volver a lista" />
+
+                    <TextBlock
+                    x:Name="ResultsViewModeText"
+                    MinWidth="58"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Text="Lista"
+                    TextAlignment="Center" />
+
+                    <Button
+                    Width="28"
+                    Height="26"
+                    Padding="0"
+                    Click="ResultsViewZoomIn_Click"
+                    Content="+"
+                    ToolTipService.ToolTip="Mostrar o ampliar miniaturas" />
+                </StackPanel>
+            </ScrollViewer>
+
             <StackPanel Visibility="Collapsed">
                 <ToggleButton x:Name="ChipPdf" />
                 <ToggleButton x:Name="ChipDocx" />
@@ -735,6 +798,7 @@
                 <ComboBoxItem Content="Solo carpetas" Tag="folders" />
             </ComboBox>
 
+
         </Grid>
 
 
@@ -748,16 +812,67 @@
                 <ColumnDefinition x:Name="FoldersPaneCol" Width="220" />
                 <ColumnDefinition Width="1" />
                 <!--  div izq-centro  -->
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" MinWidth="320" />
                 <!--  Centro  -->
-                <ColumnDefinition Width="1" />
-                <!--  div centro-der  -->
-                <ColumnDefinition x:Name="DetailsCol" Width="210" />
+                <ColumnDefinition
+                    x:Name="DetailsSplitterCol"
+                    Width="12" />
+                <!--  divisor ajustable centro-derecha  -->
+                <ColumnDefinition
+                    x:Name="DetailsCol"
+                    Width="380"
+                    MinWidth="260"
+                    MaxWidth="750" />
             </Grid.ColumnDefinitions>
 
-            <!--  Divisores verticales  -->
-            <Border Grid.Column="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-            <Border Grid.Column="3" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+            <!--  Divisor izquierdo  -->
+            <Border
+                Grid.Column="1"
+                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+            <!--  Separador ajustable entre resultados y vista previa  -->
+            <Thumb
+                x:Name="DetailsPaneSplitter"
+                Grid.Column="3"
+                Width="12"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                Background="#1FFFFFFF"
+                Canvas.ZIndex="50"
+                DragDelta="DetailsPaneSplitter_DragDelta"
+                DragCompleted="DetailsPaneSplitter_DragCompleted"
+                PointerEntered="DetailsPaneSplitter_PointerEntered"
+                PointerExited="DetailsPaneSplitter_PointerExited"
+                ToolTipService.ToolTip="Mantén presionado y arrastra para cambiar el ancho de la vista previa">
+                <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                        <Grid
+                            x:Name="SplitterRoot"
+                            Background="{TemplateBinding Background}">
+                            <Border
+                                Width="2"
+                                HorizontalAlignment="Center"
+                                Background="#5AFFFFFF"
+                                CornerRadius="1" />
+                            <Border
+                                Width="8"
+                                Height="44"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="#66000000"
+                                CornerRadius="4">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="16"
+                                    FontWeight="Bold"
+                                    Foreground="White"
+                                    Text="⋮" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Thumb.Template>
+            </Thumb>
 
 
             <!--  ── LEFT PANEL ───────────────────────────────────  -->
@@ -1235,9 +1350,11 @@
                         <ColumnDefinition Width="5" />
                         <ColumnDefinition x:Name="HeaderNameColumn" Width="*" />
                         <ColumnDefinition Width="5" />
-                        <ColumnDefinition x:Name="HeaderDateColumn" Width="130" />
+                        <ColumnDefinition x:Name="HeaderStatusColumn" Width="180" />
                         <ColumnDefinition Width="5" />
-                        <ColumnDefinition x:Name="HeaderStarColumn" Width="36" />
+                        <ColumnDefinition x:Name="HeaderDateColumn" Width="145" />
+                        <ColumnDefinition Width="7" />
+                        <ColumnDefinition x:Name="HeaderStarColumn" Width="44" />
                     </Grid.ColumnDefinitions>
 
                     <TextBlock
@@ -1288,20 +1405,39 @@
                     </Button>
 
                     <Thumb
-                        x:Name="NameDateSplitter"
+                        x:Name="NameStatusSplitter"
                         Grid.Column="3"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch"
                         Background="Transparent"
                         DragCompleted="ColumnSplitter_DragCompleted"
-                        DragDelta="NameDateSplitter_DragDelta"
-                        ToolTipService.ToolTip="Arrastra para ajustar Name y Date Modified" />
+                        DragDelta="NameStatusSplitter_DragDelta"
+                        ToolTipService.ToolTip="Arrastra para ajustar Name y Estado actualización" />
+
+                    <TextBlock
+                        Grid.Column="4"
+                        VerticalAlignment="Center"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        Foreground="#D6D6D6"
+                        Text="Estado actualización"
+                        TextTrimming="CharacterEllipsis" />
+
+                    <Thumb
+                        x:Name="StatusDateSplitter"
+                        Grid.Column="5"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Background="Transparent"
+                        DragCompleted="ColumnSplitter_DragCompleted"
+                        DragDelta="StatusDateSplitter_DragDelta"
+                        ToolTipService.ToolTip="Arrastra para ajustar Estado y Date Modified" />
 
                     <!--  Ordenar por fecha reciente / antigua  -->
                     <Button
                         x:Name="HeaderModifiedSortButton"
-                        Grid.Column="4"
-                        Padding="0"
+                        Grid.Column="6"
+                        Padding="8,0"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
@@ -1328,7 +1464,7 @@
 
                     <Thumb
                         x:Name="DateStarSplitter"
-                        Grid.Column="5"
+                        Grid.Column="7"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch"
                         Background="Transparent"
@@ -1348,7 +1484,11 @@
                 </Grid>
 
                 <!--  Lista de resultados estilo Everything  -->
-                <Grid Grid.Row="2">
+                <Grid
+                    x:Name="ResultsViewHost"
+                    Grid.Row="2"
+                    IsTabStop="True"
+                    PointerPressed="ResultsViewHost_PointerPressed">
                     <Border
                         x:Name="LoadingOverlay"
                         Canvas.ZIndex="50"
@@ -1450,6 +1590,29 @@
                             </Style>
                         </ListView.ItemContainerStyle>
 
+                        <ListView.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border
+                                            Margin="0,7,0,2"
+                                            Padding="10,6"
+                                            Background="#26000000"
+                                            BorderBrush="#40FFFFFF"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="4">
+                                            <TextBlock
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Opacity="0.92"
+                                                Text="{Binding HeaderText}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListView.GroupStyle>
+
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchResultRow">
                                 <Grid
@@ -1462,9 +1625,11 @@
                                         <ColumnDefinition Width="5" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="5" />
-                                        <ColumnDefinition Width="130" />
+                                        <ColumnDefinition Width="180" />
                                         <ColumnDefinition Width="5" />
-                                        <ColumnDefinition Width="36" />
+                                        <ColumnDefinition Width="145" />
+                                        <ColumnDefinition Width="7" />
+                                        <ColumnDefinition Width="44" />
                                     </Grid.ColumnDefinitions>
 
                                     <!--  Path: en Notion muestra la base correspondiente  -->
@@ -1513,9 +1678,22 @@
                                             TextWrapping="NoWrap" />
                                     </Grid>
 
-                                    <!--  Date Modified  -->
+                                    <!--  Estado texto actualización proyecto  -->
                                     <TextBlock
                                         Grid.Column="4"
+                                        VerticalAlignment="Center"
+                                        FontFamily="Segoe UI"
+                                        FontSize="11"
+                                        Foreground="#D4D4D4"
+                                        MaxLines="1"
+                                        Text="{x:Bind ProjectUpdateStatus, Mode=OneWay, FallbackValue='—'}"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="NoWrap"
+                                        ToolTipService.ToolTip="{x:Bind ProjectUpdateStatus, Mode=OneWay}" />
+
+                                    <!--  Date Modified  -->
+                                    <TextBlock
+                                        Grid.Column="6"
                                         VerticalAlignment="Center"
                                         FontFamily="Segoe UI"
                                         FontSize="12"
@@ -1527,7 +1705,7 @@
 
                                     <!--  Favorito  -->
                                     <Button
-                                        Grid.Column="6"
+                                        Grid.Column="8"
                                         Width="26"
                                         Height="20"
                                         Padding="0"
@@ -1574,6 +1752,11 @@
                                     Click="CtxCopyLink_Click"
                                     Text="Copiar link" />
 
+                                <MenuFlyoutItem
+                                    x:Name="CtxMenuCopyDomainItem"
+                                    Click="CtxCopyDomain_Click"
+                                    Text="Copiar dominio" />
+
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
@@ -1615,6 +1798,101 @@
                             </MenuFlyout>
                         </ListView.ContextFlyout>
                     </ListView>
+
+                    <GridView
+                        x:Name="ResultsThumbnailGrid"
+                        Canvas.ZIndex="5"
+                        IsItemClickEnabled="False"
+                        SelectionMode="Extended"
+                        Visibility="Collapsed"
+                        DoubleTapped="ResultsThumbnailGrid_DoubleTapped"
+                        RightTapped="ResultsThumbnailGrid_RightTapped"
+                        SelectionChanged="ResultsThumbnailGrid_SelectionChanged">
+                        <GridView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ItemsWrapGrid
+                                    MaximumRowsOrColumns="0"
+                                    Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </GridView.ItemsPanel>
+
+                        <GridView.ItemContainerStyle>
+                            <Style TargetType="GridViewItem">
+                                <Setter Property="Padding" Value="4" />
+                                <Setter Property="Margin" Value="3" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </GridView.ItemContainerStyle>
+
+                        <GridView.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border
+                                            Margin="4,9,4,3"
+                                            Padding="10,6"
+                                            Background="#26000000"
+                                            BorderBrush="#40FFFFFF"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="4">
+                                            <TextBlock
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Text="{Binding HeaderText}" />
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </GridView.GroupStyle>
+
+                        <GridView.ItemTemplate>
+                            <DataTemplate x:DataType="models:SearchResultRow">
+                                <Grid
+                                    Width="{x:Bind ThumbnailTileWidth, Mode=OneWay}"
+                                    Height="{x:Bind ThumbnailTileHeight, Mode=OneWay}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="42" />
+                                    </Grid.RowDefinitions>
+
+                                    <Border
+                                        Grid.Row="0"
+                                        Margin="4"
+                                        Background="#25000000"
+                                        CornerRadius="6">
+                                        <Grid>
+                                            <IconSourceElement
+                                                Width="52"
+                                                Height="52"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IconSource="{x:Bind Icon, Mode=OneWay}" />
+
+                                            <Image
+                                                HorizontalAlignment="Stretch"
+                                                VerticalAlignment="Stretch"
+                                                Source="{x:Bind Thumbnail, Mode=OneWay}"
+                                                Stretch="Uniform" />
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock
+                                        Grid.Row="1"
+                                        Margin="5,2"
+                                        HorizontalAlignment="Stretch"
+                                        FontSize="11"
+                                        FontWeight="SemiBold"
+                                        MaxLines="2"
+                                        Text="{x:Bind DisplayName, Mode=OneWay}"
+                                        TextAlignment="Center"
+                                        TextTrimming="CharacterEllipsis"
+                                        TextWrapping="WrapWholeWords"
+                                        ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}" />
+                                </Grid>
+                            </DataTemplate>
+                        </GridView.ItemTemplate>
+                    </GridView>
 
                     <TextBlock
                         x:Name="EmptyResultsHint"
@@ -1702,100 +1980,16 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="30" />
-                        <!--  Header Favoritos  -->
-                        <RowDefinition Height="Auto" />
-                        <!--  Search Favoritos  -->
-                        <RowDefinition Height="140" />
-                        <!--  Lista Favoritos  -->
-                        <RowDefinition Height="30" />
                         <!--  Header Detalles  -->
                         <RowDefinition Height="*" />
-                        <!--  Detalles  -->
+                        <!--  Detalles y vista previa  -->
                         <RowDefinition Height="38" />
                         <!--  Acciones  -->
                     </Grid.RowDefinitions>
 
-                    <!--  Header Favoritos  -->
-                    <Grid
-                        Grid.Row="0"
-                        Padding="10,0"
-                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                        BorderThickness="0,0,0,1">
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="11"
-                            FontWeight="SemiBold"
-                            Opacity="0.55"
-                            Text="FAVORITOS" />
-                    </Grid>
-
-                    <!--  Search Favoritos  -->
-                    <AutoSuggestBox
-                        Grid.Row="1"
-                        Margin="8,5,8,4"
-                        FontSize="12"
-                        PlaceholderText="Search Favoritos" />
-
-                    <!--  Lista Favoritos  -->
-                    <ListView
-                        x:Name="BookmarksList"
-                        Grid.Row="2"
-                        Padding="0"
-                        IsItemClickEnabled="True"
-                        ItemClick="BookmarksList_ItemClick"
-                        ItemsSource="{x:Bind _bookmarksOc, Mode=OneWay}"
-                        SelectionMode="Single">
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="Padding" Value="10,0" />
-                                <Setter Property="MinHeight" Value="32" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Height="32" ColumnSpacing="6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel
-                                        Grid.Column="0"
-                                        VerticalAlignment="Center"
-                                        Spacing="1">
-                                        <TextBlock
-                                            FontSize="12"
-                                            FontWeight="SemiBold"
-                                            Text="{Binding Title}"
-                                            TextTrimming="CharacterEllipsis" />
-                                        <TextBlock
-                                            FontSize="10"
-                                            MaxLines="1"
-                                            Opacity="0.5"
-                                            Text="{Binding LocalPath}"
-                                            TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
-                                    <Button
-                                        Grid.Column="1"
-                                        Width="24"
-                                        Height="24"
-                                        Padding="0"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Click="BtnBookmarkPanelStar_Click"
-                                        Content="★"
-                                        FontSize="11"
-                                        Tag="{Binding LocalPath}"
-                                        ToolTipService.ToolTip="Quitar Favorito" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-
                     <!--  Header Detalles  -->
                     <Grid
-                        Grid.Row="3"
+                        Grid.Row="0"
                         Padding="10,0"
                         Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
@@ -1810,8 +2004,8 @@
 
                     <!--  Detalles  -->
                     <ScrollViewer
-                        Grid.Row="4"
-                        Padding="10,8"
+                        Grid.Row="1"
+                        Padding="12,10"
                         VerticalScrollBarVisibility="Auto">
                         <StackPanel Spacing="8">
                             <StackPanel Spacing="3">
@@ -1846,12 +2040,163 @@
                                         TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
+
+                            <Border
+                                x:Name="LocalImagePreviewCard"
+                                Padding="10"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="6"
+                                Visibility="Collapsed">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Opacity="0.70"
+                                            Text="VISTA PREVIA DE IMAGEN" />
+
+                                        <Button
+                                            Grid.Column="1"
+                                            MinWidth="34"
+                                            Height="26"
+                                            Padding="6,0"
+                                            Click="LocalImageZoomOut_Click"
+                                            Content="−"
+                                            CornerRadius="5" />
+
+                                        <Button
+                                            Grid.Column="2"
+                                            MinWidth="52"
+                                            Height="26"
+                                            Padding="6,0"
+                                            Click="LocalImageResetZoom_Click"
+                                            Content="100%"
+                                            CornerRadius="5" />
+
+                                        <Button
+                                            Grid.Column="3"
+                                            MinWidth="34"
+                                            Height="26"
+                                            Padding="6,0"
+                                            Click="LocalImageZoomIn_Click"
+                                            Content="+"
+                                            CornerRadius="5" />
+
+                                        <Button
+                                            Grid.Column="4"
+                                            Height="26"
+                                            Padding="8,0"
+                                            Click="LocalImageFit_Click"
+                                            Content="Ajustar"
+                                            CornerRadius="5" />
+                                    </Grid>
+
+                                    <TextBlock
+                                        x:Name="LocalImagePreviewStatus"
+                                        FontSize="10"
+                                        Opacity="0.65"
+                                        Text="Ctrl + rueda para acercar o alejar."
+                                        TextWrapping="Wrap" />
+
+                                    <Border
+                                        Height="360"
+                                        Background="#26000000"
+                                        CornerRadius="5">
+                                        <Grid>
+                                            <ScrollViewer
+                                                x:Name="LocalImageScrollViewer"
+                                                IsTabStop="True"
+                                                PointerPressed="LocalImageScrollViewer_PointerPressed"
+                                                HorizontalScrollBarVisibility="Auto"
+                                                HorizontalScrollMode="Enabled"
+                                                VerticalScrollBarVisibility="Auto"
+                                                VerticalScrollMode="Enabled"
+                                                ZoomMode="Disabled">
+                                                <Grid
+                                                    x:Name="LocalImageCanvas"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center">
+                                                    <Image
+                                                        x:Name="LocalImagePreview"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        ImageFailed="LocalImagePreview_ImageFailed"
+                                                        ImageOpened="LocalImagePreview_ImageOpened"
+                                                        Stretch="Fill" />
+                                                </Grid>
+                                            </ScrollViewer>
+
+                                            <ProgressRing
+                                                x:Name="LocalImagePreviewProgress"
+                                                Width="26"
+                                                Height="26"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsActive="False"
+                                                Visibility="Collapsed" />
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <Border
+                                x:Name="NotionPreviewCard"
+                                Padding="12"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="6"
+                                Visibility="Collapsed">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Opacity="0.70"
+                                            Text="VISTA PREVIA" />
+
+                                        <ProgressRing
+                                            x:Name="NotionPreviewProgress"
+                                            Grid.Column="1"
+                                            Width="16"
+                                            Height="16"
+                                            IsActive="False"
+                                            Visibility="Collapsed" />
+                                    </Grid>
+
+                                    <TextBlock
+                                        x:Name="NotionPreviewStatus"
+                                        FontSize="10"
+                                        Opacity="0.60"
+                                        Text="Selecciona una página de Notion."
+                                        TextWrapping="Wrap" />
+
+                                    <StackPanel
+                                        x:Name="NotionPreviewContent"
+                                        Spacing="7" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </ScrollViewer>
 
                     <!--  Acciones — altura fija 38px, nunca se corta  -->
                     <Grid
-                        Grid.Row="5"
+                        Grid.Row="2"
                         Padding="8,0"
                         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                         BorderThickness="0,1,0,0"

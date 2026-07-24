@@ -4,6 +4,7 @@ using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Bookmarks;
 using Anfeta.UI.Services.Dropbox;
+using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Speech;
 using Anfeta.UI.Services.VoiceCommands;
@@ -14,6 +15,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
@@ -50,9 +52,17 @@ namespace Anfeta.UI.Views
         // enums
         private enum ViewMode { Explorer, Bookmarks }
         private enum SearchSourceScope { All, Notion, Dropbox }
+        private enum ResultGroupingMode
+        {
+            None,
+            Domain,
+            Name
+        }
 
         private ViewMode _mode = ViewMode.Explorer;
         private SearchSourceScope _activeSourceScope = SearchSourceScope.All;
+        private ResultGroupingMode _resultGroupingMode = ResultGroupingMode.None;
+        private CollectionViewSource? _groupedResultsViewSource;
         private bool _isUpdatingFilterCombo;
 
         // Win32 file attributes (Dropbox / OneDrive placeholders)
@@ -169,14 +179,22 @@ namespace Anfeta.UI.Views
         private const string LS_SearchTextScale = "Search.TextScale";
         private const string LS_DefaultSearchTag = "Search.DefaultTag";
         private const string LS_SearchSourceScope = "Search.SourceScope";
+        private const string LS_ResultGroupingMode = "Search.ResultGrouping.Mode";
         private const string LS_ResultPathColumnWidth = "Search.ResultColumns.Path";
         private const string LS_ResultDateColumnWidth = "Search.ResultColumns.Date";
+        private const string LS_ResultStatusColumnWidth = "Search.ResultColumns.Status";
         private const string LS_ResultStarColumnWidth = "Search.ResultColumns.Star";
+        private const string LS_DetailsPaneWidth = "Search.DetailsPane.Width";
+        private const double DETAILS_PANE_MIN = 260;
+        private const double DETAILS_PANE_DEFAULT = 380;
+        private const double DETAILS_PANE_MAX = 750;
         private const double RESULT_PATH_MIN = 70;
         private const double RESULT_PATH_MAX = 420;
-        private const double RESULT_DATE_MIN = 90;
+        private const double RESULT_DATE_MIN = 120;
         private const double RESULT_DATE_MAX = 280;
-        private const double RESULT_STAR_MIN = 32;
+        private const double RESULT_STATUS_MIN = 100;
+        private const double RESULT_STATUS_MAX = 420;
+        private const double RESULT_STAR_MIN = 42;
         private const double RESULT_STAR_MAX = 90;
         private const string CUSTOM_TAG_VALUE = "__custom__";
         private readonly Dictionary<FrameworkElement, double> _originalFontSizes = new();
@@ -191,6 +209,26 @@ namespace Anfeta.UI.Views
 
         // arrastrar archivos hacia Notion
         private bool _isNotionFileDragActive;
+
+        // vista previa de páginas de Notion
+        private readonly NotionPagePreviewService _notionPreviewService = new();
+        private CancellationTokenSource? _notionPreviewCts;
+        private string _activePreviewPageId = string.Empty;
+
+        private CancellationTokenSource? _localImagePreviewCts;
+        private string _activeLocalImagePath = string.Empty;
+        private double _localImageZoom = 1.0;
+        private int _localImagePixelWidth;
+        private int _localImagePixelHeight;
+        private bool _localImageFitMode;
+        private bool _localImageWheelHandlerHooked;
+
+        // vista de resultados estilo Everything
+        private const string LS_ResultsViewZoomLevel =
+            "Search.ResultsView.ZoomLevel";
+        private int _resultsViewZoomLevel;
+        private bool _resultsWheelHandlerHooked;
+        private CancellationTokenSource? _thumbnailLoadCts;
 
         #endregion
 
@@ -211,7 +249,9 @@ namespace Anfeta.UI.Views
             public int DaysModified => ModifiedLocalDate == DateTime.MinValue
                                             ? int.MaxValue
                                             : (int)(DateTime.Now.Date - ModifiedLocalDate.Date).TotalDays;
-            public string? SearchText => $"{_x.Name} {_x.Target}";
+            public string? SearchText =>
+                $"{_x.Name} {_x.Target} {_x.SearchText} " +
+                $"{_x.Description} {_x.ProjectUpdateStatus}";
 
             private static DateTime ParseServerModified(string? s)
             {
@@ -324,6 +364,9 @@ namespace Anfeta.UI.Views
             LoadSearchBackgroundTheme();
             LoadModulePreferences();
             LoadResultColumnWidths();
+            LoadDetailsPaneWidth();
+            LoadResultsViewMode();
+            EnsureResultsWheelHandler();
             UpdateColumnSortIndicators();
             // Suscripción única controlada por flag — evita duplicados si Loaded se dispara más de una vez
             if (!_isIndexStateHooked)
@@ -374,6 +417,37 @@ namespace Anfeta.UI.Views
             }
 
             StopDropboxChangeWatcher();
+
+            try
+            {
+                _notionPreviewCts?.Cancel();
+                _notionPreviewCts?.Dispose();
+                _notionPreviewCts = null;
+            }
+            catch
+            {
+                // La cancelación de la vista previa no debe bloquear el cierre.
+            }
+
+            try
+            {
+                _localImagePreviewCts?.Cancel();
+                _localImagePreviewCts?.Dispose();
+                _localImagePreviewCts = null;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                _thumbnailLoadCts?.Cancel();
+                _thumbnailLoadCts?.Dispose();
+                _thumbnailLoadCts = null;
+            }
+            catch
+            {
+            }
         }
         private void OnSearchFocusRequested()
         {
@@ -522,6 +596,7 @@ namespace Anfeta.UI.Views
             DetailsTitle.Text = "Selecciona un elemento";
             DetailsPath.Text = "-";
             DetailsMeta.Text = "-";
+            ResetPreviewPanel();
         }
 
         private void FinishUi()
@@ -534,61 +609,461 @@ namespace Anfeta.UI.Views
         #endregion
         private void RefreshResultsListView()
         {
-            ResultsList.ItemsSource = null;
-            ResultsList.ItemsSource = Results;
+            if (_resultGroupingMode == ResultGroupingMode.None)
+            {
+                _groupedResultsViewSource = null;
+                _resultGroups.Clear();
+                ResultsList.ItemsSource = null;
+                ResultsList.ItemsSource = Results;
+            }
+            else
+            {
+                _resultGroups.Clear();
+
+                foreach (var group in BuildResultGroups(Results.ToList()))
+                    _resultGroups.Add(group);
+
+                _groupedResultsViewSource = new CollectionViewSource
+                {
+                    Source = _resultGroups,
+                    IsSourceGrouped = true
+                };
+
+                ResultsList.ItemsSource = _groupedResultsViewSource.View;
+            }
+
+            if (ResultsThumbnailGrid != null)
+            {
+                ResultsThumbnailGrid.ItemsSource =
+                    _resultGroupingMode == ResultGroupingMode.None
+                        ? Results
+                        : _groupedResultsViewSource?.View;
+            }
+
             DispatcherQueue.TryEnqueue(() =>
             {
                 ApplyTextScaleToVisualTree();
                 ApplyResultColumnWidthsToVisualTree();
+                ApplyResultsViewMode();
             });
         }
 
-        private IEnumerable<SearchResultGroup> BuildResultGroups(List<SearchResultRow> rows)
+        private IEnumerable<SearchResultGroup> BuildResultGroups(
+            List<SearchResultRow> rows)
         {
-            if (rows.Count == 0)
+            if (rows.Count == 0 ||
+                _resultGroupingMode == ResultGroupingMode.None)
+            {
                 return Enumerable.Empty<SearchResultGroup>();
-
-            var order = new[]
-            {
-                "Clientes",
-                "Dominios",
-                "Revisiones",
-                "Programas y proyectos",
-                "Cobrar y pagar",
-                "Correos Contraseñas",
-                "Archivos locales",
-                "Notion",
-                "Otros"
-            };
-
-            return rows
-                .GroupBy(GetResultGroupName)
-                .OrderBy(g =>
-                {
-                    var index = Array.FindIndex(order, x =>
-                        string.Equals(x, g.Key, StringComparison.OrdinalIgnoreCase));
-
-                    return index >= 0 ? index : int.MaxValue;
-                })
-                .ThenBy(g => g.Key)
-                .Select(g => new SearchResultGroup(g.Key, g));
-        }
-
-        private string GetResultGroupName(SearchResultRow row)
-        {
-            if (row.Source == SearchSource.Notion)
-            {
-                if (!string.IsNullOrWhiteSpace(row.ExternalSourceName))
-                    return row.ExternalSourceName;
-
-                return "Notion";
             }
 
-            if (row.Source == SearchSource.Local || row.Source == SearchSource.Dropbox)
-                return "Archivos locales";
-
-            return "Otros";
+            return rows
+                .GroupBy(row => GetResultGroupName(row, null))
+                .OrderBy(group => IsFallbackGroup(group.Key) ? 1 : 0)
+                .ThenBy(group => group.Key)
+                .Select(group => new SearchResultGroup(group.Key, group));
         }
+
+        private string GetResultGroupName(
+            SearchResultRow row,
+            Dictionary<string, int>? frequency)
+        {
+            return _resultGroupingMode switch
+            {
+                ResultGroupingMode.Domain => GetDomainGroupName(row),
+                ResultGroupingMode.Name => GetAssignedPersonGroupName(row),
+                _ => "Resultados"
+            };
+        }
+
+        private static string GetDomainGroupName(SearchResultRow row)
+        {
+            var name = (row.DisplayName ?? row.Name ?? string.Empty).Trim();
+
+            var match = Regex.Match(
+                name,
+                @"(?<![\w@])(?:https?://)?(?:www\.)?" +
+                @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
+                @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
+                @"com|mx|org|net|io|co|app|dev))" +
+                @"(?=$|[/:?#\s)\]}>.,;!])",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+
+            return match.Success
+                ? match.Groups["domain"].Value.Trim().TrimEnd('.').ToLowerInvariant()
+                : "Sin dominio";
+        }
+
+        private static string GetAssignedPersonGroupName(
+            SearchResultRow row)
+        {
+            var name = (row.DisplayName ?? row.Name ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(name))
+                return "Sin persona asignada";
+
+            var aliases = new Dictionary<string, string>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                ["jjohn"] = "John",
+                ["john"] = "John",
+
+                ["aandr"] = "Andrade",
+                ["andr"] = "Andrade",
+                ["andrade"] = "Andrade",
+
+                ["nneft"] = "Neftali",
+                ["neft"] = "Neftali",
+                ["neftali"] = "Neftali",
+
+                ["brian"] = "Brian",
+                ["bbria"] = "Brian",
+                ["bria"] = "Brian",
+
+                ["genaro"] = "Genaro",
+                ["gena"] = "Genaro",
+
+                ["isaias"] = "Isaias",
+                ["isaías"] = "Isaias",
+                ["isai"] = "Isaias",
+
+                ["karla"] = "Karla",
+                ["karl"] = "Karla",
+
+                ["sotelo"] = "Sotelo",
+                ["sote"] = "Sotelo",
+
+                ["acali"] = "Acali",
+                ["acal"] = "Acali",
+
+                ["emmanuel"] = "Emmanuel",
+                ["emanuel"] = "Emmanuel",
+                ["emma"] = "Emmanuel",
+                ["emman"] = "Emmanuel"
+            };
+
+            var tokens = Regex.Matches(
+                    name,
+                    @"[\p{L}\p{Nd}]+")
+                .Cast<Match>()
+                .Select(match => match.Value.Trim())
+                .Where(token => !string.IsNullOrWhiteSpace(token))
+                .ToList();
+
+            foreach (var token in tokens)
+            {
+                if (aliases.TryGetValue(token, out var person))
+                    return person;
+            }
+
+            return "Sin persona asignada";
+        }
+
+        private static bool IsFallbackGroup(string key)
+        {
+            return key.StartsWith(
+                       "Sin ",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(
+                       key,
+                       "Otros",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        #region ===== Vista resultados: lista / miniaturas =====
+
+        private void LoadResultsViewMode()
+        {
+            var values = ApplicationData.Current.LocalSettings.Values;
+
+            _resultsViewZoomLevel =
+                values.TryGetValue(
+                    LS_ResultsViewZoomLevel,
+                    out var raw) &&
+                raw is int saved
+                    ? Math.Clamp(saved, 0, 3)
+                    : 0;
+
+            ApplyResultsViewMode();
+        }
+
+        private void EnsureResultsWheelHandler()
+        {
+            if (_resultsWheelHandlerHooked ||
+                ResultsViewHost == null)
+            {
+                return;
+            }
+
+            ResultsViewHost.AddHandler(
+                UIElement.PointerWheelChangedEvent,
+                new PointerEventHandler(
+                    ResultsViewHost_PointerWheelChanged),
+                handledEventsToo: true);
+
+            _resultsWheelHandlerHooked = true;
+        }
+
+        private void ResultsViewHost_PointerPressed(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            ResultsViewHost.Focus(FocusState.Pointer);
+        }
+
+        private void ResultsViewHost_PointerWheelChanged(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (!IsResultsControlKeyDown())
+                return;
+
+            var delta = e
+                .GetCurrentPoint(ResultsViewHost)
+                .Properties
+                .MouseWheelDelta;
+
+            ChangeResultsViewZoom(
+                delta > 0 ? 1 : -1);
+
+            e.Handled = true;
+        }
+
+        private static bool IsResultsControlKeyDown()
+        {
+            var leftState =
+                Microsoft.UI.Input.InputKeyboardSource
+                    .GetKeyStateForCurrentThread(
+                        Windows.System.VirtualKey.LeftControl);
+
+            var rightState =
+                Microsoft.UI.Input.InputKeyboardSource
+                    .GetKeyStateForCurrentThread(
+                        Windows.System.VirtualKey.RightControl);
+
+            const Windows.UI.Core.CoreVirtualKeyStates down =
+                Windows.UI.Core.CoreVirtualKeyStates.Down;
+
+            return (leftState & down) == down ||
+                   (rightState & down) == down;
+        }
+
+        private void ResultsViewZoomIn_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            ChangeResultsViewZoom(1);
+        }
+
+        private void ResultsViewZoomOut_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            ChangeResultsViewZoom(-1);
+        }
+
+        private void ChangeResultsViewZoom(int direction)
+        {
+            var next = Math.Clamp(
+                _resultsViewZoomLevel + direction,
+                0,
+                3);
+
+            if (next == _resultsViewZoomLevel)
+                return;
+
+            _resultsViewZoomLevel = next;
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_ResultsViewZoomLevel] =
+                _resultsViewZoomLevel;
+
+            ApplyResultsViewMode();
+
+            if (_resultsViewZoomLevel > 0)
+                _ = LoadResultThumbnailsAsync();
+        }
+
+        private void ApplyResultsViewMode()
+        {
+            if (ResultsList == null ||
+                ResultsThumbnailGrid == null)
+            {
+                return;
+            }
+
+            var useThumbnails =
+                _resultsViewZoomLevel > 0;
+
+            ResultsList.Visibility =
+                useThumbnails
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+
+            ResultsThumbnailGrid.Visibility =
+                useThumbnails
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            ResultsHeaderGrid.Visibility =
+                useThumbnails
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+
+            var itemWidth = _resultsViewZoomLevel switch
+            {
+                1 => 104d,
+                2 => 150d,
+                3 => 205d,
+                _ => 150d
+            };
+
+            var itemHeight = _resultsViewZoomLevel switch
+            {
+                1 => 132d,
+                2 => 176d,
+                3 => 232d,
+                _ => 176d
+            };
+
+            foreach (var row in Results)
+            {
+                row.ThumbnailTileWidth = itemWidth;
+                row.ThumbnailTileHeight = itemHeight;
+                row.ThumbnailImageHeight =
+                    Math.Max(64, itemHeight - 48);
+            }
+
+            if (ResultsViewModeText != null)
+            {
+                ResultsViewModeText.Text =
+                    _resultsViewZoomLevel switch
+                    {
+                        1 => "Pequeña",
+                        2 => "Mediana",
+                        3 => "Grande",
+                        _ => "Lista"
+                    };
+            }
+
+            if (useThumbnails)
+                _ = LoadResultThumbnailsAsync();
+        }
+
+        private async Task LoadResultThumbnailsAsync()
+        {
+            if (_resultsViewZoomLevel <= 0)
+                return;
+
+            try
+            {
+                _thumbnailLoadCts?.Cancel();
+                _thumbnailLoadCts?.Dispose();
+            }
+            catch
+            {
+            }
+
+            _thumbnailLoadCts =
+                new CancellationTokenSource();
+
+            var token = _thumbnailLoadCts.Token;
+
+            var requestedSize =
+                _resultsViewZoomLevel switch
+                {
+                    1 => 96u,
+                    2 => 160u,
+                    3 => 220u,
+                    _ => 160u
+                };
+
+            var candidates = Results
+                .Where(row =>
+                    row.Source != SearchSource.Notion &&
+                    row.Thumbnail == null &&
+                    IsThumbnailImagePath(row.Target))
+                .Take(250)
+                .ToList();
+
+            foreach (var row in candidates)
+            {
+                token.ThrowIfCancellationRequested();
+
+                var thumbnail =
+                    await _iconService.GetThumbnailAsync(
+                        row.Target,
+                        requestedSize,
+                        token);
+
+                if (thumbnail != null)
+                    row.Thumbnail = thumbnail;
+            }
+        }
+
+        private static bool IsThumbnailImagePath(
+            string? path)
+        {
+            var extension =
+                Path.GetExtension(path ?? string.Empty)
+                    .ToLowerInvariant();
+
+            return extension is
+                ".png" or ".jpg" or ".jpeg" or
+                ".webp" or ".gif" or ".bmp";
+        }
+
+        private void ResultsThumbnailGrid_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (ResultsThumbnailGrid.SelectedItem is
+                not SearchResultRow row)
+            {
+                return;
+            }
+
+            ResultsList.SelectedItem = row;
+        }
+
+        private void ResultsThumbnailGrid_DoubleTapped(
+            object sender,
+            DoubleTappedRoutedEventArgs e)
+        {
+            if (ResultsThumbnailGrid.SelectedItem is
+                not SearchResultRow row)
+            {
+                return;
+            }
+
+            ResultsList.SelectedItem = row;
+            ResultsList_DoubleTapped(
+                ResultsList,
+                e);
+        }
+
+        private void ResultsThumbnailGrid_RightTapped(
+            object sender,
+            RightTappedRoutedEventArgs e)
+        {
+            if (ResultsThumbnailGrid.SelectedItem is
+                SearchResultRow row)
+            {
+                ResultsList.SelectedItem = row;
+            }
+
+            ResultsContextFlyout.ShowAt(
+                ResultsThumbnailGrid,
+                e.GetPosition(
+                    ResultsThumbnailGrid));
+
+            e.Handled = true;
+        }
+
+        #endregion
 
         #region ===== Module Preferences: text size / default tag =====
 
@@ -620,6 +1095,22 @@ namespace Anfeta.UI.Views
                     "dropbox" => SearchSourceScope.Dropbox,
                     _ => SearchSourceScope.All
                 };
+
+                var savedGroupingMode =
+                    (values[LS_ResultGroupingMode] as string ?? "none")
+                    .Trim()
+                    .ToLowerInvariant();
+
+                _resultGroupingMode = savedGroupingMode switch
+                {
+                    "domain" => ResultGroupingMode.Domain,
+                    "name" => ResultGroupingMode.Name,
+                    _ => ResultGroupingMode.None
+                };
+
+                SelectComboItemByTag(
+                    GroupResultsCombo,
+                    savedGroupingMode);
 
                 SetSourceScopeChipChecks();
 
@@ -931,11 +1422,91 @@ namespace Anfeta.UI.Views
 
         #endregion
 
+        #region ===== Details pane width =====
+
+        private void LoadDetailsPaneWidth()
+        {
+            if (DetailsCol == null)
+                return;
+
+            var width = ReadColumnWidth(
+                LS_DetailsPaneWidth,
+                DETAILS_PANE_DEFAULT,
+                DETAILS_PANE_MIN,
+                DETAILS_PANE_MAX);
+
+            DetailsCol.Width = new GridLength(width);
+        }
+
+        private void DetailsPaneSplitter_PointerEntered(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (sender is Thumb thumb)
+                thumb.Background = new SolidColorBrush(
+                    Color.FromArgb(70, 255, 255, 255));
+        }
+
+        private void DetailsPaneSplitter_PointerExited(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (sender is Thumb thumb)
+                thumb.Background = new SolidColorBrush(
+                    Color.FromArgb(31, 255, 255, 255));
+        }
+
+        private void DetailsPaneSplitter_DragDelta(
+            object sender,
+            DragDeltaEventArgs e)
+        {
+            if (DetailsCol == null)
+                return;
+
+            // El panel está a la derecha:
+            // mover el separador a la izquierda aumenta su ancho.
+            var currentWidth =
+                DetailsCol.ActualWidth > 0
+                    ? DetailsCol.ActualWidth
+                    : DetailsCol.Width.Value;
+
+            var newWidth = Math.Clamp(
+                currentWidth - e.HorizontalChange,
+                DETAILS_PANE_MIN,
+                DETAILS_PANE_MAX);
+
+            DetailsCol.Width =
+                new GridLength(newWidth);
+        }
+
+        private void DetailsPaneSplitter_DragCompleted(
+            object sender,
+            DragCompletedEventArgs e)
+        {
+            if (DetailsCol == null)
+                return;
+
+            var width = Math.Clamp(
+                DetailsCol.ActualWidth,
+                DETAILS_PANE_MIN,
+                DETAILS_PANE_MAX);
+
+            DetailsCol.Width = new GridLength(width);
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_DetailsPaneWidth] = width;
+        }
+
+        #endregion
+
         #region ===== Result column widths =====
 
         private void LoadResultColumnWidths()
         {
-            if (HeaderPathColumn == null || HeaderDateColumn == null || HeaderStarColumn == null)
+            if (HeaderPathColumn == null ||
+                HeaderStatusColumn == null ||
+                HeaderDateColumn == null ||
+                HeaderStarColumn == null)
                 return;
 
             var values = ApplicationData.Current.LocalSettings.Values;
@@ -943,11 +1514,18 @@ namespace Anfeta.UI.Views
             HeaderPathColumn.Width = new GridLength(
                 ReadColumnWidth(LS_ResultPathColumnWidth, 150, RESULT_PATH_MIN, RESULT_PATH_MAX));
 
+            HeaderStatusColumn.Width = new GridLength(
+                ReadColumnWidth(
+                    LS_ResultStatusColumnWidth,
+                    180,
+                    RESULT_STATUS_MIN,
+                    RESULT_STATUS_MAX));
+
             HeaderDateColumn.Width = new GridLength(
-                ReadColumnWidth(LS_ResultDateColumnWidth, 130, RESULT_DATE_MIN, RESULT_DATE_MAX));
+                ReadColumnWidth(LS_ResultDateColumnWidth, 145, RESULT_DATE_MIN, RESULT_DATE_MAX));
 
             HeaderStarColumn.Width = new GridLength(
-                ReadColumnWidth(LS_ResultStarColumnWidth, 36, RESULT_STAR_MIN, RESULT_STAR_MAX));
+                ReadColumnWidth(LS_ResultStarColumnWidth, 44, RESULT_STAR_MIN, RESULT_STAR_MAX));
 
             HeaderNameColumn.Width = new GridLength(1, GridUnitType.Star);
             ApplyResultColumnWidthsToVisualTree();
@@ -990,12 +1568,53 @@ namespace Anfeta.UI.Views
             ApplyResultColumnWidthsToVisualTree();
         }
 
-        private void NameDateSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+        private void NameStatusSplitter_DragDelta(
+            object sender,
+            DragDeltaEventArgs e)
         {
-            // Mover el separador a la derecha amplía Name y reduce Date Modified.
-            var current = HeaderDateColumn.Width.Value;
-            HeaderDateColumn.Width = new GridLength(
-                Math.Clamp(current - e.HorizontalChange, RESULT_DATE_MIN, RESULT_DATE_MAX));
+            var current =
+                HeaderStatusColumn.Width.Value;
+
+            HeaderStatusColumn.Width =
+                new GridLength(
+                    Math.Clamp(
+                        current - e.HorizontalChange,
+                        RESULT_STATUS_MIN,
+                        RESULT_STATUS_MAX));
+
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void StatusDateSplitter_DragDelta(
+            object sender,
+            DragDeltaEventArgs e)
+        {
+            var currentStatus =
+                HeaderStatusColumn.Width.Value;
+
+            var currentDate =
+                HeaderDateColumn.Width.Value;
+
+            var minimumDelta = Math.Max(
+                RESULT_STATUS_MIN - currentStatus,
+                currentDate - RESULT_DATE_MAX);
+
+            var maximumDelta = Math.Min(
+                RESULT_STATUS_MAX - currentStatus,
+                currentDate - RESULT_DATE_MIN);
+
+            var appliedDelta = Math.Clamp(
+                e.HorizontalChange,
+                minimumDelta,
+                maximumDelta);
+
+            HeaderStatusColumn.Width =
+                new GridLength(
+                    currentStatus + appliedDelta);
+
+            HeaderDateColumn.Width =
+                new GridLength(
+                    currentDate - appliedDelta);
 
             ApplyResultColumnWidthsToVisualTree();
         }
@@ -1031,6 +1650,7 @@ namespace Anfeta.UI.Views
         {
             var values = ApplicationData.Current.LocalSettings.Values;
             values[LS_ResultPathColumnWidth] = HeaderPathColumn.Width.Value;
+            values[LS_ResultStatusColumnWidth] = HeaderStatusColumn.Width.Value;
             values[LS_ResultDateColumnWidth] = HeaderDateColumn.Width.Value;
             values[LS_ResultStarColumnWidth] = HeaderStarColumn.Width.Value;
         }
@@ -1039,6 +1659,7 @@ namespace Anfeta.UI.Views
         {
             if (RootLayout == null ||
                 HeaderPathColumn == null ||
+                HeaderStatusColumn == null ||
                 HeaderDateColumn == null ||
                 HeaderStarColumn == null)
                 return;
@@ -1050,15 +1671,22 @@ namespace Anfeta.UI.Views
         {
             if (node is Grid grid &&
                 string.Equals(grid.Tag?.ToString(), "ResultColumns", StringComparison.Ordinal) &&
-                grid.ColumnDefinitions.Count >= 7)
+                grid.ColumnDefinitions.Count >= 9)
             {
-                grid.ColumnDefinitions[0].Width = new GridLength(HeaderPathColumn.Width.Value);
+                grid.ColumnDefinitions[0].Width =
+                    new GridLength(HeaderPathColumn.Width.Value);
                 grid.ColumnDefinitions[1].Width = new GridLength(5);
-                grid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
+                grid.ColumnDefinitions[2].Width =
+                    new GridLength(1, GridUnitType.Star);
                 grid.ColumnDefinitions[3].Width = new GridLength(5);
-                grid.ColumnDefinitions[4].Width = new GridLength(HeaderDateColumn.Width.Value);
+                grid.ColumnDefinitions[4].Width =
+                    new GridLength(HeaderStatusColumn.Width.Value);
                 grid.ColumnDefinitions[5].Width = new GridLength(5);
-                grid.ColumnDefinitions[6].Width = new GridLength(HeaderStarColumn.Width.Value);
+                grid.ColumnDefinitions[6].Width =
+                    new GridLength(HeaderDateColumn.Width.Value);
+                grid.ColumnDefinitions[7].Width = new GridLength(7);
+                grid.ColumnDefinitions[8].Width =
+                    new GridLength(HeaderStarColumn.Width.Value);
             }
 
             var childCount = VisualTreeHelper.GetChildrenCount(node);

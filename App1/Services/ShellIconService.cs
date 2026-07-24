@@ -1,8 +1,14 @@
 ﻿using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Windows.Storage;
+using Windows.Storage.FileProperties;
+using Windows.Storage.Streams;
 
 namespace Anfeta.UI.Services
 {
@@ -45,6 +51,57 @@ namespace Anfeta.UI.Services
 
 
             return FileIcon;
+        }
+
+        public async Task<ImageSource?> GetThumbnailAsync(
+            string path,
+            uint requestedSize,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(path) ||
+                !File.Exists(path))
+            {
+                return null;
+            }
+
+            var extension = Path.GetExtension(path)
+                .ToLowerInvariant();
+
+            if (extension is not (
+                ".png" or ".jpg" or ".jpeg" or
+                ".webp" or ".gif" or ".bmp"))
+            {
+                return null;
+            }
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var file = await StorageFile.GetFileFromPathAsync(path);
+
+                using var thumbnail = await file.GetThumbnailAsync(
+                    ThumbnailMode.PicturesView,
+                    Math.Max(64u, requestedSize),
+                    ThumbnailOptions.UseCurrentScale);
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (thumbnail == null || thumbnail.Size == 0)
+                    return null;
+
+                var bitmap = new BitmapImage
+                {
+                    DecodePixelType = DecodePixelType.Logical
+                };
+
+                await bitmap.SetSourceAsync(thumbnail);
+                return bitmap;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

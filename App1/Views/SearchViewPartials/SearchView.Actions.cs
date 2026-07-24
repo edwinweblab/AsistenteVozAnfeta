@@ -21,6 +21,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.System;
 using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 
@@ -30,46 +31,88 @@ namespace Anfeta.UI.Views
     {
         #region ===== Acciones del Menú Contextual =====
 
-        private async void CtxOpen_Click(object sender, RoutedEventArgs e)
+        private async void CtxOpen_Click(
+            object sender,
+            RoutedEventArgs e)
         {
             var rows = GetSelectedRowsOrCtx(sender);
-            if (rows.Count == 0) return;
+            if (rows.Count == 0)
+                return;
 
-            try
+            const int MAX_OPEN = 5;
+
+            if (rows.Count > 1)
             {
-                const int MAX_OPEN = 5;
+                var confirmed = await ConfirmOpenManyAsync(
+                    rows.Count,
+                    MAX_OPEN);
 
-                if (rows.Count > 1)
+                if (!confirmed)
+                    return;
+            }
+
+            var max = Math.Min(rows.Count, MAX_OPEN);
+            var opened = 0;
+            var failed = 0;
+            string? lastError = null;
+
+            for (var index = 0; index < max; index++)
+            {
+                var row = rows[index];
+
+                try
                 {
-                    var ok = await ConfirmOpenManyAsync(rows.Count, MAX_OPEN);
-                    if (!ok) return;
-                }
+                    if (IsNotionRow(row))
+                    {
+                        var notionOpened = await OpenNotionDesktopAsync(
+                            row,
+                            allowBrowserFallback: true);
 
-                var max = Math.Min(rows.Count, MAX_OPEN);
+                        if (notionOpened)
+                            opened++;
+                        else
+                            failed++;
 
-                for (int i = 0; i < max; i++)
-                {
-                    var target = GetRowTarget(rows[i]);
+                        continue;
+                    }
+
+                    var target = GetRowTarget(row);
 
                     if (string.IsNullOrWhiteSpace(target))
-                        continue;
-
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                     {
-                        FileName = target,
-                        UseShellExecute = true
-                    });
+                        failed++;
+                        continue;
+                    }
+
+                    System.Diagnostics.Process.Start(
+                        new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = target,
+                            UseShellExecute = true
+                        });
+
+                    opened++;
                 }
-
-                var hasNotion = rows.Take(max).Any(IsNotionRow);
-
-                StatusText.Text = rows.Count == 1
-                    ? hasNotion ? "Página de Notion abierta ✅" : "Abierto ✅"
-                    : $"Abiertos {Math.Min(rows.Count, MAX_OPEN)} de {rows.Count} ✅";
+                catch (Exception ex)
+                {
+                    failed++;
+                    lastError = ex.Message;
+                }
             }
-            catch (Exception ex)
+
+            if (failed == 0)
             {
-                StatusText.Text = $"Error al abrir: {ex.Message}";
+                StatusText.Text = opened == 1
+                    ? "Estado: Abierto ✅"
+                    : $"Estado: Abiertos {opened} elemento(s) ✅";
+            }
+            else
+            {
+                StatusText.Text =
+                    $"Estado: Abiertos {opened} · Fallaron {failed}" +
+                    (string.IsNullOrWhiteSpace(lastError)
+                        ? string.Empty
+                        : $" · Último: {lastError}");
             }
         }
 
@@ -289,6 +332,83 @@ namespace Anfeta.UI.Views
             StatusText.Text = IsNotionRow(row)
                 ? "Copiado: link de Notion ✅"
                 : "Copiado ✅";
+        }
+
+        private void CtxCopyDomain_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+
+            if (row == null)
+            {
+                StatusText.Text =
+                    "Estado: Selecciona un resultado.";
+                return;
+            }
+
+            var domain = TryExtractFirstDomain(row);
+
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                StatusText.Text =
+                    "Estado: No se encontró un dominio en este resultado.";
+                return;
+            }
+
+            var package =
+                new Windows.ApplicationModel.DataTransfer
+                    .DataPackage();
+
+            package.SetText(domain);
+
+            Windows.ApplicationModel.DataTransfer
+                .Clipboard.SetContent(package);
+
+            StatusText.Text =
+                $"Estado: Dominio copiado ✅ {domain}";
+        }
+
+        private static string TryExtractFirstDomain(
+            SearchResultRow row)
+        {
+            // Buscar únicamente en el nombre visible del resultado.
+            // No se toma el dominio desde URL, descripción, estado o ruta.
+            var candidates = new[]
+            {
+                row?.DisplayName,
+                row?.Name
+            };
+
+            const string pattern =
+                @"(?<![\w@])(?:https?://)?(?:www\.)?" +
+                @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
+                @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
+                @"com|mx|org|net|io|co|app|dev))" +
+                @"(?=$|[/:?#\s)\]}>.,;!])";
+
+            foreach (var candidate in candidates)
+            {
+                if (string.IsNullOrWhiteSpace(candidate))
+                    continue;
+
+                var match = Regex.Match(
+                    candidate,
+                    pattern,
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+                if (match.Success)
+                {
+                    return match.Groups["domain"]
+                        .Value
+                        .Trim()
+                        .TrimEnd('.')
+                        .ToLowerInvariant();
+                }
+            }
+
+            return string.Empty;
         }
 
         private async void CtxDelete_Click(object sender, RoutedEventArgs e)
@@ -2932,6 +3052,181 @@ namespace Anfeta.UI.Views
         #endregion
 
         #region== Notion ==
+
+        private async Task<bool> OpenNotionDesktopAsync(
+            SearchResultRow row,
+            bool allowBrowserFallback)
+        {
+            if (row == null || !IsNotionRow(row))
+                return false;
+
+            var webUrl = GetRowTarget(row);
+
+            if (string.IsNullOrWhiteSpace(webUrl) ||
+                !Uri.TryCreate(webUrl, UriKind.Absolute, out var webUri))
+            {
+                StatusText.Text =
+                    "Estado: La página no tiene una URL válida de Notion.";
+                return false;
+            }
+
+            var desktopUri =
+                BuildNotionDesktopUri(webUri);
+
+            LaunchQuerySupportStatus supportStatus;
+
+            try
+            {
+                supportStatus =
+                    await Launcher.QueryUriSupportAsync(
+                        desktopUri,
+                        LaunchQuerySupportType.Uri);
+            }
+            catch
+            {
+                supportStatus =
+                    LaunchQuerySupportStatus.Unknown;
+            }
+
+            if (supportStatus ==
+                LaunchQuerySupportStatus.Available)
+            {
+                try
+                {
+                    StatusText.Text =
+                        "Estado: Abriendo en Notion Desktop...";
+
+                    var desktopOpened =
+                        await Launcher.LaunchUriAsync(
+                            desktopUri);
+
+                    if (desktopOpened)
+                    {
+                        StatusText.Text =
+                            "Estado: Página abierta en Notion Desktop ✅";
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // Notion estaba registrado, pero Windows no pudo iniciarlo.
+                }
+            }
+
+            if (!allowBrowserFallback)
+            {
+                StatusText.Text =
+                    "Estado: No fue posible abrir Notion Desktop.";
+                return false;
+            }
+
+            return await PromptOpenNotionInBrowserAsync(
+                webUri,
+                supportStatus);
+        }
+
+        private static Uri BuildNotionDesktopUri(Uri webUri)
+        {
+            var absolute = webUri.AbsoluteUri;
+
+            if (absolute.StartsWith(
+                    "notion://",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return webUri;
+            }
+
+            var hostAndPath = absolute
+                .Replace(
+                    "https://",
+                    string.Empty,
+                    StringComparison.OrdinalIgnoreCase)
+                .Replace(
+                    "http://",
+                    string.Empty,
+                    StringComparison.OrdinalIgnoreCase);
+
+            return new Uri(
+                $"notion://{hostAndPath}",
+                UriKind.Absolute);
+        }
+
+        private async Task<bool> PromptOpenNotionInBrowserAsync(
+            Uri webUri,
+            LaunchQuerySupportStatus supportStatus)
+        {
+            var content = new StackPanel
+            {
+                Spacing = 8
+            };
+
+            var reason = supportStatus switch
+            {
+                LaunchQuerySupportStatus.AppNotInstalled =>
+                    "No se encontró una aplicación instalada para abrir enlaces de Notion.",
+                LaunchQuerySupportStatus.AppUnavailable =>
+                    "Notion Desktop está instalado, pero no se encuentra disponible en este momento.",
+                LaunchQuerySupportStatus.NotSupported =>
+                    "Windows no tiene una aplicación asociada al protocolo de Notion.",
+                _ =>
+                    "No fue posible abrir la aplicación de escritorio de Notion."
+            };
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text = reason,
+                    TextWrapping = TextWrapping.Wrap
+                });
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Verifica que Notion Desktop esté instalado y que la opción " +
+                        "“Abrir enlaces en la aplicación de escritorio” esté activa. " +
+                        "También puedes abrir esta página en el navegador.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.75
+                });
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = "Notion Desktop no disponible",
+                Content = content,
+                PrimaryButtonText = "Abrir en navegador",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                StatusText.Text =
+                    "Estado: Apertura cancelada.";
+                return false;
+            }
+
+            try
+            {
+                var browserOpened =
+                    await Launcher.LaunchUriAsync(webUri);
+
+                StatusText.Text = browserOpened
+                    ? "Estado: Página abierta en el navegador ✅"
+                    : "Estado: No fue posible abrir la página.";
+
+                return browserOpened;
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: Error abriendo la página → {ex.Message}";
+                return false;
+            }
+        }
+
         private static string GetRowTarget(SearchResultRow row)
         {
             if (IsNotionRow(row) && !string.IsNullOrWhiteSpace(row.ExternalUrl))

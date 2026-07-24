@@ -61,6 +61,50 @@ namespace Anfeta.UI.Views
             FinishUi();
         }
 
+        private void GroupResultsCombo_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (_loadingModulePreferences ||
+                GroupResultsCombo.SelectedItem is not ComboBoxItem item)
+            {
+                return;
+            }
+
+            var tag = (item.Tag?.ToString() ?? "none")
+                .Trim()
+                .ToLowerInvariant();
+
+            _resultGroupingMode = tag switch
+            {
+                "domain" => ResultGroupingMode.Domain,
+                "name" => ResultGroupingMode.Name,
+                _ => ResultGroupingMode.None
+            };
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_ResultGroupingMode] = tag;
+
+            ResultsList.SelectedItem = null;
+            RefreshResultsListView();
+
+            StatusText.Text =
+                _resultGroupingMode == ResultGroupingMode.None
+                    ? "Estado: Agrupación desactivada ✅"
+                    : $"Estado: Resultados agrupados por " +
+                      $"{GetGroupingModeLabel()} ✅";
+        }
+
+        private string GetGroupingModeLabel()
+        {
+            return _resultGroupingMode switch
+            {
+                ResultGroupingMode.Domain => "dominio",
+                ResultGroupingMode.Name => "persona asignada",
+                _ => "ninguno"
+            };
+        }
+
         private async void SortCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (SortCombo.SelectedItem is ComboBoxItem cbi && cbi.Tag is string tag)

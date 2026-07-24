@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using Windows.Storage;
 using System.Threading.Tasks;
 
 namespace Anfeta.UI.Views
@@ -322,14 +323,39 @@ namespace Anfeta.UI.Views
         private void ToggleDetailsPane_Click(object sender, RoutedEventArgs e)
         {
             var show = ToggleDetailsPane.IsChecked == true;
+
             if (show)
             {
+                DetailsCol.MinWidth = DETAILS_PANE_MIN;
+                DetailsCol.MaxWidth = DETAILS_PANE_MAX;
+
+                DetailsSplitterCol.Width = new GridLength(12);
+                DetailsPaneSplitter.Visibility = Visibility.Visible;
                 DetailsPane.Visibility = Visibility.Visible;
-                DetailsCol.Width = new GridLength(340);
+
+                LoadDetailsPaneWidth();
             }
             else
             {
+                var currentWidth = DetailsCol.ActualWidth;
+
+                if (currentWidth >= DETAILS_PANE_MIN)
+                {
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_DetailsPaneWidth] = Math.Clamp(
+                            currentWidth,
+                            DETAILS_PANE_MIN,
+                            DETAILS_PANE_MAX);
+                }
+
                 DetailsPane.Visibility = Visibility.Collapsed;
+                DetailsPaneSplitter.Visibility = Visibility.Collapsed;
+                DetailsSplitterCol.Width = new GridLength(0);
+
+                // Es necesario quitar temporalmente los límites,
+                // de lo contrario MinWidth mantiene un espacio vacío.
+                DetailsCol.MinWidth = 0;
+                DetailsCol.MaxWidth = double.PositiveInfinity;
                 DetailsCol.Width = new GridLength(0);
             }
         }

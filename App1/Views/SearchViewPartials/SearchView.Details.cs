@@ -15,7 +15,7 @@ namespace Anfeta.UI.Views
     {
         #region ===== Results / Details / Open =====
 
-        private void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
             BtnDetailsLocation.Content = IsNotionRow(row)
@@ -38,10 +38,15 @@ namespace Anfeta.UI.Views
                     $"Origen: Notion\n" +
                     $"Base: {baseName}\n" +
                     $"Estado: Página de Notion\n" +
+                    $"Actualización: {(!string.IsNullOrWhiteSpace(row.ProjectUpdateStatus) ? row.ProjectUpdateStatus : "—")}\n" +
                     $"Modificado: {(!string.IsNullOrWhiteSpace(row.ServerModified) ? row.ServerModified : "—")}";
                 StatusText.Text = "Estado: Página de Notion seleccionada ✅";
+
+                await LoadNotionPreviewForSelectionAsync(row);
                 return;
             }
+
+            ResetPreviewPanel();
 
             var online = File.Exists(row.Target) && NeedsHydration(row.Target);
 
@@ -54,6 +59,8 @@ namespace Anfeta.UI.Views
             StatusText.Text = (row.Type ?? "").Equals("folder", StringComparison.OrdinalIgnoreCase)
                 ? "Estado: Es carpeta (usa acciones de navegación) 📁"
                 : "Estado: Seleccionado ✅";
+
+            await LoadLocalPreviewForSelectionAsync(row);
         }
 
         private async void ResultsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -63,21 +70,9 @@ namespace Anfeta.UI.Views
 
             if (IsNotionRow(row))
             {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = row.Target,
-                        UseShellExecute = true
-                    });
-
-                    StatusText.Text = "Estado: Página de Notion abierta ✅";
-                }
-                catch (Exception ex)
-                {
-                    StatusText.Text = $"Estado: Error abriendo Notion → {ex.Message}";
-                }
-
+                await OpenNotionDesktopAsync(
+                    row,
+                    allowBrowserFallback: true);
                 return;
             }
 
@@ -131,21 +126,9 @@ namespace Anfeta.UI.Views
 
             if (IsNotionRow(row))
             {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = row.Target,
-                        UseShellExecute = true
-                    });
-
-                    StatusText.Text = "Estado: Página de Notion abierta ✅";
-                }
-                catch (Exception ex)
-                {
-                    StatusText.Text = $"Estado: Error abriendo Notion → {ex.Message}";
-                }
-
+                await OpenNotionDesktopAsync(
+                    row,
+                    allowBrowserFallback: true);
                 return;
             }
 
@@ -195,28 +178,16 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private void BtnDetailsLink_Click(object sender, RoutedEventArgs e)
+        private async void BtnDetailsLink_Click(object sender, RoutedEventArgs e)
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
             if (string.IsNullOrWhiteSpace(row.Target)) return;
 
             if (IsNotionRow(row))
             {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = row.Target,
-                        UseShellExecute = true
-                    });
-
-                    StatusText.Text = "Estado: Página de Notion abierta ✅";
-                }
-                catch (Exception ex)
-                {
-                    StatusText.Text = $"Estado: Error abriendo Notion → {ex.Message}";
-                }
-
+                await OpenNotionDesktopAsync(
+                    row,
+                    allowBrowserFallback: true);
                 return;
             }
 
