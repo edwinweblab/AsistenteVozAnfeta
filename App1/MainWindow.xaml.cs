@@ -13,6 +13,7 @@ using System.Diagnostics;
 using System.Linq;
 using Windows.UI;
 using Anfeta.UI.Services;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using System.Reflection;
@@ -24,6 +25,8 @@ namespace Anfeta.UI
     {
         private readonly ShellViewModel _shell;
         private GlobalHotkeyService? _hotkeyService;
+        private readonly IndexedFileReminderService _indexedReminderService;
+        private readonly SemaphoreSlim _reminderDialogLock = new(1, 1);
 
         public MainWindow()
         {
@@ -73,6 +76,17 @@ namespace Anfeta.UI
             CheckGoogleCalendarStatusOnStartup();
             _hotkeyService = App.AppHost.Services.GetRequiredService<GlobalHotkeyService>();
             _hotkeyService.SearchHotkeyPressed += OnSearchHotkeyPressed;
+
+            _indexedReminderService =
+                App.AppHost.Services.GetRequiredService<
+                    IndexedFileReminderService>();
+
+            _indexedReminderService.ReminderDue +=
+                IndexedReminderService_ReminderDue;
+
+            _indexedReminderService.Start(
+                DispatcherQueue);
+
             this.Closed += MainWindow_Closed;
 
             Debug.WriteLine("MAINWINDOW: constructor OK");
@@ -303,6 +317,133 @@ namespace Anfeta.UI
             }
         }
 
+        private void IndexedReminderService_ReminderDue(
+            object? sender,
+            IndexedFileReminder reminder)
+        {
+            DispatcherQueue.TryEnqueue(
+                async () =>
+                {
+                    await ShowIndexedReminderAsync(
+                        reminder);
+                });
+        }
+
+        private async Task ShowIndexedReminderAsync(
+            IndexedFileReminder reminder)
+        {
+            await _reminderDialogLock.WaitAsync();
+
+            try
+            {
+                var sourceLabel =
+                    reminder.Source == Models.Weblab.SearchSource.Notion
+                        ? "Notion"
+                        : reminder.Source == Models.Weblab.SearchSource.Dropbox
+                            ? "Dropbox"
+                            : "Archivo local";
+
+                var content = new StackPanel
+                {
+                    Spacing = 8
+                };
+
+                content.Children.Add(
+                    new TextBlock
+                    {
+                        Text = reminder.Message,
+                        FontSize = 16,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold,
+                        TextWrapping =
+                            TextWrapping.Wrap
+                    });
+
+                content.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            $"Programado: " +
+                            $"{reminder.ReminderAt:dd/MM/yyyy HH:mm}",
+                        Opacity = 0.72
+                    });
+
+                content.Children.Add(
+                    new TextBlock
+                    {
+                        Text = $"Origen: {sourceLabel}",
+                        Opacity = 0.72
+                    });
+
+                if (!string.IsNullOrWhiteSpace(
+                        reminder.Target))
+                {
+                    content.Children.Add(
+                        new TextBlock
+                        {
+                            Text = reminder.Target,
+                            TextWrapping =
+                                TextWrapping.Wrap,
+                            Opacity = 0.60
+                        });
+                }
+
+                var copyStatus =
+                    new TextBlock
+                    {
+                        Text = string.Empty,
+                        Opacity = 0.72
+                    };
+
+                var copyButton =
+                    new Button
+                    {
+                        Content = "Copiar texto",
+                        HorizontalAlignment =
+                            HorizontalAlignment.Left
+                    };
+
+                copyButton.Click += (_, __) =>
+                {
+                    var package =
+                        new Windows.ApplicationModel.DataTransfer
+                            .DataPackage();
+
+                    package.SetText(
+                        reminder.Message);
+
+                    Windows.ApplicationModel.DataTransfer
+                        .Clipboard.SetContent(package);
+
+                    copyStatus.Text =
+                        "Texto copiado ✅";
+                };
+
+                content.Children.Add(copyButton);
+                content.Children.Add(copyStatus);
+
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = Root.XamlRoot,
+                    Title = "Recordatorio ANFETA",
+                    Content = content,
+                    PrimaryButtonText = "Entendido",
+                    DefaultButton =
+                        ContentDialogButton.Primary
+                };
+
+                await dialog.ShowAsync();
+            }
+            catch
+            {
+                // Un diálogo no debe bloquear futuros avisos.
+            }
+            finally
+            {
+                _reminderDialogLock.Release();
+            }
+        }
+
         // ═══════════════════════════════════════════
         // Ciclo de vida
         // ═══════════════════════════════════════════
@@ -310,9 +451,17 @@ namespace Anfeta.UI
         private void MainWindow_Closed(object sender, WindowEventArgs args)
         {
             DropboxIndexCoordinator.StateChanged -= OnDropboxStateChanged;
+
+            _indexedReminderService.ReminderDue -=
+                IndexedReminderService_ReminderDue;
+
+            _indexedReminderService.Stop();
+
             Debug.WriteLine("MAINWINDOW: Closed");
+
             if (_hotkeyService != null)
                 _hotkeyService.SearchHotkeyPressed -= OnSearchHotkeyPressed;
+
             ((App)Application.Current).CleanupAndExit();
         }
         public void ToggleSearchFromHotkey()

@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -15,12 +16,15 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.Graphics.Imaging;
+using Windows.Storage.Streams;
 using Windows.System;
 using WinRT.Interop;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
@@ -827,6 +831,219 @@ namespace Anfeta.UI.Views
             if (!string.IsNullOrWhiteSpace(query))
                 await RunSearchAsync(query);
         }
+
+        #region ===== Pantallazo de resultados =====
+
+        private async void BtnCaptureResults_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (ResultsViewHost == null ||
+                ResultsViewHost.ActualWidth < 2 ||
+                ResultsViewHost.ActualHeight < 2)
+            {
+                StatusText.Text =
+                    "Estado: El área de resultados todavía no está lista para capturarse.";
+                return;
+            }
+
+            if (Results.Count == 0)
+            {
+                var emptyDialog = new ContentDialog
+                {
+                    XamlRoot = this.XamlRoot,
+                    Title = "No hay resultados para capturar",
+                    Content =
+                        "Realiza una búsqueda o abre una carpeta antes de tomar el pantallazo.",
+                    CloseButtonText = "Cerrar",
+                    DefaultButton = ContentDialogButton.Close
+                };
+
+                await emptyDialog.ShowAsync();
+                return;
+            }
+
+            var queryTitle =
+                BuildResultsCaptureTitle();
+
+            StorageFile? captureFile = null;
+
+            try
+            {
+                BtnCaptureResults.IsEnabled = false;
+
+                ShowLoadingState(
+                    "Estado: Preparando pantallazo...",
+                    "Capturando los resultados visibles de la búsqueda actual.");
+
+                // Esperamos a que el botón y el overlay reflejen el estado
+                // antes de capturar el área central.
+                await Task.Delay(120);
+
+                // El overlay de carga vive dentro del área capturable.
+                // Se oculta durante el render para que no aparezca en la imagen.
+                var previousOverlayVisibility =
+                    LoadingOverlay.Visibility;
+
+                LoadingOverlay.Visibility =
+                    Visibility.Collapsed;
+
+                try
+                {
+                    captureFile =
+                        await CaptureResultsAreaToPngAsync(
+                            queryTitle);
+                }
+                finally
+                {
+                    LoadingOverlay.Visibility =
+                        previousOverlayVisibility;
+                }
+
+                HideLoadingState();
+
+                await UploadFilesToNotionRevisionsAsync(
+                    new[] { captureFile },
+                    "pantallazo de resultados");
+            }
+            catch (Exception ex)
+            {
+                HideLoadingState();
+
+                StatusText.Text =
+                    $"Estado: No se pudo crear el pantallazo → {ex.Message}";
+            }
+            finally
+            {
+                BtnCaptureResults.IsEnabled = true;
+            }
+        }
+
+        private string BuildResultsCaptureTitle()
+        {
+            var query =
+                (SearchBox?.Text ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(query))
+                return query;
+
+            if (_isBrowsing &&
+                !string.IsNullOrWhiteSpace(_currentFolderPath))
+            {
+                var folderName =
+                    Path.GetFileName(
+                        _currentFolderPath.TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar));
+
+                if (!string.IsNullOrWhiteSpace(folderName))
+                    return $"Resultados {folderName}";
+            }
+
+            return $"Resultados ANFETA {DateTime.Now:yyyy-MM-dd HH-mm}";
+        }
+
+        private async Task<StorageFile> CaptureResultsAreaToPngAsync(
+            string suggestedTitle)
+        {
+            var renderTarget =
+                new RenderTargetBitmap();
+
+            await renderTarget.RenderAsync(
+                ResultsViewHost);
+
+            var pixelWidth =
+                renderTarget.PixelWidth;
+
+            var pixelHeight =
+                renderTarget.PixelHeight;
+
+            if (pixelWidth <= 0 ||
+                pixelHeight <= 0)
+            {
+                throw new InvalidOperationException(
+                    "Windows no devolvió una imagen válida del área de resultados.");
+            }
+
+            var pixels =
+                await renderTarget.GetPixelsAsync();
+
+            var safeName =
+                SanitizeCaptureFileName(
+                    suggestedTitle);
+
+            var fileName =
+                $"{safeName}.png";
+
+            var tempFolder =
+                ApplicationData.Current.TemporaryFolder;
+
+            var file =
+                await tempFolder.CreateFileAsync(
+                    fileName,
+                    CreationCollisionOption.GenerateUniqueName);
+
+            await using var fileStream =
+                await file.OpenStreamForWriteAsync();
+
+            fileStream.SetLength(0);
+
+            var randomAccessStream =
+                fileStream.AsRandomAccessStream();
+
+            var encoder =
+                await BitmapEncoder.CreateAsync(
+                    BitmapEncoder.PngEncoderId,
+                    randomAccessStream);
+
+            encoder.SetPixelData(
+                BitmapPixelFormat.Bgra8,
+                BitmapAlphaMode.Premultiplied,
+                (uint)pixelWidth,
+                (uint)pixelHeight,
+                96,
+                96,
+                pixels.ToArray());
+
+            await encoder.FlushAsync();
+            await randomAccessStream.FlushAsync();
+
+            return file;
+        }
+
+        private static string SanitizeCaptureFileName(
+            string value)
+        {
+            var clean =
+                (value ?? string.Empty).Trim();
+
+            foreach (var invalid in
+                     Path.GetInvalidFileNameChars())
+            {
+                clean =
+                    clean.Replace(
+                        invalid,
+                        ' ');
+            }
+
+            clean =
+                Regex.Replace(
+                    clean,
+                    @"\s+",
+                    " ")
+                .Trim()
+                .TrimEnd('.');
+
+            if (string.IsNullOrWhiteSpace(clean))
+                clean = "Resultados ANFETA";
+
+            if (clean.Length > 90)
+                clean = clean.Substring(0, 90).Trim();
+
+            return clean;
+        }
+
+        #endregion
 
         private enum NotionUploadLayout
         {
@@ -1875,14 +2092,25 @@ namespace Anfeta.UI.Views
                     else App.LocalIndex.RenameExact(oldPath, newFullPath!, isFolder: false);
                 }
 
-                // 3) Persistir
+                // 3) Actualizar inmediatamente el objeto visible.
+                // El índice puede contener otra instancia de SearchResultRow;
+                // por eso la tarjeta/lista actual no siempre cambiaba hasta
+                // ejecutar otra búsqueda manualmente.
+                if (kind == FileChangeKind.Rename &&
+                    !string.IsNullOrWhiteSpace(newFullPath))
+                {
+                    row.Target = newFullPath;
+                    row.Name = Path.GetFileName(newFullPath);
+                }
+
+                // 4) Persistir
                 var snapshot = App.LocalIndex.GetAll();
                 if (snapshot.Count == 0)
                     throw new InvalidOperationException("Índice quedó vacío: no se persistirá.");
 
                 await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, snapshot, CancellationToken.None);
 
-                // 4) Refresh UI
+                // 5) Refresh UI
                 await RefreshAfterFileChangeAsync(kind, oldPath, newFullPath);
             }
             finally
@@ -1959,11 +2187,39 @@ namespace Anfeta.UI.Views
             LoadFoldersRoot();
             BuildTreeRoot();
 
-            var targetFolder = _currentFolderPath;
-            if (string.IsNullOrWhiteSpace(targetFolder) || !Directory.Exists(targetFolder))
-                targetFolder = DROPBOX_ROOT;
+            var currentQuery =
+                (SearchBox?.Text ?? string.Empty).Trim();
 
-            await BrowseFolderAsync(targetFolder, pushHistory: false);
+            // Conserva exactamente el modo en el que estaba el usuario.
+            // Una búsqueda vacía también es una vista global válida de resultados,
+            // así que no debe convertirse automáticamente en navegación por carpeta.
+            if (!_isBrowsing)
+            {
+                await RunSearchAsync(currentQuery);
+                return;
+            }
+
+            var targetFolder =
+                !string.IsNullOrWhiteSpace(_currentFolderPath) &&
+                Directory.Exists(_currentFolderPath)
+                    ? _currentFolderPath
+                    : !string.IsNullOrWhiteSpace(_currentFolder) &&
+                      Directory.Exists(_currentFolder)
+                        ? _currentFolder
+                        : DROPBOX_ROOT;
+
+            if (!string.IsNullOrWhiteSpace(targetFolder) &&
+                Directory.Exists(targetFolder))
+            {
+                await BrowseFolderAsync(
+                    targetFolder,
+                    pushHistory: false);
+            }
+            else
+            {
+                _isBrowsing = false;
+                await RunSearchAsync(currentQuery);
+            }
         }
 
         private static string NormalizePath(string p)
@@ -2182,6 +2438,28 @@ namespace Anfeta.UI.Views
             });
 
             content.Children.Add(titleBox);
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Formato para recordatorio: AAAA-MM-DD HH:mm descripción",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    Opacity = 0.82
+                });
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Ejemplo: 2026-07-24 13:30 nneft Revisar campaña",
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    Opacity = 0.68
+                });
 
             var dialog = new ContentDialog
             {
@@ -2614,9 +2892,9 @@ namespace Anfeta.UI.Views
 
             helpText.Text = isNotionBatch
                 ? "Las diferencias se representan con %1, %2, etc. " +
-                  "En títulos de Notion se permiten caracteres como /."
+                  "Recordatorio Notion: AAAA-MM-DD HH:mm descripción."
                 : "Las diferencias se representan con %1, %2, etc. " +
-                  "Puedes agregar texto antes, después o entre las variables.";
+                  "Recordatorio local/Dropbox: AAAA-MM-DD HH-mm descripción.ext.";
 
             Grid.SetRow(helpText, 3);
             Grid.SetColumn(helpText, 0);
@@ -2972,17 +3250,74 @@ namespace Anfeta.UI.Views
             var textBox = new TextBox
             {
                 Text = currentName,
-                Width = 320
+                Width = 430,
+                PlaceholderText =
+                    "AAAA-MM-DD HH-mm descripción.ext"
             };
+
+            var content = new StackPanel
+            {
+                Spacing = 9
+            };
+
+            content.Children.Add(textBox);
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Formato para recordatorio: AAAA-MM-DD HH-mm descripción.ext",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    Opacity = 0.82
+                });
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Ejemplo: 2026-07-24 13-30 nneft Revisar campaña.png",
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    Opacity = 0.68
+                });
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "En archivos locales y Dropbox la hora usa guion porque Windows no permite ':' en nombres.",
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    Opacity = 0.60
+                });
 
             var dialog = new ContentDialog
             {
                 XamlRoot = this.XamlRoot,
                 Title = "Renombrar",
-                Content = textBox,
+                Content = content,
                 PrimaryButtonText = "Aceptar",
                 CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Primary
+                DefaultButton = ContentDialogButton.Primary,
+                IsPrimaryButtonEnabled =
+                    !string.IsNullOrWhiteSpace(currentName)
+            };
+
+            textBox.TextChanged += (_, __) =>
+            {
+                dialog.IsPrimaryButtonEnabled =
+                    !string.IsNullOrWhiteSpace(
+                        textBox.Text);
+            };
+
+            dialog.Opened += (_, __) =>
+            {
+                textBox.Focus(
+                    FocusState.Programmatic);
+                textBox.SelectAll();
             };
 
             return await dialog.ShowAsync() ==
@@ -3047,6 +3382,64 @@ namespace Anfeta.UI.Views
                 DefaultButton = ContentDialogButton.Close
             };
             return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        }
+
+        #endregion
+
+        #region ===== Vistas rápidas de Notion =====
+
+        private async void OpenSavedNotionView_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is not MenuFlyoutItem item ||
+                item.Tag is not string url ||
+                string.IsNullOrWhiteSpace(url) ||
+                !Uri.TryCreate(url, UriKind.Absolute, out var webUri))
+            {
+                StatusText.Text =
+                    "Estado: La vista de Notion no tiene un enlace válido.";
+                return;
+            }
+
+            var desktopUri =
+                BuildNotionDesktopUri(webUri);
+
+            try
+            {
+                var support =
+                    await Launcher.QueryUriSupportAsync(
+                        desktopUri,
+                        LaunchQuerySupportType.Uri);
+
+                if (support ==
+                    LaunchQuerySupportStatus.Available)
+                {
+                    StatusText.Text =
+                        $"Estado: Abriendo {item.Text} en Notion...";
+
+                    if (await Launcher.LaunchUriAsync(
+                            desktopUri))
+                    {
+                        StatusText.Text =
+                            $"Estado: Vista abierta en Notion ✅ {item.Text}";
+                        return;
+                    }
+                }
+
+                var browserOpened =
+                    await Launcher.LaunchUriAsync(
+                        webUri);
+
+                StatusText.Text = browserOpened
+                    ? $"Estado: Vista abierta en navegador ✅ {item.Text}"
+                    : "Estado: No fue posible abrir la vista.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: Error abriendo la vista → {ex.Message}";
+            }
         }
 
         #endregion

@@ -230,6 +230,14 @@ namespace Anfeta.UI.Views
         private bool _resultsWheelHandlerHooked;
         private CancellationTokenSource? _thumbnailLoadCts;
 
+        // calendario comparativo de Revisiones
+        private readonly NotionCalendarService _notionCalendarService = new();
+        private CancellationTokenSource? _calendarCts;
+        private DateTime _calendarSelectedDate = DateTime.Today;
+        private bool _calendarViewActive;
+        private Color _calendarThemeColor =
+            Color.FromArgb(255, 21, 21, 21);
+
         #endregion
 
         #region ===== Internal Models =====
@@ -399,6 +407,11 @@ namespace Anfeta.UI.Views
             await ApplyIndexStateAsync();
             await EnsureIndexBootstrappedAsync();
             await ApplyDefaultTagIfEmptyAsync();
+
+            // Precarga silenciosa del calendario del día actual.
+            // No bloquea el buscador ni muestra overlay.
+            _ = PreloadCalendarOnStartupAsync();
+
             ApplyTextScaleToVisualTree();
 
             // Seguridad final del arranque:
@@ -444,6 +457,25 @@ namespace Anfeta.UI.Views
                 _thumbnailLoadCts?.Cancel();
                 _thumbnailLoadCts?.Dispose();
                 _thumbnailLoadCts = null;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                _calendarCts?.Cancel();
+                _calendarCts?.Dispose();
+                _calendarCts = null;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                _notionNoticeTimer?.Stop();
+                _notionNoticeTimer = null;
             }
             catch
             {
@@ -1726,6 +1758,10 @@ namespace Anfeta.UI.Views
             };
 
             RootLayout.Background = new SolidColorBrush(bgColor);
+            _calendarThemeColor = bgColor;
+
+            if (CalendarHost != null)
+                ApplyCalendarTheme(bgColor);
 
             ApplicationData.Current.LocalSettings.Values[LS_SearchBackgroundTheme] = theme;
         }

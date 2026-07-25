@@ -60,7 +60,11 @@
                 <ColumnDefinition Width="Auto" />
                 <!--  Actualización Notion automática: botón oculto por compatibilidad con código existente  -->
                 <ColumnDefinition Width="Auto" />
-                <!--  Última sync  -->
+                <!--  Calendario comparativo  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Vistas rápidas de Notion  -->
+                <ColumnDefinition Width="Auto" />
+                <!--  Pantallazo  -->
                 <ColumnDefinition Width="Auto" />
                 <!--  Menú  -->
             </Grid.ColumnDefinitions>
@@ -398,21 +402,87 @@
                 </StackPanel>
             </Button>
 
-            <!--  Última sincronización Notion  -->
-            <TextBlock
-                x:Name="NotionSyncInfoText"
+
+            <!--  Calendario comparativo de Revisiones  -->
+            <ToggleButton
+                x:Name="ToggleCalendarView"
                 Grid.Column="8"
-                MaxWidth="220"
+                Height="32"
+                Padding="10,0"
                 VerticalAlignment="Center"
-                FontSize="11"
-                Foreground="#AFAFAF"
-                Text=""
-                TextTrimming="CharacterEllipsis"
-                ToolTipService.ToolTip="{Binding Text, ElementName=NotionSyncInfoText}" />
+                Click="ToggleCalendarView_Click"
+                CornerRadius="6"
+                ToolTipService.ToolTip="Cambiar entre resultados y calendario">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="6">
+                    <FontIcon
+                        FontSize="13"
+                        Glyph="&#xE787;" />
+                    <TextBlock Text="Calendario" />
+                </StackPanel>
+            </ToggleButton>
+
+            <!--  Vistas rápidas de Notion  -->
+            <Button
+                x:Name="BtnNotionViews"
+                Grid.Column="9"
+                Height="32"
+                Padding="10,0"
+                VerticalAlignment="Center"
+                CornerRadius="6"
+                ToolTipService.ToolTip="Abrir vistas frecuentes de Notion">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="6">
+                    <FontIcon
+                        FontSize="13"
+                        Glyph="&#xE8A5;" />
+                    <TextBlock Text="Vistas" />
+                    <FontIcon
+                        FontSize="10"
+                        Glyph="&#xE70D;" />
+                </StackPanel>
+
+                <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                        <MenuFlyoutSubItem Text="Revisiones">
+                            <MenuFlyoutItem
+                                Click="OpenSavedNotionView_Click"
+                                Tag="https://app.notion.com/p/2eeabd7d91b781348ed5c537ec14962e?v=3a5abd7d91b78097ac57000cd9017ac3&amp;source=copy_link"
+                                Text="Seguimiento HOY Proyectos — Tabla" />
+                            <MenuFlyoutItem
+                                Click="OpenSavedNotionView_Click"
+                                Tag="https://app.notion.com/p/2eeabd7d91b781348ed5c537ec14962e?v=3a1abd7d91b7809d9351000c725547e4&amp;source=copy_link"
+                                Text="Seguimiento HOY Proyectos — Tablero" />
+                        </MenuFlyoutSubItem>
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
+
+            <!--  Pantallazo de resultados  -->
+            <Button
+                x:Name="BtnCaptureResults"
+                Grid.Column="10"
+                Height="32"
+                Padding="10,0"
+                VerticalAlignment="Center"
+                Click="BtnCaptureResults_Click"
+                CornerRadius="6"
+                ToolTipService.ToolTip="Capturar los resultados visibles y subirlos a Notion">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="6">
+                    <FontIcon
+                        FontSize="13"
+                        Glyph="&#xE722;" />
+                    <TextBlock Text="Pantallazo" />
+                </StackPanel>
+            </Button>
 
             <!--  Menú ⋯  -->
             <Button
-                Grid.Column="9"
+                Grid.Column="11"
                 Width="36"
                 Height="32"
                 VerticalAlignment="Center"
@@ -824,6 +894,165 @@
                     MinWidth="260"
                     MaxWidth="750" />
             </Grid.ColumnDefinitions>
+
+            <!--  Vista calendario; se construye desde SearchView.Calendar.cs  -->
+            <Grid
+        x:Name="CalendarHost"
+        Grid.Column="0"
+        Grid.ColumnSpan="5"
+        Canvas.ZIndex="500"
+        Background="#111820"
+        Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    Grid.Row="0"
+                    Padding="12,9"
+                    Background="#191F28"
+                    BorderBrush="#34404D"
+                    BorderThickness="0,0,0,1">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button
+                            Grid.Column="0"
+                            Width="32"
+                            Height="30"
+                            Padding="0"
+                            Click="CalendarPreviousDay_Click"
+                            Content="‹"
+                            CornerRadius="6" />
+
+                        <Button
+                            Grid.Column="1"
+                            Height="30"
+                            Padding="10,0"
+                            Click="CalendarToday_Click"
+                            Content="Hoy"
+                            CornerRadius="6" />
+
+                        <TextBlock
+                            x:Name="CalendarDateTitle"
+                            Grid.Column="2"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontSize="16"
+                            FontWeight="SemiBold"
+                            Text="Calendario" />
+
+                        <Button
+                            Grid.Column="3"
+                            Width="32"
+                            Height="30"
+                            Padding="0"
+                            Click="CalendarNextDay_Click"
+                            Content="›"
+                            CornerRadius="6" />
+
+                        <Button
+                            x:Name="CalendarPeopleButton"
+                            Grid.Column="4"
+                            Height="30"
+                            Padding="10,0"
+                            Click="CalendarPeopleButton_Click"
+                            Content="Personas"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Elegir las personas visibles" />
+
+                        <Button
+                            Grid.Column="5"
+                            Width="30"
+                            Height="30"
+                            Padding="0"
+                            Click="CalendarZoomOut_Click"
+                            Content="−"
+                            CornerRadius="6" />
+
+                        <TextBlock
+                            x:Name="CalendarZoomText"
+                            Grid.Column="6"
+                            MinWidth="46"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Text="100%"
+                            TextAlignment="Center" />
+
+                        <Button
+                            Grid.Column="7"
+                            Width="30"
+                            Height="30"
+                            Padding="0"
+                            Click="CalendarZoomIn_Click"
+                            Content="+"
+                            CornerRadius="6" />
+
+                        <Button
+                            Grid.Column="8"
+                            Height="30"
+                            Padding="10,0"
+                            Click="CalendarRefresh_Click"
+                            Content="Actualizar"
+                            CornerRadius="6" />
+
+                        <Button
+                            Grid.Column="9"
+                            Height="30"
+                            Padding="10,0"
+                            Click="CalendarClose_Click"
+                            Content="Resultados"
+                            CornerRadius="6" />
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1">
+                    <ScrollViewer
+                        x:Name="CalendarScrollViewer"
+                        HorizontalScrollBarVisibility="Auto"
+                        HorizontalScrollMode="Enabled"
+                        VerticalScrollBarVisibility="Auto"
+                        VerticalScrollMode="Enabled"
+                        PointerWheelChanged="CalendarScrollViewer_PointerWheelChanged"
+                        ViewChanged="CalendarScrollViewer_ViewChanged">
+                        <Canvas
+                    x:Name="CalendarCanvas"
+                    MinWidth="900"
+                    MinHeight="820"
+                    Background="#10161E" />
+                    </ScrollViewer>
+
+                    <Border
+                x:Name="CalendarEmptyState"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Padding="22,16"
+                Background="#E61B1F23"
+                BorderBrush="#465566"
+                BorderThickness="1"
+                CornerRadius="10"
+                Visibility="Collapsed">
+                        <TextBlock
+                    x:Name="CalendarEmptyText"
+                    MaxWidth="520"
+                    Text="No hay actividades para este día."
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                    </Border>
+                </Grid>
+            </Grid>
 
             <!--  Divisor izquierdo  -->
             <Border
@@ -1264,6 +1493,9 @@
                     <RowDefinition Height="30" />
                     <!--  Paginación  -->
                 </Grid.RowDefinitions>
+
+
+
 
                 <!--  Cabecera: breadcrumb izq · controles voz der  -->
                 <Grid
@@ -2298,6 +2530,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <StackPanel
@@ -2320,9 +2553,41 @@
                     TextTrimming="CharacterEllipsis" />
             </StackPanel>
 
+            <Border
+                x:Name="NotionSyncNotice"
+                Grid.Column="1"
+                MaxWidth="260"
+                Height="20"
+                Padding="8,1"
+                VerticalAlignment="Center"
+                Background="#2428A745"
+                BorderBrush="#5528A745"
+                BorderThickness="1"
+                CornerRadius="10"
+                Visibility="Collapsed"
+                ToolTipService.ToolTip="{Binding Text, ElementName=NotionSyncInfoText}">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="5">
+                    <FontIcon
+                        x:Name="NotionSyncNoticeIcon"
+                        FontSize="10"
+                        Glyph="&#xE73E;"
+                        Foreground="#74D68A" />
+                    <TextBlock
+                        x:Name="NotionSyncInfoText"
+                        MaxWidth="225"
+                        VerticalAlignment="Center"
+                        FontSize="10"
+                        Foreground="#D7EBDD"
+                        Text=""
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+
             <TextBlock
                 x:Name="ModeText"
-                Grid.Column="1"
+                Grid.Column="2"
                 VerticalAlignment="Center"
                 FontSize="11"
                 Opacity="0.6"
@@ -2330,7 +2595,7 @@
 
             <TextBlock
                 x:Name="CountText"
-                Grid.Column="2"
+                Grid.Column="3"
                 VerticalAlignment="Center"
                 FontSize="11"
                 Opacity="0.6"

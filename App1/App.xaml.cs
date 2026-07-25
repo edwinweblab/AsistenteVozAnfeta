@@ -22,6 +22,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
+using Anfeta.UI.Services.Search;
 
 namespace Anfeta.UI
 {
@@ -57,6 +58,7 @@ namespace Anfeta.UI
                     services.AddSingleton<ISpeechToTextService, SpeechToTextService>();
                     services.AddSingleton<ITextToSpeechService, TextToSpeechService>();
                     services.AddSingleton<GlobalHotkeyService>();
+                    services.AddSingleton<IndexedFileReminderService>();
 
                     // =========================
                     // Dropbox API / OAuth

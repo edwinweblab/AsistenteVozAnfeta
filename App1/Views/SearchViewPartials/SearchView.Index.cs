@@ -23,6 +23,7 @@ namespace Anfeta.UI.Views
         private const string LS_NotionLastSyncUtc = "Notion.LastSyncUtc";
         private DispatcherQueueTimer? _notionChangeTimer;
         private bool _notionSyncRunning;
+        private DispatcherQueueTimer? _notionNoticeTimer;
 
         private const string LS_DropboxSyncCursor = "Dropbox.SyncCursor";
         private DispatcherQueueTimer? _dropboxChangeTimer;
@@ -34,6 +35,86 @@ namespace Anfeta.UI.Views
                 return dto.LocalDateTime.ToString("yyyy-MM-dd HH:mm");
 
             return utcText;
+        }
+
+        private void ShowNotionSyncNotice(
+            string message,
+            bool isError = false,
+            int visibleSeconds = 5)
+        {
+            if (NotionSyncNotice == null ||
+                NotionSyncInfoText == null)
+            {
+                return;
+            }
+
+            _notionNoticeTimer?.Stop();
+            _notionNoticeTimer = null;
+
+            var clean = (message ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(clean))
+            {
+                HideNotionSyncNotice();
+                return;
+            }
+
+            NotionSyncInfoText.Text = clean;
+            NotionSyncNotice.Visibility = Visibility.Visible;
+
+            if (NotionSyncNoticeIcon != null)
+            {
+                NotionSyncNoticeIcon.Glyph =
+                    isError
+                        ? "\uE783"
+                        : "\uE73E";
+
+                NotionSyncNoticeIcon.Foreground =
+                    new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                        isError
+                            ? Windows.UI.Color.FromArgb(255, 255, 142, 142)
+                            : Windows.UI.Color.FromArgb(255, 116, 214, 138));
+            }
+
+            NotionSyncNotice.Background =
+                new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    isError
+                        ? Windows.UI.Color.FromArgb(45, 180, 52, 52)
+                        : Windows.UI.Color.FromArgb(36, 40, 167, 69));
+
+            NotionSyncNotice.BorderBrush =
+                new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    isError
+                        ? Windows.UI.Color.FromArgb(90, 220, 70, 70)
+                        : Windows.UI.Color.FromArgb(85, 40, 167, 69));
+
+            _notionNoticeTimer =
+                DispatcherQueue.CreateTimer();
+
+            _notionNoticeTimer.Interval =
+                TimeSpan.FromSeconds(
+                    Math.Max(2, visibleSeconds));
+
+            _notionNoticeTimer.IsRepeating = false;
+            _notionNoticeTimer.Tick += (_, _) =>
+            {
+                HideNotionSyncNotice();
+            };
+
+            _notionNoticeTimer.Start();
+        }
+
+        private void HideNotionSyncNotice()
+        {
+            _notionNoticeTimer?.Stop();
+            _notionNoticeTimer = null;
+
+            if (NotionSyncInfoText != null)
+                NotionSyncInfoText.Text = string.Empty;
+
+            if (NotionSyncNotice != null)
+                NotionSyncNotice.Visibility =
+                    Visibility.Collapsed;
         }
         #region ===== Index Coordinator (Auto-index) =====
 
@@ -429,7 +510,10 @@ namespace Anfeta.UI.Views
 
             if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(dataSourceId))
             {
-                NotionSyncInfoText.Text = "Notion no configurado";
+                ShowNotionSyncNotice(
+                    "Notion no configurado",
+                    isError: true,
+                    visibleSeconds: 7);
 
                 if (!automatic)
                     StatusText.Text = "Estado: Notion no configurado.";
@@ -458,9 +542,11 @@ namespace Anfeta.UI.Views
 
             try
             {
-                NotionSyncInfoText.Text = automatic
-                    ? "Sincronizando Notion..."
-                    : "Revisando Notion...";
+                ShowNotionSyncNotice(
+                    automatic
+                        ? "Sincronizando Notion..."
+                        : "Revisando Notion...",
+                    visibleSeconds: 4);
 
                 if (!automatic)
                     StatusText.Text = "Estado: Revisando cambios de Notion...";
@@ -468,6 +554,9 @@ namespace Anfeta.UI.Views
                 var syncAnchorUtc = DateTimeOffset.UtcNow;
 
                 List<SearchResultRow> changedItems;
+                DateTimeOffset calendarChangeAnchorUtc =
+                    syncAnchorUtc.Subtract(
+                        TimeSpan.FromMinutes(3));
 
                 if (!string.IsNullOrWhiteSpace(lastSyncStr) &&
                     DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
@@ -476,6 +565,9 @@ namespace Anfeta.UI.Views
                         lastSyncUtc
                             .ToUniversalTime()
                             .Subtract(TimeSpan.FromMinutes(3));
+
+                    calendarChangeAnchorUtc =
+                        overlapAnchor;
 
                     changedItems = await NotionIndexBuilder.BuildManyChangedSinceAsync(
                         token,
@@ -544,14 +636,32 @@ namespace Anfeta.UI.Views
                     }
                 }
 
+                var revisionesChanged =
+                    changedItems.Any(item =>
+                        string.Equals(
+                            item.ExternalSourceName,
+                            "Revisiones",
+                            StringComparison.OrdinalIgnoreCase));
+
+                if (revisionesChanged)
+                {
+                    await RefreshCalendarAfterNotionChangesAsync(
+                        calendarChangeAnchorUtc);
+                }
+
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] =
                     syncAnchorUtc.ToString("O");
 
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
 
-                NotionSyncInfoText.Text = changedItems.Count > 0
-                    ? $"Notion actualizado ✅ {changedItems.Count} cambios"
-                    : $"Notion al día ✅ {FormatUtcLocal(syncAnchorUtc.ToString("O"))}";
+                ShowNotionSyncNotice(
+                    changedItems.Count > 0
+                        ? $"Notion actualizado · {changedItems.Count} cambio(s)"
+                        : "Notion al día",
+                    visibleSeconds:
+                        changedItems.Count > 0
+                            ? 6
+                            : 3);
 
                 if (showNotionUi)
                 {
@@ -562,7 +672,10 @@ namespace Anfeta.UI.Views
             }
             catch (Exception ex)
             {
-                NotionSyncInfoText.Text = "Notion: revisión falló";
+                ShowNotionSyncNotice(
+                    "Error al revisar Notion",
+                    isError: true,
+                    visibleSeconds: 8);
 
                 if (showNotionUi)
                     StatusText.Text = $"Estado: Error actualizando Notion → {ex.Message}";
@@ -609,7 +722,9 @@ namespace Anfeta.UI.Views
                     DateTimeOffset.UtcNow.ToString("O");
 
                 StatusText.Text = $"Estado: Notion cargado ✅ ({notionItems.Count} páginas)";
-                NotionSyncInfoText.Text = $"Notion al día ✅ {FormatUtcLocal(DateTimeOffset.UtcNow.ToString("O"))}";
+                ShowNotionSyncNotice(
+                    "Notion al día",
+                    visibleSeconds: 3);
 
                 return notionItems.Count > 0;
             }
@@ -935,13 +1050,15 @@ namespace Anfeta.UI.Views
                 string.IsNullOrWhiteSpace(lastSyncStr) ||
                 !DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
             {
-                NotionSyncInfoText.Text = "";
+                HideNotionSyncNotice();
                 return;
             }
 
             try
             {
-                NotionSyncInfoText.Text = "Revisando Notion...";
+                ShowNotionSyncNotice(
+                    "Revisando Notion...",
+                    visibleSeconds: 3);
 
                 var overlapAnchor =
                     lastSyncUtc
@@ -960,13 +1077,18 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                NotionSyncInfoText.Text = $"Notion al día ✅ {FormatUtcLocal(lastSyncStr)}";
+                ShowNotionSyncNotice(
+                    "Notion al día",
+                    visibleSeconds: 3);
             }
             catch
             {
                 // No bloqueamos el buscador si falla una revisión silenciosa.
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
-                NotionSyncInfoText.Text = "Notion: revisión falló";
+                ShowNotionSyncNotice(
+                    "Error al revisar Notion",
+                    isError: true,
+                    visibleSeconds: 8);
             }
         }
         private async void BtnCheckNotionDeleted_Click(object sender, RoutedEventArgs e)
@@ -1095,10 +1217,14 @@ namespace Anfeta.UI.Views
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] = now;
 
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
-                NotionSyncInfoText.Text = $"Notion al día ✅ {FormatUtcLocal(now)}";
+                ShowNotionSyncNotice(
+                    "Notion al día",
+                    visibleSeconds: 4);
 
                 if (_activeSourceScope != SearchSourceScope.Dropbox)
                     await RefreshCurrentViewPreservingScopeAsync();
+
+                await RebuildCalendarCacheAfterFullSyncAsync();
 
                 StatusText.Text = $"Estado: Resync Notion completo ✅ ({freshNotionItems.Count} páginas)";
             }

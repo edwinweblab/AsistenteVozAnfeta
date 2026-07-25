@@ -109,6 +109,13 @@ namespace Anfeta.UI.Views
 
                 // Si hay índice cargado, mostrar todos los resultados.
                 // Aquí entran Notion, local o local + Notion.
+                // Importante: esta es una vista global de búsqueda, no navegación
+                // por carpeta. Si no se limpia este estado, al renombrar un archivo
+                // ANFETA intenta refrescar la carpeta raíz y cambia de vista.
+                _isBrowsing = false;
+                _currentFolder = string.Empty;
+                _currentFolderPath = string.Empty;
+
                 BreadcrumbText.Text = "Todos los resultados";
 
                 await PaintLoadedIndexAsync();
@@ -179,6 +186,13 @@ namespace Anfeta.UI.Views
 
         private async Task RunSearchAsync(string uiQuery, string? effectiveQuery = null)
         {
+            // Toda búsqueda, incluso una búsqueda vacía, representa la vista
+            // global del índice. Esto evita conservar por error el estado de
+            // navegación de una carpeta anterior.
+            _isBrowsing = false;
+            _currentFolder = string.Empty;
+            _currentFolderPath = string.Empty;
+
             if (DropboxIndexCoordinator.IsIndexing)
             {
                 StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
@@ -214,6 +228,7 @@ namespace Anfeta.UI.Views
         // Sin CancellationToken — para llamadas directas
         private async Task RunLocalSearchAsync(string query)
         {
+            _isBrowsing = false;
             _mode = ViewMode.Explorer;
             Results.Clear();
 
@@ -310,6 +325,7 @@ namespace Anfeta.UI.Views
         {
             token.ThrowIfCancellationRequested();
 
+            _isBrowsing = false;
             _mode = ViewMode.Explorer;
             Results.Clear();
 
