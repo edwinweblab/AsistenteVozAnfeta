@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -16,8 +15,7 @@ namespace Anfeta.UI.Services.Notion
     {
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
-        private const int HttpTimeoutSeconds = 120;
-        private const int MaxRetryAttempts = 4;
+        private const int HttpTimeoutSeconds = 30;
 
         public static async Task<List<SearchResultRow>> BuildAsync(
             string token,
@@ -101,10 +99,14 @@ namespace Anfeta.UI.Services.Notion
 
                 var jsonBody = JsonSerializer.Serialize(payload);
 
-                using var response = await SendQueryWithRetryAsync(
-                    http,
-                    $"data_sources/{dataSourceId.Trim()}/query",
+                using var content = new StringContent(
                     jsonBody,
+                    Encoding.UTF8,
+                    "application/json");
+
+                using var response = await http.PostAsync(
+                    $"data_sources/{dataSourceId.Trim()}/query",
+                    content,
                     ct);
 
                 var json = await response.Content.ReadAsStringAsync(ct);
@@ -173,99 +175,6 @@ namespace Anfeta.UI.Services.Notion
 
             return changes.Count > 0;
         }
-
-        private static async Task<HttpResponseMessage> SendQueryWithRetryAsync(
-            HttpClient http,
-            string requestUri,
-            string jsonBody,
-            CancellationToken cancellationToken)
-        {
-            Exception? lastException = null;
-
-            for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    using var content = new StringContent(
-                        jsonBody,
-                        Encoding.UTF8,
-                        "application/json");
-
-                    var response = await http.PostAsync(
-                        requestUri,
-                        content,
-                        cancellationToken);
-
-                    if (!ShouldRetry(response.StatusCode) ||
-                        attempt == MaxRetryAttempts)
-                    {
-                        return response;
-                    }
-
-                    var delay = GetRetryDelay(response, attempt);
-                    response.Dispose();
-                    await Task.Delay(delay, cancellationToken);
-                }
-                catch (TaskCanceledException ex)
-                    when (!cancellationToken.IsCancellationRequested &&
-                          attempt < MaxRetryAttempts)
-                {
-                    lastException = ex;
-                    await Task.Delay(
-                        GetExponentialDelay(attempt),
-                        cancellationToken);
-                }
-                catch (HttpRequestException ex)
-                    when (attempt < MaxRetryAttempts)
-                {
-                    lastException = ex;
-                    await Task.Delay(
-                        GetExponentialDelay(attempt),
-                        cancellationToken);
-                }
-            }
-
-            throw new HttpRequestException(
-                "Notion no respondió después de varios intentos.",
-                lastException);
-        }
-
-        private static bool ShouldRetry(HttpStatusCode statusCode)
-        {
-            var numeric = (int)statusCode;
-            return statusCode == HttpStatusCode.TooManyRequests ||
-                   numeric == 529 ||
-                   numeric >= 500;
-        }
-
-        private static TimeSpan GetRetryDelay(
-            HttpResponseMessage response,
-            int attempt)
-        {
-            if (response.Headers.RetryAfter?.Delta is TimeSpan delta &&
-                delta > TimeSpan.Zero)
-            {
-                return delta;
-            }
-
-            if (response.Headers.RetryAfter?.Date is DateTimeOffset date)
-            {
-                var wait = date - DateTimeOffset.UtcNow;
-                if (wait > TimeSpan.Zero)
-                    return wait;
-            }
-
-            return GetExponentialDelay(attempt);
-        }
-
-        private static TimeSpan GetExponentialDelay(int attempt)
-        {
-            var seconds = Math.Min(12, Math.Pow(2, attempt - 1));
-            return TimeSpan.FromSeconds(seconds);
-        }
-
         private static SearchResultRow MapPageToSearchRow(JsonElement page, string sourceName)
         {
             var pageId = GetString(page, "id");
@@ -279,6 +188,7 @@ namespace Anfeta.UI.Services.Notion
 
             string title = "";
             string description = "";
+            string scheduledDate = "";
             string projectUpdateStatus = "";
 
             if (hasProps)
@@ -296,13 +206,16 @@ namespace Anfeta.UI.Services.Notion
 
                 description = GetPropText(props, "Descripción / Notas");
 
-                projectUpdateStatus = GetPropTextByAliases(
-                    props,
-                    "Estado texto Actualización Proyecto",
-                    "Estado Texto Actualización Proyecto",
-                    "Estado texto actualización proyecto",
-                    "Estado de actualización",
-                    "Estado actualización");
+                scheduledDate =
+                    GetPropTextByFlexibleAliases(
+                        props,
+                        "Fecha POR Hacer (Trabajando)",
+                        "Fecha por hacer",
+                        "Fecha POR Hacer",
+                        "Fecha de Inicio");
+
+                projectUpdateStatus =
+                    GetProjectUpdateStatus(props);
             }
 
             if (string.IsNullOrWhiteSpace(title))
@@ -313,7 +226,8 @@ namespace Anfeta.UI.Services.Notion
                 sourceName,
                 title,
                 description,
-                projectUpdateStatus
+                projectUpdateStatus,
+                scheduledDate
             };
 
             return new SearchResultRow
@@ -330,6 +244,7 @@ namespace Anfeta.UI.Services.Notion
                 Source = SearchSource.Notion,
                 Description = description,
                 ProjectUpdateStatus = projectUpdateStatus,
+                ScheduledDate = scheduledDate,
                 SearchText = string.Join(" ", searchParts.Where(x => !string.IsNullOrWhiteSpace(x)))
             };
         }
@@ -348,56 +263,167 @@ namespace Anfeta.UI.Services.Notion
 
             return $"[{sourceName}] {cleanTitle}";
         }
-        private static string GetPropTextByAliases(
-            JsonElement props,
-            params string[] aliases)
+        private static string GetProjectUpdateStatus(
+            JsonElement props)
         {
-            var normalizedAliases = aliases
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(NormalizePropertyName)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var prop in props.EnumerateObject())
+            var preferredNames = new[]
             {
-                if (normalizedAliases.Contains(
-                        NormalizePropertyName(prop.Name)))
+                "Estado texto Actualización Proyecto",
+                "Estado Texto Actualización Proyecto",
+                "Estado texto actualización proyecto"
+            };
+
+            foreach (var preferred in preferredNames)
+            {
+                var normalizedPreferred =
+                    NormalizePropertyName(preferred);
+
+                foreach (var property in props.EnumerateObject())
                 {
-                    return ExtractPropertyText(prop.Value);
+                    if (NormalizePropertyName(property.Name) != normalizedPreferred)
+                        continue;
+
+                    var type = GetString(property.Value, "type");
+
+                    if (type == "checkbox")
+                        continue;
+
+                    if (type == "formula" &&
+                        property.Value.TryGetProperty("formula", out var formula) &&
+                        GetString(formula, "type") == "boolean")
+                    {
+                        continue;
+                    }
+
+                    var text = ExtractPropertyText(property.Value);
+
+                    if (IsUsefulProjectStatus(text))
+                        return text.Trim();
                 }
             }
 
-            return "";
+            foreach (var property in props.EnumerateObject())
+            {
+                var name = NormalizePropertyName(property.Name);
+
+                if (!name.Contains("estado") ||
+                    !name.Contains("texto") ||
+                    !name.Contains("actualizacion") ||
+                    !name.Contains("proyecto"))
+                {
+                    continue;
+                }
+
+                var type = GetString(property.Value, "type");
+
+                if (type == "checkbox")
+                    continue;
+
+                if (type == "formula" &&
+                    property.Value.TryGetProperty("formula", out var formula) &&
+                    GetString(formula, "type") == "boolean")
+                {
+                    continue;
+                }
+
+                var text = ExtractPropertyText(property.Value);
+
+                if (IsUsefulProjectStatus(text))
+                    return text.Trim();
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsUsefulProjectStatus(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            return !string.Equals(text, "Sí", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(text, "No", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(text, "True", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(text, "False", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetPropTextByFlexibleAliases(
+            JsonElement props,
+            params string[] aliases)
+        {
+            foreach (var alias in aliases)
+            {
+                var exact = GetPropText(props, alias);
+
+                if (!string.IsNullOrWhiteSpace(exact))
+                    return exact;
+            }
+
+            var normalizedAliases = aliases
+                .Select(NormalizePropertyName)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+
+            foreach (var property in props.EnumerateObject())
+            {
+                var normalizedName =
+                    NormalizePropertyName(property.Name);
+
+                var matches =
+                    normalizedAliases.Any(alias =>
+                        normalizedName == alias ||
+                        normalizedName.Contains(alias) ||
+                        alias.Contains(normalizedName));
+
+                if (!matches &&
+                    normalizedAliases.Any(alias =>
+                        alias.Contains("fecha por hacer") &&
+                        normalizedName.Contains("fecha por hacer")))
+                {
+                    matches = true;
+                }
+
+                if (!matches)
+                    continue;
+
+                var value = ExtractPropertyText(property.Value);
+
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+
+            return string.Empty;
         }
 
         private static string NormalizePropertyName(string value)
         {
-            var normalized = (value ?? string.Empty)
+            var text = (value ?? string.Empty)
                 .Trim()
                 .ToLowerInvariant()
                 .Normalize(NormalizationForm.FormD);
 
-            var builder = new StringBuilder(normalized.Length);
+            var builder = new StringBuilder();
 
-            foreach (var character in normalized)
+            foreach (var ch in text)
             {
                 var category =
                     System.Globalization.CharUnicodeInfo
-                        .GetUnicodeCategory(character);
+                        .GetUnicodeCategory(ch);
 
-                if (category !=
+                if (category ==
                     System.Globalization.UnicodeCategory.NonSpacingMark)
                 {
-                    builder.Append(
-                        char.IsWhiteSpace(character)
-                            ? ' '
-                            : character);
+                    continue;
                 }
+
+                builder.Append(
+                    char.IsLetterOrDigit(ch)
+                        ? ch
+                        : ' ');
             }
 
             return string.Join(
                 " ",
                 builder.ToString()
-                    .Normalize(NormalizationForm.FormC)
                     .Split(
                         ' ',
                         StringSplitOptions.RemoveEmptyEntries));
@@ -432,6 +458,7 @@ namespace Anfeta.UI.Services.Notion
                 "number" => ExtractNumber(prop, "number"),
                 "checkbox" => ExtractCheckbox(prop),
                 "formula" => ExtractFormula(prop),
+                "rollup" => ExtractRollup(prop),
                 "unique_id" => ExtractUniqueId(prop),
                 "people" => ExtractPeople(prop),
                 "files" => ExtractFiles(prop),
@@ -534,6 +561,40 @@ namespace Anfeta.UI.Services.Notion
                 "date" => ExtractDate(formula),
                 _ => ""
             };
+        }
+
+        private static string ExtractRollup(JsonElement prop)
+        {
+            if (!prop.TryGetProperty(
+                    "rollup",
+                    out var rollup) ||
+                rollup.ValueKind != JsonValueKind.Object)
+            {
+                return string.Empty;
+            }
+
+            var type = GetString(rollup, "type");
+
+            if (type == "date")
+                return ExtractDate(rollup);
+
+            if (type == "array" &&
+                rollup.TryGetProperty(
+                    "array",
+                    out var array) &&
+                array.ValueKind == JsonValueKind.Array)
+            {
+                return string.Join(
+                    " ",
+                    array.EnumerateArray()
+                        .Select(ExtractPropertyText)
+                        .Where(x => !string.IsNullOrWhiteSpace(x)));
+            }
+
+            if (type == "number")
+                return ExtractNumber(rollup, "number");
+
+            return string.Empty;
         }
 
         private static string ExtractUniqueId(JsonElement prop)
@@ -662,7 +723,6 @@ namespace Anfeta.UI.Services.Notion
                         source.Name);
 
                     all.AddRange(rows);
-                    await Task.Delay(350, ct);
                 }
                 catch (OperationCanceledException)
                 {

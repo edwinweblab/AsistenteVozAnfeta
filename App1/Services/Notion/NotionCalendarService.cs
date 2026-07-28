@@ -31,12 +31,18 @@ namespace Anfeta.UI.Services.Notion
                     100);
     }
 
+    public sealed record NotionCalendarWarmupResult(
+        bool HadSavedToday,
+        bool Updated,
+        int TodayCount,
+        string Message);
+
     public sealed class NotionCalendarService
     {
         public string LastDiagnostics { get; private set; } = "";
 
         private const string CacheFileName =
-            "notion_calendar_cache_v1.json";
+            "notion_calendar_cache_v5.json";
 
         private static readonly SemaphoreSlim CacheLock =
             new(1, 1);
@@ -46,6 +52,9 @@ namespace Anfeta.UI.Services.Notion
                 new(StringComparer.Ordinal);
 
         private static bool _cacheLoaded;
+
+        private static readonly object StartupWarmupLock = new();
+        private static Task<NotionCalendarWarmupResult>? _startupWarmupTask;
 
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
@@ -82,10 +91,23 @@ namespace Anfeta.UI.Services.Notion
 
         private static readonly string[] StatusAliases =
         {
+            "(bien) Estado opcion multiple revisiones",
+            "Estado opcion multiple revisiones",
+            "Estado opción múltiple revisiones",
             "Estado de trabajo",
             "Estado texto Actualización Proyecto",
             "Seguimiento Estado Proyecto",
             "Estatus IA"
+        };
+
+        private static readonly string[] DescriptionAliases =
+        {
+            "Descripción",
+            "Descripcion",
+            "Actividad",
+            "Notas",
+            "Comentario",
+            "Resumen"
         };
 
         private readonly ConcurrentDictionary<string, string> _relatedTitleCache =
@@ -94,6 +116,104 @@ namespace Anfeta.UI.Services.Notion
         private sealed record SchemaInfo(
             IReadOnlyList<string> DateProperties,
             string TitleProperty);
+
+        public Task<NotionCalendarWarmupResult> StartStartupWarmupAsync(
+            string token,
+            DateTimeOffset? changedAfterUtc,
+            CancellationToken cancellationToken = default)
+        {
+            lock (StartupWarmupLock)
+            {
+                if (_startupWarmupTask == null ||
+                    _startupWarmupTask.IsCanceled ||
+                    _startupWarmupTask.IsFaulted)
+                {
+                    _startupWarmupTask =
+                        WarmupStartupCoreAsync(
+                            token,
+                            changedAfterUtc,
+                            cancellationToken);
+                }
+
+                return _startupWarmupTask;
+            }
+        }
+
+        private async Task<NotionCalendarWarmupResult> WarmupStartupCoreAsync(
+            string token,
+            DateTimeOffset? changedAfterUtc,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return new NotionCalendarWarmupResult(
+                    false,
+                    false,
+                    0,
+                    "Calendario sin token de Notion.");
+            }
+
+            await EnsureCacheLoadedAsync(cancellationToken);
+
+            var savedToday =
+                await TryGetCachedDayAsync(
+                    DateTime.Today,
+                    cancellationToken);
+
+            var hadSavedToday =
+                savedToday != null;
+
+            var updated = false;
+
+            if (hadSavedToday &&
+                changedAfterUtc.HasValue)
+            {
+                updated =
+                    await RefreshChangedSinceAsync(
+                        token,
+                        changedAfterUtc.Value
+                            .ToUniversalTime()
+                            .Subtract(TimeSpan.FromMinutes(3)),
+                        cancellationToken);
+            }
+            else
+            {
+                // Solo cuando todavía no existe caché útil se construye Hoy.
+                // En aperturas posteriores se usa actualización incremental.
+                await GetDayAsync(
+                    token,
+                    DateTime.Today,
+                    progress: null,
+                    cancellationToken,
+                    forceRefresh: true);
+
+                updated = true;
+            }
+
+            // Ayer y Mañana se preparan únicamente si todavía no existen.
+            await PreloadDayAsync(
+                token,
+                DateTime.Today.AddDays(-1),
+                cancellationToken);
+
+            await PreloadDayAsync(
+                token,
+                DateTime.Today.AddDays(1),
+                cancellationToken);
+
+            var currentToday =
+                await TryGetCachedDayAsync(
+                    DateTime.Today,
+                    cancellationToken);
+
+            return new NotionCalendarWarmupResult(
+                hadSavedToday,
+                updated,
+                currentToday?.Count ?? 0,
+                updated
+                    ? "Calendario actualizado con los cambios recientes."
+                    : "La versión guardada ya estaba al día.");
+        }
 
         public async Task<IReadOnlyList<NotionCalendarActivity>> GetDayAsync(
             string token,
@@ -329,6 +449,232 @@ namespace Anfeta.UI.Services.Notion
                 forceRefresh: true);
         }
 
+        public async Task<NotionCalendarActivity> MoveActivityToDateAsync(
+            string token,
+            NotionCalendarActivity activity,
+            DateTime targetDate,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                throw new InvalidOperationException(
+                    "La actividad no contiene un identificador de Notion.");
+            }
+
+            using var http =
+                CreateClient(token);
+
+            var page =
+                await ReadPageAsync(
+                    http,
+                    activity.PageId,
+                    cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "No se pudieron leer las propiedades actuales de la actividad.");
+            }
+
+            var propertyName =
+                activity.DatePropertyName;
+
+            if (string.IsNullOrWhiteSpace(propertyName) ||
+                !properties.TryGetProperty(
+                    propertyName,
+                    out var currentProperty) ||
+                !ReadString(currentProperty, "type")
+                    .Equals(
+                        "date",
+                        StringComparison.OrdinalIgnoreCase))
+            {
+                propertyName =
+                    DateAliases.FirstOrDefault(alias =>
+                        properties.EnumerateObject().Any(property =>
+                            Normalize(property.Name) == Normalize(alias) &&
+                            ReadString(property.Value, "type")
+                                .Equals(
+                                    "date",
+                                    StringComparison.OrdinalIgnoreCase)))
+                    ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                throw new InvalidOperationException(
+                    "No se encontró una propiedad de fecha editable. " +
+                    "La fecha visible podría provenir de una fórmula o rollup.");
+            }
+
+            var duration =
+                activity.End > activity.Start
+                    ? activity.End - activity.Start
+                    : TimeSpan.FromHours(1);
+
+            var newStart =
+                targetDate.Date.Add(activity.Start.TimeOfDay);
+
+            var newEnd =
+                newStart.Add(duration);
+
+            var startOffset =
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        newStart,
+                        DateTimeKind.Local));
+
+            var endOffset =
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        newEnd,
+                        DateTimeKind.Local));
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["properties"] =
+                        new Dictionary<string, object?>
+                        {
+                            [propertyName] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["date"] =
+                                        new Dictionary<string, object?>
+                                        {
+                                            ["start"] =
+                                                startOffset.ToString("O"),
+                                            ["end"] =
+                                                endOffset.ToString("O")
+                                        }
+                                }
+                        }
+                };
+
+            using var response =
+                await SendPatchWithRetryAsync(
+                    http,
+                    $"pages/{activity.PageId}",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
+
+            var responseJson =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "mover la actividad",
+                    response,
+                    responseJson);
+            }
+
+            var updated =
+                new NotionCalendarActivity
+                {
+                    PageId = activity.PageId,
+                    PageUrl = activity.PageUrl,
+                    Title = activity.Title,
+                    Person = activity.Person,
+                    OriginalPerson = activity.OriginalPerson,
+                    IsCompletedForReview =
+                        activity.IsCompletedForReview,
+                    Project = activity.Project,
+                    Status = activity.Status,
+                    StatusColor = activity.StatusColor,
+                    Description = activity.Description,
+                    DatePropertyName = propertyName,
+                    Start = newStart,
+                    End = newEnd
+                };
+
+            await RemoveActivityFromCacheAsync(
+                activity.PageId,
+                cancellationToken);
+
+            foreach (var day in EnumerateActivityDays(updated))
+            {
+                var key =
+                    day.ToString(
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture);
+
+                await CacheLock.WaitAsync(
+                    cancellationToken);
+
+                try
+                {
+                    if (!DayCache.TryGetValue(
+                            key,
+                            out var list))
+                    {
+                        list =
+                            new List<NotionCalendarActivity>();
+
+                        DayCache[key] = list;
+                    }
+
+                    list.RemoveAll(item =>
+                        string.Equals(
+                            item.PageId,
+                            updated.PageId,
+                            StringComparison.OrdinalIgnoreCase));
+
+                    list.Add(updated);
+
+                    await SaveCacheUnsafeAsync(
+                        cancellationToken);
+                }
+                finally
+                {
+                    CacheLock.Release();
+                }
+            }
+
+            return updated;
+        }
+
+        private static async Task RemoveActivityFromCacheAsync(
+            string pageId,
+            CancellationToken cancellationToken)
+        {
+            await EnsureCacheLoadedAsync(
+                cancellationToken);
+
+            await CacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                foreach (var key in DayCache.Keys.ToList())
+                {
+                    DayCache[key].RemoveAll(activity =>
+                        string.Equals(
+                            activity.PageId,
+                            pageId,
+                            StringComparison.OrdinalIgnoreCase));
+                }
+
+                await SaveCacheUnsafeAsync(
+                    cancellationToken);
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+        }
+
         public async Task<bool> RefreshChangedSinceAsync(
             string token,
             DateTimeOffset changedAfterUtc,
@@ -497,8 +843,16 @@ namespace Anfeta.UI.Services.Notion
 
             try
             {
-                DayCache[key] =
+                var incoming =
                     activities.ToList();
+
+                // Una consulta válida sin actividades sí debe guardarse,
+                // pero nunca sustituimos una caché poblada cuando la llamada
+                // fue cancelada antes de completar este método.
+                cancellationToken.ThrowIfCancellationRequested();
+
+                DayCache[key] =
+                    incoming;
 
                 await SaveCacheUnsafeAsync(
                     cancellationToken);
@@ -840,7 +1194,7 @@ namespace Anfeta.UI.Services.Notion
                     schema.DateProperties,
                     out var start,
                     out var end,
-                    out _))
+                    out var datePropertyName))
             {
                 return null;
             }
@@ -864,9 +1218,13 @@ namespace Anfeta.UI.Services.Notion
                 props,
                 ProjectAliases);
 
-            var status = ReadByAliases(
+            var (status, statusColor) =
+                ReadPreferredCalendarStatus(
+                    props);
+
+            var description = ReadByAliases(
                 props,
-                StatusAliases);
+                DescriptionAliases);
 
             var pageId = ReadString(page, "id");
             var pageUrl = ReadString(page, "url");
@@ -877,8 +1235,13 @@ namespace Anfeta.UI.Services.Notion
                 PageUrl = pageUrl,
                 Title = title,
                 Person = people,
+                OriginalPerson = people,
+                IsCompletedForReview = IsCompletedReviewStatus(status),
                 Project = project,
                 Status = status,
+                StatusColor = statusColor,
+                Description = description,
+                DatePropertyName = datePropertyName,
                 Start = start,
                 End = end
             };
@@ -1162,6 +1525,217 @@ namespace Anfeta.UI.Services.Notion
 
             using var document = JsonDocument.Parse(json);
             return document.RootElement.Clone();
+        }
+
+        private static (string Name, string Color)
+            ReadPreferredCalendarStatus(
+                JsonElement props)
+        {
+            // Prioridad absoluta a la propiedad mostrada en Notion:
+            // “(bien) Estado opcion multiple revisiones”.
+            foreach (var property in props.EnumerateObject())
+            {
+                var normalizedName =
+                    Normalize(property.Name);
+
+                var isPreferred =
+                    normalizedName ==
+                        "bien estado opcion multiple revisiones" ||
+                    normalizedName ==
+                        "estado opcion multiple revisiones";
+
+                if (!isPreferred)
+                    continue;
+
+                var name =
+                    ExtractPropertyText(
+                        property.Value);
+
+                var color =
+                    ReadPropertyOptionColor(
+                        property.Value);
+
+                if (string.IsNullOrWhiteSpace(color))
+                    color = MapStatusNameToNotionColor(name);
+
+                if (!string.IsNullOrWhiteSpace(name) ||
+                    !string.IsNullOrWhiteSpace(color))
+                {
+                    return (name, color);
+                }
+            }
+
+            // El color del calendario no debe inferirse desde el título
+            // zREVISION ni desde otros estados. Si la propiedad solicitada
+            // no existe o está vacía, se conserva un estado neutro.
+            return (
+                string.Empty,
+                string.Empty);
+        }
+
+        private static string ReadPropertyOptionColor(
+            JsonElement property)
+        {
+            if (property.ValueKind != JsonValueKind.Object)
+                return string.Empty;
+
+            var type = ReadString(property, "type");
+
+            if ((type == "status" || type == "select") &&
+                property.TryGetProperty(type, out var selected) &&
+                selected.ValueKind == JsonValueKind.Object)
+            {
+                var directColor = ReadString(selected, "color");
+
+                if (!string.IsNullOrWhiteSpace(directColor))
+                    return directColor;
+            }
+
+            if (type == "multi_select" &&
+                property.TryGetProperty("multi_select", out var options) &&
+                options.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var option in options.EnumerateArray())
+                {
+                    var color = ReadString(option, "color");
+
+                    if (!string.IsNullOrWhiteSpace(color))
+                        return color;
+                }
+            }
+
+            if (type == "rollup" &&
+                property.TryGetProperty("rollup", out var rollup) &&
+                rollup.ValueKind == JsonValueKind.Object &&
+                ReadString(rollup, "type") == "array" &&
+                rollup.TryGetProperty("array", out var items) &&
+                items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    var color = ReadPropertyOptionColor(item);
+
+                    if (!string.IsNullOrWhiteSpace(color))
+                        return color;
+                }
+            }
+
+            return MapStatusNameToNotionColor(
+                ExtractPropertyText(property));
+        }
+
+        private static bool IsCompletedReviewStatus(
+            string status)
+        {
+            var normalized = Normalize(status);
+
+            return
+                normalized.Contains("pendiente") &&
+                normalized.Contains("cobrar") ||
+                normalized.Contains("cobrado") &&
+                normalized.Contains("terminado");
+        }
+
+        private static string MapStatusNameToNotionColor(
+            string status)
+        {
+            var normalized = Normalize(status);
+
+            if (string.IsNullOrWhiteSpace(normalized))
+                return string.Empty;
+
+            if (normalized.Contains("suspe") && normalized.Contains("pago"))
+                return "yellow";
+
+            if (normalized.Contains("arrancar") && normalized.Contains("asignar"))
+                return "red";
+
+            if (normalized.Contains("prtuz") && normalized.Contains("por hacer"))
+                return "purple";
+
+            if (normalized.Contains("revisar") && normalized.Contains("revisiones"))
+                return "blue";
+
+            if (normalized.Contains("terminado") &&
+                normalized.Contains("rev") &&
+                normalized.Contains("cobro"))
+            {
+                return "blue";
+            }
+
+            if (normalized.Contains("pendiente") && normalized.Contains("cobrar"))
+                return "green";
+
+            if (normalized.Contains("cobrado") && normalized.Contains("terminado"))
+                return "green";
+
+            if (normalized.Contains("terminado"))
+                return "green";
+
+            return string.Empty;
+        }
+
+        private static string ReadColorByAliases(
+            JsonElement props,
+            IEnumerable<string> aliases)
+        {
+            foreach (var alias in aliases)
+            {
+                var property =
+                    FindPropertyByAlias(
+                        props,
+                        alias);
+
+                if (property.ValueKind !=
+                    JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var type =
+                    ReadString(
+                        property,
+                        "type");
+
+                if ((type == "status" ||
+                     type == "select") &&
+                    property.TryGetProperty(
+                        type,
+                        out var selected) &&
+                    selected.ValueKind ==
+                        JsonValueKind.Object)
+                {
+                    var color =
+                        ReadString(
+                            selected,
+                            "color");
+
+                    if (!string.IsNullOrWhiteSpace(color))
+                        return color;
+                }
+
+                if (type == "multi_select" &&
+                    property.TryGetProperty(
+                        "multi_select",
+                        out var options) &&
+                    options.ValueKind ==
+                        JsonValueKind.Array)
+                {
+                    foreach (var option in
+                             options.EnumerateArray())
+                    {
+                        var color =
+                            ReadString(
+                                option,
+                                "color");
+
+                        if (!string.IsNullOrWhiteSpace(color))
+                            return color;
+                    }
+                }
+            }
+
+            return string.Empty;
         }
 
         private static string ReadByAliases(
@@ -1543,9 +2117,12 @@ namespace Anfeta.UI.Services.Notion
                 ("isaias", "Isaias"),
                 ("isai", "Isaias"),
 
-                ("eedua", "Eduardo"),
-                ("eduardo", "Eduardo"),
-                ("edua", "Eduardo"),
+                ("ssote", "Sotelo"),
+                ("sotelo", "Sotelo"),
+                ("sote", "Sotelo"),
+                ("eedua", "Sotelo"),
+                ("eduardo", "Sotelo"),
+                ("edua", "Sotelo"),
 
                 ("aacal", "Acalli"),
                 ("acalli", "Acalli"),
@@ -1662,6 +2239,34 @@ namespace Anfeta.UI.Services.Notion
                     return await http.PostAsync(
                         requestUri,
                         content,
+                        cancellationToken);
+                },
+                cancellationToken);
+        }
+
+        private static async Task<HttpResponseMessage> SendPatchWithRetryAsync(
+            HttpClient http,
+            string requestUri,
+            string json,
+            CancellationToken cancellationToken)
+        {
+            return await SendWithRetryAsync(
+                async () =>
+                {
+                    using var request =
+                        new HttpRequestMessage(
+                            HttpMethod.Patch,
+                            requestUri)
+                        {
+                            Content =
+                                new StringContent(
+                                    json,
+                                    Encoding.UTF8,
+                                    "application/json")
+                        };
+
+                    return await http.SendAsync(
+                        request,
                         cancellationToken);
                 },
                 cancellationToken);

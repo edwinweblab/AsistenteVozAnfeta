@@ -420,13 +420,15 @@ namespace Anfeta.UI.Views
             SearchResultRow existing,
             SearchResultRow incoming)
         {
-            if (string.Equals(
-                    existing.DisplayName,
-                    incoming.DisplayName,
-                    StringComparison.Ordinal))
-            {
+            var sameContent =
+                string.Equals(existing.DisplayName, incoming.DisplayName, StringComparison.Ordinal) &&
+                string.Equals(existing.Description ?? string.Empty, incoming.Description ?? string.Empty, StringComparison.Ordinal) &&
+                string.Equals(existing.ProjectUpdateStatus ?? string.Empty, incoming.ProjectUpdateStatus ?? string.Empty, StringComparison.Ordinal) &&
+                string.Equals(existing.ScheduledDate ?? string.Empty, incoming.ScheduledDate ?? string.Empty, StringComparison.Ordinal) &&
+                string.Equals(existing.ServerModified ?? string.Empty, incoming.ServerModified ?? string.Empty, StringComparison.Ordinal);
+
+            if (sameContent)
                 return false;
-            }
 
             var existingModified =
                 ParseNotionModified(existing.ServerModified);
@@ -531,23 +533,11 @@ namespace Anfeta.UI.Views
                 !automatic ||
                 _activeSourceScope != SearchSourceScope.Dropbox;
 
-            if (showNotionUi)
-            {
-                ShowLoadingState(
-                    automatic
-                        ? "Estado: Sincronizando Notion..."
-                        : "Estado: Revisando cambios de Notion...",
-                    "Consultando páginas nuevas o modificadas.");
-            }
+            // La sincronización de Notion usa únicamente el estado inferior
+            // y el aviso compacto. No mostramos el overlay central.
 
             try
             {
-                ShowNotionSyncNotice(
-                    automatic
-                        ? "Sincronizando Notion..."
-                        : "Revisando Notion...",
-                    visibleSeconds: 4);
-
                 if (!automatic)
                     StatusText.Text = "Estado: Revisando cambios de Notion...";
 
@@ -654,15 +644,6 @@ namespace Anfeta.UI.Views
 
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
 
-                ShowNotionSyncNotice(
-                    changedItems.Count > 0
-                        ? $"Notion actualizado · {changedItems.Count} cambio(s)"
-                        : "Notion al día",
-                    visibleSeconds:
-                        changedItems.Count > 0
-                            ? 6
-                            : 3);
-
                 if (showNotionUi)
                 {
                     StatusText.Text = changedItems.Count > 0
@@ -686,8 +667,7 @@ namespace Anfeta.UI.Views
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
                 BtnRefreshNotion.IsEnabled = true;
 
-                if (showNotionUi)
-                    HideLoadingState();
+                // No hay overlay central que cerrar para Notion.
             }
         }
         private async Task<bool> TryLoadNotionIndexOnStartupAsync(CancellationToken ct = default)
@@ -722,9 +702,7 @@ namespace Anfeta.UI.Views
                     DateTimeOffset.UtcNow.ToString("O");
 
                 StatusText.Text = $"Estado: Notion cargado ✅ ({notionItems.Count} páginas)";
-                ShowNotionSyncNotice(
-                    "Notion al día",
-                    visibleSeconds: 3);
+                // Revisión automática silenciosa.
 
                 return notionItems.Count > 0;
             }
@@ -1056,10 +1034,6 @@ namespace Anfeta.UI.Views
 
             try
             {
-                ShowNotionSyncNotice(
-                    "Revisando Notion...",
-                    visibleSeconds: 3);
-
                 var overlapAnchor =
                     lastSyncUtc
                         .ToUniversalTime()

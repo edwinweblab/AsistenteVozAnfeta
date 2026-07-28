@@ -84,6 +84,7 @@ namespace Anfeta.UI.Models.Weblab
         public string SearchText { get; set; } = "";
         public string Description { get; set; } = "";
         public string ProjectUpdateStatus { get; set; } = "";
+        public string ScheduledDate { get; set; } = "";
         public string ExternalSourceName { get; set; } = "";
 
         private string _name = "";
@@ -182,6 +183,65 @@ namespace Anfeta.UI.Models.Weblab
 
                 return "Local";
             }
+        }
+
+        [JsonIgnore]
+        public string FechaPorHacerColumn
+        {
+            get
+            {
+                if (Source != SearchSource.Notion ||
+                    string.IsNullOrWhiteSpace(ScheduledDate))
+                {
+                    return "-";
+                }
+
+                var raw = ScheduledDate.Trim();
+                var separatorIndex = raw.IndexOf(" - ", StringComparison.Ordinal);
+
+                if (separatorIndex > 0)
+                {
+                    var startRaw = raw.Substring(0, separatorIndex).Trim();
+                    var endRaw = raw.Substring(separatorIndex + 3).Trim();
+
+                    if (DateTimeOffset.TryParse(startRaw, out var start) &&
+                        DateTimeOffset.TryParse(endRaw, out var end))
+                    {
+                        var localStart = start.LocalDateTime;
+                        var localEnd = end.LocalDateTime;
+
+                        return localStart.Date == localEnd.Date
+                            ? $"{FormatRelativeScheduledDate(localStart)} {localStart:HH:mm}–{localEnd:HH:mm}"
+                            : $"{FormatRelativeScheduledDate(localStart)} {localStart:HH:mm} – {FormatRelativeScheduledDate(localEnd)} {localEnd:HH:mm}";
+                    }
+                }
+
+                if (DateTimeOffset.TryParse(raw, out var offset))
+                {
+                    var local = offset.LocalDateTime;
+                    return $"{FormatRelativeScheduledDate(local)} {local:HH:mm}";
+                }
+
+                if (DateTime.TryParse(raw, out var date))
+                    return $"{FormatRelativeScheduledDate(date)} {date:HH:mm}";
+
+                return raw;
+            }
+        }
+
+        private static string FormatRelativeScheduledDate(
+            DateTime value)
+        {
+            var difference =
+                (value.Date - DateTime.Today).Days;
+
+            return difference switch
+            {
+                -1 => "Ayer",
+                0 => "Hoy",
+                1 => "Mañana",
+                _ => value.ToString("dd/MM/yyyy")
+            };
         }
 
         [JsonIgnore]

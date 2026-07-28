@@ -373,6 +373,44 @@ namespace Anfeta.UI.Views
                 $"Estado: Dominio copiado ✅ {domain}";
         }
 
+        private async void CtxOpenDomain_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+
+            if (row == null)
+            {
+                StatusText.Text =
+                    "Estado: Selecciona un resultado.";
+                return;
+            }
+
+            var domain = TryExtractFirstDomain(row);
+
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                StatusText.Text =
+                    "Estado: No se encontró un dominio en este resultado.";
+                return;
+            }
+
+            try
+            {
+                var uri = new Uri($"https://{domain}");
+                var opened = await Launcher.LaunchUriAsync(uri);
+
+                StatusText.Text = opened
+                    ? $"Estado: Dominio abierto ✅ {domain}"
+                    : $"Estado: No se pudo abrir {domain}.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: Error abriendo dominio → {ex.Message}";
+            }
+        }
+
         private static string TryExtractFirstDomain(
             SearchResultRow row)
         {
@@ -1045,6 +1083,66 @@ namespace Anfeta.UI.Views
 
         #endregion
 
+        private const string LS_NotionUploadRecentTags =
+            "Notion.Upload.RecentTags";
+
+        private static readonly string[] NotionUploadQuickTags =
+        {
+            "prtuzREVISION",
+            "prtuzCOBRAR",
+            "prtuzPAGAR",
+            "bbilb"
+        };
+
+        private static readonly string[] NotionUploadPersonTags =
+        {
+            "jjohn",
+            "kkarl",
+            "iisaia",
+            "eedua",
+            "aacal",
+            "aandr",
+            "eemma",
+            "bbria",
+            "ggena",
+            "nneft"
+        };
+
+        private static IReadOnlyList<string> LoadNotionUploadRecentTags()
+        {
+            var raw =
+                ApplicationData.Current.LocalSettings.Values[
+                    LS_NotionUploadRecentTags] as string;
+
+            if (string.IsNullOrWhiteSpace(raw))
+                return Array.Empty<string>();
+
+            return raw.Split('|', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+        }
+
+        private static void SaveNotionUploadRecentTags(
+            IEnumerable<string> tags)
+        {
+            var current = LoadNotionUploadRecentTags();
+
+            var merged = (tags ?? Array.Empty<string>())
+                .Concat(current)
+                .Select(x => (x ?? string.Empty).Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_NotionUploadRecentTags] =
+                string.Join("|", merged);
+        }
+
         private enum NotionUploadLayout
         {
             SinglePage,
@@ -1551,6 +1649,150 @@ namespace Anfeta.UI.Views
 
             titleSection.Children.Add(titleBox);
 
+            var selectedUploadTags =
+                new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            void AppendTagToEditor(
+                TextBox editor,
+                string tag)
+            {
+                var cleanTag = (tag ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(cleanTag))
+                    return;
+
+                var current = (editor.Text ?? string.Empty).Trim();
+                var tokens = current.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+
+                if (tokens.Any(x => string.Equals(
+                        x,
+                        cleanTag,
+                        StringComparison.OrdinalIgnoreCase)))
+                {
+                    return;
+                }
+
+                editor.Text = string.IsNullOrWhiteSpace(current)
+                    ? cleanTag
+                    : $"{cleanTag} {current}";
+
+                editor.SelectionStart = editor.Text.Length;
+                selectedUploadTags.Add(cleanTag);
+            }
+
+            void AppendTagToActiveTitles(string tag)
+            {
+                if (separatePagesOption.IsChecked == true)
+                {
+                    foreach (var editor in titleEditors)
+                        AppendTagToEditor(editor, tag);
+                }
+                else
+                {
+                    AppendTagToEditor(titleBox, tag);
+                }
+            }
+
+            var quickTagsPanel = new StackPanel
+            {
+                Spacing = 7
+            };
+
+            quickTagsPanel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Tags más utilizados:",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
+
+            var quickTagButtons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6
+            };
+
+            foreach (var tag in NotionUploadQuickTags)
+            {
+                var button = new Button
+                {
+                    Content = tag,
+                    Padding = new Thickness(9, 4, 9, 4),
+                    Tag = tag
+                };
+
+                button.Click += (_, __) =>
+                    AppendTagToActiveTitles(tag);
+
+                quickTagButtons.Children.Add(button);
+            }
+
+            quickTagsPanel.Children.Add(quickTagButtons);
+
+            var personTagCombo = new ComboBox
+            {
+                PlaceholderText = "TAGS (personas)",
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            foreach (var tag in NotionUploadPersonTags)
+            {
+                personTagCombo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = tag,
+                        Tag = tag
+                    });
+            }
+
+            personTagCombo.SelectionChanged += (_, __) =>
+            {
+                if (personTagCombo.SelectedItem is not ComboBoxItem item)
+                    return;
+
+                var tag = item.Tag?.ToString() ?? string.Empty;
+                AppendTagToActiveTitles(tag);
+                personTagCombo.SelectedItem = null;
+            };
+
+            quickTagsPanel.Children.Add(personTagCombo);
+
+            var recentTags = LoadNotionUploadRecentTags();
+            if (recentTags.Count > 0)
+            {
+                quickTagsPanel.Children.Add(
+                    new TextBlock
+                    {
+                        Text = "Usados recientemente:",
+                        FontSize = 11,
+                        Opacity = 0.70
+                    });
+
+                var recentPanel = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6
+                };
+
+                foreach (var tag in recentTags.Take(5))
+                {
+                    var button = new Button
+                    {
+                        Content = tag,
+                        Padding = new Thickness(8, 3, 8, 3)
+                    };
+
+                    button.Click += (_, __) =>
+                        AppendTagToActiveTitles(tag);
+
+                    recentPanel.Children.Add(button);
+                }
+
+                quickTagsPanel.Children.Add(recentPanel);
+            }
+
             var content = new StackPanel
             {
                 Width = 660,
@@ -1597,6 +1839,7 @@ namespace Anfeta.UI.Views
             content.Children.Add(separatePagesOption);
             content.Children.Add(titleSection);
             content.Children.Add(separateTitlesPanel);
+            content.Children.Add(quickTagsPanel);
 
             var dialog = new ContentDialog
             {
@@ -1677,6 +1920,9 @@ namespace Anfeta.UI.Views
                     (editor.Text ??
                      string.Empty).Trim())
                 .ToList();
+
+            SaveNotionUploadRecentTags(
+                selectedUploadTags);
 
             return new NotionUploadOptions(
                 separatePagesOption.IsChecked == true
@@ -3657,6 +3903,16 @@ namespace Anfeta.UI.Views
             CtxMenuCopyLinkItem.Text = isNotion
                 ? "Copiar link de Notion"
                 : "Copiar link";
+
+            var detectedDomain = row == null
+                ? string.Empty
+                : TryExtractFirstDomain(row);
+
+            var hasDomain =
+                !string.IsNullOrWhiteSpace(detectedDomain);
+
+            CtxMenuCopyDomainItem.IsEnabled = hasDomain;
+            CtxMenuOpenDomainItem.IsEnabled = hasDomain;
 
             var canUseDropboxActions = CanCreateDropboxFolderHere(row);
 

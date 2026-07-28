@@ -13,11 +13,13 @@ using System.Diagnostics;
 using System.Linq;
 using Windows.UI;
 using Anfeta.UI.Services;
+using Anfeta.UI.Services.Notion;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using Windows.ApplicationModel;
+using Windows.Storage;
 using WinRT.Interop;
 namespace Anfeta.UI
 {
@@ -27,6 +29,9 @@ namespace Anfeta.UI
         private GlobalHotkeyService? _hotkeyService;
         private readonly IndexedFileReminderService _indexedReminderService;
         private readonly SemaphoreSlim _reminderDialogLock = new(1, 1);
+        private readonly NotionCalendarService _calendarStartupService = new();
+        private const string LS_CalendarLastSyncUtc =
+            "Search.Calendar.LastSyncUtc";
 
         public MainWindow()
         {
@@ -74,6 +79,7 @@ namespace Anfeta.UI
 
             SubscribeDropboxState();
             CheckGoogleCalendarStatusOnStartup();
+            _ = StartCalendarWarmupOnStartupAsync();
             _hotkeyService = App.AppHost.Services.GetRequiredService<GlobalHotkeyService>();
             _hotkeyService.SearchHotkeyPressed += OnSearchHotkeyPressed;
 
@@ -92,6 +98,62 @@ namespace Anfeta.UI
             Debug.WriteLine("MAINWINDOW: constructor OK");
         }
 
+
+        private async Task StartCalendarWarmupOnStartupAsync()
+        {
+            var values =
+                ApplicationData.Current.LocalSettings.Values;
+
+            var token =
+                values["Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+                return;
+
+            DateTimeOffset? anchorUtc = null;
+
+            var calendarAnchor =
+                values[LS_CalendarLastSyncUtc] as string;
+
+            var notionAnchor =
+                values["Notion.LastSyncUtc"] as string;
+
+            if (DateTimeOffset.TryParse(
+                    calendarAnchor,
+                    out var parsedCalendar))
+            {
+                anchorUtc =
+                    parsedCalendar.ToUniversalTime();
+            }
+            else if (DateTimeOffset.TryParse(
+                         notionAnchor,
+                         out var parsedNotion))
+            {
+                anchorUtc =
+                    parsedNotion.ToUniversalTime();
+            }
+
+            try
+            {
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(12));
+
+                await _calendarStartupService
+                    .StartStartupWarmupAsync(
+                        token,
+                        anchorUtc,
+                        cts.Token);
+
+                values[LS_CalendarLastSyncUtc] =
+                    DateTimeOffset.UtcNow.ToString("O");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(
+                    $"[CALENDAR_WARMUP] {ex.Message}");
+            }
+        }
 
         private void ApplyVisibleAppVersion()
         {

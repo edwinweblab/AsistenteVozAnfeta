@@ -77,6 +77,15 @@ namespace Anfeta.UI.Views
             EnsureSearchDebounce();
 
             var q = (sender.Text ?? string.Empty).Trim();
+
+            if (_calendarViewActive)
+            {
+                CancelPendingSearch();
+                QuickCommandsInputFlyout?.Hide();
+                ApplyCalendarSearchFilter(q);
+                return;
+            }
+
             SyncBaseChipsFromQuery(q);
             RefreshQuickFlyoutContent(q);
 
@@ -158,6 +167,12 @@ namespace Anfeta.UI.Views
             UpdateQuickFlyoutVisibility();
             ResetCurrentMatchOptions();
             var ui = (sender.Text ?? "").Trim();
+
+            if (_calendarViewActive)
+            {
+                ApplyCalendarSearchFilter(ui);
+                return;
+            }
 
             if (string.IsNullOrWhiteSpace(ui))
             {
@@ -483,6 +498,18 @@ namespace Anfeta.UI.Views
                     .ThenBy(x => ParseModifiedForSort(x.ServerModified))
                     .ThenBy(x => x.DisplayName ?? x.Name),
 
+                "scheduled_asc" => items
+                    .OrderBy(x => HasScheduledDateForSort(x) ? 0 : 1)
+                    .ThenBy(x => ParseScheduledDateForSort(x.ScheduledDate))
+                    .ThenBy(x => GetPathOrderRank(x))
+                    .ThenBy(x => x.DisplayName ?? x.Name),
+
+                "scheduled_desc" => items
+                    .OrderBy(x => HasScheduledDateForSort(x) ? 0 : 1)
+                    .ThenByDescending(x => ParseScheduledDateForSort(x.ScheduledDate))
+                    .ThenBy(x => GetPathOrderRank(x))
+                    .ThenBy(x => x.DisplayName ?? x.Name),
+
                 _ => items
                     .OrderBy(x => GetPathOrderRank(x))
                     .ThenBy(x => x.DisplayName ?? x.Name)
@@ -555,6 +582,85 @@ namespace Anfeta.UI.Views
         {
             return System.Text.RegularExpressions.Regex
                 .Replace((value ?? string.Empty).ToLowerInvariant(), @"[^a-z0-9áéíóúñ]+", "");
+        }
+
+        private async void HeaderScheduledDateSort_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            _sortKey =
+                _sortKey == "scheduled_asc"
+                    ? "scheduled_desc"
+                    : "scheduled_asc";
+
+            if (ScheduledDateSortArrow != null)
+            {
+                ScheduledDateSortArrow.Text =
+                    _sortKey == "scheduled_asc"
+                        ? "▲"
+                        : "▼";
+            }
+
+            if (NameSortArrow != null)
+                NameSortArrow.Text = string.Empty;
+
+            if (ModifiedSortArrow != null)
+                ModifiedSortArrow.Text = string.Empty;
+
+            await RunSearchAsync(
+                (SearchBox?.Text ?? string.Empty).Trim());
+
+            StatusText.Text =
+                _sortKey == "scheduled_asc"
+                    ? "Estado: Fecha por hacer ordenada de antigua a reciente ✅"
+                    : "Estado: Fecha por hacer ordenada de reciente a antigua ✅";
+        }
+
+        private static bool HasScheduledDateForSort(
+            Anfeta.UI.Models.Weblab.SearchResultRow row)
+        {
+            return ParseScheduledDateForSort(
+                       row.ScheduledDate) !=
+                   DateTime.MaxValue;
+        }
+
+        private static DateTime ParseScheduledDateForSort(
+            string? value)
+        {
+            var raw =
+                (value ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(raw))
+                return DateTime.MaxValue;
+
+            var separatorIndex =
+                raw.IndexOf(
+                    " - ",
+                    StringComparison.Ordinal);
+
+            if (separatorIndex > 0)
+            {
+                raw =
+                    raw.Substring(
+                        0,
+                        separatorIndex).Trim();
+            }
+
+            if (DateTimeOffset.TryParse(
+                    raw,
+                    out var offset))
+            {
+                return offset.LocalDateTime;
+            }
+
+            if (DateTime.TryParse(
+                    raw,
+                    out var date))
+            {
+                return date;
+            }
+
+            return DateTime.MaxValue;
         }
 
         private static DateTime ParseModifiedForSort(string? value)

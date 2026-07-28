@@ -183,7 +183,7 @@ namespace Anfeta.UI.Views
         private const string LS_ResultPathColumnWidth = "Search.ResultColumns.Path";
         private const string LS_ResultDateColumnWidth = "Search.ResultColumns.Date";
         private const string LS_ResultStatusColumnWidth = "Search.ResultColumns.Status";
-        private const string LS_ResultStarColumnWidth = "Search.ResultColumns.Star";
+        private const string LS_ResultScheduledDateColumnWidth = "Search.ResultColumns.ScheduledDate";
         private const string LS_DetailsPaneWidth = "Search.DetailsPane.Width";
         private const double DETAILS_PANE_MIN = 260;
         private const double DETAILS_PANE_DEFAULT = 380;
@@ -194,8 +194,8 @@ namespace Anfeta.UI.Views
         private const double RESULT_DATE_MAX = 280;
         private const double RESULT_STATUS_MIN = 100;
         private const double RESULT_STATUS_MAX = 420;
-        private const double RESULT_STAR_MIN = 42;
-        private const double RESULT_STAR_MAX = 90;
+        private const double RESULT_SCHEDULED_DATE_MIN = 120;
+        private const double RESULT_SCHEDULED_DATE_MAX = 280;
         private const string CUSTOM_TAG_VALUE = "__custom__";
         private readonly Dictionary<FrameworkElement, double> _originalFontSizes = new();
         private double _textScale = 1.0;
@@ -327,6 +327,14 @@ namespace Anfeta.UI.Views
         public SearchView()
         {
             InitializeComponent();
+
+            // El indicador de Fecha por hacer es independiente de los
+            // ordenamientos existentes por nombre y fecha modificada.
+            HeaderNameSortButton.Click +=
+                (_, __) => ScheduledDateSortArrow.Text = string.Empty;
+
+            HeaderModifiedSortButton.Click +=
+                (_, __) => ScheduledDateSortArrow.Text = string.Empty;
 
             _savedFiltersService = new SavedSearchFiltersService(_savedFiltersRepository);
 
@@ -1537,8 +1545,8 @@ namespace Anfeta.UI.Views
         {
             if (HeaderPathColumn == null ||
                 HeaderStatusColumn == null ||
-                HeaderDateColumn == null ||
-                HeaderStarColumn == null)
+                HeaderScheduledDateColumn == null ||
+                HeaderDateColumn == null)
                 return;
 
             var values = ApplicationData.Current.LocalSettings.Values;
@@ -1553,11 +1561,15 @@ namespace Anfeta.UI.Views
                     RESULT_STATUS_MIN,
                     RESULT_STATUS_MAX));
 
+            HeaderScheduledDateColumn.Width = new GridLength(
+                ReadColumnWidth(
+                    LS_ResultScheduledDateColumnWidth,
+                    155,
+                    RESULT_SCHEDULED_DATE_MIN,
+                    RESULT_SCHEDULED_DATE_MAX));
+
             HeaderDateColumn.Width = new GridLength(
                 ReadColumnWidth(LS_ResultDateColumnWidth, 145, RESULT_DATE_MIN, RESULT_DATE_MAX));
-
-            HeaderStarColumn.Width = new GridLength(
-                ReadColumnWidth(LS_ResultStarColumnWidth, 44, RESULT_STAR_MIN, RESULT_STAR_MAX));
 
             HeaderNameColumn.Width = new GridLength(1, GridUnitType.Star);
             ApplyResultColumnWidthsToVisualTree();
@@ -1617,23 +1629,23 @@ namespace Anfeta.UI.Views
             ApplyResultColumnWidthsToVisualTree();
         }
 
-        private void StatusDateSplitter_DragDelta(
+        private void StatusScheduledDateSplitter_DragDelta(
             object sender,
             DragDeltaEventArgs e)
         {
             var currentStatus =
                 HeaderStatusColumn.Width.Value;
 
-            var currentDate =
-                HeaderDateColumn.Width.Value;
+            var currentScheduled =
+                HeaderScheduledDateColumn.Width.Value;
 
             var minimumDelta = Math.Max(
                 RESULT_STATUS_MIN - currentStatus,
-                currentDate - RESULT_DATE_MAX);
+                currentScheduled - RESULT_SCHEDULED_DATE_MAX);
 
             var maximumDelta = Math.Min(
                 RESULT_STATUS_MAX - currentStatus,
-                currentDate - RESULT_DATE_MIN);
+                currentScheduled - RESULT_SCHEDULED_DATE_MIN);
 
             var appliedDelta = Math.Clamp(
                 e.HorizontalChange,
@@ -1644,30 +1656,43 @@ namespace Anfeta.UI.Views
                 new GridLength(
                     currentStatus + appliedDelta);
 
-            HeaderDateColumn.Width =
+            HeaderScheduledDateColumn.Width =
                 new GridLength(
-                    currentDate - appliedDelta);
+                    currentScheduled - appliedDelta);
 
             ApplyResultColumnWidthsToVisualTree();
         }
 
-        private void DateStarSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+        private void ScheduledDateDateSplitter_DragDelta(
+            object sender,
+            DragDeltaEventArgs e)
         {
-            var currentDate = HeaderDateColumn.Width.Value;
-            var currentStar = HeaderStarColumn.Width.Value;
+            var currentScheduled =
+                HeaderScheduledDateColumn.Width.Value;
+
+            var currentDate =
+                HeaderDateColumn.Width.Value;
 
             var minimumDelta = Math.Max(
-                RESULT_DATE_MIN - currentDate,
-                currentStar - RESULT_STAR_MAX);
+                RESULT_SCHEDULED_DATE_MIN - currentScheduled,
+                currentDate - RESULT_DATE_MAX);
 
             var maximumDelta = Math.Min(
-                RESULT_DATE_MAX - currentDate,
-                currentStar - RESULT_STAR_MIN);
+                RESULT_SCHEDULED_DATE_MAX - currentScheduled,
+                currentDate - RESULT_DATE_MIN);
 
-            var appliedDelta = Math.Clamp(e.HorizontalChange, minimumDelta, maximumDelta);
+            var appliedDelta = Math.Clamp(
+                e.HorizontalChange,
+                minimumDelta,
+                maximumDelta);
 
-            HeaderDateColumn.Width = new GridLength(currentDate + appliedDelta);
-            HeaderStarColumn.Width = new GridLength(currentStar - appliedDelta);
+            HeaderScheduledDateColumn.Width =
+                new GridLength(
+                    currentScheduled + appliedDelta);
+
+            HeaderDateColumn.Width =
+                new GridLength(
+                    currentDate - appliedDelta);
 
             ApplyResultColumnWidthsToVisualTree();
         }
@@ -1683,8 +1708,9 @@ namespace Anfeta.UI.Views
             var values = ApplicationData.Current.LocalSettings.Values;
             values[LS_ResultPathColumnWidth] = HeaderPathColumn.Width.Value;
             values[LS_ResultStatusColumnWidth] = HeaderStatusColumn.Width.Value;
+            values[LS_ResultScheduledDateColumnWidth] =
+                HeaderScheduledDateColumn.Width.Value;
             values[LS_ResultDateColumnWidth] = HeaderDateColumn.Width.Value;
-            values[LS_ResultStarColumnWidth] = HeaderStarColumn.Width.Value;
         }
 
         private void ApplyResultColumnWidthsToVisualTree()
@@ -1692,8 +1718,8 @@ namespace Anfeta.UI.Views
             if (RootLayout == null ||
                 HeaderPathColumn == null ||
                 HeaderStatusColumn == null ||
-                HeaderDateColumn == null ||
-                HeaderStarColumn == null)
+                HeaderScheduledDateColumn == null ||
+                HeaderDateColumn == null)
                 return;
 
             ApplyResultColumnWidthsRecursive(RootLayout);
@@ -1715,10 +1741,10 @@ namespace Anfeta.UI.Views
                     new GridLength(HeaderStatusColumn.Width.Value);
                 grid.ColumnDefinitions[5].Width = new GridLength(5);
                 grid.ColumnDefinitions[6].Width =
-                    new GridLength(HeaderDateColumn.Width.Value);
-                grid.ColumnDefinitions[7].Width = new GridLength(7);
+                    new GridLength(HeaderScheduledDateColumn.Width.Value);
+                grid.ColumnDefinitions[7].Width = new GridLength(5);
                 grid.ColumnDefinitions[8].Width =
-                    new GridLength(HeaderStarColumn.Width.Value);
+                    new GridLength(HeaderDateColumn.Width.Value);
             }
 
             var childCount = VisualTreeHelper.GetChildrenCount(node);
