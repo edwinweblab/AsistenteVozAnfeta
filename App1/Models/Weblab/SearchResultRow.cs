@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Media;
 using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using System.Text.Json.Serialization;
 
 namespace Anfeta.UI.Models.Weblab
@@ -297,7 +298,39 @@ namespace Anfeta.UI.Models.Weblab
 
             clean = StripSourcePrefix(clean, ExternalSourceName);
 
+            if (Source == SearchSource.Notion &&
+                string.Equals(
+                    ExternalSourceName,
+                    "Revisiones",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                clean = StripReminderMetadata(clean);
+            }
+
             return clean.Trim();
+        }
+
+        private static string StripReminderMetadata(string value)
+        {
+            var text = (value ?? string.Empty).Trim();
+
+            var match = Regex.Match(
+                text,
+                @"^(?<date>\d{4}-\d{2}-\d{2})[ T](?<hour>\d{2})[:\-](?<minute>\d{2})\s+" +
+                @"(?<recipient>[a-z0-9_-]+)(?:\s+de:[a-z0-9_-]+)?(?:\s+\[TERMINADO\])?\s*",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+
+            if (!match.Success)
+                return text;
+
+            var clean = text
+                .Substring(match.Length)
+                .Trim(' ', '-', '–', '—', ':', '|');
+
+            return string.IsNullOrWhiteSpace(clean)
+                ? text
+                : clean;
         }
 
         private string BuildResultSummary()

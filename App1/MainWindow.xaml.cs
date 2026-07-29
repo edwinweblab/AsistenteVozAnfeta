@@ -386,9 +386,39 @@ namespace Anfeta.UI
             DispatcherQueue.TryEnqueue(
                 async () =>
                 {
+                    SignalIncomingReminder();
+
                     await ShowIndexedReminderAsync(
                         reminder);
                 });
+        }
+
+
+        private void SignalIncomingReminder()
+        {
+            try
+            {
+                MessageBeep(0x00000040); // MB_ICONASTERISK
+
+                var hwnd = WindowNative.GetWindowHandle(this);
+                if (hwnd == IntPtr.Zero || IsAppForeground(hwnd))
+                    return;
+
+                var flash = new FLASHWINFO
+                {
+                    cbSize = (uint)Marshal.SizeOf<FLASHWINFO>(),
+                    hwnd = hwnd,
+                    dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG,
+                    uCount = 5,
+                    dwTimeout = 0
+                };
+
+                FlashWindowEx(ref flash);
+            }
+            catch
+            {
+                // El aviso visual/sonoro no debe bloquear el recordatorio.
+            }
         }
 
         private async Task ShowIndexedReminderAsync(
@@ -438,6 +468,30 @@ namespace Anfeta.UI
                     });
 
                 if (!string.IsNullOrWhiteSpace(
+                        reminder.RecipientName))
+                {
+                    content.Children.Add(
+                        new TextBlock
+                        {
+                            Text =
+                                $"Para: {reminder.RecipientName} ({reminder.RecipientTag})",
+                            Opacity = 0.72
+                        });
+                }
+
+                if (!string.IsNullOrWhiteSpace(
+                        reminder.SenderName))
+                {
+                    content.Children.Add(
+                        new TextBlock
+                        {
+                            Text =
+                                $"De: {reminder.SenderName} ({reminder.SenderTag})",
+                            Opacity = 0.72
+                        });
+                }
+
+                if (!string.IsNullOrWhiteSpace(
                         reminder.Target))
                 {
                     content.Children.Add(
@@ -448,6 +502,102 @@ namespace Anfeta.UI
                                 TextWrapping.Wrap,
                             Opacity = 0.60
                         });
+                }
+
+                ContentDialog? reminderDialog = null;
+
+                var actionStatus =
+                    new TextBlock
+                    {
+                        Text = string.Empty,
+                        Opacity = 0.72,
+                        TextWrapping = TextWrapping.Wrap
+                    };
+
+                var actions = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8
+                };
+
+                if (reminder.Source == Models.Weblab.SearchSource.Notion &&
+                    Uri.TryCreate(
+                        reminder.Target,
+                        UriKind.Absolute,
+                        out var notionUri))
+                {
+                    var openButton = new Button
+                    {
+                        Content = "Abrir en Notion",
+                        HorizontalAlignment = HorizontalAlignment.Left
+                    };
+
+                    openButton.Click += async (_, __) =>
+                    {
+                        try
+                        {
+                            var desktopUri = new Uri(
+                                notionUri.AbsoluteUri.Replace(
+                                    "https://",
+                                    "notion://",
+                                    StringComparison.OrdinalIgnoreCase));
+
+                            var support =
+                                await Windows.System.Launcher.QueryUriSupportAsync(
+                                    desktopUri,
+                                    Windows.System.LaunchQuerySupportType.Uri);
+
+                            var opened =
+                                support == Windows.System.LaunchQuerySupportStatus.Available &&
+                                await Windows.System.Launcher.LaunchUriAsync(desktopUri);
+
+                            if (!opened)
+                                opened = await Windows.System.Launcher.LaunchUriAsync(notionUri);
+
+                            actionStatus.Text = opened
+                                ? "Mensaje abierto ✅"
+                                : "No se pudo abrir el mensaje.";
+                        }
+                        catch (Exception ex)
+                        {
+                            actionStatus.Text =
+                                $"No se pudo abrir → {ex.Message}";
+                        }
+                    };
+
+                    actions.Children.Add(openButton);
+                }
+
+                if (reminder.Source ==
+                        Models.Weblab.SearchSource.Notion &&
+                    !string.IsNullOrWhiteSpace(
+                        reminder.PageId))
+                {
+                    var conversationButton =
+                        new Button
+                        {
+                            Content = "Abrir conversación",
+                            HorizontalAlignment =
+                                HorizontalAlignment.Left
+                        };
+
+                    conversationButton.Click +=
+                        async (_, __) =>
+                        {
+                            actionStatus.Text =
+                                "Abriendo conversación...";
+
+                            reminderDialog?.Hide();
+
+                            await Task.Delay(150);
+
+                            await OpenReminderConversationAsync(
+                                reminder);
+                        };
+
+                    actions.Children.Insert(
+                        0,
+                        conversationButton);
                 }
 
                 var copyStatus =
@@ -481,10 +631,58 @@ namespace Anfeta.UI
                         "Texto copiado ✅";
                 };
 
-                content.Children.Add(copyButton);
+                actions.Children.Add(copyButton);
+                content.Children.Add(actions);
+
+                var snoozePanel = new Grid
+                {
+                    ColumnSpacing = 8
+                };
+
+                snoozePanel.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(1, GridUnitType.Star)
+                    });
+                snoozePanel.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = GridLength.Auto
+                    });
+
+                var snoozeCombo = new ComboBox
+                {
+                    Header = "Posponer recordatorio",
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    SelectedIndex = 0
+                };
+
+                snoozeCombo.Items.Add(
+                    new ComboBoxItem { Content = "5 minutos", Tag = "5" });
+                snoozeCombo.Items.Add(
+                    new ComboBoxItem { Content = "10 minutos", Tag = "10" });
+                snoozeCombo.Items.Add(
+                    new ComboBoxItem { Content = "30 minutos", Tag = "30" });
+                snoozeCombo.Items.Add(
+                    new ComboBoxItem { Content = "1 hora", Tag = "60" });
+
+                var snoozeButton = new Button
+                {
+                    Content = "Posponer",
+                    VerticalAlignment = VerticalAlignment.Bottom
+                };
+
+                Grid.SetColumn(snoozeCombo, 0);
+                snoozePanel.Children.Add(snoozeCombo);
+
+                Grid.SetColumn(snoozeButton, 1);
+                snoozePanel.Children.Add(snoozeButton);
+
+                content.Children.Add(snoozePanel);
+                content.Children.Add(actionStatus);
                 content.Children.Add(copyStatus);
 
-                var dialog = new ContentDialog
+                reminderDialog = new ContentDialog
                 {
                     XamlRoot = Root.XamlRoot,
                     Title = "Recordatorio ANFETA",
@@ -492,6 +690,30 @@ namespace Anfeta.UI
                     PrimaryButtonText = "Entendido",
                     DefaultButton =
                         ContentDialogButton.Primary
+                };
+
+                var dialog = reminderDialog;
+
+                snoozeButton.Click += (_, __) =>
+                {
+                    if (snoozeCombo.SelectedItem is not ComboBoxItem selected ||
+                        !double.TryParse(
+                            selected.Tag?.ToString(),
+                            out var minutes))
+                    {
+                        actionStatus.Text =
+                            "Selecciona un tiempo para posponer.";
+                        return;
+                    }
+
+                    _indexedReminderService.Snooze(
+                        reminder,
+                        TimeSpan.FromMinutes(minutes));
+
+                    actionStatus.Text =
+                        $"Recordatorio pospuesto {selected.Content} ✅";
+
+                    dialog.Hide();
                 };
 
                 await dialog.ShowAsync();
@@ -504,6 +726,44 @@ namespace Anfeta.UI
             {
                 _reminderDialogLock.Release();
             }
+        }
+
+        private async Task OpenReminderConversationAsync(
+            IndexedFileReminder reminder)
+        {
+            if (string.IsNullOrWhiteSpace(
+                    reminder.PageId))
+            {
+                return;
+            }
+
+            var hwnd =
+                WindowNative.GetWindowHandle(this);
+
+            if (hwnd != IntPtr.Zero)
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+                Activate();
+                SetForegroundWindow(hwnd);
+            }
+
+            var searchItem =
+                FindNavItem("Search");
+
+            if (searchItem != null)
+                AppNav.SelectedItem = searchItem;
+
+            if (ContentFrame.CurrentSourcePageType !=
+                typeof(SearchTabsView))
+            {
+                ContentFrame.Navigate(
+                    typeof(SearchTabsView));
+
+                await Task.Delay(300);
+            }
+
+            SearchView.RequestOpenConversation(
+                reminder.PageId);
         }
 
         // ═══════════════════════════════════════════
@@ -580,6 +840,25 @@ namespace Anfeta.UI
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        private const uint FLASHW_TRAY = 0x00000002;
+        private const uint FLASHW_TIMERNOFG = 0x0000000C;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FLASHWINFO
+        {
+            public uint cbSize;
+            public IntPtr hwnd;
+            public uint dwFlags;
+            public uint uCount;
+            public uint dwTimeout;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+        [DllImport("user32.dll")]
+        private static extern bool MessageBeep(uint uType);
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();

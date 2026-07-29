@@ -64,6 +64,83 @@
                     </StackPanel>
                 </Grid>
 
+                <!--  ═══ IDENTIDAD DE USUARIO ═══  -->
+                <StackPanel Spacing="14">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border
+                            Width="3"
+                            Height="18"
+                            Background="{StaticResource AnfetaAccentBrush}"
+                            CornerRadius="2" />
+                        <FontIcon
+                            FontSize="14"
+                            Foreground="{StaticResource AnfetaAccentBrush}"
+                            Glyph="&#xE77B;" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            CharacterSpacing="100"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="#FFFFFF"
+                            Text="USUARIO ACTUAL" />
+                    </StackPanel>
+
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Grid.Column="0"
+                                Background="{StaticResource AnfetaAccentBrush}"
+                                CornerRadius="12,0,0,12"
+                                Opacity="0.6" />
+                            <StackPanel
+                                Grid.Column="1"
+                                Padding="18,16"
+                                Spacing="12">
+                                <StackPanel Spacing="3">
+                                    <TextBlock
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Foreground="#FFFFFF"
+                                        Text="¿Quién está usando ANFETA?" />
+                                    <TextBlock
+                                        FontSize="11"
+                                        Foreground="#D4C9C0"
+                                        Text="Se usa para mostrar únicamente los mensajes y recordatorios dirigidos a esta persona. Sin seleccionar mostrará todos."
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ComboBox
+                                    x:Name="CurrentUserCombo"
+                                    Height="40"
+                                    HorizontalAlignment="Stretch"
+                                    PlaceholderText="Sin seleccionar · mostrar todos"
+                                    SelectionChanged="CurrentUserCombo_SelectionChanged">
+                                    <ComboBoxItem Content="Sin seleccionar · mostrar todos" Tag="" />
+                                    <ComboBoxItem Content="John" Tag="jjohn" />
+                                    <ComboBoxItem Content="Karla" Tag="kkarl" />
+                                    <ComboBoxItem Content="Isaias" Tag="iisaia" />
+                                    <ComboBoxItem Content="Sotelo" Tag="eedua" />
+                                    <ComboBoxItem Content="Acalli" Tag="aacal" />
+                                    <ComboBoxItem Content="Andrade" Tag="aandr" />
+                                    <ComboBoxItem Content="Emmanuel" Tag="eemma" />
+                                    <ComboBoxItem Content="Brian" Tag="bbria" />
+                                    <ComboBoxItem Content="Genaro" Tag="ggena" />
+                                    <ComboBoxItem Content="Neftali" Tag="nneft" />
+                                </ComboBox>
+                                <TextBlock
+                                    x:Name="CurrentUserStatusText"
+                                    FontSize="11"
+                                    Foreground="#D4C9C0"
+                                    Text="Se mostrarán todos los recordatorios."
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
                 <!--  ═══ SECCIÓN DROPBOX ═══  -->
                 <StackPanel Spacing="14">
                     <StackPanel Orientation="Horizontal" Spacing="10">
@@ -219,9 +296,7 @@
                                     </Button>
                                 </StackPanel>
 
-                                <StackPanel
-                                    Orientation="Horizontal"
-                                    Spacing="10">
+                                <StackPanel Orientation="Horizontal" Spacing="10">
                                     <Button
                                         x:Name="BtnConnectDropbox"
                                         Click="BtnConnectDropbox_Click"

@@ -1274,10 +1274,12 @@ namespace Anfeta.UI.Views
                 _predictiveSuggestions.Add(new PredictiveSuggestion
                 {
                     Title = topic.Text,
-                    Subtitle = $"{scope.PathLabel} · aparece {topic.Count}x",
+                    Subtitle = topic.IsDomain
+                        ? $"{scope.PathLabel} · dominio completo · aparece {topic.Count}x"
+                        : $"{scope.PathLabel} · aparece {topic.Count}x",
                     Query = topic.Text,
-                    Kind = "Topic",
-                    IconGlyph = ""
+                    Kind = topic.IsDomain ? "Domain" : "Topic",
+                    IconGlyph = topic.IsDomain ? "\uE71B" : ""
                 });
             }
         }
@@ -1306,10 +1308,12 @@ namespace Anfeta.UI.Views
                 _predictiveSuggestions.Add(new PredictiveSuggestion
                 {
                     Title = topic.Text,
-                    Subtitle = $"Sugerencia · aparece {topic.Count}x",
+                    Subtitle = topic.IsDomain
+                        ? $"Dominio completo · aparece {topic.Count}x"
+                        : $"Sugerencia · aparece {topic.Count}x",
                     Query = topic.Text,
-                    Kind = "Topic",
-                    IconGlyph = ""
+                    Kind = topic.IsDomain ? "Domain" : "Topic",
+                    IconGlyph = topic.IsDomain ? "\uE71B" : ""
                 });
             }
         }
@@ -1469,6 +1473,7 @@ namespace Anfeta.UI.Views
         {
             public string Text { get; set; } = "";
             public int Count { get; set; }
+            public bool IsDomain { get; set; }
         }
 
         private List<TopicCount> BuildFrequentTopicSuggestions(
@@ -1476,77 +1481,263 @@ namespace Anfeta.UI.Views
             string rowFilter,
             string excludedQuery = "")
         {
-            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var filter = NormalizeSuggestionText(rowFilter);
-            var excludedTerms = BuildPredictiveExcludedTerms(excludedQuery);
+            var counts =
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            var domainCounts =
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            var filter =
+                NormalizeSuggestionText(rowFilter);
+
+            var excludedTerms =
+                BuildPredictiveExcludedTerms(excludedQuery);
+
+            var currentToken =
+                GetCurrentPredictiveToken(
+                    string.IsNullOrWhiteSpace(rowFilter)
+                        ? excludedQuery
+                        : rowFilter);
 
             foreach (var row in rows)
             {
-                if (!string.IsNullOrWhiteSpace(filter) && !RowMatchesPredictiveText(row, rowFilter))
+                if (!string.IsNullOrWhiteSpace(filter) &&
+                    !RowMatchesPredictiveText(row, rowFilter))
+                {
                     continue;
+                }
 
-                var title = NormalizeSuggestionText(GetPredictiveTitle(row));
+                var originalTitle =
+                    GetPredictiveTitle(row);
+
+                var extractedDomains =
+                    ExtractPredictiveDomains(originalTitle);
+
+                // Los dominios se extraen ANTES de normalizar el título.
+                // Así se conservan los puntos y se sugieren como una sola pieza.
+                foreach (var domain in extractedDomains)
+                {
+                    var normalizedDomain =
+                        NormalizeSuggestionText(domain);
+
+                    if (excludedTerms.Contains(normalizedDomain))
+                        continue;
+
+                    if (!string.IsNullOrWhiteSpace(currentToken) &&
+                        !domain.StartsWith(
+                            currentToken,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        !domain.Contains(
+                            currentToken,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    domainCounts[domain] =
+                        domainCounts.TryGetValue(
+                            domain,
+                            out var domainCount)
+                            ? domainCount + 1
+                            : 1;
+                }
+
+                var title =
+                    NormalizeSuggestionText(originalTitle);
+
                 if (string.IsNullOrWhiteSpace(title))
                     continue;
 
+                var flattenedDomains =
+                    extractedDomains
+                        .Select(domain =>
+                            Regex.Replace(
+                                domain.ToLowerInvariant(),
+                                @"[^\p{L}\p{Nd}]+",
+                                string.Empty))
+                        .Where(value =>
+                            !string.IsNullOrWhiteSpace(value))
+                        .ToHashSet(
+                            StringComparer.OrdinalIgnoreCase);
+
                 var words = title
-                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Split(
+                        ' ',
+                        StringSplitOptions.RemoveEmptyEntries)
                     .Where(IsUsefulPredictiveWord)
-                    .Where(x => !excludedTerms.Contains(NormalizeSuggestionText(x)))
+                    .Where(word =>
+                        !flattenedDomains.Contains(
+                            Regex.Replace(
+                                word.ToLowerInvariant(),
+                                @"[^\p{L}\p{Nd}]+",
+                                string.Empty)))
+                    .Where(word =>
+                        !excludedTerms.Contains(
+                            NormalizeSuggestionText(word)))
                     .ToList();
 
-                var local = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var local =
+                    new HashSet<string>(
+                        StringComparer.OrdinalIgnoreCase);
 
                 foreach (var word in words)
                     local.Add(word);
 
-                for (int i = 0; i < words.Count - 1; i++)
+                for (var index = 0;
+                     index < words.Count - 1;
+                     index++)
                 {
-                    var phrase = $"{words[i]} {words[i + 1]}";
+                    var phrase =
+                        $"{words[index]} {words[index + 1]}";
+
                     var phraseParts = phrase
-                        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                        .Split(
+                            ' ',
+                            StringSplitOptions.RemoveEmptyEntries)
                         .Select(NormalizeSuggestionText)
                         .ToList();
 
-                    if (phraseParts.Any(x => excludedTerms.Contains(x)))
+                    if (phraseParts.Any(part =>
+                            excludedTerms.Contains(part)))
+                    {
                         continue;
+                    }
 
                     local.Add(phrase);
                 }
 
                 foreach (var item in local)
                 {
-                    if (!string.IsNullOrWhiteSpace(filter) &&
-                        !item.Contains(filter, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Si el usuario ya escribió un término, no obligamos a que la sugerencia
-                        // contenga ese mismo texto; la fila ya fue filtrada arriba.
-                    }
-
-                    counts[item] = counts.TryGetValue(item, out var current)
-                        ? current + 1
-                        : 1;
+                    counts[item] =
+                        counts.TryGetValue(
+                            item,
+                            out var current)
+                            ? current + 1
+                            : 1;
                 }
             }
 
-            var minCount = string.IsNullOrWhiteSpace(filter) ? 2 : 1;
+            var minCount =
+                string.IsNullOrWhiteSpace(filter)
+                    ? 2
+                    : 1;
 
-            var currentToken = GetCurrentPredictiveToken(
-                string.IsNullOrWhiteSpace(rowFilter)
-                    ? excludedQuery
-                    : rowFilter);
+            var domainSuggestions =
+                domainCounts
+                    .Where(pair => pair.Value >= 1)
+                    .OrderBy(pair =>
+                        GetPredictiveDomainPrefixRank(
+                            pair.Key,
+                            currentToken))
+                    .ThenByDescending(pair => pair.Value)
+                    .ThenBy(pair => pair.Key.Length)
+                    .ThenBy(pair => pair.Key)
+                    .Select(pair =>
+                        new TopicCount
+                        {
+                            Text = pair.Key,
+                            Count = pair.Value,
+                            IsDomain = true
+                        });
 
-            return counts
-                .Where(x => x.Value >= minCount)
-                .OrderBy(x => GetPredictivePrefixRank(x.Key, currentToken))
-                .ThenByDescending(x => x.Value)
-                .ThenBy(x => x.Key)
-                .Select(x => new TopicCount
-                {
-                    Text = x.Key,
-                    Count = x.Value
-                })
+            var topicSuggestions =
+                counts
+                    .Where(pair =>
+                        pair.Value >= minCount)
+                    .OrderBy(pair =>
+                        GetPredictivePrefixRank(
+                            pair.Key,
+                            currentToken))
+                    .ThenByDescending(pair => pair.Value)
+                    .ThenBy(pair => pair.Key)
+                    .Select(pair =>
+                        new TopicCount
+                        {
+                            Text = pair.Key,
+                            Count = pair.Value,
+                            IsDomain = false
+                        });
+
+            return domainSuggestions
+                .Concat(topicSuggestions)
+                .GroupBy(
+                    item => item.Text,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
                 .ToList();
+        }
+
+        private static IReadOnlyList<string>
+            ExtractPredictiveDomains(
+                string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return Array.Empty<string>();
+
+            const string pattern =
+                @"(?<![\w@])(?:https?://)?(?:www\.)?" +
+                @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
+                @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
+                @"com|mx|org|net|io|co|app|dev))" +
+                @"(?=$|[/:?#\s)\]}>.,;!])";
+
+            return Regex.Matches(
+                    value,
+                    pattern,
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant)
+                .Cast<Match>()
+                .Select(match =>
+                    match.Groups["domain"]
+                        .Value
+                        .Trim()
+                        .TrimEnd('.')
+                        .ToLowerInvariant())
+                .Where(domain =>
+                    !string.IsNullOrWhiteSpace(domain))
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static int GetPredictiveDomainPrefixRank(
+            string domain,
+            string currentToken)
+        {
+            if (string.IsNullOrWhiteSpace(currentToken))
+                return 0;
+
+            var cleanDomain =
+                (domain ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+
+            var cleanToken =
+                (currentToken ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+
+            if (cleanDomain.StartsWith(
+                    cleanToken + ".",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            if (cleanDomain.StartsWith(
+                    cleanToken,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return 1;
+            }
+
+            return cleanDomain.Contains(
+                cleanToken,
+                StringComparison.OrdinalIgnoreCase)
+                    ? 2
+                    : 3;
         }
 
 

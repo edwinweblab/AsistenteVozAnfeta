@@ -33,7 +33,55 @@ namespace Anfeta.UI.Services.Notion
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
         private const long MaxSinglePartBytes = 20L * 1024L * 1024L;
+        private const int MultiPartChunkBytes = 10 * 1024 * 1024;
+        private const long MaxMultiPartBytes = 5L * 1024L * 1024L * 1024L;
         private const int MaxFilesPerPage = 50;
+
+        public async Task<NotionCreatedFilePage>
+            CreateRevisionMessageAsync(
+                string token,
+                string pageTitle,
+                IReadOnlyList<string>? localFilePaths = null,
+                IProgress<NotionFileUploadProgress>? progress = null,
+                CancellationToken cancellationToken = default)
+        {
+            var paths =
+                (localFilePaths ??
+                 Array.Empty<string>())
+                .Where(path =>
+                    !string.IsNullOrWhiteSpace(path))
+                .ToList();
+
+            if (paths.Count > 0)
+            {
+                return await CreateRevisionFromFilesAsync(
+                    token,
+                    paths,
+                    pageTitle,
+                    progress,
+                    cancellationToken);
+            }
+
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException(
+                    "No hay un token de Notion configurado.");
+
+            pageTitle =
+                (pageTitle ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(pageTitle))
+                throw new ArgumentException(
+                    "El título de la página está vacío.");
+
+            using var http =
+                CreateHttpClient(token);
+
+            return await CreateRevisionPageAsync(
+                http,
+                Array.Empty<UploadedNotionFile>(),
+                pageTitle,
+                cancellationToken);
+        }
 
         public Task<NotionCreatedFilePage> CreateRevisionFromFileAsync(
             string token,
@@ -92,10 +140,10 @@ namespace Anfeta.UI.Services.Notion
 
                 var info = new FileInfo(path);
 
-                if (info.Length > MaxSinglePartBytes)
+                if (info.Length > MaxMultiPartBytes)
                 {
                     throw new InvalidOperationException(
-                        $"“{info.Name}” supera 20 MB. Esta versión usa la carga simple de Notion.");
+                        $"“{info.Name}” supera el máximo de 5 GB admitido por la carga multiparte de Notion.");
                 }
 
                 files.Add(info);
@@ -116,19 +164,12 @@ namespace Anfeta.UI.Services.Notion
                     Total: files.Count,
                     FileName: file.Name));
 
-                var fileUploadId = await CreateFileUploadAsync(
-                    http,
-                    file.Name,
-                    contentType,
-                    cancellationToken);
-
-                await SendFileBytesAsync(
-                    http,
-                    fileUploadId,
-                    file.FullName,
-                    file.Name,
-                    contentType,
-                    cancellationToken);
+                var fileUploadId =
+                    await UploadFileAsync(
+                        http,
+                        file,
+                        contentType,
+                        cancellationToken);
 
                 uploadedFiles.Add(new UploadedNotionFile(
                     fileUploadId,
@@ -146,6 +187,157 @@ namespace Anfeta.UI.Services.Notion
                 uploadedFiles,
                 pageTitle,
                 cancellationToken);
+        }
+
+        public sealed record NotionAppendedAttachment(
+            string FileUploadId,
+            string FileName,
+            string BlockType);
+
+        public async Task<IReadOnlyList<NotionAppendedAttachment>>
+            AppendFilesToPageAsync(
+                string token,
+                string pageId,
+                IReadOnlyList<string> localFilePaths,
+                IProgress<NotionFileUploadProgress>? progress = null,
+                CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException(
+                    "No hay un token de Notion configurado.");
+
+            if (string.IsNullOrWhiteSpace(pageId))
+                throw new ArgumentException(
+                    "La conversación no tiene identificador de Notion.");
+
+            var validPaths = (localFilePaths ?? Array.Empty<string>())
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (validPaths.Count == 0)
+                return Array.Empty<NotionAppendedAttachment>();
+
+            if (validPaths.Count > MaxFilesPerPage)
+            {
+                throw new InvalidOperationException(
+                    $"Puedes adjuntar como máximo {MaxFilesPerPage} archivos.");
+            }
+
+            using var http = CreateHttpClient(token);
+            var uploaded = new List<UploadedNotionFile>();
+
+            for (var index = 0; index < validPaths.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var path = validPaths[index];
+
+                if (!File.Exists(path))
+                    throw new FileNotFoundException(
+                        "No se encontró uno de los archivos seleccionados.",
+                        path);
+
+                var info = new FileInfo(path);
+
+                if (info.Length > MaxMultiPartBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"“{info.Name}” supera el máximo de 5 GB admitido por la carga multiparte de Notion.");
+                }
+
+                var contentType = GetContentType(info.Extension);
+
+                progress?.Report(
+                    new NotionFileUploadProgress(
+                        index,
+                        validPaths.Count,
+                        info.Name));
+
+                var fileUploadId =
+                    await UploadFileAsync(
+                        http,
+                        info,
+                        contentType,
+                        cancellationToken);
+
+                uploaded.Add(
+                    new UploadedNotionFile(
+                        fileUploadId,
+                        info.Name,
+                        info.Extension));
+
+                progress?.Report(
+                    new NotionFileUploadProgress(
+                        index + 1,
+                        validPaths.Count,
+                        info.Name));
+            }
+
+            var children = new List<object>();
+
+            foreach (var item in uploaded)
+            {
+                var blockType = GetBlockType(item.Extension);
+
+                var fileReference =
+                    new Dictionary<string, object?>
+                    {
+                        ["type"] = "file_upload",
+                        ["file_upload"] =
+                            new Dictionary<string, object?>
+                            {
+                                ["id"] = item.FileUploadId
+                            }
+                    };
+
+                children.Add(
+                    new Dictionary<string, object?>
+                    {
+                        ["object"] = "block",
+                        ["type"] = blockType,
+                        [blockType] = fileReference
+                    });
+            }
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["children"] = children
+                };
+
+            using var content =
+                new StringContent(
+                    JsonSerializer.Serialize(payload),
+                    Encoding.UTF8,
+                    "application/json");
+
+            using var response =
+                await http.PatchAsync(
+                    $"blocks/{pageId.Trim()}/children",
+                    content,
+                    cancellationToken);
+
+            var json =
+                await response.Content
+                    .ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "adjuntar archivos a la conversación",
+                    response,
+                    json);
+            }
+
+            return uploaded
+                .Select(item =>
+                    new NotionAppendedAttachment(
+                        item.FileUploadId,
+                        item.FileName,
+                        GetBlockType(item.Extension)))
+                .ToList();
         }
 
         private sealed record UploadedNotionFile(
@@ -175,14 +367,22 @@ namespace Anfeta.UI.Services.Notion
             HttpClient http,
             string fileName,
             string contentType,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool multiPart = false,
+            int numberOfParts = 1)
         {
             var payload = new Dictionary<string, object?>
             {
-                ["mode"] = "single_part",
+                ["mode"] =
+                    multiPart
+                        ? "multi_part"
+                        : "single_part",
                 ["filename"] = fileName,
                 ["content_type"] = contentType
             };
+
+            if (multiPart)
+                payload["number_of_parts"] = numberOfParts;
 
             using var content = new StringContent(
                 JsonSerializer.Serialize(payload),
@@ -210,6 +410,159 @@ namespace Anfeta.UI.Services.Notion
             }
 
             return idElement.GetString()!;
+        }
+
+        private static async Task<string>
+            UploadFileAsync(
+                HttpClient http,
+                FileInfo file,
+                string contentType,
+                CancellationToken cancellationToken)
+        {
+            if (file.Length <= MaxSinglePartBytes)
+            {
+                var id =
+                    await CreateFileUploadAsync(
+                        http,
+                        file.Name,
+                        contentType,
+                        cancellationToken);
+
+                await SendFileBytesAsync(
+                    http,
+                    id,
+                    file.FullName,
+                    file.Name,
+                    contentType,
+                    cancellationToken);
+
+                return id;
+            }
+
+            var numberOfParts =
+                (int)Math.Ceiling(
+                    file.Length /
+                    (double)MultiPartChunkBytes);
+
+            var uploadId =
+                await CreateFileUploadAsync(
+                    http,
+                    file.Name,
+                    contentType,
+                    cancellationToken,
+                    multiPart: true,
+                    numberOfParts:
+                        numberOfParts);
+
+            await using var stream =
+                new FileStream(
+                    file.FullName,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    bufferSize: 81920,
+                    useAsync: true);
+
+            var buffer =
+                new byte[MultiPartChunkBytes];
+
+            for (var part = 1;
+                 part <= numberOfParts;
+                 part++)
+            {
+                cancellationToken
+                    .ThrowIfCancellationRequested();
+
+                var totalRead = 0;
+
+                while (totalRead < buffer.Length)
+                {
+                    var read =
+                        await stream.ReadAsync(
+                            buffer.AsMemory(
+                                totalRead,
+                                buffer.Length -
+                                totalRead),
+                            cancellationToken);
+
+                    if (read == 0)
+                        break;
+
+                    totalRead += read;
+                }
+
+                using var form =
+                    new MultipartFormDataContent();
+
+                using var partContent =
+                    new ByteArrayContent(
+                        buffer,
+                        0,
+                        totalRead);
+
+                partContent.Headers.ContentType =
+                    new MediaTypeHeaderValue(
+                        contentType);
+
+                form.Add(
+                    partContent,
+                    "file",
+                    file.Name);
+
+                form.Add(
+                    new StringContent(
+                        part.ToString(
+                            System.Globalization
+                                .CultureInfo
+                                .InvariantCulture)),
+                    "part_number");
+
+                using var response =
+                    await http.PostAsync(
+                        $"file_uploads/{uploadId}/send",
+                        form,
+                        cancellationToken);
+
+                var json =
+                    await response.Content
+                        .ReadAsStringAsync(
+                            cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw CreateNotionException(
+                        $"enviar la parte {part} de {numberOfParts}",
+                        response,
+                        json);
+                }
+            }
+
+            using var completeContent =
+                new StringContent(
+                    "{}",
+                    Encoding.UTF8,
+                    "application/json");
+
+            using var completeResponse =
+                await http.PostAsync(
+                    $"file_uploads/{uploadId}/complete",
+                    completeContent,
+                    cancellationToken);
+
+            var completeJson =
+                await completeResponse.Content
+                    .ReadAsStringAsync(
+                        cancellationToken);
+
+            if (!completeResponse.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "completar la carga multiparte",
+                    completeResponse,
+                    completeJson);
+            }
+
+            return uploadId;
         }
 
         private static async Task SendFileBytesAsync(
@@ -356,7 +709,10 @@ namespace Anfeta.UI.Services.Notion
                 PageId: pageId,
                 PageUrl: pageUrl,
                 Title: pageTitle,
-                FileUploadId: uploadedFiles.First().FileUploadId);
+                FileUploadId:
+                    uploadedFiles.FirstOrDefault()?
+                        .FileUploadId ??
+                    string.Empty);
         }
 
         private static InvalidOperationException CreateNotionException(

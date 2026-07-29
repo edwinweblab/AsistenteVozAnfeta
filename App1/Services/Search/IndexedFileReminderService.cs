@@ -16,20 +16,53 @@ namespace Anfeta.UI.Services.Search
         string Message,
         string Target,
         DateTimeOffset ReminderAt,
-        SearchSource Source);
+        SearchSource Source,
+        string RecipientTag,
+        string RecipientName,
+        string SenderTag,
+        string SenderName,
+        string PageId);
 
     public sealed class IndexedFileReminderService : IDisposable
     {
         private const string LS_FiredReminders =
             "Search.IndexedReminders.Fired.v1";
 
+        private const string LS_CurrentUserTag =
+            "Messaging.CurrentUserTag";
+
+        private const string LS_SnoozedReminders =
+            "Search.IndexedReminders.Snoozed.v1";
+
         private static readonly Regex ReminderPattern = new(
             @"(?<!\d)(?<date>\d{4}-\d{2}-\d{2})[ T](?<hour>\d{2})[:\-](?<minute>\d{2})(?!\d)",
             RegexOptions.Compiled |
             RegexOptions.CultureInvariant);
 
+        private static readonly Dictionary<string, string> RecipientNames =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["jjohn"] = "John",
+                ["kkarl"] = "Karla",
+                ["iisaia"] = "Isaias",
+                ["eedua"] = "Sotelo",
+                ["aacal"] = "Acalli",
+                ["aandr"] = "Andrade",
+                ["eemma"] = "Emmanuel",
+                ["bbria"] = "Brian",
+                ["ggena"] = "Genaro",
+                ["nneft"] = "Neftali"
+            };
+
         private readonly Dictionary<string, DateTimeOffset> _fired =
             new(StringComparer.OrdinalIgnoreCase);
+
+        private readonly Dictionary<string, SnoozedReminder> _snoozed =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        public sealed record SnoozedReminder(
+            IndexedFileReminder Reminder,
+            DateTimeOffset DueAt);
 
         private DispatcherQueueTimer? _scanTimer;
         private bool _started;
@@ -45,6 +78,7 @@ namespace Anfeta.UI.Services.Search
             _started = true;
 
             LoadFiredReminders();
+            LoadSnoozedReminders();
             PruneFiredReminders();
 
             _scanTimer = dispatcherQueue.CreateTimer();
@@ -87,7 +121,7 @@ namespace Anfeta.UI.Services.Search
                 .Where(row =>
                     row != null &&
                     !string.IsNullOrWhiteSpace(
-                        row.DisplayName ?? row.Name))
+                        row.Name))
                 .ToList();
 
             if (rows.Count == 0)
@@ -95,25 +129,31 @@ namespace Anfeta.UI.Services.Search
 
             var now = DateTimeOffset.Now;
 
-            // Solo recupera avisos recientes si ANFETA estaba cerrada
-            // o si el índice terminó de cargar unos minutos después.
+            FireDueSnoozedReminders(now);
+
             var oldestAllowed =
                 now.Subtract(TimeSpan.FromMinutes(15));
 
             foreach (var row in rows)
             {
                 var visibleTitle =
-                    (row.DisplayName ??
-                     row.Name ??
-                     string.Empty).Trim();
+                    StripReminderSourcePrefix(
+                        row.Name);
 
                 if (!TryParseReminder(
                         visibleTitle,
                         out var reminderAt,
-                        out var reminderMessage))
+                        out var reminderMessage,
+                        out var recipientTag,
+                        out var recipientName,
+                        out var senderTag,
+                        out var senderName))
                 {
                     continue;
                 }
+
+                if (!ShouldShowForCurrentUser(recipientTag))
+                    continue;
 
                 if (reminderAt > now ||
                     reminderAt < oldestAllowed)
@@ -140,17 +180,57 @@ namespace Anfeta.UI.Services.Search
                         reminderMessage,
                         ResolveTarget(row),
                         reminderAt,
-                        row.Source));
+                        row.Source,
+                        recipientTag,
+                        recipientName,
+                        senderTag,
+                        senderName,
+                        row.ExternalId ?? string.Empty));
             }
+        }
+
+        private static string StripReminderSourcePrefix(
+            string? value)
+        {
+            var text =
+                (value ?? string.Empty).Trim();
+
+            if (!text.StartsWith(
+                    "[",
+                    StringComparison.Ordinal))
+            {
+                return text;
+            }
+
+            var close =
+                text.IndexOf(']');
+
+            if (close > 0 &&
+                close < 60)
+            {
+                text = text
+                    .Substring(close + 1)
+                    .Trim();
+            }
+
+            return text;
         }
 
         private static bool TryParseReminder(
             string title,
             out DateTimeOffset reminderAt,
-            out string message)
+            out string message,
+            out string recipientTag,
+            out string recipientName,
+            out string senderTag,
+            out string senderName)
         {
             reminderAt = default;
             message = string.Empty;
+            recipientTag = string.Empty;
+            recipientName = string.Empty;
+            senderTag = string.Empty;
+            senderName = string.Empty;
 
             if (string.IsNullOrWhiteSpace(title))
                 return false;
@@ -194,10 +274,111 @@ namespace Anfeta.UI.Services.Search
                         ':',
                         '|');
 
+            var firstToken = message
+                .Split(
+                    new[] { ' ', '\t', '\r', '\n' },
+                    StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault() ?? string.Empty;
+
+            if (RecipientNames.TryGetValue(
+                    firstToken,
+                    out var mappedName))
+            {
+                recipientTag = firstToken;
+                recipientName = mappedName;
+
+                message = message
+                    .Substring(firstToken.Length)
+                    .Trim(
+                        ' ',
+                        '-',
+                        '–',
+                        '—',
+                        ':',
+                        '|');
+            }
+
+            var senderMatch = Regex.Match(
+                message,
+                @"^(?:de:)(?<tag>[a-z0-9_-]+)(?:\s+|$)",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+
+            if (senderMatch.Success)
+            {
+                var parsedSenderTag =
+                    senderMatch.Groups["tag"].Value;
+
+                if (RecipientNames.TryGetValue(
+                        parsedSenderTag,
+                        out var mappedSenderName))
+                {
+                    senderTag = parsedSenderTag;
+                    senderName = mappedSenderName;
+                }
+
+                message = message
+                    .Substring(senderMatch.Length)
+                    .Trim(
+                        ' ',
+                        '-',
+                        '–',
+                        '—',
+                        ':',
+                        '|');
+            }
+
+            var markerFound = true;
+
+            while (markerFound)
+            {
+                markerFound = false;
+
+                if (message.StartsWith(
+                        "[TERMINADO]",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    message = message
+                        .Substring("[TERMINADO]".Length)
+                        .Trim();
+                    markerFound = true;
+                }
+
+                if (message.StartsWith(
+                        "[RESPUESTA]",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    message = message
+                        .Substring("[RESPUESTA]".Length)
+                        .Trim();
+                    markerFound = true;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(message))
                 message = title.Trim();
 
             return true;
+        }
+
+        private static bool ShouldShowForCurrentUser(
+            string recipientTag)
+        {
+            var currentUserTag =
+                (ApplicationData.Current.LocalSettings.Values[
+                    LS_CurrentUserTag] as string ?? string.Empty)
+                .Trim();
+
+            if (string.IsNullOrWhiteSpace(currentUserTag))
+                return true;
+
+            if (string.IsNullOrWhiteSpace(recipientTag))
+                return true;
+
+            return string.Equals(
+                currentUserTag,
+                recipientTag,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildReminderIdentity(
@@ -226,6 +407,84 @@ namespace Anfeta.UI.Services.Search
             }
 
             return row.Target ?? string.Empty;
+        }
+
+        public void Snooze(
+            IndexedFileReminder reminder,
+            TimeSpan delay)
+        {
+            if (reminder == null || delay <= TimeSpan.Zero)
+                return;
+
+            var dueAt = DateTimeOffset.Now.Add(delay);
+            var key = $"{reminder.Identity}|snooze";
+
+            _snoozed[key] = new SnoozedReminder(
+                reminder with
+                {
+                    ReminderAt = dueAt
+                },
+                dueAt);
+
+            SaveSnoozedReminders();
+        }
+
+        private void FireDueSnoozedReminders(
+            DateTimeOffset now)
+        {
+            var due = _snoozed
+                .Where(item => item.Value.DueAt <= now)
+                .ToList();
+
+            foreach (var item in due)
+            {
+                _snoozed.Remove(item.Key);
+                ReminderDue?.Invoke(this, item.Value.Reminder);
+            }
+
+            if (due.Count > 0)
+                SaveSnoozedReminders();
+        }
+
+        private void LoadSnoozedReminders()
+        {
+            _snoozed.Clear();
+
+            try
+            {
+                var raw =
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_SnoozedReminders] as string;
+
+                if (string.IsNullOrWhiteSpace(raw))
+                    return;
+
+                var stored = JsonSerializer.Deserialize<
+                    Dictionary<string, SnoozedReminder>>(raw);
+
+                if (stored == null)
+                    return;
+
+                foreach (var item in stored)
+                    _snoozed[item.Key] = item.Value;
+            }
+            catch
+            {
+                _snoozed.Clear();
+            }
+        }
+
+        private void SaveSnoozedReminders()
+        {
+            try
+            {
+                ApplicationData.Current.LocalSettings.Values[
+                    LS_SnoozedReminders] =
+                    JsonSerializer.Serialize(_snoozed);
+            }
+            catch
+            {
+            }
         }
 
         private void LoadFiredReminders()
@@ -269,7 +528,6 @@ namespace Anfeta.UI.Services.Search
             }
             catch
             {
-                // La persistencia no debe bloquear ANFETA.
             }
         }
 

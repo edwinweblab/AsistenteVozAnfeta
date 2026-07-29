@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
@@ -23,7 +24,7 @@ namespace Anfeta.UI.Views
     public sealed partial class SearchView
     {
         private const int CalendarStartHour = 8;
-        private const int CalendarEndHour = 19;
+        private const int CalendarEndHour = 22;
         private const string LS_CalendarZoom = "Search.Calendar.Zoom";
         private const string LS_CalendarPeople = "Search.Calendar.People";
         private const string LS_CalendarOrder = "Search.Calendar.Order";
@@ -87,6 +88,14 @@ namespace Anfeta.UI.Views
         private DispatcherTimer? _calendarChangesTimer;
         private DateTimeOffset _calendarLastChangesCheckUtc = DateTimeOffset.UtcNow.AddMinutes(-5);
         private bool _calendarChangesRefreshRunning;
+
+        private Button? _calendarDraggingButton;
+        private NotionCalendarActivity? _calendarDraggingActivity;
+        private uint _calendarDragPointerId;
+        private double _calendarDragStartPointerY;
+        private double _calendarDragStartTop;
+        private bool _calendarDragActive;
+        private bool _calendarSuppressNextActivityClick;
 
         private enum CalendarReviewView
         {
@@ -789,10 +798,7 @@ namespace Anfeta.UI.Views
                     CalendarReviewView.General
                     ? activities
                     : activities
-                        .Where(activity =>
-                            activity.IsCompletedForReview ||
-                            IsCompletedReviewStatus(
-                                activity.Status))
+                        .Where(IsPendingReviewActivity)
                         .ToList();
 
             var visibleActivities =
@@ -815,7 +821,7 @@ namespace Anfeta.UI.Views
                     ? (_calendarReviewView ==
                         CalendarReviewView.General
                         ? "No hay actividades programadas para este día."
-                        : $"No hay actividades completadas para revisión de {_calendarReviewView}.") +
+                        : $"No hay actividades pendientes con rtuzREVISION para {_calendarReviewView}.") +
                       (string.IsNullOrWhiteSpace(
                           _notionCalendarService.LastDiagnostics)
                           ? string.Empty
@@ -1054,6 +1060,32 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private static bool IsPendingReviewActivity(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null)
+                return false;
+
+            var searchable = string.Join(
+                " ",
+                new[]
+                {
+                    activity.Title,
+                    activity.Project,
+                    activity.Status,
+                    activity.Description
+                }.Where(value =>
+                    !string.IsNullOrWhiteSpace(value)));
+
+            // Solo rtuzREVISION se considera pendiente para estas vistas.
+            // No coincide con prtuzREVISION, zREVISION ni con fragmentos.
+            return Regex.IsMatch(
+                searchable,
+                @"(?<![\p{L}\p{Nd}_])rtuzREVISION(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+        }
+
         private void ApplyCalendarSearchFilter(
             string query)
         {
@@ -1074,58 +1106,107 @@ namespace Anfeta.UI.Views
                 IReadOnlyList<NotionCalendarActivity> activities,
                 string query)
         {
-            var terms =
-                SplitCalendarSearchTerms(query);
+            var parts =
+                ParseCalendarSearchParts(query);
 
-            if (terms.Count == 0)
+            if (parts.Count == 0)
                 return activities;
 
             return activities
                 .Where(activity =>
                 {
-                    var searchable =
-                        NormalizeCalendarSearchText(
-                            string.Join(
-                                " ",
-                                new[]
-                                {
-                                    activity.Title,
-                                    activity.Person,
-                                    activity.OriginalPerson,
-                                    activity.Project,
-                                    activity.Status,
-                                    activity.Description,
-                                    activity.PageUrl,
-                                    activity.TimeLabel,
-                                    activity.Start.ToString(
-                                        "dd/MM/yyyy HH:mm",
-                                        CultureInfo.InvariantCulture),
-                                    activity.End.ToString(
-                                        "dd/MM/yyyy HH:mm",
-                                        CultureInfo.InvariantCulture)
-                                }));
+                    var searchable = string.Join(
+                        " ",
+                        new[]
+                        {
+                            activity.Title,
+                            activity.Person,
+                            activity.OriginalPerson,
+                            activity.Project,
+                            activity.Status,
+                            activity.Description,
+                            activity.PageUrl,
+                            activity.TimeLabel,
+                            activity.Start.ToString(
+                                "dd/MM/yyyy HH:mm",
+                                CultureInfo.InvariantCulture),
+                            activity.End.ToString(
+                                "dd/MM/yyyy HH:mm",
+                                CultureInfo.InvariantCulture)
+                        });
 
-                    return terms.All(term =>
-                        searchable.Contains(
-                            term,
-                            StringComparison.Ordinal));
+                    return parts.All(part =>
+                        part.IsExact
+                            ? ContainsExactCalendarPart(
+                                searchable,
+                                part.Value)
+                            : searchable.Contains(
+                                part.Value,
+                                StringComparison.OrdinalIgnoreCase));
                 })
                 .ToList();
         }
 
-        private static IReadOnlyList<string>
-            SplitCalendarSearchTerms(
-                string query)
+        private sealed record CalendarSearchPart(
+            string Value,
+            bool IsExact);
+
+        private static IReadOnlyList<CalendarSearchPart>
+            ParseCalendarSearchParts(string query)
         {
-            return (query ?? string.Empty)
-                .Split(
-                    new[] { ' ', '\t', '\r', '\n' },
-                    StringSplitOptions.RemoveEmptyEntries)
-                .Select(NormalizeCalendarSearchText)
-                .Where(term =>
-                    !string.IsNullOrWhiteSpace(term))
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            var result =
+                new List<CalendarSearchPart>();
+
+            foreach (Match match in Regex.Matches(
+                query ?? string.Empty,
+                "\\\"(?<exact>[^\\\"]+)\\\"|(?<normal>\\S+)",
+                RegexOptions.CultureInvariant))
+            {
+                var exact =
+                    match.Groups["exact"].Success;
+
+                var value = exact
+                    ? match.Groups["exact"].Value
+                    : match.Groups["normal"].Value;
+
+                value = value.Trim();
+
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    result.Add(
+                        new CalendarSearchPart(
+                            value,
+                            exact));
+                }
+            }
+
+            return result;
+        }
+
+        private static bool ContainsExactCalendarPart(
+            string searchable,
+            string value)
+        {
+            value =
+                (value ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(value))
+                return true;
+
+            if (value.Any(char.IsWhiteSpace) ||
+                value.Contains('.') ||
+                value.Contains('/'))
+            {
+                return searchable.Contains(
+                    value,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            return Regex.IsMatch(
+                searchable,
+                $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(value)}(?![\p{{L}}\p{{Nd}}_])",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
         }
 
         private static string NormalizeCalendarSearchText(
@@ -1380,6 +1461,18 @@ namespace Anfeta.UI.Views
             button.PointerExited +=
                 CalendarActivity_PointerExited;
 
+            button.PointerPressed +=
+                CalendarActivityDrag_PointerPressed;
+
+            button.PointerMoved +=
+                CalendarActivityDrag_PointerMoved;
+
+            button.PointerReleased +=
+                CalendarActivityDrag_PointerReleased;
+
+            button.PointerCanceled +=
+                CalendarActivityDrag_PointerCanceled;
+
             button.ContextFlyout =
                 BuildCalendarActivityContextFlyout(
                     activity);
@@ -1390,6 +1483,274 @@ namespace Anfeta.UI.Views
             Canvas.SetTop(button, top);
             Canvas.SetZIndex(button, 10);
             CalendarCanvas.Children.Add(button);
+        }
+
+        private void CalendarActivityDrag_PointerPressed(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (sender is not Button button ||
+                button.Tag is not NotionCalendarActivity activity)
+            {
+                return;
+            }
+
+            var point =
+                e.GetCurrentPoint(CalendarCanvas);
+
+            if (!point.Properties.IsLeftButtonPressed)
+                return;
+
+            _calendarDraggingButton = button;
+            _calendarDraggingActivity = activity;
+            _calendarDragPointerId = e.Pointer.PointerId;
+            _calendarDragStartPointerY = point.Position.Y;
+            _calendarDragStartTop = Canvas.GetTop(button);
+            _calendarDragActive = false;
+
+            button.CapturePointer(e.Pointer);
+        }
+
+        private void CalendarActivityDrag_PointerMoved(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (_calendarDraggingButton == null ||
+                _calendarDraggingActivity == null ||
+                e.Pointer.PointerId !=
+                    _calendarDragPointerId)
+            {
+                return;
+            }
+
+            var point =
+                e.GetCurrentPoint(CalendarCanvas);
+
+            if (!point.Properties.IsLeftButtonPressed)
+                return;
+
+            var delta =
+                point.Position.Y -
+                _calendarDragStartPointerY;
+
+            if (!_calendarDragActive &&
+                Math.Abs(delta) < 5)
+            {
+                return;
+            }
+
+            _calendarDragActive = true;
+            HideCalendarActivityPreviewFlyout();
+
+            var minTop =
+                CalendarHeaderHeight + 3;
+
+            var maxTop =
+                CalendarHeaderHeight +
+                (CalendarEndHour - CalendarStartHour) *
+                CalendarHourHeight -
+                _calendarDraggingButton.Height;
+
+            var top =
+                Math.Clamp(
+                    _calendarDragStartTop + delta,
+                    minTop,
+                    Math.Max(minTop, maxTop));
+
+            Canvas.SetTop(
+                _calendarDraggingButton,
+                top);
+
+            _calendarDraggingButton.Opacity = 0.78;
+            Canvas.SetZIndex(
+                _calendarDraggingButton,
+                500);
+
+            var minutes =
+                Math.Round(
+                    ((top - CalendarHeaderHeight - 3) /
+                     CalendarHourHeight * 60d) / 15d) * 15d;
+
+            var previewStart =
+                _calendarSelectedDate.Date
+                    .AddHours(CalendarStartHour)
+                    .AddMinutes(minutes);
+
+            var duration =
+                _calendarDraggingActivity.End >
+                _calendarDraggingActivity.Start
+                    ? _calendarDraggingActivity.End -
+                      _calendarDraggingActivity.Start
+                    : TimeSpan.FromHours(1);
+
+            StatusText.Text =
+                $"Estado: Mover a {previewStart:HH:mm}–" +
+                $"{previewStart.Add(duration):HH:mm}";
+
+            e.Handled = true;
+        }
+
+        private async void CalendarActivityDrag_PointerReleased(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (_calendarDraggingButton == null ||
+                _calendarDraggingActivity == null ||
+                e.Pointer.PointerId !=
+                    _calendarDragPointerId)
+            {
+                return;
+            }
+
+            var button =
+                _calendarDraggingButton;
+
+            var activity =
+                _calendarDraggingActivity;
+
+            button.ReleasePointerCapture(e.Pointer);
+            button.Opacity = 1;
+
+            var wasDragging =
+                _calendarDragActive;
+
+            _calendarDraggingButton = null;
+            _calendarDraggingActivity = null;
+            _calendarDragPointerId = 0;
+            _calendarDragActive = false;
+
+            if (!wasDragging)
+                return;
+
+            _calendarSuppressNextActivityClick = true;
+            e.Handled = true;
+
+            var top =
+                Canvas.GetTop(button);
+
+            var minutes =
+                Math.Round(
+                    ((top - CalendarHeaderHeight - 3) /
+                     CalendarHourHeight * 60d) / 15d) * 15d;
+
+            var duration =
+                activity.End > activity.Start
+                    ? activity.End - activity.Start
+                    : TimeSpan.FromHours(1);
+
+            var totalMinutes =
+                (CalendarEndHour - CalendarStartHour) * 60d;
+
+            minutes = Math.Clamp(
+                minutes,
+                0,
+                Math.Max(
+                    0,
+                    totalMinutes -
+                    duration.TotalMinutes));
+
+            var targetStart =
+                _calendarSelectedDate.Date
+                    .AddHours(CalendarStartHour)
+                    .AddMinutes(minutes);
+
+            await MoveCalendarActivityToTimeAsync(
+                activity,
+                targetStart);
+        }
+
+        private void CalendarActivityDrag_PointerCanceled(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (_calendarDraggingButton != null)
+            {
+                _calendarDraggingButton.Opacity = 1;
+                _calendarDraggingButton.ReleasePointerCapture(
+                    e.Pointer);
+            }
+
+            var shouldRedraw =
+                _calendarDragActive;
+
+            _calendarDraggingButton = null;
+            _calendarDraggingActivity = null;
+            _calendarDragPointerId = 0;
+            _calendarDragActive = false;
+
+            if (shouldRedraw)
+                DrawCalendar(_calendarActivities);
+        }
+
+        private async Task MoveCalendarActivityToTimeAsync(
+            NotionCalendarActivity activity,
+            DateTime targetStart)
+        {
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    "Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                DrawCalendar(_calendarActivities);
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            var oldStart =
+                activity.Start;
+
+            var oldEnd =
+                activity.End;
+
+            try
+            {
+                StatusText.Text =
+                    $"Estado: Guardando nueva hora {targetStart:HH:mm}...";
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(2));
+
+                var updated =
+                    await _notionCalendarService
+                        .UpdateActivityScheduleAsync(
+                            token,
+                            activity,
+                            targetStart,
+                            cts.Token);
+
+                activity.Start = updated.Start;
+                activity.End = updated.End;
+                activity.DatePropertyName =
+                    updated.DatePropertyName;
+
+                var currentDay =
+                    await _notionCalendarService
+                        .TryGetCachedDayAsync(
+                            _calendarSelectedDate,
+                            cts.Token);
+
+                _calendarActivities =
+                    currentDay ??
+                    Array.Empty<NotionCalendarActivity>();
+
+                DrawCalendar(_calendarActivities);
+
+                StatusText.Text =
+                    $"Estado: Actividad movida a " +
+                    $"{updated.Start:HH:mm}–{updated.End:HH:mm} ✅";
+            }
+            catch (Exception ex)
+            {
+                activity.Start = oldStart;
+                activity.End = oldEnd;
+                DrawCalendar(_calendarActivities);
+
+                StatusText.Text =
+                    $"Estado: No se pudo cambiar la hora → {ex.Message}";
+            }
         }
 
         private MenuFlyout BuildCalendarActivityContextFlyout(
@@ -2633,6 +2994,12 @@ namespace Anfeta.UI.Views
             object sender,
             RoutedEventArgs e)
         {
+            if (_calendarSuppressNextActivityClick)
+            {
+                _calendarSuppressNextActivityClick = false;
+                return;
+            }
+
             if (sender is not Button button ||
                 button.Tag is not NotionCalendarActivity activity)
             {

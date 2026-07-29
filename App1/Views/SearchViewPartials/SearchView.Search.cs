@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -70,7 +71,9 @@ namespace Anfeta.UI.Views
             if (_suppressSuggest)
                 return;
 
-            // Sugerencias desactivadas temporalmente para evitar que tapen los resultados.
+            // El buscador usa únicamente el panel predictivo personalizado
+            // (tarjetas azules). Se desactiva el desplegable nativo del
+            // AutoSuggestBox para evitar mostrar dos predictivos a la vez.
             sender.ItemsSource = null;
             sender.IsSuggestionListOpen = false;
 
@@ -88,6 +91,11 @@ namespace Anfeta.UI.Views
 
             SyncBaseChipsFromQuery(q);
             RefreshQuickFlyoutContent(q);
+
+            // Prioriza dominios completos dentro del predictivo personalizado.
+            // Ejemplo: al escribir "weblab" o "weblab." se muestran primero
+            // weblab.mx, weblab.com y weblab.com.mx, conservando los puntos.
+            PromoteDomainPredictiveSuggestions(q);
 
             if (ShouldShowQuickFlyout(q))
                 ShowQuickCommandsInputFlyout();
@@ -153,6 +161,151 @@ namespace Anfeta.UI.Views
 
             _searchDebounceTimer!.Stop();
             _searchDebounceTimer.Start();
+        }
+
+
+        private void PromoteDomainPredictiveSuggestions(
+            string query)
+        {
+            if (!App.LocalIndex.HasData)
+                return;
+
+            var raw =
+                (query ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(raw))
+                return;
+
+            // El predictivo trabaja sobre la última parte escrita para no
+            // interferir con búsquedas que ya contienen varios términos.
+            var currentPart = raw
+                .Split(
+                    new[] { ' ', '\t', '\r', '\n', '"', '\'' },
+                    StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault()?
+                .Trim()
+                .ToLowerInvariant() ?? string.Empty;
+
+            if (currentPart.Length < 2)
+                return;
+
+            const string domainPattern =
+                @"(?<![\w@])(?:https?://)?(?:www\.)?" +
+                @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
+                @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
+                @"com|mx|org|net|io|co|app|dev))" +
+                @"(?=$|[/:?#\s)\]}>.,;!])";
+
+            var frequency =
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in App.LocalIndex.GetAll())
+            {
+                var searchable = string.Join(
+                    " ",
+                    new[]
+                    {
+                        row.DisplayName,
+                        row.Name,
+                        row.SearchText,
+                        row.Description,
+                        row.Target
+                    }.Where(value =>
+                        !string.IsNullOrWhiteSpace(value)));
+
+                foreach (Match match in Regex.Matches(
+                             searchable,
+                             domainPattern,
+                             RegexOptions.IgnoreCase |
+                             RegexOptions.CultureInvariant))
+                {
+                    var domain = match.Groups["domain"]
+                        .Value
+                        .Trim()
+                        .TrimEnd('.')
+                        .ToLowerInvariant();
+
+                    if (string.IsNullOrWhiteSpace(domain))
+                        continue;
+
+                    if (!domain.StartsWith(
+                            currentPart,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    frequency[domain] =
+                        frequency.TryGetValue(domain, out var count)
+                            ? count + 1
+                            : 1;
+                }
+            }
+
+            var domains = frequency
+                .OrderByDescending(pair =>
+                    string.Equals(
+                        pair.Key,
+                        currentPart,
+                        StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(pair =>
+                    pair.Key.StartsWith(
+                        currentPart + ".",
+                        StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(pair => pair.Value)
+                .ThenBy(pair => pair.Key.Length)
+                .ThenBy(pair => pair.Key)
+                .Take(8)
+                .ToList();
+
+            if (domains.Count == 0)
+                return;
+
+            // Evita duplicados y coloca los dominios al inicio del panel azul.
+            for (var index =
+                     _predictiveSuggestions.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                var existing =
+                    _predictiveSuggestions[index];
+
+                if (domains.Any(pair =>
+                        string.Equals(
+                            existing.Query,
+                            pair.Key,
+                            StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(
+                            existing.Title,
+                            pair.Key,
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    _predictiveSuggestions.RemoveAt(index);
+                }
+            }
+
+            for (var index = domains.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                var pair = domains[index];
+
+                _predictiveSuggestions.Insert(
+                    0,
+                    new PredictiveSuggestion
+                    {
+                        Title = pair.Key,
+                        Subtitle =
+                            $"Dominio completo · aparece {pair.Value}x",
+                        Query = pair.Key,
+                        Kind = "Domain",
+                        IconGlyph = "\uE71B"
+                    });
+            }
+
+            BindPredictiveSuggestions();
+            UpdateQuickFlyoutVisibility();
         }
 
         private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
@@ -267,7 +420,8 @@ namespace Anfeta.UI.Views
 
             var parsed = AdvancedQueryV3.Parse(queryForSearch);
 
-            if (!LooksAdvanced(queryForSearch))
+            if (HasQuotedSearchParts(queryForSearch) ||
+                !LooksAdvanced(queryForSearch))
                 UpdateHighlightTermsForAutoAnd(queryForSearch);
             else
                 UpdateHighlightTerms(queryForSearch, parsed);
@@ -276,9 +430,10 @@ namespace Anfeta.UI.Views
             {
                 if (queryForSearch == "-") return;
 
-                if (!LooksAdvanced(queryForSearch))
+                if (HasQuotedSearchParts(queryForSearch) ||
+                    !LooksAdvanced(queryForSearch))
                 {
-                    items = items.Where(x => MatchesAutoAndQueryOnRow(x, queryForSearch));
+                    items = items.Where(x => MatchesFlexibleOrQuotedQuery(x, queryForSearch));
                 }
                 else
                 {
@@ -365,7 +520,8 @@ namespace Anfeta.UI.Views
 
             var parsed = AdvancedQueryV3.Parse(queryForSearch);
 
-            if (!LooksAdvanced(queryForSearch))
+            if (HasQuotedSearchParts(queryForSearch) ||
+                !LooksAdvanced(queryForSearch))
                 UpdateHighlightTermsForAutoAnd(queryForSearch);
             else
                 UpdateHighlightTerms(queryForSearch, parsed);
@@ -374,9 +530,10 @@ namespace Anfeta.UI.Views
             {
                 if (queryForSearch == "-") return;
 
-                if (!LooksAdvanced(queryForSearch))
+                if (HasQuotedSearchParts(queryForSearch) ||
+                    !LooksAdvanced(queryForSearch))
                 {
-                    items = items.Where(x => MatchesAutoAndQueryOnRow(x, queryForSearch));
+                    items = items.Where(x => MatchesFlexibleOrQuotedQuery(x, queryForSearch));
                 }
                 else
                 {
@@ -421,6 +578,127 @@ namespace Anfeta.UI.Views
             _voicePost.NotifySearchResults(Results);
             Dictation_SetResults(Results);
             await Task.CompletedTask;
+        }
+
+        private static bool HasQuotedSearchParts(
+            string query)
+        {
+            return Regex.IsMatch(
+                query ?? string.Empty,
+                "\"[^\"]+\"",
+                RegexOptions.CultureInvariant);
+        }
+
+        private static bool MatchesFlexibleOrQuotedQuery(
+            Anfeta.UI.Models.Weblab.SearchResultRow row,
+            string query)
+        {
+            var searchable = string.Join(
+                " ",
+                new[]
+                {
+                    row.DisplayName,
+                    row.Name,
+                    row.Target,
+                    row.PathColumn,
+                    row.SearchText,
+                    row.Description,
+                    row.ProjectUpdateStatus,
+                    row.ScheduledDate,
+                    row.ExternalSourceName
+                }.Where(value =>
+                    !string.IsNullOrWhiteSpace(value)));
+
+            var parts = ParseFlexibleSearchParts(query);
+
+            if (parts.Count == 0)
+                return true;
+
+            return parts.All(part =>
+                part.IsExact
+                    ? ContainsExactSearchPart(
+                        searchable,
+                        part.Value)
+                    : searchable.Contains(
+                        part.Value,
+                        StringComparison.OrdinalIgnoreCase));
+        }
+
+        private sealed record FlexibleSearchPart(
+            string Value,
+            bool IsExact);
+
+        private static IReadOnlyList<FlexibleSearchPart>
+            ParseFlexibleSearchParts(string query)
+        {
+            var result =
+                new List<FlexibleSearchPart>();
+
+            var raw =
+                (query ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(raw))
+                return result;
+
+            var matches = Regex.Matches(
+                raw,
+                "\\\"(?<exact>[^\\\"]+)\\\"|(?<normal>\\S+)",
+                RegexOptions.CultureInvariant);
+
+            foreach (Match match in matches)
+            {
+                var exact =
+                    match.Groups["exact"].Success;
+
+                var value = exact
+                    ? match.Groups["exact"].Value
+                    : match.Groups["normal"].Value;
+
+                value = value.Trim();
+
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    result.Add(
+                        new FlexibleSearchPart(
+                            value,
+                            exact));
+                }
+            }
+
+            return result;
+        }
+
+        private static bool ContainsExactSearchPart(
+            string searchable,
+            string exactValue)
+        {
+            var value =
+                (exactValue ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(value))
+                return true;
+
+            // Una frase con espacios o un dominio se busca completa y en orden.
+            // Para tags simples se exigen límites para impedir que zREVISION
+            // coincida dentro de rtuzREVISION o prtuzREVISION.
+            if (value.Any(char.IsWhiteSpace) ||
+                value.Contains('.') ||
+                value.Contains('/') ||
+                value.Contains('\\'))
+            {
+                return searchable.Contains(
+                    value,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            var pattern =
+                $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(value)}(?![\p{{L}}\p{{Nd}}_])";
+
+            return Regex.IsMatch(
+                searchable,
+                pattern,
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
         }
 
         private void UpdateSearchBreadcrumb(string rawQuery, NotionBaseScope scope, string queryForSearch)

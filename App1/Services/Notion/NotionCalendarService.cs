@@ -645,6 +645,202 @@ namespace Anfeta.UI.Services.Notion
             return updated;
         }
 
+        public async Task<NotionCalendarActivity>
+            UpdateActivityScheduleAsync(
+                string token,
+                NotionCalendarActivity activity,
+                DateTime targetStart,
+                CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                throw new InvalidOperationException(
+                    "La actividad no contiene un identificador de Notion.");
+            }
+
+            using var http =
+                CreateClient(token);
+
+            var page =
+                await ReadPageAsync(
+                    http,
+                    activity.PageId,
+                    cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "No se pudieron leer las propiedades actuales de la actividad.");
+            }
+
+            var propertyName =
+                activity.DatePropertyName;
+
+            if (string.IsNullOrWhiteSpace(propertyName) ||
+                !properties.TryGetProperty(
+                    propertyName,
+                    out var currentProperty) ||
+                !ReadString(currentProperty, "type")
+                    .Equals(
+                        "date",
+                        StringComparison.OrdinalIgnoreCase))
+            {
+                propertyName =
+                    DateAliases.FirstOrDefault(alias =>
+                        properties.EnumerateObject().Any(property =>
+                            Normalize(property.Name) ==
+                                Normalize(alias) &&
+                            ReadString(
+                                property.Value,
+                                "type")
+                                .Equals(
+                                    "date",
+                                    StringComparison.OrdinalIgnoreCase)))
+                    ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                throw new InvalidOperationException(
+                    "No se encontró una propiedad de fecha editable. " +
+                    "La fecha visible podría provenir de una fórmula o rollup.");
+            }
+
+            var duration =
+                activity.End > activity.Start
+                    ? activity.End - activity.Start
+                    : TimeSpan.FromHours(1);
+
+            var localStart =
+                DateTime.SpecifyKind(
+                    targetStart,
+                    DateTimeKind.Local);
+
+            var localEnd =
+                localStart.Add(duration);
+
+            var startOffset =
+                new DateTimeOffset(localStart);
+
+            var endOffset =
+                new DateTimeOffset(localEnd);
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["properties"] =
+                        new Dictionary<string, object?>
+                        {
+                            [propertyName] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["date"] =
+                                        new Dictionary<string, object?>
+                                        {
+                                            ["start"] =
+                                                startOffset.ToString("O"),
+                                            ["end"] =
+                                                endOffset.ToString("O")
+                                        }
+                                }
+                        }
+                };
+
+            using var response =
+                await SendPatchWithRetryAsync(
+                    http,
+                    $"pages/{activity.PageId}",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
+
+            var responseJson =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "cambiar la hora de la actividad",
+                    response,
+                    responseJson);
+            }
+
+            var updated =
+                new NotionCalendarActivity
+                {
+                    PageId = activity.PageId,
+                    PageUrl = activity.PageUrl,
+                    Title = activity.Title,
+                    Person = activity.Person,
+                    OriginalPerson = activity.OriginalPerson,
+                    IsCompletedForReview =
+                        activity.IsCompletedForReview,
+                    Project = activity.Project,
+                    Status = activity.Status,
+                    StatusColor = activity.StatusColor,
+                    Description = activity.Description,
+                    DatePropertyName = propertyName,
+                    Start = localStart,
+                    End = localEnd
+                };
+
+            await RemoveActivityFromCacheAsync(
+                activity.PageId,
+                cancellationToken);
+
+            foreach (var day in EnumerateActivityDays(updated))
+            {
+                var key =
+                    day.ToString(
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture);
+
+                await CacheLock.WaitAsync(
+                    cancellationToken);
+
+                try
+                {
+                    if (!DayCache.TryGetValue(
+                            key,
+                            out var list))
+                    {
+                        list =
+                            new List<NotionCalendarActivity>();
+
+                        DayCache[key] = list;
+                    }
+
+                    list.RemoveAll(item =>
+                        string.Equals(
+                            item.PageId,
+                            updated.PageId,
+                            StringComparison.OrdinalIgnoreCase));
+
+                    list.Add(updated);
+
+                    await SaveCacheUnsafeAsync(
+                        cancellationToken);
+                }
+                finally
+                {
+                    CacheLock.Release();
+                }
+            }
+
+            return updated;
+        }
+
         private static async Task RemoveActivityFromCacheAsync(
             string pageId,
             CancellationToken cancellationToken)

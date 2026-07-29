@@ -383,6 +383,8 @@ namespace Anfeta.UI.Views
             LoadDetailsPaneWidth();
             LoadResultsViewMode();
             EnsureResultsWheelHandler();
+            InitializeMessagesView();
+            AttachMessagesNavigationBridge();
             UpdateColumnSortIndicators();
             // Suscripción única controlada por flag — evita duplicados si Loaded se dispara más de una vez
             if (!_isIndexStateHooked)
@@ -437,6 +439,8 @@ namespace Anfeta.UI.Views
                 _isIndexStateHooked = false;
             }
 
+            DetachMessagesNavigationBridge();
+            CloseMessagesView();
             StopDropboxChangeWatcher();
 
             try

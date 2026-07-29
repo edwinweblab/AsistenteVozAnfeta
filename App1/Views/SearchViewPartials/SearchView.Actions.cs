@@ -1108,6 +1108,28 @@ namespace Anfeta.UI.Views
             "nneft"
         };
 
+        private const string LS_CurrentUserTag =
+            "Messaging.CurrentUserTag";
+
+        private static string GetNotionPersonDisplayName(string tag)
+        {
+            return (tag ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "jjohn" => "John",
+                "kkarl" => "Karla",
+                "iisaia" => "Isaias",
+                "eedua" => "Sotelo",
+                "aacal" => "Acalli",
+                "aandr" => "Andrade",
+                "eemma" => "Emmanuel",
+                "bbria" => "Brian",
+                "ggena" => "Genaro",
+                "nneft" => "Neftali",
+                _ => tag
+            };
+        }
+
+
         private static IReadOnlyList<string> LoadNotionUploadRecentTags()
         {
             var raw =
@@ -1473,8 +1495,146 @@ namespace Anfeta.UI.Views
                 HorizontalAlignment =
                     HorizontalAlignment.Stretch,
                 Text = suggestedTitle,
-                PlaceholderText = "Título de la página"
+                PlaceholderText =
+                    "dominio.com → sseo aapli aads wwebs → jjuli → Título Descripción Detalles"
             };
+
+            var titleSuggestionsLabel = new TextBlock
+            {
+                Text = "Completa la estructura del título",
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Opacity = 0.82,
+                Visibility = Visibility.Collapsed
+            };
+
+            var titleSuggestionsPanel = new VariableSizedWrapGrid
+            {
+                Orientation = Orientation.Horizontal,
+                MaximumRowsOrColumns = 3,
+                ItemWidth = 205,
+                ItemHeight = 42,
+                Visibility = Visibility.Collapsed
+            };
+
+            string BuildVisualNotionTitleSuggestion(
+                string suggestion)
+            {
+                var clean = Regex.Replace(
+                    (suggestion ?? string.Empty).Trim(),
+                    @"\s+",
+                    " ");
+
+                var tokens = clean.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+
+                if (tokens.Length < 2)
+                    return clean;
+
+                var projectTypes = new[]
+                {
+                    "sseo", "aapli", "aads", "wwebs"
+                };
+
+                var months = new[]
+                {
+                    "jjane", "ffebr", "mmarz", "aabri",
+                    "mmayo", "jjuni", "jjuli", "aagos",
+                    "ssept", "ooctu", "nnovi", "ddici"
+                };
+
+                var projectIndex = Array.FindIndex(
+                    tokens,
+                    token => projectTypes.Contains(
+                        token,
+                        StringComparer.OrdinalIgnoreCase));
+
+                if (projectIndex < 0)
+                    return clean;
+
+                var monthIndex = Array.FindIndex(
+                    tokens,
+                    projectIndex + 1,
+                    token => months.Contains(
+                        token,
+                        StringComparer.OrdinalIgnoreCase));
+
+                var domain = string.Join(
+                    " ",
+                    tokens.Take(projectIndex));
+
+                var project = tokens[projectIndex];
+
+                if (monthIndex < 0)
+                    return $"{domain}  ›  {project}";
+
+                var month = tokens[monthIndex];
+
+                var detail = string.Join(
+                    " ",
+                    tokens.Skip(monthIndex + 1));
+
+                return string.IsNullOrWhiteSpace(detail)
+                    ? $"{domain}  ›  {project}  ›  {month}"
+                    : $"{domain}  ›  {project}  ›  {month}  ›  {detail}";
+            }
+
+            void RefreshTitleSuggestions()
+            {
+                var suggestions =
+                    BuildStructuredNotionTitleSuggestions(
+                        titleBox.Text,
+                        max: 12);
+
+                titleSuggestionsPanel.Children.Clear();
+
+                foreach (var suggestion in suggestions)
+                {
+                    var suggestionButton = new Button
+                    {
+                        Content = $"◇  {BuildVisualNotionTitleSuggestion(suggestion)}",
+                        Tag = suggestion,
+                        Width = 198,
+                        Height = 36,
+                        Margin = new Thickness(0, 0, 7, 7),
+                        Padding = new Thickness(10, 5, 10, 5),
+                        HorizontalContentAlignment =
+                            HorizontalAlignment.Left,
+                        Background = new SolidColorBrush(
+                            Windows.UI.Color.FromArgb(255, 31, 55, 79)),
+                        BorderBrush = new SolidColorBrush(
+                            Windows.UI.Color.FromArgb(255, 62, 101, 139)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(8)
+                    };
+
+                    ToolTipService.SetToolTip(
+                        suggestionButton,
+                        suggestion);
+
+                    suggestionButton.Click += (_, __) =>
+                    {
+                        titleBox.Text = suggestion;
+                        titleBox.SelectionStart = titleBox.Text.Length;
+                        titleBox.Focus(FocusState.Programmatic);
+                        RefreshTitleSuggestions();
+                    };
+
+                    titleSuggestionsPanel.Children.Add(
+                        suggestionButton);
+                }
+
+                var visible = suggestions.Count > 0
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+                titleSuggestionsLabel.Visibility = visible;
+                titleSuggestionsPanel.Visibility = visible;
+            }
+
+            titleBox.TextChanged += (_, __) =>
+                RefreshTitleSuggestions();
 
             var onePageOption = new RadioButton
             {
@@ -1647,13 +1807,25 @@ namespace Anfeta.UI.Views
                         Microsoft.UI.Text.FontWeights.SemiBold
                 });
 
+            titleSection.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "(dominio.com → Tipo proyecto = sseo aapli aads wwebs → jjuli → Título Descripción Detalles)",
+                    FontSize = 11,
+                    Opacity = 0.72,
+                    TextWrapping = TextWrapping.Wrap
+                });
+
             titleSection.Children.Add(titleBox);
+            titleSection.Children.Add(titleSuggestionsLabel);
+            titleSection.Children.Add(titleSuggestionsPanel);
 
             var selectedUploadTags =
                 new HashSet<string>(
                     StringComparer.OrdinalIgnoreCase);
 
-            void AppendTagToEditor(
+            void AppendTagToTextBox(
                 TextBox editor,
                 string tag)
             {
@@ -1687,11 +1859,11 @@ namespace Anfeta.UI.Views
                 if (separatePagesOption.IsChecked == true)
                 {
                     foreach (var editor in titleEditors)
-                        AppendTagToEditor(editor, tag);
+                        AppendTagToTextBox(editor, tag);
                 }
                 else
                 {
-                    AppendTagToEditor(titleBox, tag);
+                    AppendTagToTextBox(titleBox, tag);
                 }
             }
 
@@ -1758,6 +1930,175 @@ namespace Anfeta.UI.Views
             };
 
             quickTagsPanel.Children.Add(personTagCombo);
+
+            var reminderCheck = new CheckBox
+            {
+                Content = "Programar como recordatorio / mensaje",
+                IsChecked = false
+            };
+
+            var reminderRecipientCombo = new ComboBox
+            {
+                PlaceholderText = "Selecciona destinatario",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                IsEnabled = false
+            };
+
+            foreach (var tag in NotionUploadPersonTags)
+            {
+                reminderRecipientCombo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = GetNotionPersonDisplayName(tag),
+                        Tag = tag
+                    });
+            }
+
+            var savedCurrentUserTag =
+                (ApplicationData.Current.LocalSettings.Values[
+                    LS_CurrentUserTag] as string ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(savedCurrentUserTag))
+            {
+                reminderRecipientCombo.SelectedItem =
+                    reminderRecipientCombo.Items
+                        .OfType<ComboBoxItem>()
+                        .FirstOrDefault(item =>
+                            string.Equals(
+                                item.Tag?.ToString(),
+                                savedCurrentUserTag,
+                                StringComparison.OrdinalIgnoreCase));
+            }
+
+            var reminderDelayCombo = new ComboBox
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                IsEnabled = false,
+                SelectedIndex = 0
+            };
+
+            reminderDelayCombo.Items.Add(
+                new ComboBoxItem { Content = "En 5 minutos", Tag = "5" });
+            reminderDelayCombo.Items.Add(
+                new ComboBoxItem { Content = "En 10 minutos", Tag = "10" });
+            reminderDelayCombo.Items.Add(
+                new ComboBoxItem { Content = "En 15 minutos", Tag = "15" });
+            reminderDelayCombo.Items.Add(
+                new ComboBoxItem { Content = "En 30 minutos", Tag = "30" });
+            reminderDelayCombo.Items.Add(
+                new ComboBoxItem { Content = "En 1 hora", Tag = "60" });
+            reminderDelayCombo.Items.Add(
+                new ComboBoxItem { Content = "Personalizado…", Tag = "custom" });
+
+            var customReminderValueBox = new NumberBox
+            {
+                Header = "Cantidad",
+                Minimum = 1,
+                Maximum = 999,
+                Value = 1,
+                SpinButtonPlacementMode =
+                    NumberBoxSpinButtonPlacementMode.Compact,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var customReminderUnitCombo = new ComboBox
+            {
+                Header = "Unidad",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                SelectedIndex = 0
+            };
+
+            customReminderUnitCombo.Items.Add(
+                new ComboBoxItem { Content = "Minutos", Tag = "minutes" });
+            customReminderUnitCombo.Items.Add(
+                new ComboBoxItem { Content = "Horas", Tag = "hours" });
+            customReminderUnitCombo.Items.Add(
+                new ComboBoxItem { Content = "Días", Tag = "days" });
+
+            var customReminderGrid = new Grid
+            {
+                ColumnSpacing = 10,
+                Visibility = Visibility.Collapsed
+            };
+
+            customReminderGrid.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
+            customReminderGrid.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
+
+            Grid.SetColumn(customReminderValueBox, 0);
+            customReminderGrid.Children.Add(customReminderValueBox);
+
+            Grid.SetColumn(customReminderUnitCombo, 1);
+            customReminderGrid.Children.Add(customReminderUnitCombo);
+
+            var reminderPanel = new StackPanel
+            {
+                Spacing = 7
+            };
+
+            reminderPanel.Children.Add(reminderCheck);
+            reminderPanel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Destinatario:",
+                    FontSize = 11,
+                    Opacity = 0.72
+                });
+            reminderPanel.Children.Add(reminderRecipientCombo);
+            reminderPanel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Mostrar recordatorio:",
+                    FontSize = 11,
+                    Opacity = 0.72
+                });
+            reminderPanel.Children.Add(reminderDelayCombo);
+            reminderPanel.Children.Add(customReminderGrid);
+
+            void RefreshCustomReminderVisibility()
+            {
+                var isCustom =
+                    reminderDelayCombo.SelectedItem is ComboBoxItem selectedDelay &&
+                    string.Equals(
+                        selectedDelay.Tag?.ToString(),
+                        "custom",
+                        StringComparison.OrdinalIgnoreCase);
+
+                customReminderGrid.Visibility =
+                    reminderCheck.IsChecked == true && isCustom
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+
+                customReminderValueBox.IsEnabled =
+                    reminderCheck.IsChecked == true && isCustom;
+
+                customReminderUnitCombo.IsEnabled =
+                    reminderCheck.IsChecked == true && isCustom;
+            }
+
+            reminderCheck.Checked += (_, __) =>
+            {
+                reminderRecipientCombo.IsEnabled = true;
+                reminderDelayCombo.IsEnabled = true;
+                RefreshCustomReminderVisibility();
+            };
+
+            reminderCheck.Unchecked += (_, __) =>
+            {
+                reminderRecipientCombo.IsEnabled = false;
+                reminderDelayCombo.IsEnabled = false;
+                RefreshCustomReminderVisibility();
+            };
+
+            reminderDelayCombo.SelectionChanged += (_, __) =>
+                RefreshCustomReminderVisibility();
 
             var recentTags = LoadNotionUploadRecentTags();
             if (recentTags.Count > 0)
@@ -1840,6 +2181,21 @@ namespace Anfeta.UI.Views
             content.Children.Add(titleSection);
             content.Children.Add(separateTitlesPanel);
             content.Children.Add(quickTagsPanel);
+            content.Children.Add(reminderPanel);
+
+            var contentScroll = new ScrollViewer
+            {
+                Content = content,
+                MaxHeight = Math.Clamp(
+                    ActualHeight - 190,
+                    420,
+                    680),
+                HorizontalScrollBarVisibility =
+                    ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility =
+                    ScrollBarVisibility.Auto,
+                VerticalScrollMode = ScrollMode.Enabled
+            };
 
             var dialog = new ContentDialog
             {
@@ -1847,7 +2203,7 @@ namespace Anfeta.UI.Views
                 Title = files.Count == 1
                     ? "Subir archivo a Notion"
                     : "Subir varios archivos a Notion",
-                Content = content,
+                Content = contentScroll,
                 PrimaryButtonText = "Continuar y subir",
                 CloseButtonText = "Cancelar",
                 DefaultButton =
@@ -1878,12 +2234,34 @@ namespace Anfeta.UI.Views
                     ? Visibility.Visible
                     : Visibility.Collapsed;
 
-                dialog.IsPrimaryButtonEnabled = separate
+                var titlesValid = separate
                     ? titleEditors.All(editor =>
                         !string.IsNullOrWhiteSpace(
                             editor.Text))
                     : !string.IsNullOrWhiteSpace(
                         titleBox.Text);
+
+                var customDelaySelected =
+                    reminderDelayCombo.SelectedItem is ComboBoxItem selectedDelay &&
+                    string.Equals(
+                        selectedDelay.Tag?.ToString(),
+                        "custom",
+                        StringComparison.OrdinalIgnoreCase);
+
+                var customDelayValid =
+                    !customDelaySelected ||
+                    (!double.IsNaN(customReminderValueBox.Value) &&
+                     customReminderValueBox.Value >= 1 &&
+                     customReminderUnitCombo.SelectedItem is ComboBoxItem);
+
+                var reminderValid =
+                    reminderCheck.IsChecked != true ||
+                    (reminderRecipientCombo.SelectedItem is ComboBoxItem &&
+                     reminderDelayCombo.SelectedItem is ComboBoxItem &&
+                     customDelayValid);
+
+                dialog.IsPrimaryButtonEnabled =
+                    titlesValid && reminderValid;
             }
 
             titleBox.TextChanged +=
@@ -1901,12 +2279,29 @@ namespace Anfeta.UI.Views
             separatePagesOption.Checked +=
                 (_, __) => RefreshDialogState();
 
+            reminderCheck.Checked +=
+                (_, __) => RefreshDialogState();
+            reminderCheck.Unchecked +=
+                (_, __) => RefreshDialogState();
+            reminderRecipientCombo.SelectionChanged +=
+                (_, __) => RefreshDialogState();
+            reminderDelayCombo.SelectionChanged +=
+                (_, __) => RefreshDialogState();
+            customReminderValueBox.ValueChanged +=
+                (_, __) => RefreshDialogState();
+            customReminderUnitCombo.SelectionChanged +=
+                (_, __) => RefreshDialogState();
+
             dialog.Opened += (_, __) =>
             {
                 RefreshDialogState();
                 titleBox.Focus(
                     FocusState.Programmatic);
-                titleBox.SelectAll();
+
+                var innerTitleTextBox =
+                    FindVisualChild<TextBox>(titleBox);
+
+                innerTitleTextBox?.SelectAll();
             };
 
             if (await dialog.ShowAsync() !=
@@ -1921,6 +2316,85 @@ namespace Anfeta.UI.Views
                      string.Empty).Trim())
                 .ToList();
 
+            var singleTitle =
+                (titleBox.Text ?? string.Empty).Trim();
+
+            if (reminderCheck.IsChecked == true &&
+                reminderRecipientCombo.SelectedItem is ComboBoxItem recipientItem)
+            {
+                var recipientTag =
+                    (recipientItem.Tag?.ToString() ?? string.Empty).Trim();
+
+                double delayMinutes = 5;
+
+                if (reminderDelayCombo.SelectedItem is ComboBoxItem delayItem)
+                {
+                    var delayTag =
+                        delayItem.Tag?.ToString() ?? string.Empty;
+
+                    if (string.Equals(
+                            delayTag,
+                            "custom",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        var amount =
+                            double.IsNaN(customReminderValueBox.Value)
+                                ? 1
+                                : Math.Max(1, customReminderValueBox.Value);
+
+                        var unit =
+                            customReminderUnitCombo.SelectedItem is ComboBoxItem unitItem
+                                ? unitItem.Tag?.ToString() ?? "minutes"
+                                : "minutes";
+
+                        delayMinutes = unit switch
+                        {
+                            "hours" => amount * 60,
+                            "days" => amount * 24 * 60,
+                            _ => amount
+                        };
+                    }
+                    else if (double.TryParse(
+                                 delayTag,
+                                 System.Globalization.NumberStyles.Float,
+                                 System.Globalization.CultureInfo.InvariantCulture,
+                                 out var parsedDelay))
+                    {
+                        delayMinutes = parsedDelay;
+                    }
+                }
+
+                var reminderAt =
+                    DateTime.Now.AddMinutes(delayMinutes);
+
+                string BuildReminderTitle(string originalTitle)
+                {
+                    var cleanTitle =
+                        (originalTitle ?? string.Empty).Trim();
+
+                    var senderTag =
+                        (ApplicationData.Current.LocalSettings.Values[
+                            LS_CurrentUserTag] as string ?? string.Empty).Trim();
+
+                    var senderToken =
+                        string.IsNullOrWhiteSpace(senderTag)
+                            ? string.Empty
+                            : $" de:{senderTag}";
+
+                    return
+                        $"{reminderAt:yyyy-MM-dd HH:mm} {recipientTag}{senderToken} {cleanTitle}".Trim();
+                }
+
+                singleTitle =
+                    BuildReminderTitle(singleTitle);
+
+                separateTitles = separateTitles
+                    .Select(BuildReminderTitle)
+                    .ToList();
+
+                selectedUploadTags.Add(recipientTag);
+            }
+
             SaveNotionUploadRecentTags(
                 selectedUploadTags);
 
@@ -1928,8 +2402,7 @@ namespace Anfeta.UI.Views
                 separatePagesOption.IsChecked == true
                     ? NotionUploadLayout.SeparatePages
                     : NotionUploadLayout.SinglePage,
-                (titleBox.Text ??
-                 string.Empty).Trim(),
+                singleTitle,
                 separateTitles);
         }
 
@@ -4508,6 +4981,421 @@ namespace Anfeta.UI.Views
         #endregion
 
         #region ===== Sugerencias de Búsqueda =====
+
+        private static List<string>
+            BuildStructuredNotionTitleSuggestions(
+                string? input,
+                int max = 12)
+        {
+            var raw =
+                Regex.Replace(
+                    (input ?? string.Empty).Trim(),
+                    @"\s+",
+                    " ");
+
+            var projectTypes = new[]
+            {
+                "sseo",
+                "aapli",
+                "aads",
+                "wwebs"
+            };
+
+            var months = new[]
+            {
+                "jjane",
+                "ffebr",
+                "mmarz",
+                "aabri",
+                "mmayo",
+                "jjuni",
+                "jjuli",
+                "aagos",
+                "ssept",
+                "ooctu",
+                "nnovi",
+                "ddici"
+            };
+
+            string CleanSegment(string value)
+                => Regex.Replace(
+                    (value ?? string.Empty).Trim(),
+                    @"\s+",
+                    " ");
+
+            string BuildTitle(
+                string domain,
+                string project = "",
+                string month = "",
+                string detail = "")
+            {
+                var parts = new List<string>();
+
+                if (!string.IsNullOrWhiteSpace(domain))
+                    parts.Add(domain.Trim());
+
+                if (!string.IsNullOrWhiteSpace(project))
+                    parts.Add(project.Trim());
+
+                if (!string.IsNullOrWhiteSpace(month))
+                    parts.Add(month.Trim());
+
+                if (!string.IsNullOrWhiteSpace(detail))
+                    parts.Add(detail.Trim());
+
+                return Regex.Replace(
+                    string.Join(" ", parts),
+                    @"\s+",
+                    " ").Trim();
+            }
+
+            var suggestions =
+                new List<string>();
+
+            var explicitSegments = raw
+                .Split(
+                    '/',
+                    StringSplitOptions.None)
+                .Select(CleanSegment)
+                .ToList();
+
+            var domain = explicitSegments.Count > 0
+                ? explicitSegments[0]
+                : string.Empty;
+
+            var project = explicitSegments.Count > 1
+                ? explicitSegments[1]
+                : string.Empty;
+
+            var month = explicitSegments.Count > 2
+                ? explicitSegments[2]
+                : string.Empty;
+
+            var detail = explicitSegments.Count > 3
+                ? string.Join(
+                    " / ",
+                    explicitSegments.Skip(3))
+                : string.Empty;
+
+            // También entiende escritura sin diagonales:
+            // "weblab.mx sseo" -> dominio + tipo.
+            if (!raw.Contains('/'))
+            {
+                var domainMatch = Regex.Match(
+                    raw,
+                    @"(?<![\w@])(?:https?://)?(?:www\.)?" +
+                    @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
+                    @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
+                    @"com|mx|org|net|io|co|app|dev))",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+                if (domainMatch.Success)
+                {
+                    domain = domainMatch.Groups["domain"]
+                        .Value
+                        .Trim()
+                        .TrimEnd('.')
+                        .ToLowerInvariant();
+
+                    var remainder = raw
+                        .Substring(
+                            domainMatch.Index +
+                            domainMatch.Length)
+                        .Trim();
+
+                    var remainderParts = remainder
+                        .Split(
+                            ' ',
+                            StringSplitOptions.RemoveEmptyEntries)
+                        .ToList();
+
+                    if (remainderParts.Count > 0)
+                    {
+                        project =
+                            remainderParts[0];
+
+                        if (remainderParts.Count > 1)
+                        {
+                            month =
+                                remainderParts[1];
+                        }
+
+                        if (remainderParts.Count > 2)
+                        {
+                            detail =
+                                string.Join(
+                                    " ",
+                                    remainderParts.Skip(2));
+                        }
+                    }
+                }
+            }
+
+            var knownProject = projectTypes
+                .FirstOrDefault(value =>
+                    string.Equals(
+                        value,
+                        project,
+                        StringComparison.OrdinalIgnoreCase));
+
+            var knownMonth = months
+                .FirstOrDefault(value =>
+                    string.Equals(
+                        value,
+                        month,
+                        StringComparison.OrdinalIgnoreCase));
+
+            // Etapa 1: completar dominio.
+            if (string.IsNullOrWhiteSpace(domain) ||
+                !domain.Contains('.'))
+            {
+                return BuildIndexPredictiveSuggestions(
+                        raw,
+                        max)
+                    .Where(value =>
+                        value.Contains('.'))
+                    .Take(max)
+                    .ToList();
+            }
+
+            // Etapa 2: elegir tipo de proyecto.
+            if (string.IsNullOrWhiteSpace(project) ||
+                knownProject == null)
+            {
+                foreach (var type in projectTypes
+                    .Where(type =>
+                        string.IsNullOrWhiteSpace(project) ||
+                        type.StartsWith(
+                            project,
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    suggestions.Add(
+                        BuildTitle(
+                            domain,
+                            type));
+                }
+
+                if (suggestions.Count == 0)
+                {
+                    foreach (var type in projectTypes)
+                    {
+                        suggestions.Add(
+                            BuildTitle(
+                                domain,
+                                type));
+                    }
+                }
+
+                return suggestions
+                    .Distinct(
+                        StringComparer.OrdinalIgnoreCase)
+                    .Take(max)
+                    .ToList();
+            }
+
+            // Etapa 3: elegir mes.
+            if (string.IsNullOrWhiteSpace(month) ||
+                knownMonth == null)
+            {
+                foreach (var value in months
+                    .Where(value =>
+                        string.IsNullOrWhiteSpace(month) ||
+                        value.StartsWith(
+                            month,
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    suggestions.Add(
+                        BuildTitle(
+                            domain,
+                            knownProject,
+                            value));
+                }
+
+                if (suggestions.Count == 0)
+                {
+                    foreach (var value in months)
+                    {
+                        suggestions.Add(
+                            BuildTitle(
+                                domain,
+                                knownProject,
+                                value));
+                    }
+                }
+
+                return suggestions
+                    .Distinct(
+                        StringComparer.OrdinalIgnoreCase)
+                    .Take(max)
+                    .ToList();
+            }
+
+            // Etapa 4: sugerir detalles frecuentes del índice.
+            var titlePrefix =
+                BuildTitle(
+                    domain,
+                    knownProject,
+                    knownMonth,
+                    detail);
+
+            var frequentDetails =
+                BuildIndexPredictiveSuggestions(
+                    detail,
+                    max: max * 2)
+                .Select(value =>
+                    value.Trim())
+                .Where(value =>
+                    !string.IsNullOrWhiteSpace(value))
+                .Where(value =>
+                    !value.Contains(
+                        domain,
+                        StringComparison.OrdinalIgnoreCase))
+                .Where(value =>
+                    !projectTypes.Contains(
+                        value,
+                        StringComparer.OrdinalIgnoreCase))
+                .Where(value =>
+                    !months.Contains(
+                        value,
+                        StringComparer.OrdinalIgnoreCase))
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .Take(max)
+                .ToList();
+
+            foreach (var value in frequentDetails)
+            {
+                suggestions.Add(
+                    BuildTitle(
+                        domain,
+                        knownProject,
+                        knownMonth,
+                        value));
+            }
+
+            // Siempre deja una opción limpia para continuar escribiendo libre.
+            if (suggestions.Count == 0)
+            {
+                suggestions.Add(
+                    BuildTitle(
+                        domain,
+                        knownProject,
+                        knownMonth));
+            }
+
+            return suggestions
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .Take(max)
+                .ToList();
+        }
+
+        private static List<string> BuildIndexPredictiveSuggestions(
+            string? input,
+            int max = 10)
+        {
+            var typed =
+                (input ?? string.Empty).Trim();
+
+            if (typed.Length < 2 ||
+                !App.LocalIndex.HasData)
+            {
+                return new List<string>();
+            }
+
+            var activeFragment = Regex.Match(
+                typed,
+                @"(?:^|\s)(?<value>[\p{L}\p{Nd}._\-/]+)$",
+                RegexOptions.CultureInvariant)
+                .Groups["value"]
+                .Value;
+
+            if (string.IsNullOrWhiteSpace(activeFragment))
+                activeFragment = typed;
+
+            var prefix = typed.Substring(
+                0,
+                Math.Max(0, typed.Length - activeFragment.Length));
+
+            var candidates = new Dictionary<string, int>(
+                StringComparer.OrdinalIgnoreCase);
+
+            void AddCandidate(string value, int weight)
+            {
+                var clean =
+                    (value ?? string.Empty).Trim()
+                    .Trim('(', ')', '[', ']', '{', '}', ',', ';', ':', '!', '?');
+
+                if (clean.Length < 2 ||
+                    !clean.Contains(
+                        activeFragment,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (!candidates.TryGetValue(clean, out var current) ||
+                    weight < current)
+                {
+                    candidates[clean] = weight;
+                }
+            }
+
+            foreach (var row in App.LocalIndex.GetAll())
+            {
+                var fields = new[]
+                {
+                    row.DisplayName,
+                    row.Name,
+                    row.SearchText,
+                    row.Description,
+                    row.ProjectUpdateStatus
+                };
+
+                foreach (var field in fields)
+                {
+                    if (string.IsNullOrWhiteSpace(field))
+                        continue;
+
+                    foreach (Match match in Regex.Matches(
+                        field,
+                        @"(?:https?://)?(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev)|[\p{L}\p{Nd}][\p{L}\p{Nd}._\-/]{1,}",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant))
+                    {
+                        var token = match.Value;
+                        var weight = token.StartsWith(
+                            activeFragment,
+                            StringComparison.OrdinalIgnoreCase)
+                                ? 0
+                                : 1;
+
+                        AddCandidate(token, weight);
+                    }
+                }
+            }
+
+            foreach (var fixedValue in new[]
+            {
+                "sseo", "aapli", "aads", "wwebs",
+                "jjane", "ffebr", "mmarz", "aabri",
+                "mmayo", "jjuni", "jjuli", "aagos",
+                "ssept", "ooctu", "nnovi", "ddici"
+            })
+            {
+                AddCandidate(fixedValue, 0);
+            }
+
+            return candidates
+                .OrderBy(item => item.Value)
+                .ThenBy(item => item.Key.Length)
+                .ThenBy(item => item.Key)
+                .Take(Math.Max(1, max))
+                .Select(item => prefix + item.Key)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         private static List<string> GenerateStutterSuggestions(string input, int max = 8)
         {

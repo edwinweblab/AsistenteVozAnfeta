@@ -76,7 +76,10 @@
                 <!--  10 · Vistas  -->
                 <ColumnDefinition Width="Auto" />
 
-                <!--  11 · Menú adicional  -->
+                <!--  11 · Vistas  -->
+                <ColumnDefinition Width="Auto" />
+
+                <!--  12 · Menú adicional  -->
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
@@ -89,6 +92,7 @@
                 PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
                 QueryIcon="Find"
                 QuerySubmitted="SearchBox_QuerySubmitted"
+                SuggestionChosen="SearchBox_SuggestionChosen"
                 Tapped="SearchBox_Tapped"
                 TextChanged="SearchBox_TextChanged">
 
@@ -439,7 +443,7 @@
             <!--  Vistas rápidas de Notion  -->
             <Button
                 x:Name="BtnNotionViews"
-                Grid.Column="10"
+                Grid.Column="11"
                 MinWidth="86"
                 Height="32"
                 Padding="10,0"
@@ -474,10 +478,53 @@
                 </Button.Flyout>
             </Button>
 
+            <!--  Mensajes / recordatorios  -->
+            <ToggleButton
+                x:Name="ToggleMessagesView"
+                Grid.Column="9"
+                Width="44"
+                Height="32"
+                Padding="0"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                VerticalAlignment="Center"
+                Click="ToggleMessagesView_Click"
+                CornerRadius="6"
+                ToolTipService.ToolTip="Abrir mensajes y recordatorios">
+                <Grid>
+                    <FontIcon
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="14"
+                        Glyph="&#xE8BD;" />
+
+                    <Border
+                        x:Name="MessagesUnreadBadge"
+                        MinWidth="16"
+                        Height="16"
+                        Margin="0,-8,-18,0"
+                        Padding="4,0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="#E5484D"
+                        CornerRadius="8"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="MessagesUnreadBadgeText"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontSize="9"
+                            FontWeight="SemiBold"
+                            Foreground="White"
+                            Text="0" />
+                    </Border>
+                </Grid>
+            </ToggleButton>
+
             <!--  Pantallazo de resultados  -->
             <Button
                 x:Name="BtnCaptureResults"
-                Grid.Column="9"
+                Grid.Column="10"
                 Width="38"
                 Height="32"
                 Padding="0"
@@ -494,7 +541,7 @@
 
             <!--  Menú ⋯  -->
             <Button
-                Grid.Column="11"
+                Grid.Column="12"
                 Width="36"
                 Height="32"
                 Padding="0"
@@ -909,6 +956,266 @@
                     MinWidth="260"
                     MaxWidth="750" />
             </Grid.ColumnDefinitions>
+
+            <!--  Vista de mensajes y recordatorios; lógica en SearchView.Messages.cs  -->
+            <Grid
+                x:Name="MessagesHost"
+                Grid.Column="0"
+                Grid.ColumnSpan="5"
+                Canvas.ZIndex="510"
+                Background="#111820"
+                Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    Grid.Row="0"
+                    Padding="12,9"
+                    Background="#191F28"
+                    BorderBrush="#34404D"
+                    BorderThickness="0,0,0,1">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="210" />
+                            <ColumnDefinition Width="175" />
+                            <ColumnDefinition Width="245" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontSize="17"
+                            FontWeight="SemiBold"
+                            Text="Mensajes" />
+
+                        <Button
+                            Grid.Column="1"
+                            Height="32"
+                            Padding="12,0"
+                            Click="MessagesNew_Click"
+                            Content="+ Nuevo mensaje"
+                            CornerRadius="6" />
+
+                        <ComboBox
+                            x:Name="MessagesFilterCombo"
+                            Grid.Column="2"
+                            Height="32"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="MessagesFilterCombo_SelectionChanged">
+                            <ComboBoxItem Content="Recibidos" Tag="received" />
+                            <ComboBoxItem Content="Enviados" Tag="sent" />
+                            <ComboBoxItem Content="Conversaciones" Tag="conversations" />
+                            <ComboBoxItem Content="Vencidos" Tag="overdue" />
+                            <ComboBoxItem Content="Terminados" Tag="completed" />
+                            <ComboBoxItem Content="Todos" Tag="all" />
+                        </ComboBox>
+
+                        <ComboBox
+                            x:Name="MessagesGroupCombo"
+                            Grid.Column="3"
+                            Height="32"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="MessagesGroupCombo_SelectionChanged">
+                            <ComboBoxItem Content="Sin agrupar" Tag="none" />
+                            <ComboBoxItem Content="Por persona" Tag="person" />
+                            <ComboBoxItem Content="Por dominio" Tag="domain" />
+                            <ComboBoxItem Content="Por proyecto" Tag="project" />
+                            <ComboBoxItem Content="Por mes" Tag="month" />
+                        </ComboBox>
+
+                        <TextBox
+                            x:Name="MessagesSearchBox"
+                            Grid.Column="4"
+                            Height="32"
+                            PlaceholderText="Buscar en mensajes..."
+                            TextChanged="MessagesSearchBox_TextChanged" />
+
+                        <TextBlock
+                            x:Name="MessagesSummaryText"
+                            Grid.Column="5"
+                            VerticalAlignment="Center"
+                            Opacity="0.72"
+                            Text="0 mensajes" />
+
+                        <Button
+                            Grid.Column="6"
+                            Height="30"
+                            Padding="12,0"
+                            Click="MessagesRefresh_Click"
+                            Content="Actualizar"
+                            CornerRadius="6" />
+
+                        <Button
+                            Grid.Column="7"
+                            Width="32"
+                            Height="30"
+                            Padding="0"
+                            Click="MessagesClose_Click"
+                            Content="✕"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Cerrar mensajes" />
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1">
+                    <ListView
+                        x:Name="MessagesList"
+                        Margin="12"
+                        IsItemClickEnabled="False"
+                        SelectionMode="None">
+                        <ListView.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border
+                                            Margin="0,8,0,6"
+                                            Padding="10,6"
+                                            Background="#202A35"
+                                            CornerRadius="7">
+                                            <TextBlock
+                                                FontSize="14"
+                                                FontWeight="SemiBold"
+                                                Text="{Binding Name}" />
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListView.GroupStyle>
+
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Border
+                                    Margin="0,0,0,8"
+                                    Padding="14"
+                                    Background="{Binding CardBackground}"
+                                    BorderBrush="{Binding CardBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10">
+                                    <Grid ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" Spacing="5">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Border
+                                                    Padding="6,2"
+                                                    Background="#E5484D"
+                                                    CornerRadius="8"
+                                                    Visibility="{Binding UnreadVisibility}">
+                                                    <TextBlock
+                                                        FontSize="9"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="White"
+                                                        Text="NUEVO" />
+                                                </Border>
+
+                                                <TextBlock
+                                                    FontSize="15"
+                                                    FontWeight="SemiBold"
+                                                    Text="{Binding Message}"
+                                                    TextWrapping="Wrap" />
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                                <TextBlock
+                                                    Opacity="0.72"
+                                                    Text="{Binding DirectionLabel}" />
+                                                <TextBlock
+                                                    Opacity="0.72"
+                                                    Text="{Binding ScheduledLabel}" />
+                                                <TextBlock
+                                                    Opacity="0.72"
+                                                    Text="{Binding StatusLabel}" />
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                                <TextBlock
+                                                    Opacity="0.72"
+                                                    Text="{Binding LastReplyLabel}"
+                                                    Visibility="{Binding LastReplyVisibility}" />
+                                                <TextBlock
+                                                    Opacity="0.78"
+                                                    FontWeight="SemiBold"
+                                                    Text="{Binding WaitingForLabel}" />
+                                            </StackPanel>
+
+                                            <TextBlock
+                                                MaxLines="1"
+                                                Opacity="0.55"
+                                                Text="{Binding IdentifierLabel}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Orientation="Horizontal"
+                                            Spacing="6">
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageOpen_Click"
+                                                Content="Abrir"
+                                                Tag="{Binding}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageHistory_Click"
+                                                Content="Historial"
+                                                Tag="{Binding}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageReassign_Click"
+                                                Content="Reasignar"
+                                                Tag="{Binding}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageReschedule_Click"
+                                                Content="Reprogramar"
+                                                Tag="{Binding}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageComplete_Click"
+                                                Content="{Binding CompleteButtonText}"
+                                                Tag="{Binding}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageDelete_Click"
+                                                Content="Eliminar"
+                                                Tag="{Binding}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <StackPanel
+                        x:Name="MessagesEmptyState"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="8"
+                        Visibility="Collapsed">
+                        <FontIcon
+                            HorizontalAlignment="Center"
+                            FontSize="34"
+                            Glyph="&#xE8BD;"
+                            Opacity="0.55" />
+                        <TextBlock
+                            x:Name="MessagesEmptyText"
+                            FontSize="15"
+                            Opacity="0.72"
+                            Text="No hay mensajes para este filtro." />
+                    </StackPanel>
+                </Grid>
+            </Grid>
 
             <!--  Vista calendario; se construye desde SearchView.Calendar.cs  -->
             <Grid

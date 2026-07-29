@@ -38,6 +38,7 @@ namespace Anfeta.UI.Views
         private const string LS_NotionToken = "Notion.Token";
         private const string LS_NotionDataSourceId = "Notion.DataSourceId";
         private const string LS_NotionLastSyncUtc = "Notion.LastSyncUtc";
+        private const string LS_CurrentUserTag = "Messaging.CurrentUserTag";
         public SettingsView()
         {
             InitializeComponent();
@@ -65,6 +66,7 @@ namespace Anfeta.UI.Views
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             LoadCurrentHotkey();
+            LoadCurrentUserIntoUI();
             LoadDropboxRootIntoUI();
             LoadNotionSettingsIntoUI();
             await LoadDropboxApiStateAsync();
@@ -84,6 +86,54 @@ namespace Anfeta.UI.Views
 
             _indexCts?.Cancel();
             _indexCts = null;
+        }
+
+        private void LoadCurrentUserIntoUI()
+        {
+            var savedTag =
+                (ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] as string ?? string.Empty)
+                .Trim();
+
+            foreach (var item in CurrentUserCombo.Items.OfType<ComboBoxItem>())
+            {
+                if (string.Equals(
+                        item.Tag?.ToString() ?? string.Empty,
+                        savedTag,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    CurrentUserCombo.SelectedItem = item;
+                    UpdateCurrentUserStatus(item);
+                    return;
+                }
+            }
+
+            CurrentUserCombo.SelectedIndex = 0;
+        }
+
+        private void CurrentUserCombo_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (CurrentUserCombo.SelectedItem is not ComboBoxItem item)
+                return;
+
+            var tag = (item.Tag?.ToString() ?? string.Empty).Trim();
+            ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] = tag;
+            UpdateCurrentUserStatus(item);
+
+            ShowStatus(
+                string.IsNullOrWhiteSpace(tag)
+                    ? "Usuario sin seleccionar: se mostrarán todos los recordatorios."
+                    : $"Usuario actual guardado: {item.Content}",
+                InfoBarSeverity.Success);
+        }
+
+        private void UpdateCurrentUserStatus(ComboBoxItem item)
+        {
+            var tag = (item.Tag?.ToString() ?? string.Empty).Trim();
+            CurrentUserStatusText.Text = string.IsNullOrWhiteSpace(tag)
+                ? "Se mostrarán todos los recordatorios."
+                : $"Solo se mostrarán mensajes dirigidos a {item.Content} ({tag}).";
         }
 
         // ─────────────────────────────────────────────────────────
