@@ -6,7 +6,8 @@ namespace Anfeta.UI.Models.Notion
     public enum MessageThreadKind
     {
         Message,
-        System
+        System,
+        ReadReceipt
     }
 
     public sealed class MessageThreadAttachment
@@ -23,6 +24,14 @@ namespace Anfeta.UI.Models.Notion
                 StringComparison.OrdinalIgnoreCase);
     }
 
+
+    public sealed class ReviewAlertSourceLink
+    {
+        public string PageId { get; init; } = string.Empty;
+        public string PageUrl { get; init; } = string.Empty;
+        public string Title { get; init; } = string.Empty;
+    }
+
     public sealed class MessageThreadEntry
     {
         public string Id { get; init; } = string.Empty;
@@ -32,6 +41,7 @@ namespace Anfeta.UI.Models.Notion
         public string RecipientTag { get; init; } = string.Empty;
         public string RecipientName { get; init; } = string.Empty;
         public DateTimeOffset CreatedAt { get; init; }
+        public string ReferenceEntryId { get; init; } = string.Empty;
         public string Text { get; init; } = string.Empty;
         public IReadOnlyList<MessageThreadAttachment> Attachments { get; init; } =
             Array.Empty<MessageThreadAttachment>();

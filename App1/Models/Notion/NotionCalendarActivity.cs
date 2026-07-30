@@ -13,6 +13,7 @@ namespace Anfeta.UI.Models.Notion
         public string Project { get; set; } = "";
         public string Status { get; set; } = "";
         public string StatusColor { get; set; } = "";
+        public string UpdateText { get; set; } = "";
         public string Description { get; set; } = "";
         public string DatePropertyName { get; set; } = "";
         public DateTime Start { get; set; }

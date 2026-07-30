@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.WindowsRuntime;
@@ -1174,7 +1175,8 @@ namespace Anfeta.UI.Views
         private sealed record NotionUploadOptions(
             NotionUploadLayout Layout,
             string PageTitle,
-            IReadOnlyList<string> SeparatePageTitles);
+            IReadOnlyList<string> SeparatePageTitles,
+            IReadOnlyList<StorageFile> Files);
 
         private async void CtxUploadNotionFile_Click(
             object sender,
@@ -1364,11 +1366,19 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            // Conserva exactamente la búsqueda actual como título sugerido,
+            // incluyendo comillas y caracteres especiales. Esto es importante
+            // para los pantallazos de búsquedas exactas.
+            var currentSearchTitle =
+                (SearchBox?.Text ?? string.Empty).Trim();
+
             var suggestedTitle =
-                validFiles.Count == 1
-                    ? Path.GetFileNameWithoutExtension(
-                        validFiles[0].Name)
-                    : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
+                !string.IsNullOrWhiteSpace(currentSearchTitle)
+                    ? currentSearchTitle
+                    : validFiles.Count == 1
+                        ? Path.GetFileNameWithoutExtension(
+                            validFiles[0].Name)
+                        : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
 
             var options =
                 await PromptNotionRevisionUploadOptionsAsync(
@@ -1377,6 +1387,23 @@ namespace Anfeta.UI.Views
 
             if (options == null)
                 return;
+
+            validFiles = options.Files
+                .Where(file =>
+                    file != null &&
+                    !string.IsNullOrWhiteSpace(file.Path) &&
+                    File.Exists(file.Path))
+                .DistinctBy(
+                    file => file.Path,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (validFiles.Count == 0)
+            {
+                StatusText.Text =
+                    "Estado: No quedaron archivos válidos para subir.";
+                return;
+            }
 
             try
             {
@@ -1486,10 +1513,230 @@ namespace Anfeta.UI.Views
             }
         }
 
+
+        private sealed record NaturalReminderCommand(
+            DateTime ReminderAt,
+            string CleanTitle,
+            string CommandText);
+
+        private static bool TryParseNaturalReminderCommand(
+            string rawTitle,
+            DateTime now,
+            out NaturalReminderCommand command)
+        {
+            command = new NaturalReminderCommand(
+                now,
+                (rawTitle ?? string.Empty).Trim(),
+                string.Empty);
+
+            var title =
+                Regex.Replace(
+                    (rawTitle ?? string.Empty).Trim(),
+                    @"\s+",
+                    " ");
+
+            if (string.IsNullOrWhiteSpace(title))
+                return false;
+
+            DateTime reminderAt;
+            string cleanTitle;
+            string commandText;
+
+            var relative =
+                Regex.Match(
+                    title,
+                    @"^(?<value>\d{1,3})\s*(?<unit>m|min|minuto|minutos|h|hr|hora|horas)\b[\s:,-]*(?<title>.*)$",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            if (relative.Success &&
+                int.TryParse(
+                    relative.Groups["value"].Value,
+                    out var amount) &&
+                amount > 0)
+            {
+                var unit =
+                    relative.Groups["unit"].Value
+                        .Trim()
+                        .ToLowerInvariant();
+
+                reminderAt =
+                    unit.StartsWith("h", StringComparison.Ordinal)
+                        ? now.AddHours(amount)
+                        : now.AddMinutes(amount);
+
+                cleanTitle =
+                    relative.Groups["title"].Value.Trim();
+
+                commandText =
+                    relative.Value
+                        .Substring(
+                            0,
+                            relative.Value.Length -
+                            relative.Groups["title"].Value.Length)
+                        .Trim(' ', ':', ',', '-');
+
+                command = new NaturalReminderCommand(
+                    reminderAt,
+                    string.IsNullOrWhiteSpace(cleanTitle)
+                        ? title
+                        : cleanTitle,
+                    commandText);
+
+                return true;
+            }
+
+            var tomorrow =
+                Regex.Match(
+                    title,
+                    @"^mañana(?:\s+(?<time>(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?)))?[\s:,-]*(?<title>.*)$",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            if (tomorrow.Success)
+            {
+                var targetDate =
+                    now.Date.AddDays(1);
+
+                var timeText =
+                    tomorrow.Groups["time"].Value.Trim();
+
+                var time =
+                    new TimeSpan(9, 0, 0);
+
+                if (!string.IsNullOrWhiteSpace(timeText) &&
+                    TryParseReminderClockTime(
+                        timeText,
+                        out var parsedTime))
+                {
+                    time = parsedTime;
+                }
+
+                reminderAt =
+                    targetDate.Add(time);
+
+                cleanTitle =
+                    tomorrow.Groups["title"].Value.Trim();
+
+                commandText =
+                    string.IsNullOrWhiteSpace(timeText)
+                        ? "mañana"
+                        : $"mañana {timeText}";
+
+                command = new NaturalReminderCommand(
+                    reminderAt,
+                    string.IsNullOrWhiteSpace(cleanTitle)
+                        ? title
+                        : cleanTitle,
+                    commandText);
+
+                return true;
+            }
+
+            var clock =
+                Regex.Match(
+                    title,
+                    @"^(?<time>\d{1,2}(?::\d{2})?\s*(?:am|pm))[\s:,-]*(?<title>.*)$",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            if (!clock.Success)
+            {
+                clock =
+                    Regex.Match(
+                        title,
+                        @"^(?<time>(?:[01]?\d|2[0-3]):[0-5]\d)[\s:,-]*(?<title>.*)$",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant);
+            }
+
+            if (clock.Success &&
+                TryParseReminderClockTime(
+                    clock.Groups["time"].Value,
+                    out var clockTime))
+            {
+                reminderAt =
+                    now.Date.Add(clockTime);
+
+                if (reminderAt <= now)
+                    reminderAt = reminderAt.AddDays(1);
+
+                cleanTitle =
+                    clock.Groups["title"].Value.Trim();
+
+                commandText =
+                    clock.Groups["time"].Value.Trim();
+
+                command = new NaturalReminderCommand(
+                    reminderAt,
+                    string.IsNullOrWhiteSpace(cleanTitle)
+                        ? title
+                        : cleanTitle,
+                    commandText);
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryParseReminderClockTime(
+            string value,
+            out TimeSpan time)
+        {
+            time = default;
+
+            var clean =
+                Regex.Replace(
+                    (value ?? string.Empty).Trim().ToLowerInvariant(),
+                    @"\s+",
+                    " ");
+
+            var formats = new[]
+            {
+                "h tt",
+                "h:mm tt",
+                "hh tt",
+                "hh:mm tt",
+                "H:mm",
+                "HH:mm"
+            };
+
+            if (!DateTime.TryParseExact(
+                    clean,
+                    formats,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AllowWhiteSpaces,
+                    out var parsed))
+            {
+                return false;
+            }
+
+            time = parsed.TimeOfDay;
+            return true;
+        }
+
         private async Task<NotionUploadOptions?> PromptNotionRevisionUploadOptionsAsync(
             IReadOnlyList<StorageFile> files,
             string suggestedTitle)
         {
+            var selectedFiles =
+                new ObservableCollection<StorageFile>(
+                    (files ?? Array.Empty<StorageFile>())
+                    .Where(file => file != null)
+                    .DistinctBy(
+                        file => file.Path,
+                        StringComparer.OrdinalIgnoreCase));
+
+            var originalFilePaths =
+                new HashSet<string>(
+                    selectedFiles.Select(file => file.Path),
+                    StringComparer.OrdinalIgnoreCase);
+
+            var addedAttachmentPaths =
+                new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+
             var titleBox = new TextBox
             {
                 HorizontalAlignment =
@@ -1781,18 +2028,288 @@ namespace Anfeta.UI.Views
                         ScrollBarVisibility.Auto
                 });
 
-            var fileList = new TextBlock
+            var filesCountText = new TextBlock
             {
-                Text = string.Join(
-                    Environment.NewLine,
-                    files.Take(12)
-                        .Select(x => $"• {x.Name}")) +
-                    (files.Count > 12
-                        ? $"{Environment.NewLine}• … y {files.Count - 12} más"
-                        : string.Empty),
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.82
+                FontWeight =
+                    Microsoft.UI.Text.FontWeights.SemiBold
             };
+
+            var fileListPanel = new StackPanel
+            {
+                Spacing = 5
+            };
+
+            var attachmentStatusText = new TextBlock
+            {
+                FontSize = 11,
+                Opacity = 0.72,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var selectAttachmentsButton = new Button
+            {
+                Content = "＋ Seleccionar imágenes o archivos",
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            var attachmentDropContent = new StackPanel
+            {
+                Spacing = 5,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            attachmentDropContent.Children.Add(
+                new TextBlock
+                {
+                    Text = "📎 Arrastra aquí imágenes o archivos adicionales",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Center
+                });
+
+            attachmentDropContent.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Se agregarán como adjuntos dentro de la misma página de Notion.",
+                    FontSize = 11,
+                    Opacity = 0.70,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Center
+                });
+
+            attachmentDropContent.Children.Add(
+                selectAttachmentsButton);
+
+            var attachmentDropZone = new Border
+            {
+                AllowDrop = true,
+                MinHeight = 92,
+                Padding = new Thickness(14),
+                CornerRadius = new CornerRadius(8),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(
+                    Windows.UI.Color.FromArgb(150, 96, 165, 250)),
+                Background = new SolidColorBrush(
+                    Windows.UI.Color.FromArgb(30, 96, 165, 250)),
+                Child = attachmentDropContent
+            };
+
+            Action refreshDialogState = () => { };
+
+            void RefreshSelectedFilesUi()
+            {
+                fileListPanel.Children.Clear();
+
+                foreach (var file in selectedFiles)
+                {
+                    var isAdditional =
+                        addedAttachmentPaths.Contains(file.Path);
+
+                    var row = new Grid
+                    {
+                        ColumnSpacing = 8
+                    };
+
+                    row.ColumnDefinitions.Add(
+                        new ColumnDefinition
+                        {
+                            Width = new GridLength(
+                                1,
+                                GridUnitType.Star)
+                        });
+
+                    row.ColumnDefinitions.Add(
+                        new ColumnDefinition
+                        {
+                            Width = GridLength.Auto
+                        });
+
+                    var fileText = new TextBlock
+                    {
+                        Text = isAdditional
+                            ? $"📎 {file.Name} · Adjunto"
+                            : $"• {file.Name}",
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis,
+                        VerticalAlignment =
+                            VerticalAlignment.Center,
+                        Opacity = isAdditional
+                            ? 1.0
+                            : 0.82
+                    };
+
+                    ToolTipService.SetToolTip(
+                        fileText,
+                        file.Path);
+
+                    Grid.SetColumn(fileText, 0);
+                    row.Children.Add(fileText);
+
+                    if (isAdditional)
+                    {
+                        var removeButton = new Button
+                        {
+                            Content = "Quitar",
+                            Tag = file,
+                            Padding = new Thickness(8, 3, 8, 3)
+                        };
+
+                        removeButton.Click += (_, __) =>
+                        {
+                            if (removeButton.Tag is not StorageFile selected)
+                                return;
+
+                            selectedFiles.Remove(selected);
+                            addedAttachmentPaths.Remove(selected.Path);
+                            RefreshSelectedFilesUi();
+                        };
+
+                        Grid.SetColumn(removeButton, 1);
+                        row.Children.Add(removeButton);
+                    }
+
+                    fileListPanel.Children.Add(row);
+                }
+
+                filesCountText.Text =
+                    $"Archivos seleccionados: {selectedFiles.Count}";
+
+                if (addedAttachmentPaths.Count > 0)
+                {
+                    onePageOption.IsChecked = true;
+                    separatePagesOption.IsEnabled = false;
+
+                    attachmentStatusText.Text =
+                        $"{addedAttachmentPaths.Count} adjunto(s) adicional(es). " +
+                        "Se subirán junto con el archivo principal en una sola página.";
+                }
+                else
+                {
+                    separatePagesOption.IsEnabled =
+                        files.Count > 1;
+
+                    attachmentStatusText.Text =
+                        "Puedes arrastrar o seleccionar más imágenes y archivos.";
+                }
+
+                refreshDialogState();
+            }
+
+            void AddAdditionalFiles(
+                IEnumerable<StorageFile> additionalFiles)
+            {
+                var added = 0;
+
+                foreach (var file in
+                         additionalFiles ??
+                         Array.Empty<StorageFile>())
+                {
+                    if (file == null ||
+                        string.IsNullOrWhiteSpace(file.Path) ||
+                        !File.Exists(file.Path) ||
+                        selectedFiles.Any(existing =>
+                            string.Equals(
+                                existing.Path,
+                                file.Path,
+                                StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    selectedFiles.Add(file);
+                    addedAttachmentPaths.Add(file.Path);
+                    added++;
+                }
+
+                attachmentStatusText.Text =
+                    added > 0
+                        ? $"Se agregaron {added} archivo(s) adicional(es) ✅"
+                        : "No se agregaron archivos nuevos.";
+
+                RefreshSelectedFilesUi();
+            }
+
+            selectAttachmentsButton.Click +=
+                async (_, __) =>
+                {
+                    try
+                    {
+                        var picker = new FileOpenPicker
+                        {
+                            SuggestedStartLocation =
+                                PickerLocationId.PicturesLibrary
+                        };
+
+                        picker.FileTypeFilter.Add("*");
+
+                        var hwnd =
+                            WindowNative.GetWindowHandle(
+                                App.MainWindowInstance);
+
+                        InitializeWithWindow.Initialize(
+                            picker,
+                            hwnd);
+
+                        var picked =
+                            await picker.PickMultipleFilesAsync();
+
+                        AddAdditionalFiles(picked);
+                    }
+                    catch (Exception ex)
+                    {
+                        attachmentStatusText.Text =
+                            $"No se pudieron seleccionar archivos → {ex.Message}";
+                    }
+                };
+
+            attachmentDropZone.DragOver +=
+                (_, args) =>
+                {
+                    var hasFiles =
+                        args.DataView.Contains(
+                            Windows.ApplicationModel.DataTransfer
+                                .StandardDataFormats.StorageItems);
+
+                    args.AcceptedOperation = hasFiles
+                        ? Windows.ApplicationModel.DataTransfer
+                            .DataPackageOperation.Copy
+                        : Windows.ApplicationModel.DataTransfer
+                            .DataPackageOperation.None;
+
+                    args.DragUIOverride.Caption =
+                        "Agregar como adjunto a la página";
+                    args.DragUIOverride.IsCaptionVisible = true;
+                    args.Handled = true;
+                };
+
+            attachmentDropZone.Drop +=
+                async (_, args) =>
+                {
+                    try
+                    {
+                        if (!args.DataView.Contains(
+                                Windows.ApplicationModel.DataTransfer
+                                    .StandardDataFormats.StorageItems))
+                        {
+                            return;
+                        }
+
+                        var items =
+                            await args.DataView.GetStorageItemsAsync();
+
+                        AddAdditionalFiles(
+                            items.OfType<StorageFile>());
+                    }
+                    catch (Exception ex)
+                    {
+                        attachmentStatusText.Text =
+                            $"No se pudieron agregar los archivos → {ex.Message}";
+                    }
+                };
 
             var titleSection = new StackPanel
             {
@@ -2043,6 +2560,15 @@ namespace Anfeta.UI.Views
                 Spacing = 7
             };
 
+            var reminderPreviewText = new TextBlock
+            {
+                Text =
+                    "También puedes iniciar el título con: 30 m, 1 h, mañana, mañana 10 am, 10 am o 15:30.",
+                FontSize = 11,
+                Opacity = 0.72,
+                TextWrapping = TextWrapping.Wrap
+            };
+
             reminderPanel.Children.Add(reminderCheck);
             reminderPanel.Children.Add(
                 new TextBlock
@@ -2061,6 +2587,30 @@ namespace Anfeta.UI.Views
                 });
             reminderPanel.Children.Add(reminderDelayCombo);
             reminderPanel.Children.Add(customReminderGrid);
+            reminderPanel.Children.Add(reminderPreviewText);
+
+            void RefreshNaturalReminderPreview()
+            {
+                if (TryParseNaturalReminderCommand(
+                        titleBox.Text,
+                        DateTime.Now,
+                        out var parsed))
+                {
+                    reminderPreviewText.Text =
+                        $"Comando detectado: “{parsed.CommandText}” → " +
+                        $"{parsed.ReminderAt:dd/MM/yyyy HH:mm}\n" +
+                        $"Título limpio: {parsed.CleanTitle}";
+
+                    reminderPreviewText.Opacity = 1;
+                }
+                else
+                {
+                    reminderPreviewText.Text =
+                        "También puedes iniciar el título con: 30 m, 1 h, mañana, mañana 10 am, 10 am o 15:30.";
+
+                    reminderPreviewText.Opacity = 0.72;
+                }
+            }
 
             void RefreshCustomReminderVisibility()
             {
@@ -2140,23 +2690,27 @@ namespace Anfeta.UI.Views
                 Spacing = 10
             };
 
-            content.Children.Add(
-                new TextBlock
-                {
-                    Text =
-                        $"Archivos seleccionados: {files.Count}",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold
-                });
+            content.Children.Add(filesCountText);
 
             content.Children.Add(
                 new ScrollViewer
                 {
-                    Content = fileList,
-                    MaxHeight = 150,
+                    Content = fileListPanel,
+                    MaxHeight = 170,
                     VerticalScrollBarVisibility =
                         ScrollBarVisibility.Auto
                 });
+
+            content.Children.Add(
+                new TextBlock
+                {
+                    Text = "Adjuntos adicionales:",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
+
+            content.Children.Add(attachmentDropZone);
+            content.Children.Add(attachmentStatusText);
 
             content.Children.Add(
                 new TextBlock
@@ -2221,7 +2775,7 @@ namespace Anfeta.UI.Views
             dialog.Resources[
                 "ContentDialogMinWidth"] = 760d;
 
-            void RefreshDialogState()
+            refreshDialogState = () =>
             {
                 var separate =
                     separatePagesOption.IsChecked == true;
@@ -2262,39 +2816,45 @@ namespace Anfeta.UI.Views
 
                 dialog.IsPrimaryButtonEnabled =
                     titlesValid && reminderValid;
-            }
+            };
 
             titleBox.TextChanged +=
-                (_, __) => RefreshDialogState();
+                (_, __) =>
+                {
+                    RefreshNaturalReminderPreview();
+                    refreshDialogState();
+                };
 
             foreach (var editor in titleEditors)
             {
                 editor.TextChanged +=
-                    (_, __) => RefreshDialogState();
+                    (_, __) => refreshDialogState();
             }
 
             onePageOption.Checked +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
 
             separatePagesOption.Checked +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
 
             reminderCheck.Checked +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
             reminderCheck.Unchecked +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
             reminderRecipientCombo.SelectionChanged +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
             reminderDelayCombo.SelectionChanged +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
             customReminderValueBox.ValueChanged +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
             customReminderUnitCombo.SelectionChanged +=
-                (_, __) => RefreshDialogState();
+                (_, __) => refreshDialogState();
 
             dialog.Opened += (_, __) =>
             {
-                RefreshDialogState();
+                RefreshSelectedFilesUi();
+                RefreshNaturalReminderPreview();
+                refreshDialogState();
                 titleBox.Focus(
                     FocusState.Programmatic);
 
@@ -2364,13 +2924,25 @@ namespace Anfeta.UI.Views
                     }
                 }
 
-                var reminderAt =
-                    DateTime.Now.AddMinutes(delayMinutes);
-
                 string BuildReminderTitle(string originalTitle)
                 {
                     var cleanTitle =
                         (originalTitle ?? string.Empty).Trim();
+
+                    var reminderAt =
+                        DateTime.Now.AddMinutes(delayMinutes);
+
+                    if (TryParseNaturalReminderCommand(
+                            cleanTitle,
+                            DateTime.Now,
+                            out var parsedCommand))
+                    {
+                        reminderAt =
+                            parsedCommand.ReminderAt;
+
+                        cleanTitle =
+                            parsedCommand.CleanTitle;
+                    }
 
                     var senderTag =
                         (ApplicationData.Current.LocalSettings.Values[
@@ -2403,7 +2975,8 @@ namespace Anfeta.UI.Views
                     ? NotionUploadLayout.SeparatePages
                     : NotionUploadLayout.SinglePage,
                 singleTitle,
-                separateTitles);
+                separateTitles,
+                selectedFiles.ToList());
         }
 
         private async Task AddCreatedNotionPageToIndexAsync(

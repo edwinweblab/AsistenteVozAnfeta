@@ -11,13 +11,13 @@
 	<Identity
 	  Name="c6d297e3-90b3-45d7-8116-b599de47cc6a"
 	  Publisher="CN=nanoc"
-	  Version="1.0.18.0" />
+	  Version="1.0.27.0" />
 
 	<mp:PhoneIdentity PhoneProductId="c6d297e3-90b3-45d7-8116-b599de47cc6a" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
 	<Properties>
-		<DisplayName>App1</DisplayName>
-		<PublisherDisplayName>guerr</PublisherDisplayName>
+		<DisplayName>ANFETA</DisplayName>
+		<PublisherDisplayName>NefTech</PublisherDisplayName>
 		<Logo>Assets\StoreLogo.png</Logo>
 	</Properties>
 
@@ -36,7 +36,7 @@
 		  EntryPoint="$targetentrypoint$">
 
 			<uap:VisualElements
-			  DisplayName="Asistente de voz - ANFETA"
+			  DisplayName="ANFETA"
 			  Description="Asistente de voz empresarial para gestión de proyectos"
 			  BackgroundColor="transparent"
 			  Square150x150Logo="Assets\Square150x150Logo.png"
@@ -60,7 +60,7 @@
 					<desktop:StartupTask
 						TaskId="AnfetaStartup"
 						Enabled="false"
-						DisplayName="Anfeta" />
+						DisplayName="ANFETA" />
 				</desktop:Extension>
 			</Extensions>
 

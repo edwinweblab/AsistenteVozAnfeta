@@ -100,6 +100,21 @@ namespace Anfeta.UI.Services.Notion
             "Estatus IA"
         };
 
+        private static readonly string[] UpdateTextAliases =
+        {
+            "Estado texto Actualización Proyecto",
+            "Estado Texto Actualización Proyecto",
+            "Estado texto actualización proyecto",
+            "Estado texto",
+            "Estado actualización",
+            "Estado de actualización",
+            "Actualización Proyecto",
+            "Seguimiento Estado Proyecto",
+            "Seguimiento",
+            "Última actualización",
+            "Ultima actualizacion"
+        };
+
         private static readonly string[] DescriptionAliases =
         {
             "Descripción",
@@ -593,6 +608,7 @@ namespace Anfeta.UI.Services.Notion
                     Project = activity.Project,
                     Status = activity.Status,
                     StatusColor = activity.StatusColor,
+                    UpdateText = activity.UpdateText,
                     Description = activity.Description,
                     DatePropertyName = propertyName,
                     Start = newStart,
@@ -789,6 +805,7 @@ namespace Anfeta.UI.Services.Notion
                     Project = activity.Project,
                     Status = activity.Status,
                     StatusColor = activity.StatusColor,
+                    UpdateText = activity.UpdateText,
                     Description = activity.Description,
                     DatePropertyName = propertyName,
                     Start = localStart,
@@ -1418,6 +1435,9 @@ namespace Anfeta.UI.Services.Notion
                 ReadPreferredCalendarStatus(
                     props);
 
+            var updateText = ReadProjectUpdateText(
+                props);
+
             var description = ReadByAliases(
                 props,
                 DescriptionAliases);
@@ -1436,6 +1456,7 @@ namespace Anfeta.UI.Services.Notion
                 Project = project,
                 Status = status,
                 StatusColor = statusColor,
+                UpdateText = updateText,
                 Description = description,
                 DatePropertyName = datePropertyName,
                 Start = start,
@@ -1494,7 +1515,14 @@ namespace Anfeta.UI.Services.Notion
                     return NormalizePersonLabel(text);
             }
 
-            return DetectPersonFromTitle(title);
+            var detectedFromTitle = DetectPersonFromTitle(title);
+
+            return string.Equals(
+                    detectedFromTitle,
+                    "Sin asignar",
+                    StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : detectedFromTitle;
         }
 
         private async Task<string> ResolveRelatedTitleAsync(
@@ -1934,6 +1962,111 @@ namespace Anfeta.UI.Services.Notion
             return string.Empty;
         }
 
+        private static string ReadProjectUpdateText(
+            JsonElement props)
+        {
+            foreach (var alias in UpdateTextAliases)
+            {
+                var value =
+                    ExtractPropertyText(
+                        FindPropertyByAlias(
+                            props,
+                            alias));
+
+                if (IsUsefulUpdateText(value))
+                    return value.Trim();
+            }
+
+            var candidates =
+                new List<(string Value, int Score)>();
+
+            foreach (var property in props.EnumerateObject())
+            {
+                var name =
+                    Normalize(property.Name);
+
+                var type =
+                    ReadString(
+                        property.Value,
+                        "type");
+
+                if (type == "checkbox")
+                    continue;
+
+                if (type == "formula" &&
+                    property.Value.TryGetProperty(
+                        "formula",
+                        out var formula) &&
+                    ReadString(formula, "type") ==
+                        "boolean")
+                {
+                    continue;
+                }
+
+                var score = 0;
+
+                if (name.Contains("estado"))
+                    score += 4;
+
+                if (name.Contains("texto"))
+                    score += 4;
+
+                if (name.Contains("actualizacion"))
+                    score += 5;
+
+                if (name.Contains("seguimiento"))
+                    score += 4;
+
+                if (name.Contains("proyecto"))
+                    score += 2;
+
+                if (name.Contains("comentario"))
+                    score += 1;
+
+                if (score < 6)
+                    continue;
+
+                var value =
+                    ExtractPropertyText(
+                        property.Value);
+
+                if (IsUsefulUpdateText(value))
+                    candidates.Add((value.Trim(), score));
+            }
+
+            return candidates
+                .OrderByDescending(item => item.Score)
+                .Select(item => item.Value)
+                .FirstOrDefault() ??
+                string.Empty;
+        }
+
+        private static bool IsUsefulUpdateText(
+            string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var clean = value.Trim();
+
+            return !string.Equals(
+                       clean,
+                       "Sí",
+                       StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(
+                       clean,
+                       "No",
+                       StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(
+                       clean,
+                       "True",
+                       StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(
+                       clean,
+                       "False",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
         private static string ReadByAliases(
             JsonElement props,
             IEnumerable<string> aliases)
@@ -2277,7 +2410,7 @@ namespace Anfeta.UI.Services.Notion
 
             return parts.Count > 0
                 ? string.Join(", ", parts)
-                : "Sin asignar";
+                : string.Empty;
         }
 
         private static string NormalizeSinglePerson(string value)

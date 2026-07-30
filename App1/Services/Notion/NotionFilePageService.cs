@@ -20,7 +20,27 @@ namespace Anfeta.UI.Services.Notion
     public sealed record NotionFileUploadProgress(
         int Completed,
         int Total,
-        string FileName);
+        string FileName,
+        long BytesCompleted = 0,
+        long TotalBytes = 0)
+    {
+        public int Percentage =>
+            TotalBytes > 0
+                ? Math.Clamp(
+                    (int)Math.Round(
+                        BytesCompleted * 100d /
+                        TotalBytes),
+                    0,
+                    100)
+                : Total > 0
+                    ? Math.Clamp(
+                        (int)Math.Round(
+                            Completed * 100d /
+                            Total),
+                        0,
+                        100)
+                    : 0;
+    }
 
     public sealed class NotionFilePageService
     {
@@ -169,6 +189,9 @@ namespace Anfeta.UI.Services.Notion
                         http,
                         file,
                         contentType,
+                        progress,
+                        index,
+                        files.Count,
                         cancellationToken);
 
                 uploadedFiles.Add(new UploadedNotionFile(
@@ -260,6 +283,9 @@ namespace Anfeta.UI.Services.Notion
                         http,
                         info,
                         contentType,
+                        progress,
+                        index,
+                        validPaths.Count,
                         cancellationToken);
 
                 uploaded.Add(
@@ -417,6 +443,9 @@ namespace Anfeta.UI.Services.Notion
                 HttpClient http,
                 FileInfo file,
                 string contentType,
+                IProgress<NotionFileUploadProgress>? progress,
+                int fileIndex,
+                int totalFiles,
                 CancellationToken cancellationToken)
         {
             if (file.Length <= MaxSinglePartBytes)
@@ -435,6 +464,14 @@ namespace Anfeta.UI.Services.Notion
                     file.Name,
                     contentType,
                     cancellationToken);
+
+                progress?.Report(
+                    new NotionFileUploadProgress(
+                        fileIndex + 1,
+                        totalFiles,
+                        file.Name,
+                        file.Length,
+                        file.Length));
 
                 return id;
             }
@@ -535,6 +572,20 @@ namespace Anfeta.UI.Services.Notion
                         response,
                         json);
                 }
+
+                var bytesCompleted =
+                    Math.Min(
+                        file.Length,
+                        (long)part *
+                        MultiPartChunkBytes);
+
+                progress?.Report(
+                    new NotionFileUploadProgress(
+                        fileIndex,
+                        totalFiles,
+                        file.Name,
+                        bytesCompleted,
+                        file.Length));
             }
 
             using var completeContent =

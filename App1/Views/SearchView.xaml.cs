@@ -1,4 +1,5 @@
 ﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Search;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
@@ -21,9 +22,9 @@ using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -214,6 +215,11 @@ namespace Anfeta.UI.Views
         private readonly NotionPagePreviewService _notionPreviewService = new();
         private CancellationTokenSource? _notionPreviewCts;
         private string _activePreviewPageId = string.Empty;
+        private IReadOnlyList<NotionPreviewBlock> _activePreviewBlocks = Array.Empty<NotionPreviewBlock>();
+        private SearchResultRow? _activePreviewRow;
+        private readonly SpeechSynthesizer _previewSpeechSynth = new();
+        private MediaPlayer? _previewSpeechPlayer;
+        private bool _previewSpeechPlaying;
 
         private CancellationTokenSource? _localImagePreviewCts;
         private string _activeLocalImagePath = string.Empty;
@@ -421,6 +427,10 @@ namespace Anfeta.UI.Views
             // Precarga silenciosa del calendario del día actual.
             // No bloquea el buscador ni muestra overlay.
             _ = PreloadCalendarOnStartupAsync();
+
+            // Después de las 7:00 AM y una sola vez por día,
+            // mueve pendientes de ayer a hoy y guarda un reporte local.
+            _ = RunDailyCalendarAutomationIfNeededAsync();
 
             ApplyTextScaleToVisualTree();
 

@@ -18,6 +18,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Net.Http;
+using System.Xml.Linq;
 using Windows.ApplicationModel;
 using Windows.Storage;
 using WinRT.Interop;
@@ -32,6 +34,11 @@ namespace Anfeta.UI
         private readonly NotionCalendarService _calendarStartupService = new();
         private const string LS_CalendarLastSyncUtc =
             "Search.Calendar.LastSyncUtc";
+
+        private const string AppInstallerUrl =
+            "https://github.com/neftaliweblab/anfeta-updates/releases/latest/download/ANFETA.appinstaller";
+
+        private bool _isCheckingForUpdates;
 
         public MainWindow()
         {
@@ -183,6 +190,163 @@ namespace Anfeta.UI
                     .Version?
                     .ToString() ?? "0.0.0.0";
             }
+        }
+
+        private async void CheckUpdatesButton_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (_isCheckingForUpdates)
+                return;
+
+            _isCheckingForUpdates = true;
+            CheckUpdatesButton.IsEnabled = false;
+
+            SetUpdateStatus(
+                "Buscando actualización…",
+                Color.FromArgb(255, 251, 191, 36));
+
+            try
+            {
+                using var http = new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(30)
+                };
+
+                http.DefaultRequestHeaders.UserAgent.ParseAdd(
+                    "ANFETA-UpdateChecker/1.0");
+
+                var xml = await http.GetStringAsync(
+                    AppInstallerUrl);
+
+                var document = XDocument.Parse(xml);
+                XNamespace ns =
+                    "http://schemas.microsoft.com/appx/appinstaller/2017/2";
+
+                var remoteRaw =
+                    document.Root?.Attribute("Version")?.Value ??
+                    document.Root?
+                        .Element(ns + "MainPackage")?
+                        .Attribute("Version")?
+                        .Value ??
+                    string.Empty;
+
+                if (!Version.TryParse(remoteRaw, out var remoteVersion))
+                {
+                    throw new InvalidOperationException(
+                        "El archivo de actualización no contiene una versión válida.");
+                }
+
+                var localRaw = GetCurrentAppVersion();
+
+                if (!Version.TryParse(localRaw, out var localVersion))
+                    localVersion = new Version(0, 0, 0, 0);
+
+                if (remoteVersion <= localVersion)
+                {
+                    SetUpdateStatus(
+                        $"ANFETA está actualizado · v{localRaw}",
+                        Color.FromArgb(255, 52, 211, 153));
+
+                    await ShowUpdateDialogAsync(
+                        "ANFETA está actualizado",
+                        $"Tienes instalada la versión {localRaw}. No hay una versión más reciente disponible.",
+                        showInstallButton: false);
+
+                    return;
+                }
+
+                SetUpdateStatus(
+                    $"Actualización disponible · v{remoteVersion}",
+                    Color.FromArgb(255, 96, 165, 250));
+
+                var install = await ShowUpdateDialogAsync(
+                    "Actualización disponible",
+                    $"Versión instalada: {localRaw}\n" +
+                    $"Nueva versión: {remoteVersion}\n\n" +
+                    "ANFETA abrirá App Installer para completar la actualización.",
+                    showInstallButton: true);
+
+                if (install)
+                {
+                    var source = Uri.EscapeDataString(
+                        AppInstallerUrl);
+
+                    var installerUri = new Uri(
+                        $"ms-appinstaller:?source={source}");
+
+                    var opened = await Windows.System.Launcher
+                        .LaunchUriAsync(installerUri);
+
+                    SetUpdateStatus(
+                        opened
+                            ? "Instalador de actualización abierto"
+                            : "No se pudo abrir App Installer",
+                        opened
+                            ? Color.FromArgb(255, 96, 165, 250)
+                            : Color.FromArgb(255, 248, 113, 113));
+                }
+            }
+            catch (Exception ex)
+            {
+                SetUpdateStatus(
+                    "Error al buscar actualizaciones",
+                    Color.FromArgb(255, 248, 113, 113));
+
+                await ShowUpdateDialogAsync(
+                    "No se pudo comprobar la actualización",
+                    "Revisa tu conexión a Internet y vuelve a intentarlo.\n\n" +
+                    ex.Message,
+                    showInstallButton: false);
+            }
+            finally
+            {
+                _isCheckingForUpdates = false;
+                CheckUpdatesButton.IsEnabled = true;
+            }
+        }
+
+        private void SetUpdateStatus(
+            string text,
+            Color color)
+        {
+            if (UpdateStatusText != null)
+                UpdateStatusText.Text = text;
+
+            if (UpdateStatusDot != null)
+                UpdateStatusDot.Fill = new SolidColorBrush(color);
+        }
+
+        private async Task<bool> ShowUpdateDialogAsync(
+            string title,
+            string message,
+            bool showInstallButton)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Root.XamlRoot,
+                Title = title,
+                Content = new TextBlock
+                {
+                    Text = message,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxWidth = 460
+                },
+                CloseButtonText = showInstallButton
+                    ? "Después"
+                    : "Cerrar",
+                DefaultButton = showInstallButton
+                    ? ContentDialogButton.Primary
+                    : ContentDialogButton.Close
+            };
+
+            if (showInstallButton)
+                dialog.PrimaryButtonText = "Actualizar ahora";
+
+            var result = await dialog.ShowAsync();
+
+            return showInstallButton &&
+                   result == ContentDialogResult.Primary;
         }
 
         // ═══════════════════════════════════════════

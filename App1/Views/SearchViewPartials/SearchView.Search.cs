@@ -486,7 +486,7 @@ namespace Anfeta.UI.Views
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             _voicePost.NotifySearchResults(Results);
-            Dictation_SetResults(Results);
+            Dictation_SetResults(BuildSpeechResults(Results));
             await Task.CompletedTask;
         }
 
@@ -576,7 +576,7 @@ namespace Anfeta.UI.Views
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             _voicePost.NotifySearchResults(Results);
-            Dictation_SetResults(Results);
+            Dictation_SetResults(BuildSpeechResults(Results));
             await Task.CompletedTask;
         }
 
@@ -964,6 +964,53 @@ namespace Anfeta.UI.Views
                 "Local" => 6,
                 _ => 99
             };
+        }
+
+
+        private IReadOnlyList<Anfeta.UI.Models.Weblab.SearchResultRow> BuildSpeechResults(
+            IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> rows)
+        {
+            var query = (SearchBox?.Text ?? string.Empty).Trim();
+            var queryParts = ParseFlexibleSearchParts(query)
+                .Select(x => x.Value)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+
+            return rows.Select(row =>
+            {
+                var clean = CleanResultSpeechText(row.DisplayName ?? row.Name, queryParts);
+                return new Anfeta.UI.Models.Weblab.SearchResultRow
+                {
+                    Name = string.IsNullOrWhiteSpace(clean) ? row.DisplayName : clean,
+                    Target = row.Target,
+                    Type = row.Type,
+                    Source = row.Source,
+                    ExternalId = row.ExternalId,
+                    ExternalUrl = row.ExternalUrl,
+                    ExternalSourceName = row.ExternalSourceName
+                };
+            }).ToList();
+        }
+
+        private static string CleanResultSpeechText(
+            string? value,
+            IReadOnlyList<string> queryParts)
+        {
+            var text = value ?? string.Empty;
+            text = Regex.Replace(text,
+                @"(?<![\p{L}\p{Nd}_])(?:prtuzREVISION|rtuzREVISION|zREVISION|sprtuzREVISION)(?![\p{L}\p{Nd}_])",
+                " ", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            text = Regex.Replace(text, @"\bRevisiones\b", " ", RegexOptions.IgnoreCase);
+
+            foreach (var part in queryParts)
+            {
+                var cleanPart = part.Trim('"', '\'', ' ');
+                if (cleanPart.Length < 3) continue;
+                text = Regex.Replace(text, $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(cleanPart)}(?![\p{{L}}\p{{Nd}}_])", " ", RegexOptions.IgnoreCase);
+            }
+
+            return Regex.Replace(text, @"\s+", " ")
+                .Trim(' ', '-', '–', '—', ':', '|', '/');
         }
 
         #endregion

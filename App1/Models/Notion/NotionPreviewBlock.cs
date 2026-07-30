@@ -39,6 +39,7 @@ namespace Anfeta.UI.Models.Notion
         public string Url { get; init; } = string.Empty;
         public string Caption { get; init; } = string.Empty;
         public bool IsChecked { get; init; }
+        public bool IsStrikethrough { get; init; }
         public int Depth { get; init; }
         public string Language { get; init; } = string.Empty;
     }

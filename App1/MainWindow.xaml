@@ -393,9 +393,10 @@
                     BorderBrush="#10FFFFFF"
                     BorderThickness="0,1,0,0"
                     Visibility="Collapsed">
-                    <StackPanel Spacing="3">
+                    <StackPanel Spacing="6">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <Ellipse
+                                x:Name="UpdateStatusDot"
                                 Width="5"
                                 Height="5"
                                 VerticalAlignment="Center"
@@ -406,11 +407,24 @@
                                 Foreground="#8C8075"
                                 Text="ANFETA" />
                         </StackPanel>
+
                         <TextBlock
+                            x:Name="UpdateStatusText"
                             Margin="11,0,0,0"
                             FontSize="10"
-                            Foreground="#4A3E36"
-                            Text="Asistente de Voz Empresarial" />
+                            Foreground="#6B5F56"
+                            Text="Actualizaciones automáticas activas"
+                            TextWrapping="Wrap" />
+
+                        <Button
+                            x:Name="CheckUpdatesButton"
+                            Margin="11,3,0,0"
+                            Padding="10,5"
+                            HorizontalAlignment="Left"
+                            Click="CheckUpdatesButton_Click"
+                            Content="Buscar actualizaciones"
+                            FontSize="10"
+                            ToolTipService.ToolTip="Comprobar si existe una nueva versión de ANFETA" />
                     </StackPanel>
                 </Border>
             </NavigationView.PaneFooter>

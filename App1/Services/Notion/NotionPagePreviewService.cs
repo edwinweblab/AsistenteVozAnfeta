@@ -214,6 +214,7 @@ namespace Anfeta.UI.Services.Notion
             }
 
             var text = ReadRichText(payload);
+            var isStrikethrough = ReadRichTextStrikethrough(payload);
             var caption = ReadCaption(payload);
             var url = ReadFileUrl(payload);
 
@@ -317,9 +318,36 @@ namespace Anfeta.UI.Services.Notion
                 Url = url,
                 Caption = caption,
                 IsChecked = isChecked,
+                IsStrikethrough = isStrikethrough,
                 Depth = depth,
                 Language = language
             };
+        }
+
+
+        private static bool ReadRichTextStrikethrough(JsonElement payload)
+        {
+            if (!payload.TryGetProperty("rich_text", out var richText) ||
+                richText.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var hasText = false;
+            foreach (var item in richText.EnumerateArray())
+            {
+                if (!string.IsNullOrWhiteSpace(ReadString(item, "plain_text")))
+                    hasText = true;
+
+                if (!item.TryGetProperty("annotations", out var annotations) ||
+                    !annotations.TryGetProperty("strikethrough", out var strike) ||
+                    strike.ValueKind != JsonValueKind.True)
+                {
+                    return false;
+                }
+            }
+
+            return hasText;
         }
 
         private static string ReadRichText(JsonElement payload)

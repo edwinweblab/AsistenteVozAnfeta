@@ -25,7 +25,7 @@
             <!--  Row 2 Chips + configuración en dos filas  -->
             <RowDefinition Height="*" />
             <!--  Row 3 Body  -->
-            <RowDefinition Height="22" />
+            <RowDefinition Height="34" />
             <!--  Row 4 StatusBar  -->
         </Grid.RowDefinitions>
 
@@ -1025,8 +1025,8 @@
                             SelectionChanged="MessagesGroupCombo_SelectionChanged">
                             <ComboBoxItem Content="Sin agrupar" Tag="none" />
                             <ComboBoxItem Content="Por persona" Tag="person" />
-                            <ComboBoxItem Content="Por dominio" Tag="domain" />
-                            <ComboBoxItem Content="Por proyecto" Tag="project" />
+                            <ComboBoxItem Content="Dominio / proyecto" Tag="domainproject" />
+                            <ComboBoxItem Content="Tipo de proyecto" Tag="project" />
                             <ComboBoxItem Content="Por mes" Tag="month" />
                         </ComboBox>
 
@@ -1118,6 +1118,18 @@
                                                         Text="NUEVO" />
                                                 </Border>
 
+                                                <Border
+                                                    Padding="7,2"
+                                                    Background="#2563EB"
+                                                    CornerRadius="8"
+                                                    Visibility="{Binding TutorialBadgeVisibility}">
+                                                    <TextBlock
+                                                        FontSize="9"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="White"
+                                                        Text="TUTORIAL" />
+                                                </Border>
+
                                                 <TextBlock
                                                     FontSize="15"
                                                     FontWeight="SemiBold"
@@ -1162,6 +1174,12 @@
                                             Spacing="6">
                                             <Button
                                                 Padding="10,5"
+                                                Click="MessageCopyText_Click"
+                                                Content="Copiar texto"
+                                                Tag="{Binding}"
+                                                ToolTipService.ToolTip="Copiar el contenido del mensaje" />
+                                            <Button
+                                                Padding="10,5"
                                                 Click="MessageOpen_Click"
                                                 Content="Abrir"
                                                 Tag="{Binding}" />
@@ -1172,24 +1190,60 @@
                                                 Tag="{Binding}" />
                                             <Button
                                                 Padding="10,5"
+                                                Click="MessageOpenTutorial_Click"
+                                                Content="Abrir tutorial"
+                                                Tag="{Binding}"
+                                                Visibility="{Binding TutorialActionsVisibility}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageSnooze15_Click"
+                                                Content="En 15 min"
+                                                Tag="{Binding}"
+                                                Visibility="{Binding TutorialActionsVisibility}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageSnooze60_Click"
+                                                Content="En 1 hora"
+                                                Tag="{Binding}"
+                                                Visibility="{Binding TutorialActionsVisibility}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageBusy_Click"
+                                                Content="Estoy ocupado…"
+                                                Tag="{Binding}"
+                                                Visibility="{Binding TutorialActionsVisibility}" />
+                                            <Button
+                                                Padding="10,5"
+                                                Click="MessageOpenOriginalActivity_Click"
+                                                Content="Abrir actividad"
+                                                Tag="{Binding}"
+                                                Visibility="{Binding ReviewOriginalButtonVisibility}"
+                                                ToolTipService.ToolTip="Abrir la actividad exacta que originó esta alerta" />
+                                            <Button
+                                                Padding="10,5"
                                                 Click="MessageReassign_Click"
                                                 Content="Reasignar"
-                                                Tag="{Binding}" />
+                                                Tag="{Binding}"
+                                                Visibility="{Binding MessageEditActionsVisibility}" />
                                             <Button
                                                 Padding="10,5"
                                                 Click="MessageReschedule_Click"
                                                 Content="Reprogramar"
-                                                Tag="{Binding}" />
+                                                Tag="{Binding}"
+                                                Visibility="{Binding MessageEditActionsVisibility}" />
                                             <Button
                                                 Padding="10,5"
                                                 Click="MessageComplete_Click"
                                                 Content="{Binding CompleteButtonText}"
-                                                Tag="{Binding}" />
+                                                IsEnabled="{Binding CanComplete}"
+                                                Tag="{Binding}"
+                                                ToolTipService.ToolTip="{Binding CompleteButtonToolTip}" />
                                             <Button
                                                 Padding="10,5"
                                                 Click="MessageDelete_Click"
-                                                Content="Eliminar"
-                                                Tag="{Binding}" />
+                                                Content="{Binding DeleteButtonText}"
+                                                Tag="{Binding}"
+                                                ToolTipService.ToolTip="{Binding DeleteButtonToolTip}" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -1244,6 +1298,8 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -1306,36 +1362,12 @@
                             FontWeight="SemiBold"
                             Text="Calendario" />
 
-                        <StackPanel
+                        <TextBlock
                             Grid.Column="6"
-                            Orientation="Horizontal"
-                            Spacing="4">
-                            <ToggleButton
-                                x:Name="CalendarGeneralViewButton"
-                                Height="30"
-                                Padding="10,0"
-                                Click="CalendarGeneralView_Click"
-                                Content="General"
-                                CornerRadius="6"
-                                IsChecked="True"
-                                ToolTipService.ToolTip="Mostrar todas las actividades" />
-                            <ToggleButton
-                                x:Name="CalendarJohnViewButton"
-                                Height="30"
-                                Padding="10,0"
-                                Click="CalendarJohnView_Click"
-                                Content="John"
-                                CornerRadius="6"
-                                ToolTipService.ToolTip="Actividades completadas para revisión de John" />
-                            <ToggleButton
-                                x:Name="CalendarGenaroViewButton"
-                                Height="30"
-                                Padding="10,0"
-                                Click="CalendarGenaroView_Click"
-                                Content="Genaro"
-                                CornerRadius="6"
-                                ToolTipService.ToolTip="Actividades completadas para revisión de Genaro" />
-                        </StackPanel>
+                            VerticalAlignment="Center"
+                            FontSize="11"
+                            Opacity="0.68"
+                            Text="Vista general" />
 
                         <Button
                             Grid.Column="7"
@@ -1381,13 +1413,31 @@
                         <Button
                             Grid.Column="11"
                             Height="30"
+                            Padding="9,0"
+                            Click="CalendarRunDailyAutomation_Click"
+                            Content="Procesar ayer"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Mover pendientes de ayer a hoy y guardar reporte" />
+
+                        <Button
+                            Grid.Column="12"
+                            Height="30"
+                            Padding="9,0"
+                            Click="CalendarDailyReport_Click"
+                            Content="Reporte"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Abrir el último reporte diario" />
+
+                        <Button
+                            Grid.Column="13"
+                            Height="30"
                             Padding="10,0"
                             Click="CalendarRefresh_Click"
                             Content="Actualizar"
                             CornerRadius="6" />
 
                         <Button
-                            Grid.Column="12"
+                            Grid.Column="14"
                             Height="30"
                             Padding="10,0"
                             Click="CalendarClose_Click"
@@ -2793,6 +2843,8 @@
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
 
                                         <TextBlock
@@ -2803,9 +2855,29 @@
                                             Opacity="0.70"
                                             Text="VISTA PREVIA" />
 
+                                        <Button
+                                            x:Name="BtnReadNotionPreview"
+                                            Grid.Column="1"
+                                            Height="26"
+                                            Padding="9,0"
+                                            Click="BtnReadNotionPreview_Click"
+                                            Content="▶ Leer"
+                                            CornerRadius="5"
+                                            ToolTipService.ToolTip="Leer solo el contenido pendiente" />
+
+                                        <Button
+                                            x:Name="BtnStopNotionPreviewSpeech"
+                                            Grid.Column="2"
+                                            Height="26"
+                                            Padding="9,0"
+                                            Click="BtnStopNotionPreviewSpeech_Click"
+                                            Content="■ Detener"
+                                            CornerRadius="5"
+                                            IsEnabled="False" />
+
                                         <ProgressRing
                                             x:Name="NotionPreviewProgress"
-                                            Grid.Column="1"
+                                            Grid.Column="3"
                                             Width="16"
                                             Height="16"
                                             IsActive="False"
@@ -2932,6 +3004,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <StackPanel
@@ -2986,9 +3059,29 @@
                 </StackPanel>
             </Border>
 
+            <ComboBox
+                x:Name="CalendarPhaseFilterCombo"
+                Grid.Column="2"
+                Width="205"
+                Height="30"
+                Margin="10,2"
+                Padding="10,0,8,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                SelectedIndex="0"
+                SelectionChanged="CalendarPhaseFilterCombo_SelectionChanged"
+                Visibility="Collapsed"
+                ToolTipService.ToolTip="Filtrar por fase con coincidencia exacta">
+                <ComboBoxItem Content="Todas las fases" Tag="" />
+                <ComboBoxItem Content="Por hacer · prtuzREVISION" Tag="prtuzREVISION" />
+                <ComboBoxItem Content="Para revisar · rtuzREVISION" Tag="rtuzREVISION" />
+                <ComboBoxItem Content="Suspendidos · sprtuzREVISION" Tag="sprtuzREVISION" />
+                <ComboBoxItem Content="Terminadas · zREVISION" Tag="zREVISION" />
+            </ComboBox>
+
             <TextBlock
                 x:Name="ModeText"
-                Grid.Column="2"
+                Grid.Column="3"
                 VerticalAlignment="Center"
                 FontSize="11"
                 Opacity="0.6"
@@ -2996,7 +3089,7 @@
 
             <TextBlock
                 x:Name="CountText"
-                Grid.Column="3"
+                Grid.Column="4"
                 VerticalAlignment="Center"
                 FontSize="11"
                 Opacity="0.6"

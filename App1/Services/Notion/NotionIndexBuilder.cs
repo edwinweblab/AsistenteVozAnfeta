@@ -215,7 +215,7 @@ namespace Anfeta.UI.Services.Notion
                         "Fecha de Inicio");
 
                 projectUpdateStatus =
-                    GetProjectUpdateStatus(props);
+                    GetProjectUpdateStatus(props, sourceName);
             }
 
             if (string.IsNullOrWhiteSpace(title))
@@ -264,75 +264,143 @@ namespace Anfeta.UI.Services.Notion
             return $"[{sourceName}] {cleanTitle}";
         }
         private static string GetProjectUpdateStatus(
-            JsonElement props)
+            JsonElement props,
+            string sourceName)
         {
-            var preferredNames = new[]
-            {
-                "Estado texto Actualización Proyecto",
-                "Estado Texto Actualización Proyecto",
-                "Estado texto actualización proyecto"
-            };
+            var normalizedSource =
+                NormalizePropertyName(
+                    sourceName);
+
+            var preferredNames =
+                normalizedSource.Contains("cobrar") ||
+                normalizedSource.Contains("pagar")
+                    ? new[]
+                    {
+                        "Estado texto Actualización Proyecto",
+                        "Estado texto",
+                        "Estado actualización",
+                        "Estado de actualización",
+                        "Seguimiento",
+                        "Última actualización",
+                        "Actualización"
+                    }
+                    : new[]
+                    {
+                        "Estado texto Actualización Proyecto",
+                        "Estado Texto Actualización Proyecto",
+                        "Estado texto actualización proyecto",
+                        "Estado texto",
+                        "Estado actualización",
+                        "Estado de actualización",
+                        "Seguimiento Estado Proyecto",
+                        "Seguimiento",
+                        "Última actualización"
+                    };
 
             foreach (var preferred in preferredNames)
             {
                 var normalizedPreferred =
-                    NormalizePropertyName(preferred);
+                    NormalizePropertyName(
+                        preferred);
 
-                foreach (var property in props.EnumerateObject())
+                foreach (var property in
+                         props.EnumerateObject())
                 {
-                    if (NormalizePropertyName(property.Name) != normalizedPreferred)
-                        continue;
-
-                    var type = GetString(property.Value, "type");
-
-                    if (type == "checkbox")
-                        continue;
-
-                    if (type == "formula" &&
-                        property.Value.TryGetProperty("formula", out var formula) &&
-                        GetString(formula, "type") == "boolean")
+                    if (NormalizePropertyName(
+                            property.Name) !=
+                        normalizedPreferred)
                     {
                         continue;
                     }
 
-                    var text = ExtractPropertyText(property.Value);
+                    var text =
+                        ExtractUsefulStatusText(
+                            property.Value);
 
                     if (IsUsefulProjectStatus(text))
                         return text.Trim();
                 }
             }
 
-            foreach (var property in props.EnumerateObject())
+            var candidates =
+                new List<(string Text, int Score)>();
+
+            foreach (var property in
+                     props.EnumerateObject())
             {
-                var name = NormalizePropertyName(property.Name);
+                var name =
+                    NormalizePropertyName(
+                        property.Name);
 
-                if (!name.Contains("estado") ||
-                    !name.Contains("texto") ||
-                    !name.Contains("actualizacion") ||
-                    !name.Contains("proyecto"))
+                var score = 0;
+
+                if (name.Contains("estado"))
+                    score += 4;
+
+                if (name.Contains("texto"))
+                    score += 4;
+
+                if (name.Contains("actualizacion"))
+                    score += 5;
+
+                if (name.Contains("seguimiento"))
+                    score += 4;
+
+                if (name.Contains("proyecto"))
+                    score += 2;
+
+                if (normalizedSource.Contains("cobrar") ||
+                    normalizedSource.Contains("pagar"))
                 {
-                    continue;
+                    if (name.Contains("cobrar") ||
+                        name.Contains("pagar") ||
+                        name.Contains("cobro") ||
+                        name.Contains("pago"))
+                    {
+                        score += 3;
+                    }
                 }
 
-                var type = GetString(property.Value, "type");
-
-                if (type == "checkbox")
+                if (score < 6)
                     continue;
 
-                if (type == "formula" &&
-                    property.Value.TryGetProperty("formula", out var formula) &&
-                    GetString(formula, "type") == "boolean")
-                {
-                    continue;
-                }
-
-                var text = ExtractPropertyText(property.Value);
+                var text =
+                    ExtractUsefulStatusText(
+                        property.Value);
 
                 if (IsUsefulProjectStatus(text))
-                    return text.Trim();
+                    candidates.Add((text.Trim(), score));
             }
 
-            return string.Empty;
+            return candidates
+                .OrderByDescending(item => item.Score)
+                .Select(item => item.Text)
+                .FirstOrDefault() ??
+                string.Empty;
+        }
+
+        private static string ExtractUsefulStatusText(
+            JsonElement property)
+        {
+            var type =
+                GetString(
+                    property,
+                    "type");
+
+            if (type == "checkbox")
+                return string.Empty;
+
+            if (type == "formula" &&
+                property.TryGetProperty(
+                    "formula",
+                    out var formula) &&
+                GetString(formula, "type") ==
+                    "boolean")
+            {
+                return string.Empty;
+            }
+
+            return ExtractPropertyText(property);
         }
 
         private static bool IsUsefulProjectStatus(string text)
@@ -340,10 +408,18 @@ namespace Anfeta.UI.Services.Notion
             if (string.IsNullOrWhiteSpace(text))
                 return false;
 
-            return !string.Equals(text, "Sí", StringComparison.OrdinalIgnoreCase) &&
-                   !string.Equals(text, "No", StringComparison.OrdinalIgnoreCase) &&
-                   !string.Equals(text, "True", StringComparison.OrdinalIgnoreCase) &&
-                   !string.Equals(text, "False", StringComparison.OrdinalIgnoreCase);
+            var clean = text.Trim();
+
+            return !string.Equals(clean, "Sí", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "No", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "True", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "False", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "Sin asignar", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "Sin estado", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "Vacío", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "Vacio", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "-", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(clean, "—", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string GetPropTextByFlexibleAliases(

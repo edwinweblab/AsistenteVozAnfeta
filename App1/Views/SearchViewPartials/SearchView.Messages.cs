@@ -39,6 +39,12 @@ namespace Anfeta.UI.Views
         private const string MessagesGroupModeKey =
             "Messaging.GroupMode";
 
+        private const string MessagesAllRecipientsTag =
+            "__all__";
+
+        private readonly HashSet<string> _recentBroadcastFingerprints =
+            new(StringComparer.OrdinalIgnoreCase);
+
         private static readonly Regex MessagesReminderPattern = new(
             @"(?<!\d)(?<date>\d{4}-\d{2}-\d{2})[ T](?<hour>\d{2})[:\-](?<minute>\d{2})(?!\d)",
             RegexOptions.Compiled |
@@ -119,6 +125,59 @@ namespace Anfeta.UI.Views
             public bool IsReplyNotification { get; init; }
             public bool IsUnread { get; init; }
 
+            public bool IsReviewAlert =>
+                Message.StartsWith(
+                    "Actividad lista para revisión",
+                    StringComparison.OrdinalIgnoreCase);
+
+            public bool IsTutorial { get; init; }
+
+            public Visibility TutorialBadgeVisibility =>
+                IsTutorial
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            public Visibility TutorialActionsVisibility =>
+                IsTutorial && !IsCompleted
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            public string ReviewAlertKey =>
+                IsReviewAlert
+                    ? NormalizeReviewAlertKey(Message)
+                    : string.Empty;
+
+            public bool CanComplete =>
+                !IsReviewAlert ||
+                IsCurrentUserReviewApprover();
+
+            public string CompleteButtonToolTip =>
+                IsReviewAlert && !CanComplete
+                    ? "Solo John o Genaro pueden marcar esta alerta como atendida."
+                    : IsReviewAlert
+                        ? "Cualquiera de los dos revisores puede cerrar la alerta."
+                        : "Cambiar el estado del mensaje.";
+
+            public Visibility ReviewOriginalButtonVisibility =>
+                IsReviewAlert
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+
+            public Visibility MessageEditActionsVisibility =>
+                IsReviewAlert
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+
+            public string DeleteButtonText =>
+                IsReviewAlert
+                    ? "Eliminar notificación"
+                    : "Eliminar";
+
+            public string DeleteButtonToolTip =>
+                IsReviewAlert
+                    ? "Elimina únicamente esta notificación. La actividad original no se modifica."
+                    : "Mover este mensaje a la papelera de Notion.";
+
             public Visibility UnreadVisibility =>
                 IsUnread
                     ? Visibility.Visible
@@ -161,7 +220,13 @@ namespace Anfeta.UI.Views
                 $"ID: {(string.IsNullOrWhiteSpace(Row.ExternalId) ? Row.NodeId : Row.ExternalId)}";
 
             public string CompleteButtonText =>
-                IsCompleted ? "Reabrir" : "Terminar";
+                IsReviewAlert
+                    ? IsCompleted
+                        ? "Reabrir alerta"
+                        : "Marcar como atendida"
+                    : IsCompleted
+                        ? "Reabrir"
+                        : "Terminar";
 
             public string LastReplyLabel =>
                 IsReplyNotification
@@ -177,6 +242,35 @@ namespace Anfeta.UI.Views
                 IsCompleted
                     ? "Conversación cerrada"
                     : $"Esperando respuesta de: {DisplayPerson(RecipientName, RecipientTag)}";
+
+            private static bool IsCurrentUserReviewApprover()
+            {
+                var currentUser =
+                    (ApplicationData.Current.LocalSettings.Values[
+                        MessagesCurrentUserKey] as string ??
+                     string.Empty).Trim();
+
+                return string.Equals(
+                           currentUser,
+                           "jjohn",
+                           StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(
+                           currentUser,
+                           "ggena",
+                           StringComparison.OrdinalIgnoreCase);
+            }
+
+            private static string NormalizeReviewAlertKey(
+                string value)
+            {
+                return Regex.Replace(
+                        (value ?? string.Empty)
+                            .Trim()
+                            .ToLowerInvariant(),
+                        @"\s+",
+                        " ")
+                    .Trim();
+            }
 
             public static string DisplayPerson(
                 string name,
@@ -529,17 +623,17 @@ namespace Anfeta.UI.Views
                 "overdue" =>
                     parsed.Where(item =>
                         item.IsOverdue &&
-                        (string.IsNullOrWhiteSpace(currentUserTag) ||
-                         string.Equals(
-                             item.RecipientTag,
-                             currentUserTag,
-                             StringComparison.OrdinalIgnoreCase))),
+                        !string.IsNullOrWhiteSpace(currentUserTag) &&
+                        string.Equals(
+                            item.RecipientTag,
+                            currentUserTag,
+                            StringComparison.OrdinalIgnoreCase)),
 
                 "completed" =>
                     parsed.Where(item =>
                         item.IsCompleted &&
-                        (string.IsNullOrWhiteSpace(currentUserTag) ||
-                         string.Equals(
+                        !string.IsNullOrWhiteSpace(currentUserTag) &&
+                        (string.Equals(
                              item.SenderTag,
                              currentUserTag,
                              StringComparison.OrdinalIgnoreCase) ||
@@ -548,7 +642,17 @@ namespace Anfeta.UI.Views
                              currentUserTag,
                              StringComparison.OrdinalIgnoreCase))),
 
-                _ => parsed
+                _ =>
+                    parsed.Where(item =>
+                        !string.IsNullOrWhiteSpace(currentUserTag) &&
+                        (string.Equals(
+                             item.SenderTag,
+                             currentUserTag,
+                             StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(
+                             item.RecipientTag,
+                             currentUserTag,
+                             StringComparison.OrdinalIgnoreCase)))
             };
 
             if (!string.IsNullOrWhiteSpace(
@@ -615,12 +719,15 @@ namespace Anfeta.UI.Views
                     "completed" =>
                         $"{_messageItems.Count} terminado(s)",
                     _ =>
-                        $"{_messageItems.Count} mensaje(s) · " +
-                        $"{pendingCount} pendiente(s)"
+                        pendingCount == 0
+                            ? $"{_messageItems.Count} mensaje(s)"
+                            : $"{_messageItems.Count} mensaje(s) · {pendingCount} activo(s)"
                 };
 
             MessagesSummaryText.Text =
-                $"{summaryLabel} · Usuario: {currentUserName}";
+                string.IsNullOrWhiteSpace(currentUserTag)
+                    ? "Selecciona un usuario en Configuración para ver sus mensajes."
+                    : $"{summaryLabel} · Usuario: {currentUserName}";
 
             MessagesEmptyState.Visibility =
                 _messageItems.Count == 0
@@ -693,8 +800,11 @@ namespace Anfeta.UI.Views
                             item.RecipientName,
                             item.RecipientTag)}",
 
+                "domainproject" =>
+                    ExtractMessageDomainProject(item.Message),
+
                 "domain" =>
-                    ExtractMessageDomain(item.Message),
+                    ExtractMessageDomainProject(item.Message),
 
                 "project" =>
                     ExtractMessageProject(item.Message),
@@ -726,6 +836,39 @@ namespace Anfeta.UI.Views
                     .Value
                     .ToLowerInvariant()
                 : "Sin dominio";
+        }
+
+        private static string ExtractMessageDomainProject(
+            string text)
+        {
+            var domain =
+                ExtractMessageDomain(text);
+
+            var project =
+                ExtractMessageProject(text);
+
+            var hasDomain =
+                !string.Equals(
+                    domain,
+                    "Sin dominio",
+                    StringComparison.OrdinalIgnoreCase);
+
+            var hasProject =
+                !string.Equals(
+                    project,
+                    "Sin tipo de proyecto",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (hasDomain && hasProject)
+                return $"{domain} / {project}";
+
+            if (hasDomain)
+                return $"{domain} / Sin tipo de proyecto";
+
+            if (hasProject)
+                return $"Sin dominio / {project}";
+
+            return "Sin dominio / Sin tipo de proyecto";
         }
 
         private static string ExtractMessageProject(
@@ -974,6 +1117,7 @@ namespace Anfeta.UI.Views
 
             var completed = false;
             var isReplyNotification = false;
+            var isTutorial = false;
             var markerFound = true;
 
             while (markerFound)
@@ -1001,6 +1145,17 @@ namespace Anfeta.UI.Views
                         .Trim();
                     markerFound = true;
                 }
+
+                if (remainder.StartsWith(
+                        "[TUTORIAL]",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    isTutorial = true;
+                    remainder = remainder
+                        .Substring("[TUTORIAL]".Length)
+                        .Trim();
+                    markerFound = true;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(remainder))
@@ -1021,6 +1176,7 @@ namespace Anfeta.UI.Views
                         DateTimeKind.Local)),
                 IsCompleted = completed,
                 IsReplyNotification = isReplyNotification,
+                IsTutorial = isTutorial,
                 IsUnread =
                     IsMessageUnread(
                         row.ExternalId,
@@ -1072,10 +1228,36 @@ namespace Anfeta.UI.Views
 
             var recipientCombo =
                 BuildMessagesPersonCombo(
-                    string.Empty);
+                    string.Empty,
+                    includeAll: true);
 
             recipientCombo.Header =
                 "Destinatario";
+
+            var messageTypeCombo =
+                new ComboBox
+                {
+                    Header = "Tipo de mensaje",
+                    MinWidth = 360,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch
+                };
+
+            messageTypeCombo.Items.Add(
+                new ComboBoxItem
+                {
+                    Content = "Mensaje normal",
+                    Tag = "normal"
+                });
+
+            messageTypeCombo.Items.Add(
+                new ComboBoxItem
+                {
+                    Content = "Tutorial / aviso importante",
+                    Tag = "tutorial"
+                });
+
+            messageTypeCombo.SelectedIndex = 0;
 
             var subjectBox =
                 new TextBox
@@ -1156,15 +1338,8 @@ namespace Anfeta.UI.Views
                         });
 
                     var name =
-                        new TextBlock
-                        {
-                            Text =
-                                $"📎 {item.FileName}",
-                            TextTrimming =
-                                TextTrimming.CharacterEllipsis,
-                            VerticalAlignment =
-                                VerticalAlignment.Center
-                        };
+                        BuildPendingMessageAttachmentPreview(
+                            item);
 
                     var remove =
                         new Button
@@ -1203,6 +1378,22 @@ namespace Anfeta.UI.Views
                     Content = "📎 Adjuntar archivos",
                     HorizontalAlignment =
                         HorizontalAlignment.Left
+                };
+
+            var uploadProgressBar =
+                new ProgressBar
+                {
+                    Minimum = 0,
+                    Maximum = 100,
+                    Value = 0,
+                    Visibility = Visibility.Collapsed
+                };
+
+            var uploadProgressText =
+                new TextBlock
+                {
+                    Opacity = 0.72,
+                    Visibility = Visibility.Collapsed
                 };
 
             var status =
@@ -1301,11 +1492,14 @@ namespace Anfeta.UI.Views
                 };
 
             panel.Children.Add(recipientCombo);
+            panel.Children.Add(messageTypeCombo);
             panel.Children.Add(subjectBox);
             panel.Children.Add(messageBox);
             panel.Children.Add(dateRow);
             panel.Children.Add(attach);
             panel.Children.Add(filesPanel);
+            panel.Children.Add(uploadProgressBar);
+            panel.Children.Add(uploadProgressText);
             panel.Children.Add(status);
 
             var dialog =
@@ -1356,10 +1550,34 @@ namespace Anfeta.UI.Views
                         return;
                     }
 
-                    var recipientTag =
+                    var selectedRecipientTag =
                         selectedRecipient.Tag?
                             .ToString() ??
                         string.Empty;
+
+                    var isTutorial =
+                        messageTypeCombo.SelectedItem is ComboBoxItem
+                            selectedType &&
+                        string.Equals(
+                            selectedType.Tag?.ToString(),
+                            "tutorial",
+                            StringComparison.OrdinalIgnoreCase);
+
+                    var isBroadcast =
+                        string.Equals(
+                            selectedRecipientTag,
+                            MessagesAllRecipientsTag,
+                            StringComparison.OrdinalIgnoreCase);
+
+                    var recipientTags =
+                        isBroadcast
+                            ? MessagesPeople.Keys
+                                .OrderBy(tag => MessagesPeople[tag])
+                                .ToList()
+                            : new List<string>
+                            {
+                                selectedRecipientTag
+                            };
 
                     var authorTag =
                         GetCurrentMessagesUserTag();
@@ -1381,10 +1599,25 @@ namespace Anfeta.UI.Views
                             0,
                             DateTimeOffset.Now.Offset);
 
-                    var title =
-                        $"{scheduled:yyyy-MM-dd HH:mm} " +
-                        $"{recipientTag} de:{authorTag} " +
-                        $"{subject}";
+                    var broadcastFingerprint =
+                        BuildBroadcastFingerprint(
+                            authorTag,
+                            isTutorial
+                                ? $"[TUTORIAL] {subject}"
+                                : subject,
+                            body,
+                            scheduled,
+                            pending.Select(item => item.FileName));
+
+                    if (isBroadcast &&
+                        _recentBroadcastFingerprints.Contains(
+                            broadcastFingerprint))
+                    {
+                        status.Text =
+                            "Este aviso grupal ya se envió durante esta sesión. " +
+                            "Cambia el asunto, texto o fecha para enviarlo otra vez.";
+                        return;
+                    }
 
                     try
                     {
@@ -1396,102 +1629,146 @@ namespace Anfeta.UI.Views
                                 NotionFileUploadProgress>(
                                 report =>
                                 {
-                                    status.Text =
-                                        $"Subiendo {report.FileName} · " +
+                                    uploadProgressBar.Visibility =
+                                        Visibility.Visible;
+                                    uploadProgressText.Visibility =
+                                        Visibility.Visible;
+                                    uploadProgressBar.Value =
+                                        report.Percentage;
+                                    uploadProgressText.Text =
+                                        $"{report.Percentage}% · " +
+                                        $"{report.FileName} · " +
                                         $"{report.Completed}/{report.Total}";
+                                    status.Text =
+                                        $"Subiendo {report.FileName}...";
                                 });
 
                         using var cts =
                             new CancellationTokenSource(
-                                TimeSpan.FromMinutes(30));
+                                TimeSpan.FromMinutes(45));
 
                         var service =
                             new NotionFilePageService();
 
-                        var created =
-                            await service
-                                .CreateRevisionMessageAsync(
+                        MessageViewItem? createdMessage =
+                            null;
+
+                        var completedRecipients = 0;
+
+                        foreach (var recipientTag in recipientTags)
+                        {
+                            var tutorialToken =
+                                isTutorial
+                                    ? "[TUTORIAL] "
+                                    : string.Empty;
+
+                            var title =
+                                $"{scheduled:yyyy-MM-dd HH:mm} " +
+                                $"{recipientTag} de:{authorTag} " +
+                                $"{tutorialToken}{subject}";
+
+                            status.Text =
+                                isBroadcast
+                                    ? $"Enviando aviso {completedRecipients + 1} de {recipientTags.Count}..."
+                                    : "Creando mensaje...";
+
+                            var created =
+                                await service
+                                    .CreateRevisionMessageAsync(
+                                        token,
+                                        title,
+                                        pending
+                                            .Select(item =>
+                                                item.Path)
+                                            .ToList(),
+                                        progress,
+                                        cts.Token);
+
+                            var recipientName =
+                                MessagesPeople.TryGetValue(
+                                    recipientTag,
+                                    out var mappedRecipient)
+                                    ? mappedRecipient
+                                    : recipientTag;
+
+                            var initialAttachments =
+                                pending
+                                    .Select(item =>
+                                        new MessageThreadAttachment
+                                        {
+                                            FileName =
+                                                item.FileName,
+                                            BlockType =
+                                                GetMessageAttachmentBlockType(
+                                                    item.FileName)
+                                        })
+                                    .ToList();
+
+                            var initialText =
+                                string.IsNullOrWhiteSpace(body) &&
+                                initialAttachments.Count > 0
+                                    ? $"Adjuntó {initialAttachments.Count} archivo(s)."
+                                    : body;
+
+                            await _messageThreadService
+                                .AppendEntryAsync(
                                     token,
-                                    title,
-                                    pending
-                                        .Select(item =>
-                                            item.Path)
-                                        .ToList(),
-                                    progress,
+                                    created.PageId,
+                                    new MessageThreadEntry
+                                    {
+                                        Kind =
+                                            MessageThreadKind.Message,
+                                        AuthorTag = authorTag,
+                                        AuthorName = authorName,
+                                        RecipientTag = recipientTag,
+                                        RecipientName = recipientName,
+                                        CreatedAt =
+                                            DateTimeOffset.Now,
+                                        Text = initialText,
+                                        Attachments =
+                                            initialAttachments
+                                    },
                                     cts.Token);
 
-                        var recipientName =
-                            MessagesPeople.TryGetValue(
-                                recipientTag,
-                                out var mappedRecipient)
-                                ? mappedRecipient
-                                : recipientTag;
-
-                        var initialAttachments =
-                            pending
-                                .Select(item =>
-                                    new MessageThreadAttachment
-                                    {
-                                        FileName =
-                                            item.FileName,
-                                        BlockType =
-                                            GetMessageAttachmentBlockType(
-                                                item.FileName)
-                                    })
-                                .ToList();
-
-                        var initialText =
-                            string.IsNullOrWhiteSpace(body) &&
-                            initialAttachments.Count > 0
-                                ? $"Adjuntó {initialAttachments.Count} archivo(s)."
-                                : body;
-
-                        await _messageThreadService
-                            .AppendEntryAsync(
-                                token,
-                                created.PageId,
-                                new MessageThreadEntry
+                            var row =
+                                new SearchResultRow
                                 {
-                                    Kind =
-                                        MessageThreadKind.Message,
-                                    AuthorTag = authorTag,
-                                    AuthorName = authorName,
-                                    RecipientTag = recipientTag,
-                                    RecipientName = recipientName,
-                                    CreatedAt =
-                                        DateTimeOffset.Now,
-                                    Text = initialText,
-                                    Attachments =
-                                        initialAttachments
-                                },
-                                cts.Token);
+                                    ExternalId =
+                                        created.PageId,
+                                    ExternalUrl =
+                                        created.PageUrl,
+                                    ExternalSourceName =
+                                        "Revisiones",
+                                    Source =
+                                        SearchSource.Notion,
+                                    Name = title,
+                                    Target =
+                                        created.PageUrl
+                                };
 
-                        var row =
-                            new SearchResultRow
-                            {
-                                ExternalId =
-                                    created.PageId,
-                                ExternalUrl =
-                                    created.PageUrl,
-                                ExternalSourceName =
-                                    "Revisiones",
-                                Source =
-                                    SearchSource.Notion,
-                                Name = title,
-                                Target =
-                                    created.PageUrl
-                            };
+                            createdMessage ??=
+                                TryCreateMessageViewItem(
+                                    row);
 
-                        var createdMessage =
-                            TryCreateMessageViewItem(
-                                row);
+                            completedRecipients++;
+                        }
+
+                        if (isBroadcast)
+                        {
+                            _recentBroadcastFingerprints.Add(
+                                broadcastFingerprint);
+                        }
 
                         status.Text =
-                            "Mensaje creado ✅";
+                            isBroadcast
+                                ? $"Aviso enviado a {completedRecipients} usuario(s) ✅"
+                                : "Mensaje creado ✅";
 
                         dialog.Hide();
+                        RefreshMessagesView();
 
-                        if (createdMessage != null)
+                        if (!isBroadcast &&
+                            createdMessage != null)
                         {
                             await ShowMessageConversationAsync(
                                 createdMessage,
@@ -1553,14 +1830,16 @@ namespace Anfeta.UI.Views
 
             var historyPanel = new StackPanel
             {
-                Spacing = 3,
-                Padding = new Thickness(0, 2, 0, 2)
+                Spacing = 4,
+                Padding = new Thickness(0, 2, 0, 2),
+                HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
             var historyScroll = new ScrollViewer
             {
                 MinHeight = 300,
                 MaxHeight = 430,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 Padding = new Thickness(2, 4, 8, 4),
                 VerticalScrollBarVisibility =
                     ScrollBarVisibility.Auto,
@@ -1597,6 +1876,7 @@ namespace Anfeta.UI.Views
                 new StackPanel
                 {
                     Spacing = 4,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                     Visibility = Visibility.Collapsed
                 };
 
@@ -1635,15 +1915,8 @@ namespace Anfeta.UI.Views
                         });
 
                     var nameText =
-                        new TextBlock
-                        {
-                            Text = $"📎 {attachment.FileName}",
-                            FontSize = 11,
-                            TextTrimming =
-                                TextTrimming.CharacterEllipsis,
-                            VerticalAlignment =
-                                VerticalAlignment.Center
-                        };
+                        BuildPendingMessageAttachmentPreview(
+                            attachment);
 
                     var removeButton =
                         new Button
@@ -1709,6 +1982,23 @@ namespace Anfeta.UI.Views
                 _ = RefreshPendingAttachmentsAsync();
             }
 
+            var replyUploadProgressBar =
+                new ProgressBar
+                {
+                    Minimum = 0,
+                    Maximum = 100,
+                    Value = 0,
+                    Visibility = Visibility.Collapsed
+                };
+
+            var replyUploadProgressText =
+                new TextBlock
+                {
+                    FontSize = 11,
+                    Opacity = 0.72,
+                    Visibility = Visibility.Collapsed
+                };
+
             var status = new TextBlock
             {
                 FontSize = 11,
@@ -1753,7 +2043,8 @@ namespace Anfeta.UI.Views
 
             var content = new Grid
             {
-                Width = 560,
+                Width = 500,
+                MaxWidth = 500,
                 MinHeight = 460,
                 MaxHeight = 610,
                 RowSpacing = 7
@@ -1792,6 +2083,17 @@ namespace Anfeta.UI.Views
                     Height = GridLength.Auto
                 });
 
+            content.RowDefinitions.Add(
+                new RowDefinition
+                {
+                    Height = GridLength.Auto
+                });
+            content.RowDefinitions.Add(
+                new RowDefinition
+                {
+                    Height = GridLength.Auto
+                });
+
             Grid.SetRow(historyScroll, 0);
             content.Children.Add(historyScroll);
 
@@ -1807,7 +2109,13 @@ namespace Anfeta.UI.Views
             Grid.SetRow(attachmentsPanel, 4);
             content.Children.Add(attachmentsPanel);
 
-            Grid.SetRow(status, 5);
+            Grid.SetRow(replyUploadProgressBar, 5);
+            content.Children.Add(replyUploadProgressBar);
+
+            Grid.SetRow(replyUploadProgressText, 6);
+            content.Children.Add(replyUploadProgressText);
+
+            Grid.SetRow(status, 7);
             content.Children.Add(status);
 
             content.AllowDrop = true;
@@ -1919,7 +2227,7 @@ namespace Anfeta.UI.Views
                 historyPanel.Children.Clear();
 
                 historyPanel.Children.Add(
-                    BuildMessageThreadCard(
+                    BuildAdvancedMessageThreadCard(
                         new MessageThreadEntry
                         {
                             Kind = MessageThreadKind.Message,
@@ -1933,7 +2241,11 @@ namespace Anfeta.UI.Views
                             CreatedAt = message.ScheduledAt,
                             Text = message.Message
                         },
-                        isOriginal: true));
+                        isOriginal: true,
+                        pageId: message.Row.ExternalId,
+                        token: token,
+                        reloadThread: ReloadThreadAsync,
+                        status: status));
 
                 try
                 {
@@ -1948,12 +2260,32 @@ namespace Anfeta.UI.Views
                                 message.Row.ExternalId,
                                 cts.Token);
 
+                    var receiptAdded =
+                        await EnsureMessageReadReceiptAsync(
+                            token,
+                            message.Row.ExternalId,
+                            entries);
+
+                    if (receiptAdded)
+                    {
+                        entries =
+                            await _messageThreadService
+                                .GetThreadAsync(
+                                    token,
+                                    message.Row.ExternalId,
+                                    cts.Token);
+                    }
+
                     foreach (var entry in entries)
                     {
                         historyPanel.Children.Add(
-                            BuildMessageThreadCard(
+                            BuildAdvancedMessageThreadCard(
                                 entry,
-                                isOriginal: false));
+                                isOriginal: false,
+                                pageId: message.Row.ExternalId,
+                                token: token,
+                                reloadThread: ReloadThreadAsync,
+                                status: status));
                     }
 
                     var latestMessage =
@@ -2085,7 +2417,20 @@ namespace Anfeta.UI.Views
                                         pendingAttachments
                                             .Select(item => item.Path)
                                             .ToList(),
-                                        progress: null,
+                                        progress:
+                                            new Progress<
+                                                NotionFileUploadProgress>(
+                                                report =>
+                                                {
+                                                    replyUploadProgressBar.Visibility =
+                                                        Visibility.Visible;
+                                                    replyUploadProgressText.Visibility =
+                                                        Visibility.Visible;
+                                                    replyUploadProgressBar.Value =
+                                                        report.Percentage;
+                                                    replyUploadProgressText.Text =
+                                                        $"{report.Percentage}% · {report.FileName}";
+                                                }),
                                         cts.Token);
 
                             uploadedAttachments =
@@ -2967,6 +3312,29 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private void MessageCopyText_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!TryGetMessageFromSender(
+                    sender,
+                    out var message))
+            {
+                return;
+            }
+
+            var package =
+                new DataPackage();
+
+            package.SetText(
+                message.Message);
+
+            Clipboard.SetContent(package);
+
+            StatusText.Text =
+                "Estado: Texto del mensaje copiado ✅";
+        }
+
         private async void MessageOpen_Click(
             object sender,
             RoutedEventArgs e)
@@ -2977,6 +3345,12 @@ namespace Anfeta.UI.Views
             {
                 return;
             }
+
+            // El contador rojo representa notificaciones no leídas.
+            // Al abrir la notificación se marca como leída, aunque siga
+            // pendiente de atención.
+            MarkMessageAsRead(message);
+            RefreshMessagesView();
 
             var target =
                 !string.IsNullOrWhiteSpace(
@@ -3027,6 +3401,423 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private async void MessageOpenOriginalActivity_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!TryGetMessageFromSender(
+                    sender,
+                    out var message))
+            {
+                return;
+            }
+
+            if (!message.IsReviewAlert ||
+                string.IsNullOrWhiteSpace(message.Row.ExternalId))
+            {
+                StatusText.Text =
+                    "Estado: Esta notificación no está vinculada a una actividad.";
+                return;
+            }
+
+            var token = GetSavedNotionToken();
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            try
+            {
+                StatusText.Text =
+                    "Estado: Buscando la actividad original...";
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(60));
+
+                var source =
+                    await _messageThreadService
+                        .GetReviewAlertSourceAsync(
+                            token,
+                            message.Row.ExternalId,
+                            cts.Token);
+
+                if (source == null ||
+                    string.IsNullOrWhiteSpace(source.PageUrl) ||
+                    !Uri.TryCreate(
+                        source.PageUrl,
+                        UriKind.Absolute,
+                        out var webUri))
+                {
+                    StatusText.Text =
+                        "Estado: Esta alerta es anterior al vínculo automático o no contiene una URL válida.";
+                    return;
+                }
+
+                MarkMessageAsRead(message);
+                RefreshMessagesView();
+
+                var desktopUri =
+                    new Uri(
+                        webUri.AbsoluteUri.Replace(
+                            "https://",
+                            "notion://",
+                            StringComparison.OrdinalIgnoreCase));
+
+                var support =
+                    await Launcher.QueryUriSupportAsync(
+                        desktopUri,
+                        LaunchQuerySupportType.Uri);
+
+                var opened =
+                    support == LaunchQuerySupportStatus.Available &&
+                    await Launcher.LaunchUriAsync(desktopUri);
+
+                if (!opened)
+                    opened = await Launcher.LaunchUriAsync(webUri);
+
+                StatusText.Text = opened
+                    ? $"Estado: Actividad original abierta ✅ {source.Title}"
+                    : "Estado: No se pudo abrir la actividad original.";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: Notion tardó demasiado en localizar la actividad original.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo abrir la actividad original → {ex.Message}";
+            }
+        }
+
+
+        private async void MessageOpenTutorial_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!TryGetMessageFromSender(
+                    sender,
+                    out var message) ||
+                !message.IsTutorial)
+            {
+                return;
+            }
+
+            var token = GetSavedNotionToken();
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            try
+            {
+                StatusText.Text =
+                    "Estado: Buscando el contenido del tutorial...";
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(90));
+
+                var entries =
+                    await _messageThreadService.GetThreadAsync(
+                        token,
+                        message.Row.ExternalId,
+                        cts.Token);
+
+                var attachment =
+                    entries
+                        .SelectMany(entry =>
+                            entry.Attachments ??
+                            Array.Empty<MessageThreadAttachment>())
+                        .FirstOrDefault(item =>
+                            !string.IsNullOrWhiteSpace(item.Url));
+
+                Uri? targetUri = null;
+
+                if (attachment != null)
+                {
+                    Uri.TryCreate(
+                        attachment.Url,
+                        UriKind.Absolute,
+                        out targetUri);
+                }
+
+                if (targetUri == null)
+                {
+                    var urlMatch =
+                        Regex.Match(
+                            message.Message ?? string.Empty,
+                            @"https?://[^\s<>""]+",
+                            RegexOptions.IgnoreCase |
+                            RegexOptions.CultureInvariant);
+
+                    if (urlMatch.Success)
+                    {
+                        Uri.TryCreate(
+                            urlMatch.Value.TrimEnd(
+                                '.', ',', ';', ')', ']'),
+                            UriKind.Absolute,
+                            out targetUri);
+                    }
+                }
+
+                if (targetUri == null)
+                {
+                    StatusText.Text =
+                        "Estado: El tutorial no contiene un archivo o enlace disponible.";
+                    return;
+                }
+
+                MarkMessageAsRead(message);
+                RefreshMessagesView();
+
+                var opened =
+                    await Launcher.LaunchUriAsync(
+                        targetUri);
+
+                StatusText.Text =
+                    opened
+                        ? "Estado: Tutorial abierto ✅"
+                        : "Estado: No se pudo abrir el tutorial.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo abrir el tutorial → {ex.Message}";
+            }
+        }
+
+        private async void MessageSnooze15_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (TryGetMessageFromSender(
+                    sender,
+                    out var message) &&
+                message.IsTutorial)
+            {
+                await SnoozeTutorialAsync(
+                    message,
+                    DateTimeOffset.Now.AddMinutes(15),
+                    "15 minutos");
+            }
+        }
+
+        private async void MessageSnooze60_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (TryGetMessageFromSender(
+                    sender,
+                    out var message) &&
+                message.IsTutorial)
+            {
+                await SnoozeTutorialAsync(
+                    message,
+                    DateTimeOffset.Now.AddHours(1),
+                    "1 hora");
+            }
+        }
+
+        private async void MessageBusy_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!TryGetMessageFromSender(
+                    sender,
+                    out var message) ||
+                !message.IsTutorial)
+            {
+                return;
+            }
+
+            var datePicker =
+                new DatePicker
+                {
+                    Header = "Recordarme el día",
+                    Date = DateTimeOffset.Now.AddHours(2)
+                };
+
+            var timePicker =
+                new TimePicker
+                {
+                    Header = "A la hora",
+                    Time = DateTimeOffset.Now
+                        .AddHours(2)
+                        .TimeOfDay
+                };
+
+            var panel =
+                new StackPanel
+                {
+                    Spacing = 10
+                };
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Selecciona cuándo debe volver a aparecer este tutorial.",
+                    TextWrapping =
+                        TextWrapping.Wrap
+                });
+
+            panel.Children.Add(datePicker);
+            panel.Children.Add(timePicker);
+
+            var dialog =
+                new ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    Title = "Estoy ocupado",
+                    Content = panel,
+                    PrimaryButtonText = "Posponer",
+                    CloseButtonText = "Cancelar",
+                    DefaultButton =
+                        ContentDialogButton.Primary
+                };
+
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var selectedDate =
+                datePicker.Date.Date;
+
+            var target =
+                new DateTimeOffset(
+                    selectedDate.Year,
+                    selectedDate.Month,
+                    selectedDate.Day,
+                    timePicker.Time.Hours,
+                    timePicker.Time.Minutes,
+                    0,
+                    DateTimeOffset.Now.Offset);
+
+            if (target <= DateTimeOffset.Now)
+            {
+                StatusText.Text =
+                    "Estado: Selecciona una fecha futura.";
+                return;
+            }
+
+            await SnoozeTutorialAsync(
+                message,
+                target,
+                $"hasta {target:dd/MM/yyyy HH:mm}");
+        }
+
+        private async Task SnoozeTutorialAsync(
+            MessageViewItem message,
+            DateTimeOffset target,
+            string label)
+        {
+            if (message == null ||
+                !message.IsTutorial)
+            {
+                return;
+            }
+
+            var token = GetSavedNotionToken();
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            try
+            {
+                ShowLoadingState(
+                    "Estado: Posponiendo tutorial...",
+                    message.Message);
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(60));
+
+                var senderToken =
+                    string.IsNullOrWhiteSpace(
+                        message.SenderTag)
+                        ? string.Empty
+                        : $" de:{message.SenderTag}";
+
+                var newTitle =
+                    $"{target:yyyy-MM-dd HH:mm} " +
+                    $"{message.RecipientTag}{senderToken} " +
+                    $"[TUTORIAL] {message.Message}";
+
+                var actions =
+                    new NotionPageActionsService();
+
+                await actions.RenamePageAsync(
+                    token,
+                    message.Row.ExternalId,
+                    NotionFilePageService
+                        .RevisionesDataSourceId,
+                    newTitle,
+                    cts.Token);
+
+                await UpdateNotionRowTitleAsync(
+                    message.Row.ExternalId,
+                    "Revisiones",
+                    newTitle);
+
+                var currentUser =
+                    GetCurrentMessagesUserTag();
+
+                var currentName =
+                    MessagesPeople.TryGetValue(
+                        currentUser,
+                        out var mappedName)
+                        ? mappedName
+                        : currentUser;
+
+                await _messageThreadService.AppendEntryAsync(
+                    token,
+                    message.Row.ExternalId,
+                    new MessageThreadEntry
+                    {
+                        Kind = MessageThreadKind.System,
+                        AuthorTag = currentUser,
+                        AuthorName = currentName,
+                        RecipientTag = message.RecipientTag,
+                        RecipientName = message.RecipientName,
+                        CreatedAt = DateTimeOffset.Now,
+                        Text =
+                            $"Tutorial pospuesto {label} por " +
+                            $"{MessageViewItem.DisplayPerson(currentName, currentUser)}."
+                    },
+                    cts.Token);
+
+                MarkMessageAsRead(message);
+                RefreshMessagesView();
+
+                StatusText.Text =
+                    $"Estado: Tutorial pospuesto {label} ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo posponer el tutorial → {ex.Message}";
+            }
+            finally
+            {
+                HideLoadingState();
+            }
+        }
+
         private async void MessageReassign_Click(
             object sender,
             RoutedEventArgs e)
@@ -3035,6 +3826,13 @@ namespace Anfeta.UI.Views
                     sender,
                     out var message))
             {
+                return;
+            }
+
+            if (message.IsReviewAlert)
+            {
+                StatusText.Text =
+                    "Estado: Las alertas de revisión no se pueden reasignar.";
                 return;
             }
 
@@ -3076,6 +3874,13 @@ namespace Anfeta.UI.Views
                     sender,
                     out var message))
             {
+                return;
+            }
+
+            if (message.IsReviewAlert)
+            {
+                StatusText.Text =
+                    "Estado: Las alertas de revisión no se pueden reprogramar.";
                 return;
             }
 
@@ -3156,11 +3961,217 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            if (message.IsReviewAlert)
+            {
+                await ApplyLinkedReviewAlertStateAsync(
+                    message,
+                    !message.IsCompleted);
+
+                return;
+            }
+
             await ApplyMessageChangeAsync(
                 message,
                 message.RecipientTag,
                 message.ScheduledAt,
                 !message.IsCompleted);
+        }
+
+        private async Task ApplyLinkedReviewAlertStateAsync(
+            MessageViewItem selectedMessage,
+            bool completed)
+        {
+            var currentUser =
+                GetCurrentMessagesUserTag();
+
+            var isAuthorized =
+                string.Equals(
+                    currentUser,
+                    "jjohn",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    currentUser,
+                    "ggena",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!isAuthorized)
+            {
+                StatusText.Text =
+                    "Estado: Solo John o Genaro pueden atender esta alerta.";
+                return;
+            }
+
+            var token =
+                GetSavedNotionToken();
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            var alertKey =
+                selectedMessage.ReviewAlertKey;
+
+            if (string.IsNullOrWhiteSpace(alertKey))
+            {
+                StatusText.Text =
+                    "Estado: No se pudo identificar la alerta vinculada.";
+                return;
+            }
+
+            var linkedAlerts =
+                App.LocalIndex
+                    .GetAll()
+                    .Where(row =>
+                        row.Source == SearchSource.Notion &&
+                        string.Equals(
+                            row.ExternalSourceName,
+                            "Revisiones",
+                            StringComparison.OrdinalIgnoreCase))
+                    .Select(TryCreateMessageViewItem)
+                    .Where(item =>
+                        item != null &&
+                        item.IsReviewAlert &&
+                        string.Equals(
+                            item.ReviewAlertKey,
+                            alertKey,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        (string.Equals(
+                             item.RecipientTag,
+                             "jjohn",
+                             StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(
+                             item.RecipientTag,
+                             "ggena",
+                             StringComparison.OrdinalIgnoreCase)))
+                    .Cast<MessageViewItem>()
+                    .GroupBy(item =>
+                        item.Row.ExternalId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group =>
+                        group.First())
+                    .ToList();
+
+            if (linkedAlerts.Count == 0)
+                linkedAlerts.Add(selectedMessage);
+
+            var reviewerName =
+                MessagesPeople.TryGetValue(
+                    currentUser,
+                    out var mappedReviewer)
+                    ? mappedReviewer
+                    : currentUser;
+
+            var actionText =
+                completed
+                    ? $"Alerta atendida por {reviewerName} ({currentUser}) · " +
+                      $"{DateTimeOffset.Now:dd/MM/yyyy HH:mm}."
+                    : $"Alerta reabierta por {reviewerName} ({currentUser}) · " +
+                      $"{DateTimeOffset.Now:dd/MM/yyyy HH:mm}.";
+
+            try
+            {
+                ShowLoadingState(
+                    completed
+                        ? "Estado: Marcando alerta como atendida..."
+                        : "Estado: Reabriendo alerta...",
+                    selectedMessage.Message);
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(2));
+
+                var pageActions =
+                    new NotionPageActionsService();
+
+                foreach (var alert in linkedAlerts)
+                {
+                    if (string.IsNullOrWhiteSpace(
+                            alert.Row.ExternalId))
+                    {
+                        continue;
+                    }
+
+                    var senderTag =
+                        string.IsNullOrWhiteSpace(
+                            alert.SenderTag)
+                            ? currentUser
+                            : alert.SenderTag;
+
+                    var senderToken =
+                        string.IsNullOrWhiteSpace(senderTag)
+                            ? string.Empty
+                            : $" de:{senderTag}";
+
+                    var statusToken =
+                        completed
+                            ? " [TERMINADO]"
+                            : string.Empty;
+
+                    var newTitle =
+                        $"{alert.ScheduledAt:yyyy-MM-dd HH:mm} " +
+                        $"{alert.RecipientTag}{senderToken}{statusToken} " +
+                        $"{alert.Message}";
+
+                    await pageActions.RenamePageAsync(
+                        token,
+                        alert.Row.ExternalId,
+                        NotionFilePageService
+                            .RevisionesDataSourceId,
+                        newTitle.Trim(),
+                        cts.Token);
+
+                    await UpdateNotionRowTitleAsync(
+                        alert.Row.ExternalId,
+                        "Revisiones",
+                        newTitle.Trim());
+
+                    await _messageThreadService
+                        .AppendEntryAsync(
+                            token,
+                            alert.Row.ExternalId,
+                            new MessageThreadEntry
+                            {
+                                Kind =
+                                    MessageThreadKind.System,
+                                AuthorTag = currentUser,
+                                AuthorName = reviewerName,
+                                RecipientTag =
+                                    alert.RecipientTag,
+                                RecipientName =
+                                    alert.RecipientName,
+                                CreatedAt =
+                                    DateTimeOffset.Now,
+                                Text = actionText
+                            },
+                            cts.Token);
+
+                    MarkMessageAsRead(alert);
+                }
+
+                RefreshMessagesView();
+
+                StatusText.Text =
+                    completed
+                        ? $"Estado: Alerta atendida por {reviewerName} ✅"
+                        : $"Estado: Alerta reabierta por {reviewerName} ✅";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: Notion tardó demasiado en responder.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo actualizar la alerta → {ex.Message}";
+            }
+            finally
+            {
+                HideLoadingState();
+            }
         }
 
         private async void MessageDelete_Click(
@@ -3185,10 +4196,21 @@ namespace Anfeta.UI.Views
             var confirm = new ContentDialog
             {
                 XamlRoot = XamlRoot,
-                Title = "Eliminar recordatorio",
+                Title =
+                    message.IsReviewAlert
+                        ? "Eliminar notificación"
+                        : "Eliminar recordatorio",
                 Content =
-                    $"¿Deseas mover este recordatorio a la papelera de Notion?\n\n{message.Message}",
-                PrimaryButtonText = "Eliminar",
+                    message.IsReviewAlert
+                        ? $"Se eliminará únicamente esta notificación. " +
+                          $"La actividad original del calendario no cambiará.\n\n" +
+                          $"{message.Message}"
+                        : $"¿Deseas mover este recordatorio a la papelera de Notion?\n\n" +
+                          $"{message.Message}",
+                PrimaryButtonText =
+                    message.IsReviewAlert
+                        ? "Eliminar notificación"
+                        : "Eliminar",
                 CloseButtonText = "Cancelar",
                 DefaultButton = ContentDialogButton.Close
             };
@@ -3211,7 +4233,9 @@ namespace Anfeta.UI.Views
             try
             {
                 ShowLoadingState(
-                    "Estado: Eliminando recordatorio...",
+                    message.IsReviewAlert
+                        ? "Estado: Eliminando notificación..."
+                        : "Estado: Eliminando recordatorio...",
                     message.Message);
 
                 using var cts =
@@ -3236,7 +4260,9 @@ namespace Anfeta.UI.Views
                 RefreshMessagesView();
 
                 StatusText.Text =
-                    "Estado: Recordatorio enviado a la papelera ✅";
+                    message.IsReviewAlert
+                        ? "Estado: Notificación eliminada. La actividad original permanece intacta ✅"
+                        : "Estado: Recordatorio enviado a la papelera ✅";
             }
             catch (OperationCanceledException)
             {
@@ -3246,7 +4272,9 @@ namespace Anfeta.UI.Views
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo eliminar el recordatorio → {ex.Message}";
+                    message.IsReviewAlert
+                        ? $"Estado: No se pudo eliminar la notificación → {ex.Message}"
+                        : $"Estado: No se pudo eliminar el recordatorio → {ex.Message}";
             }
             finally
             {
@@ -3401,8 +4429,52 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private static string BuildBroadcastFingerprint(
+            string authorTag,
+            string subject,
+            string body,
+            DateTimeOffset scheduled,
+            IEnumerable<string> fileNames)
+        {
+            var normalizedFiles =
+                string.Join(
+                    "|",
+                    (fileNames ??
+                     Array.Empty<string>())
+                    .Select(name =>
+                        (name ?? string.Empty)
+                            .Trim()
+                            .ToLowerInvariant())
+                    .OrderBy(name => name));
+
+            var raw =
+                string.Join(
+                    "\n",
+                    (authorTag ?? string.Empty)
+                        .Trim()
+                        .ToLowerInvariant(),
+                    (subject ?? string.Empty)
+                        .Trim()
+                        .ToLowerInvariant(),
+                    (body ?? string.Empty)
+                        .Trim()
+                        .ToLowerInvariant(),
+                    scheduled.ToString(
+                        "yyyy-MM-dd HH:mm",
+                        CultureInfo.InvariantCulture),
+                    normalizedFiles);
+
+            using var algorithm =
+                System.Security.Cryptography.SHA256.Create();
+
+            return Convert.ToHexString(
+                algorithm.ComputeHash(
+                    System.Text.Encoding.UTF8.GetBytes(raw)));
+        }
+
         private static ComboBox BuildMessagesPersonCombo(
-            string selectedTag)
+            string selectedTag,
+            bool includeAll = false)
         {
             var combo = new ComboBox
             {
@@ -3411,6 +4483,16 @@ namespace Anfeta.UI.Views
                 HorizontalAlignment =
                     HorizontalAlignment.Stretch
             };
+
+            if (includeAll)
+            {
+                combo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = "Todos los usuarios",
+                        Tag = MessagesAllRecipientsTag
+                    });
+            }
 
             foreach (var person in MessagesPeople)
             {
@@ -3449,6 +4531,25 @@ namespace Anfeta.UI.Views
             {
                 return false;
             }
+
+            var currentUser =
+                GetCurrentMessagesUserTag();
+
+            if (string.IsNullOrWhiteSpace(currentUser))
+                return false;
+
+            var belongsToCurrentUser =
+                string.Equals(
+                    item.SenderTag,
+                    currentUser,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    item.RecipientTag,
+                    currentUser,
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!belongsToCurrentUser)
+                return false;
 
             message = item;
             return true;

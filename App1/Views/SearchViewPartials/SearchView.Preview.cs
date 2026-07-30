@@ -15,6 +15,10 @@ using System.Threading.Tasks;
 using Windows.Storage;
 using Windows.System;
 using Windows.UI.Text;
+using Windows.Media.Core;
+using Windows.Media.Playback;
+using Windows.Media.SpeechSynthesis;
+using System.Text.RegularExpressions;
 
 namespace Anfeta.UI.Views
 {
@@ -34,6 +38,9 @@ namespace Anfeta.UI.Views
 
             _notionPreviewCts = null;
             _activePreviewPageId = string.Empty;
+            _activePreviewBlocks = Array.Empty<NotionPreviewBlock>();
+            _activePreviewRow = null;
+            StopNotionPreviewSpeech();
 
             if (NotionPreviewProgress != null)
             {
@@ -69,6 +76,7 @@ namespace Anfeta.UI.Views
                 (row.ExternalId ?? string.Empty).Trim();
 
             NotionPreviewCard.Visibility = Visibility.Visible;
+            _activePreviewRow = row;
             NotionPreviewContent.Children.Clear();
 
             AddDescriptionPreview(row.Description);
@@ -131,6 +139,7 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
+                _activePreviewBlocks = blocks;
                 RenderNotionPreviewBlocks(
                     row,
                     blocks);
@@ -1053,6 +1062,96 @@ namespace Anfeta.UI.Views
 
             LocalImagePreviewStatus.Text =
                 $"Ajustada a la ventana · {_localImageZoom * 100:0}%";
+        }
+
+        private async void BtnReadNotionPreview_Click(object sender, RoutedEventArgs e)
+        {
+            var speechText = BuildNotionPreviewSpeechText(_activePreviewRow, _activePreviewBlocks);
+            if (string.IsNullOrWhiteSpace(speechText))
+            {
+                NotionPreviewStatus.Text = "No hay contenido pendiente para leer.";
+                return;
+            }
+
+            try
+            {
+                StopNotionPreviewSpeech();
+                var stream = await _previewSpeechSynth.SynthesizeTextToStreamAsync(speechText);
+                _previewSpeechPlayer = new MediaPlayer();
+                _previewSpeechPlayer.Source = MediaSource.CreateFromStream(stream, stream.ContentType);
+                _previewSpeechPlayer.MediaEnded += (_, __) => DispatcherQueue.TryEnqueue(StopNotionPreviewSpeech);
+                _previewSpeechPlayer.MediaFailed += (_, __) => DispatcherQueue.TryEnqueue(StopNotionPreviewSpeech);
+                _previewSpeechPlaying = true;
+                BtnReadNotionPreview.Content = "🔊 Leyendo...";
+                BtnReadNotionPreview.IsEnabled = false;
+                BtnStopNotionPreviewSpeech.IsEnabled = true;
+                NotionPreviewStatus.Text = "Leyendo contenido pendiente de la página...";
+                _previewSpeechPlayer.Play();
+            }
+            catch (Exception ex)
+            {
+                StopNotionPreviewSpeech();
+                NotionPreviewStatus.Text = $"No se pudo iniciar la lectura: {ex.Message}";
+            }
+        }
+
+        private void BtnStopNotionPreviewSpeech_Click(object sender, RoutedEventArgs e)
+            => StopNotionPreviewSpeech();
+
+        private void StopNotionPreviewSpeech()
+        {
+            try { _previewSpeechPlayer?.Pause(); } catch { }
+            try { _previewSpeechPlayer?.Dispose(); } catch { }
+            _previewSpeechPlayer = null;
+            _previewSpeechPlaying = false;
+            if (BtnReadNotionPreview != null)
+            {
+                BtnReadNotionPreview.Content = "▶ Leer";
+                BtnReadNotionPreview.IsEnabled = true;
+            }
+            if (BtnStopNotionPreviewSpeech != null)
+                BtnStopNotionPreviewSpeech.IsEnabled = false;
+        }
+
+        private static string BuildNotionPreviewSpeechText(
+            SearchResultRow? row,
+            IReadOnlyList<NotionPreviewBlock> blocks)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(row?.Description))
+                parts.Add(CleanSpeechText(row.Description));
+
+            foreach (var block in blocks ?? Array.Empty<NotionPreviewBlock>())
+            {
+                if (block.IsStrikethrough ||
+                    (block.Kind == NotionPreviewBlockKind.ToDo && block.IsChecked) ||
+                    block.Kind is NotionPreviewBlockKind.Divider or
+                        NotionPreviewBlockKind.Image or NotionPreviewBlockKind.Pdf or
+                        NotionPreviewBlockKind.File or NotionPreviewBlockKind.Audio or
+                        NotionPreviewBlockKind.Video or NotionPreviewBlockKind.Embed)
+                {
+                    continue;
+                }
+
+                var clean = CleanSpeechText(block.Text);
+                if (!string.IsNullOrWhiteSpace(clean))
+                    parts.Add(clean);
+            }
+
+            return string.Join(". ", parts
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        }
+
+        private static string CleanSpeechText(string? value)
+        {
+            var text = value ?? string.Empty;
+            text = Regex.Replace(text,
+                @"(?<![\p{L}\p{Nd}_])(?:prtuzREVISION|rtuzREVISION|zREVISION|sprtuzREVISION)(?![\p{L}\p{Nd}_])",
+                " ", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            text = Regex.Replace(text, @"\bRevisiones\b", " ", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\s+", " ").Trim(' ', '-', '–', '—', ':', '|', '/');
+            return text;
         }
     }
 }
