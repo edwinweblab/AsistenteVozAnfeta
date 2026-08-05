@@ -313,8 +313,9 @@ namespace Anfeta.UI
             MainWindowInstance = _window;
             UIQueue = DispatcherQueue.GetForCurrentThread();
 
-            _ = HomeVM;
-            _ = CheckAndWarmupGroqAsync();
+            // El módulo Home/voz ya no se resuelve ni calienta al arrancar.
+            // Si alguna función de voz se invoca explícitamente más adelante,
+            // HomeVM se creará en ese momento bajo demanda.
 
             try
             {
@@ -336,11 +337,8 @@ namespace Anfeta.UI
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
             _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
 
-            HomeVM.PropertyChanged += (s, e) =>
-            {
-                if (e.PropertyName == nameof(HomeViewModel.IsListening))
-                    _floatingButton?.SetListeningState(HomeVM.IsListening);
-            };
+            // No se suscribe HomeVM durante el arranque para evitar cargar
+            // el modelo, micrófono y servicios del módulo de voz sin utilizarlos.
 
             _window.Activate();
         }

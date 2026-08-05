@@ -5,11 +5,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
@@ -42,7 +42,7 @@ namespace Anfeta.UI.Services.Notion
         public string LastDiagnostics { get; private set; } = "";
 
         private const string CacheFileName =
-            "notion_calendar_cache_v5.json";
+            "notion_calendar_cache_v10.json";
 
         private static readonly SemaphoreSlim CacheLock =
             new(1, 1);
@@ -56,6 +56,13 @@ namespace Anfeta.UI.Services.Notion
         private static readonly object StartupWarmupLock = new();
         private static Task<NotionCalendarWarmupResult>? _startupWarmupTask;
 
+        // Evita que pestañas o refrescos simultáneos descarguen el mismo día
+        // completo varias veces. Los consumidores comparten la tarea activa.
+        private static readonly ConcurrentDictionary<
+            string,
+            Task<IReadOnlyList<NotionCalendarActivity>>> ActiveDayLoads =
+                new(StringComparer.Ordinal);
+
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
         private const string RevisionesDataSourceId =
@@ -63,12 +70,20 @@ namespace Anfeta.UI.Services.Notion
 
         private const int MaxRetryAttempts = 4;
 
+        private static readonly Regex AuxiliaryMessageTitlePattern = new(
+            @"^\s*\d{4}-\d{2}-\d{2}[ T]\d{2}[:\-]\d{2}\s+" +
+            @"(?:jjohn|kkarl|iisai|iisaia|eedua|aacal|aandr|eemma|bbria|ggena|nneft|__all__)" +
+            @"(?:\s+de:[a-z0-9_-]+)?(?:\s+\[(?:RESPUESTA|TERMINADO)\])?(?:\s+|$)",
+            RegexOptions.Compiled |
+            RegexOptions.IgnoreCase |
+            RegexOptions.CultureInvariant);
+
         private static readonly string[] DateAliases =
         {
-            "Fecha POR Hacer (Trabajando)",
-            "Fecha por hacer",
+            // Única fuente válida para el calendario.
+            // Debe ser una propiedad editable de tipo date.
             "Fecha POR Hacer",
-            "Fecha de Inicio"
+            "Fecha por hacer"
         };
 
         private static readonly string[] PersonAliases =
@@ -79,6 +94,29 @@ namespace Anfeta.UI.Services.Notion
             "Fórmula Persona",
             "Asignado por"
         };
+
+        private static readonly Dictionary<string, string[]>
+            WorkspacePersonLookup =
+                new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["John"] = new[] { "jjohn", "john" },
+                    ["Karla"] = new[] { "kkarl", "karla", "karl" },
+                    ["Isaias"] = new[] { "iisai", "isaias", "isai" },
+                    ["Sotelo"] = new[]
+                    {
+                        "ssote", "eedua", "sotelo",
+                        "eduardo", "sote", "edua"
+                    },
+                    ["Acalli"] = new[] { "aacal", "acalli", "acal" },
+                    ["Andrade"] = new[] { "aandr", "andrade", "andr" },
+                    ["Emmanuel"] = new[]
+                    {
+                        "eemma", "emmanuel", "emanuel", "emma"
+                    },
+                    ["Brian"] = new[] { "bbria", "brian", "bria" },
+                    ["Genaro"] = new[] { "ggena", "genaro", "gena" },
+                    ["Neftali"] = new[] { "nneft", "neftali", "neft" }
+                };
 
         private static readonly string[] ProjectAliases =
         {
@@ -205,17 +243,9 @@ namespace Anfeta.UI.Services.Notion
                 updated = true;
             }
 
-            // Ayer y Mañana se preparan únicamente si todavía no existen.
-            await PreloadDayAsync(
-                token,
-                DateTime.Today.AddDays(-1),
-                cancellationToken);
-
-            await PreloadDayAsync(
-                token,
-                DateTime.Today.AddDays(1),
-                cancellationToken);
-
+            // No se precargan Ayer y Mañana durante el arranque.
+            // Cada día se obtiene bajo demanda para no competir con el índice
+            // principal del Buscador ni consumir solicitudes innecesarias.
             var currentToday =
                 await TryGetCachedDayAsync(
                     DateTime.Today,
@@ -230,7 +260,68 @@ namespace Anfeta.UI.Services.Notion
                     : "La versión guardada ya estaba al día.");
         }
 
-        public async Task<IReadOnlyList<NotionCalendarActivity>> GetDayAsync(
+        public Task<IReadOnlyList<NotionCalendarActivity>> GetDayAsync(
+            string token,
+            DateTime localDate,
+            IProgress<NotionCalendarProgress>? progress = null,
+            CancellationToken cancellationToken = default,
+            bool forceRefresh = false)
+        {
+            var key =
+                $"{localDate.Date:yyyy-MM-dd}|{forceRefresh}";
+
+            var task = ActiveDayLoads.GetOrAdd(
+                key,
+                _ => GetDayCoordinatedAsync(
+                    token,
+                    localDate,
+                    progress,
+                    cancellationToken,
+                    forceRefresh));
+
+            return AwaitSharedDayLoadAsync(key, task);
+        }
+
+        private static async Task<IReadOnlyList<NotionCalendarActivity>>
+            AwaitSharedDayLoadAsync(
+                string key,
+                Task<IReadOnlyList<NotionCalendarActivity>> task)
+        {
+            try
+            {
+                return await task;
+            }
+            finally
+            {
+                if (ActiveDayLoads.TryGetValue(key, out var current) &&
+                    ReferenceEquals(current, task))
+                {
+                    ActiveDayLoads.TryRemove(key, out _);
+                }
+            }
+        }
+
+        private async Task<IReadOnlyList<NotionCalendarActivity>>
+            GetDayCoordinatedAsync(
+                string token,
+                DateTime localDate,
+                IProgress<NotionCalendarProgress>? progress,
+                CancellationToken cancellationToken,
+                bool forceRefresh)
+        {
+            using var fullSyncLease =
+                await NotionRequestCoordinator.EnterFullSyncAsync(
+                    cancellationToken);
+
+            return await GetDayCoreAsync(
+                token,
+                localDate,
+                progress,
+                cancellationToken,
+                forceRefresh);
+        }
+
+        private async Task<IReadOnlyList<NotionCalendarActivity>> GetDayCoreAsync(
             string token,
             DateTime localDate,
             IProgress<NotionCalendarProgress>? progress = null,
@@ -286,6 +377,7 @@ namespace Anfeta.UI.Services.Notion
             var pages = await QueryDayPagesAsync(
                 http,
                 localDate.Date,
+                schema.DateProperties[0],
                 progress,
                 cancellationToken);
 
@@ -300,6 +392,10 @@ namespace Anfeta.UI.Services.Notion
             var pagesWithDate = 0;
             var hydratedPages = 0;
             var parseFailures = 0;
+
+            var datePropertyUsage =
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase);
 
             for (var pageIndex = 0;
                  pageIndex < pages.Count;
@@ -374,6 +470,18 @@ namespace Anfeta.UI.Services.Notion
                     continue;
                 }
 
+                if (!string.IsNullOrWhiteSpace(
+                        activity.DatePropertyName))
+                {
+                    datePropertyUsage[
+                        activity.DatePropertyName] =
+                            datePropertyUsage.TryGetValue(
+                                activity.DatePropertyName,
+                                out var usage)
+                                ? usage + 1
+                                : 1;
+                }
+
                 if (ActivityOverlapsDay(
                         activity,
                         localDate.Date))
@@ -382,8 +490,35 @@ namespace Anfeta.UI.Services.Notion
                 }
             }
 
+            var dateUsageText =
+                datePropertyUsage.Count == 0
+                    ? "sin propiedad"
+                    : string.Join(
+                        " | ",
+                        datePropertyUsage
+                            .OrderByDescending(item => item.Value)
+                            .Select(item =>
+                                $"{item.Key}: {item.Value}"));
+
+            var peopleUsageText =
+                activities.Count == 0
+                    ? "sin actividades"
+                    : string.Join(
+                        " | ",
+                        activities
+                            .GroupBy(activity =>
+                                string.IsNullOrWhiteSpace(activity.Person)
+                                    ? "Sin asignar"
+                                    : activity.Person,
+                                StringComparer.OrdinalIgnoreCase)
+                            .OrderBy(group => group.Key)
+                            .Select(group =>
+                                $"{group.Key}: {group.Count()}"));
+
             LastDiagnostics =
-                $"Fechas: {string.Join(" | ", schema.DateProperties.Take(5))} · " +
+                $"Fecha: Fecha POR Hacer · Asignación: Assignee > tag activo de respaldo · " +
+                $"Uso real: {dateUsageText} · " +
+                $"Día por persona: {peopleUsageText} · " +
                 $"Páginas: {pages.Count} · " +
                 $"Con fecha: {pagesWithDate} · " +
                 $"Reconsultadas: {hydratedPages} · " +
@@ -427,15 +562,27 @@ namespace Anfeta.UI.Services.Notion
 
             try
             {
-                return DayCache.TryGetValue(
+                if (!DayCache.TryGetValue(
                         key,
-                        out var cached)
-                    ? cached
-                        .OrderBy(x => x.Person)
-                        .ThenBy(x => x.Start)
-                        .ThenBy(x => x.Title)
-                        .ToList()
-                    : null;
+                        out var cached))
+                {
+                    return null;
+                }
+
+                var removed = cached.RemoveAll(
+                    IsAuxiliaryCalendarActivity);
+
+                if (removed > 0)
+                {
+                    await SaveCacheUnsafeAsync(
+                        cancellationToken);
+                }
+
+                return cached
+                    .OrderBy(x => x.Person)
+                    .ThenBy(x => x.Start)
+                    .ThenBy(x => x.Title)
+                    .ToList();
             }
             finally
             {
@@ -462,6 +609,482 @@ namespace Anfeta.UI.Services.Notion
                 progress: null,
                 cancellationToken,
                 forceRefresh: true);
+        }
+
+
+        public async Task<string> UpdateActivityTitleAsync(
+            string token,
+            string pageId,
+            string newTitle,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (string.IsNullOrWhiteSpace(pageId))
+            {
+                throw new InvalidOperationException(
+                    "La actividad no contiene un identificador de Notion.");
+            }
+
+            newTitle = (newTitle ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(newTitle))
+            {
+                throw new InvalidOperationException(
+                    "El título de la actividad no puede quedar vacío.");
+            }
+
+            using var http = CreateClient(token);
+
+            var page =
+                await ReadPageAsync(
+                    http,
+                    pageId,
+                    cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "No se pudieron leer las propiedades actuales de la actividad.");
+            }
+
+            var titlePropertyName =
+                properties
+                    .EnumerateObject()
+                    .FirstOrDefault(property =>
+                        ReadString(property.Value, "type")
+                            .Equals(
+                                "title",
+                                StringComparison.OrdinalIgnoreCase))
+                    .Name ??
+                string.Empty;
+
+            if (string.IsNullOrWhiteSpace(titlePropertyName))
+            {
+                throw new InvalidOperationException(
+                    "No se encontró la propiedad de título de la página.");
+            }
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["properties"] =
+                        new Dictionary<string, object?>
+                        {
+                            [titlePropertyName] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["type"] = "title",
+                                    ["title"] =
+                                        new object[]
+                                        {
+                                            new Dictionary<string, object?>
+                                            {
+                                                ["type"] = "text",
+                                                ["text"] =
+                                                    new Dictionary<string, object?>
+                                                    {
+                                                        ["content"] = newTitle
+                                                    }
+                                            }
+                                        }
+                                }
+                        }
+                };
+
+            using var response =
+                await SendPatchWithRetryAsync(
+                    http,
+                    $"pages/{pageId}",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
+
+            var responseJson =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "actualizar el título de la actividad",
+                    response,
+                    responseJson);
+            }
+
+            await CacheLock.WaitAsync(cancellationToken);
+
+            try
+            {
+                foreach (var day in DayCache.Values)
+                {
+                    foreach (var activity in day.Where(activity =>
+                                 string.Equals(
+                                     activity.PageId,
+                                     pageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        activity.Title = newTitle;
+                    }
+                }
+
+                await SaveCacheUnsafeAsync(cancellationToken);
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+
+            return newTitle;
+        }
+
+        public async Task<bool> UpdateActivityAssigneeAsync(
+            string token,
+            string pageId,
+            string targetPerson,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (string.IsNullOrWhiteSpace(pageId))
+            {
+                throw new InvalidOperationException(
+                    "La actividad no contiene un identificador de Notion.");
+            }
+
+            targetPerson =
+                NormalizePersonLabel(targetPerson);
+
+            if (string.IsNullOrWhiteSpace(targetPerson) ||
+                string.Equals(
+                    targetPerson,
+                    "Sin asignar",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "No se pudo identificar al nuevo responsable.");
+            }
+
+            using var http = CreateClient(token);
+
+            var page = await ReadPageAsync(
+                http,
+                pageId,
+                cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "No se pudieron leer las propiedades actuales de la actividad.");
+            }
+
+            var propertyName = string.Empty;
+            var assigneePropertyValue = default(JsonElement);
+
+            foreach (var alias in PersonAliases)
+            {
+                var normalizedAlias = Normalize(alias);
+
+                foreach (var property in
+                         properties.EnumerateObject())
+                {
+                    if (Normalize(property.Name) !=
+                        normalizedAlias)
+                    {
+                        continue;
+                    }
+
+                    propertyName = property.Name;
+                    assigneePropertyValue = property.Value;
+                    break;
+                }
+
+                if (!string.IsNullOrWhiteSpace(propertyName))
+                    break;
+            }
+
+            var updatedInNotion = false;
+
+            if (!string.IsNullOrWhiteSpace(propertyName))
+            {
+                var propertyType = ReadString(
+                    assigneePropertyValue,
+                    "type");
+
+                Dictionary<string, object?>? propertyValue =
+                    null;
+
+                if (propertyType.Equals(
+                        "people",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var userId =
+                        await ResolveWorkspaceUserIdAsync(
+                            http,
+                            targetPerson,
+                            cancellationToken);
+
+                    if (!string.IsNullOrWhiteSpace(userId))
+                    {
+                        propertyValue =
+                            new Dictionary<string, object?>
+                            {
+                                ["people"] =
+                                    new object[]
+                                    {
+                                        new Dictionary<string, object?>
+                                        {
+                                            ["id"] = userId
+                                        }
+                                    }
+                            };
+                    }
+                }
+                else if (propertyType.Equals(
+                             "rich_text",
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    propertyValue =
+                        new Dictionary<string, object?>
+                        {
+                            ["rich_text"] =
+                                new object[]
+                                {
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["type"] = "text",
+                                        ["text"] =
+                                            new Dictionary<string, object?>
+                                            {
+                                                ["content"] =
+                                                    targetPerson
+                                            }
+                                    }
+                                }
+                        };
+                }
+                else if (propertyType.Equals(
+                             "select",
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    propertyValue =
+                        new Dictionary<string, object?>
+                        {
+                            ["select"] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["name"] = targetPerson
+                                }
+                        };
+                }
+
+                if (propertyValue != null)
+                {
+                    var payload =
+                        new Dictionary<string, object?>
+                        {
+                            ["properties"] =
+                                new Dictionary<string, object?>
+                                {
+                                    [propertyName] =
+                                        propertyValue
+                                }
+                        };
+
+                    using var response =
+                        await SendPatchWithRetryAsync(
+                            http,
+                            $"pages/{pageId}",
+                            JsonSerializer.Serialize(payload),
+                            cancellationToken);
+
+                    // Si la propiedad resulta ser de solo lectura o el
+                    // usuario no puede asignarse con esta integración, no se
+                    // cancela el flujo completo. El título ya contiene el tag
+                    // correcto y Notion podrá recalcular la propiedad.
+                    updatedInNotion =
+                        response.IsSuccessStatusCode;
+                }
+            }
+
+            await CacheLock.WaitAsync(cancellationToken);
+
+            try
+            {
+                foreach (var day in DayCache.Values)
+                {
+                    foreach (var activity in day.Where(activity =>
+                                 string.Equals(
+                                     activity.PageId,
+                                     pageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        activity.Person = targetPerson;
+                    }
+                }
+
+                await SaveCacheUnsafeAsync(cancellationToken);
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+
+            // Si Assignee es fórmula, rollup o relación no editable, el título
+            // actualizado seguirá provocando su recálculo en Notion. La caché
+            // local se corrige de inmediato para no conservar al revisor.
+            return updatedInNotion;
+        }
+
+        private static async Task<string> ResolveWorkspaceUserIdAsync(
+            HttpClient http,
+            string targetPerson,
+            CancellationToken cancellationToken)
+        {
+            var normalizedTarget =
+                NormalizePersonLabel(targetPerson);
+
+            var lookupTokens =
+                WorkspacePersonLookup.TryGetValue(
+                    normalizedTarget,
+                    out var configured)
+                    ? configured
+                    : new[] { normalizedTarget };
+
+            var normalizedTokens =
+                lookupTokens
+                    .Append(normalizedTarget)
+                    .Select(NormalizeIdentityToken)
+                    .Where(value =>
+                        !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            string? cursor = null;
+
+            do
+            {
+                var requestUri =
+                    "users?page_size=100" +
+                    (string.IsNullOrWhiteSpace(cursor)
+                        ? string.Empty
+                        : $"&start_cursor={Uri.EscapeDataString(cursor)}");
+
+                using var response =
+                    await SendGetWithRetryAsync(
+                        http,
+                        requestUri,
+                        cancellationToken);
+
+                var json =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                    return string.Empty;
+
+                using var document = JsonDocument.Parse(json);
+                var root = document.RootElement;
+
+                if (root.TryGetProperty(
+                        "results",
+                        out var users) &&
+                    users.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var user in users.EnumerateArray())
+                    {
+                        if (!ReadString(user, "type").Equals(
+                                "person",
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var name =
+                            NormalizeIdentityToken(
+                                ReadString(user, "name"));
+
+                        var email = string.Empty;
+
+                        if (user.TryGetProperty(
+                                "person",
+                                out var personData) &&
+                            personData.ValueKind ==
+                                JsonValueKind.Object)
+                        {
+                            email = ReadString(
+                                personData,
+                                "email");
+                        }
+
+                        var emailLocal =
+                            NormalizeIdentityToken(
+                                email.Split('@')
+                                    .FirstOrDefault() ??
+                                string.Empty);
+
+                        var matches =
+                            normalizedTokens.Any(token =>
+                                string.Equals(
+                                    token,
+                                    name,
+                                    StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(
+                                    token,
+                                    emailLocal,
+                                    StringComparison.OrdinalIgnoreCase) ||
+                                name.StartsWith(
+                                    token,
+                                    StringComparison.OrdinalIgnoreCase) ||
+                                emailLocal.StartsWith(
+                                    token,
+                                    StringComparison.OrdinalIgnoreCase));
+
+                        if (matches)
+                            return ReadString(user, "id");
+                    }
+                }
+
+                var hasMore =
+                    root.TryGetProperty(
+                        "has_more",
+                        out var more) &&
+                    more.ValueKind == JsonValueKind.True;
+
+                cursor =
+                    hasMore &&
+                    root.TryGetProperty(
+                        "next_cursor",
+                        out var next) &&
+                    next.ValueKind == JsonValueKind.String
+                        ? next.GetString()
+                        : null;
+            }
+            while (!string.IsNullOrWhiteSpace(cursor));
+
+            return string.Empty;
+        }
+
+        private static string NormalizeIdentityToken(
+            string value)
+        {
+            return Normalize(value)
+                .Replace(" ", string.Empty);
         }
 
         public async Task<NotionCalendarActivity> MoveActivityToDateAsync(
@@ -603,6 +1226,13 @@ namespace Anfeta.UI.Services.Notion
                     Title = activity.Title,
                     Person = activity.Person,
                     OriginalPerson = activity.OriginalPerson,
+                    ReviewAssignee = activity.ReviewAssignee,
+                    ReviewState = activity.ReviewState,
+                    ReviewSubmittedAt = activity.ReviewSubmittedAt,
+                    ReviewUpdatedAt = activity.ReviewUpdatedAt,
+                    ReviewUpdatedBy = activity.ReviewUpdatedBy,
+                    ReviewNote = activity.ReviewNote,
+                    IsReviewMirror = activity.IsReviewMirror,
                     IsCompletedForReview =
                         activity.IsCompletedForReview,
                     Project = activity.Project,
@@ -800,6 +1430,13 @@ namespace Anfeta.UI.Services.Notion
                     Title = activity.Title,
                     Person = activity.Person,
                     OriginalPerson = activity.OriginalPerson,
+                    ReviewAssignee = activity.ReviewAssignee,
+                    ReviewState = activity.ReviewState,
+                    ReviewSubmittedAt = activity.ReviewSubmittedAt,
+                    ReviewUpdatedAt = activity.ReviewUpdatedAt,
+                    ReviewUpdatedBy = activity.ReviewUpdatedBy,
+                    ReviewNote = activity.ReviewNote,
+                    IsReviewMirror = activity.IsReviewMirror,
                     IsCompletedForReview =
                         activity.IsCompletedForReview,
                     Project = activity.Project,
@@ -891,16 +1528,37 @@ namespace Anfeta.UI.Services.Notion
         public async Task<bool> RefreshChangedSinceAsync(
             string token,
             DateTimeOffset changedAfterUtc,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IProgress<NotionCalendarProgress>? progress = null)
         {
             if (string.IsNullOrWhiteSpace(token))
                 return false;
 
+            // Evita que el warmup, el botón Actualizar y otras pestañas
+            // ejecuten sincronizaciones de calendario al mismo tiempo.
+            using var fullSyncLease =
+                await NotionRequestCoordinator.EnterFullSyncAsync(
+                    cancellationToken);
+
             await EnsureCacheLoadedAsync(
                 cancellationToken);
 
+            progress?.Report(
+                new NotionCalendarProgress(
+                    "Comprobando cambios",
+                    0,
+                    0,
+                    $"Buscando cambios desde {changedAfterUtc.ToLocalTime():dd/MM HH:mm}..."));
+
             using var http =
                 CreateClient(token);
+
+            progress?.Report(
+                new NotionCalendarProgress(
+                    "Consultando estructura",
+                    0,
+                    1,
+                    "Verificando las propiedades de Revisiones..."));
 
             var schema =
                 await ReadSchemaAsync(
@@ -911,10 +1569,20 @@ namespace Anfeta.UI.Services.Notion
                 await QueryChangedPagesAsync(
                     http,
                     changedAfterUtc,
+                    progress,
                     cancellationToken);
 
             if (changedPages.Count == 0)
+            {
+                progress?.Report(
+                    new NotionCalendarProgress(
+                        "Completado",
+                        1,
+                        1,
+                        "No se encontraron cambios nuevos en Notion."));
+
                 return false;
+            }
 
             var mapped =
                 new List<NotionCalendarActivity>();
@@ -923,9 +1591,20 @@ namespace Anfeta.UI.Services.Notion
                 new HashSet<string>(
                     StringComparer.OrdinalIgnoreCase);
 
-            foreach (var page in changedPages)
+            for (var pageIndex = 0;
+                 pageIndex < changedPages.Count;
+                 pageIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                var page = changedPages[pageIndex];
+
+                progress?.Report(
+                    new NotionCalendarProgress(
+                        "Analizando cambios",
+                        pageIndex + 1,
+                        changedPages.Count,
+                        $"Procesando cambio {pageIndex + 1} de {changedPages.Count}..."));
 
                 var pageId =
                     ReadString(page, "id");
@@ -943,6 +1622,13 @@ namespace Anfeta.UI.Services.Notion
                 if (activity != null)
                     mapped.Add(activity);
             }
+
+            progress?.Report(
+                new NotionCalendarProgress(
+                    "Aplicando cambios",
+                    changedPages.Count,
+                    changedPages.Count,
+                    $"Actualizando la caché con {mapped.Count} actividad(es)..."));
 
             await CacheLock.WaitAsync(
                 cancellationToken);
@@ -991,6 +1677,13 @@ namespace Anfeta.UI.Services.Notion
             {
                 CacheLock.Release();
             }
+
+            progress?.Report(
+                new NotionCalendarProgress(
+                    "Completado",
+                    changedPages.Count,
+                    changedPages.Count,
+                    $"Se aplicaron {mapped.Count} actividad(es) actualizadas."));
 
             return true;
         }
@@ -1057,7 +1750,10 @@ namespace Anfeta.UI.Services.Notion
             try
             {
                 var incoming =
-                    activities.ToList();
+                    activities
+                        .Where(activity =>
+                            !IsAuxiliaryCalendarActivity(activity))
+                        .ToList();
 
                 // Una consulta válida sin actividades sí debe guardarse,
                 // pero nunca sustituimos una caché poblada cuando la llamada
@@ -1110,7 +1806,13 @@ namespace Anfeta.UI.Services.Notion
                         DayCache.Clear();
 
                         foreach (var item in restored)
-                            DayCache[item.Key] = item.Value ?? new();
+                        {
+                            DayCache[item.Key] =
+                                (item.Value ?? new())
+                                .Where(activity =>
+                                    !IsAuxiliaryCalendarActivity(activity))
+                                .ToList();
+                        }
                     }
                 }
 
@@ -1223,15 +1925,25 @@ namespace Anfeta.UI.Services.Notion
         private static async Task<List<JsonElement>> QueryChangedPagesAsync(
             HttpClient http,
             DateTimeOffset changedAfterUtc,
+            IProgress<NotionCalendarProgress>? progress,
             CancellationToken cancellationToken)
         {
             var results = new List<JsonElement>();
             string? cursor = null;
             var hasMore = true;
+            var batchNumber = 0;
 
             while (hasMore)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                batchNumber++;
+
+                progress?.Report(
+                    new NotionCalendarProgress(
+                        "Descargando cambios",
+                        results.Count,
+                        0,
+                        $"Consultando lote {batchNumber} · {results.Count} cambio(s) recibidos..."));
 
                 var payload = new Dictionary<string, object?>
                 {
@@ -1320,6 +2032,7 @@ namespace Anfeta.UI.Services.Notion
         private static async Task<List<JsonElement>> QueryDayPagesAsync(
             HttpClient http,
             DateTime localDate,
+            string datePropertyName,
             IProgress<NotionCalendarProgress>? progress,
             CancellationToken cancellationToken)
         {
@@ -1335,14 +2048,51 @@ namespace Anfeta.UI.Services.Notion
 
                 progress?.Report(
                     new NotionCalendarProgress(
-                        "Descargando Revisiones",
+                        "Descargando actividades del día",
                         results.Count,
                         0,
-                        $"Descargando lote {batchNumber} · {results.Count} páginas recibidas..."));
+                        $"Lote {batchNumber} · {results.Count} actividades recibidas para {localDate:dd/MM/yyyy}..."));
+
+                var localDayStart =
+                    new DateTimeOffset(
+                        DateTime.SpecifyKind(
+                            localDate.Date,
+                            DateTimeKind.Local));
+
+                var localDayEnd =
+                    localDayStart.AddDays(1);
 
                 var payload = new Dictionary<string, object?>
                 {
-                    ["page_size"] = 100
+                    ["page_size"] = 100,
+                    ["filter"] =
+                        new Dictionary<string, object?>
+                        {
+                            ["and"] =
+                                new object[]
+                                {
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["property"] = datePropertyName,
+                                        ["date"] =
+                                            new Dictionary<string, object?>
+                                            {
+                                                ["on_or_after"] =
+                                                    localDayStart.ToString("O")
+                                            }
+                                    },
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["property"] = datePropertyName,
+                                        ["date"] =
+                                            new Dictionary<string, object?>
+                                            {
+                                                ["before"] =
+                                                    localDayEnd.ToString("O")
+                                            }
+                                    }
+                                }
+                        }
                 };
 
                 if (!string.IsNullOrWhiteSpace(cursor))
@@ -1390,6 +2140,22 @@ namespace Anfeta.UI.Services.Notion
             return results;
         }
 
+        private static bool IsAuxiliaryCalendarNotificationTitle(
+            string? title)
+        {
+            return !string.IsNullOrWhiteSpace(title) &&
+                   AuxiliaryMessageTitlePattern.IsMatch(
+                       title.Trim());
+        }
+
+        private static bool IsAuxiliaryCalendarActivity(
+            NotionCalendarActivity? activity)
+        {
+            return activity == null ||
+                   IsAuxiliaryCalendarNotificationTitle(
+                       activity.Title);
+        }
+
         private async Task<NotionCalendarActivity?> MapPageAsync(
             HttpClient http,
             JsonElement page,
@@ -1420,6 +2186,9 @@ namespace Anfeta.UI.Services.Notion
 
             if (string.IsNullOrWhiteSpace(title))
                 title = "Actividad sin título";
+
+            if (IsAuxiliaryCalendarNotificationTitle(title))
+                return null;
 
             var people = await ReadPersonsAsync(
                 http,
@@ -1470,59 +2239,112 @@ namespace Anfeta.UI.Services.Notion
             string title,
             CancellationToken cancellationToken)
         {
+            // La vista de Notion ya agrupa por “Assignee/Ejecutor Principal”.
+            // Esa propiedad representa la asignación efectiva y debe tener
+            // prioridad cuando el título conserva tags históricos adicionales.
             foreach (var alias in PersonAliases)
             {
-                var prop = FindPropertyByAlias(
-                    props,
-                    alias);
+                var property =
+                    FindPropertyByAlias(
+                        props,
+                        alias);
 
-                if (prop.ValueKind != JsonValueKind.Object)
-                    continue;
-
-                var type = ReadString(prop, "type");
-
-                if (type == "people")
+                if (property.ValueKind !=
+                    JsonValueKind.Object)
                 {
-                    var people = ExtractPeople(prop);
-                    if (!string.IsNullOrWhiteSpace(people))
-                        return NormalizePersonLabel(people);
+                    continue;
                 }
 
-                if (type == "relation")
+                var type =
+                    ReadString(
+                        property,
+                        "type");
+
+                if (type.Equals(
+                        "people",
+                        StringComparison.OrdinalIgnoreCase))
                 {
-                    var relations = ExtractRelationIds(prop);
+                    var person =
+                        NormalizePersonLabel(
+                            ExtractPeople(property));
 
-                    var names = new List<string>();
-
-                    foreach (var id in relations.Take(5))
+                    if (!string.IsNullOrWhiteSpace(person) &&
+                        !string.Equals(
+                            person,
+                            "Sin asignar",
+                            StringComparison.OrdinalIgnoreCase))
                     {
-                        var relatedTitle = await ResolveRelatedTitleAsync(
-                            http,
-                            id,
-                            cancellationToken);
+                        return person;
+                    }
+                }
 
-                        if (!string.IsNullOrWhiteSpace(relatedTitle))
-                            names.Add(relatedTitle);
+                if (type.Equals(
+                        "relation",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var relatedNames =
+                        new List<string>();
+
+                    foreach (var relatedId in
+                             ExtractRelationIds(property))
+                    {
+                        var relatedTitle =
+                            await ResolveRelatedTitleAsync(
+                                http,
+                                relatedId,
+                                cancellationToken);
+
+                        if (!string.IsNullOrWhiteSpace(
+                                relatedTitle))
+                        {
+                            relatedNames.Add(
+                                relatedTitle);
+                        }
                     }
 
-                    if (names.Count > 0)
-                        return NormalizePersonLabel(
-                            string.Join(", ", names));
+                    var person =
+                        NormalizePersonLabel(
+                            string.Join(
+                                ", ",
+                                relatedNames));
+
+                    if (!string.IsNullOrWhiteSpace(person) &&
+                        !string.Equals(
+                            person,
+                            "Sin asignar",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return person;
+                    }
                 }
 
-                var text = ExtractPropertyText(prop);
-                if (!string.IsNullOrWhiteSpace(text))
-                    return NormalizePersonLabel(text);
+                var text =
+                    ExtractPropertyText(
+                        property);
+
+                var normalized =
+                    NormalizePersonLabel(
+                        text);
+
+                if (!string.IsNullOrWhiteSpace(normalized) &&
+                    !string.Equals(
+                        normalized,
+                        "Sin asignar",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return normalized;
+                }
             }
 
-            var detectedFromTitle = DetectPersonFromTitle(title);
+            // Respaldo para páginas antiguas o mientras Notion termina de
+            // recalcular Assignee después de editar el título.
+            var activePerson =
+                DetectActivePersonFromTitle(
+                    title);
 
-            return string.Equals(
-                    detectedFromTitle,
-                    "Sin asignar",
-                    StringComparison.OrdinalIgnoreCase)
-                ? string.Empty
-                : detectedFromTitle;
+            return string.IsNullOrWhiteSpace(activePerson)
+                ? "Sin asignar"
+                : activePerson;
         }
 
         private async Task<string> ResolveRelatedTitleAsync(
@@ -2119,73 +2941,48 @@ namespace Anfeta.UI.Services.Notion
         private static IReadOnlyList<string> FindDatePropertyCandidates(
             JsonElement properties)
         {
-            var candidates = new List<(string Name, int Score)>();
+            var result =
+                new List<string>();
 
-            foreach (var property in properties.EnumerateObject())
+            foreach (var alias in DateAliases)
             {
-                var normalized = Normalize(property.Name);
-                var type = ReadString(property.Value, "type");
+                var normalizedAlias =
+                    Normalize(alias);
 
-                var isDateCapable =
-                    type.Equals("date", StringComparison.OrdinalIgnoreCase) ||
-                    type.Equals("formula", StringComparison.OrdinalIgnoreCase) ||
-                    type.Equals("rollup", StringComparison.OrdinalIgnoreCase);
-
-                if (!isDateCapable)
-                    continue;
-
-                var score = 0;
-
-                foreach (var alias in DateAliases)
+                foreach (var property in
+                         properties.EnumerateObject())
                 {
-                    var normalizedAlias = Normalize(alias);
+                    if (Normalize(property.Name) !=
+                            normalizedAlias)
+                    {
+                        continue;
+                    }
 
-                    if (normalized == normalizedAlias)
-                        score = Math.Max(score, 100);
-                    else if (normalized.Contains(normalizedAlias) ||
-                             normalizedAlias.Contains(normalized))
-                        score = Math.Max(score, 80);
-                }
+                    // No se aceptan fórmulas ni rollups. La fecha del
+                    // calendario sale únicamente del campo editable
+                    // “Fecha POR Hacer”.
+                    if (!ReadString(
+                            property.Value,
+                            "type")
+                        .Equals(
+                            "date",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
 
-                if (normalized.Contains("fecha por hacer"))
-                    score = Math.Max(score, 90);
-
-                if (normalized.Contains("trabaj"))
-                    score += 10;
-
-                if (normalized.Contains("seguimiento"))
-                    score = Math.Max(score, 35);
-
-                if (normalized.Contains("inicio"))
-                    score = Math.Max(score, 25);
-
-                if (score > 0)
-                    candidates.Add((property.Name, score));
-            }
-
-            // En caso de que el nombre haya cambiado, se agregan las demás
-            // propiedades de fecha al final como respaldo.
-            foreach (var property in properties.EnumerateObject())
-            {
-                var type = ReadString(property.Value, "type");
-
-                if (type.Equals("date", StringComparison.OrdinalIgnoreCase) &&
-                    candidates.All(x =>
-                        !string.Equals(
-                            x.Name,
+                    if (!result.Contains(
                             property.Name,
-                            StringComparison.Ordinal)))
-                {
-                    candidates.Add((property.Name, 1));
+                            StringComparer.Ordinal))
+                    {
+                        result.Add(property.Name);
+                    }
+
+                    break;
                 }
             }
 
-            return candidates
-                .OrderByDescending(x => x.Score)
-                .ThenBy(x => x.Name)
-                .Select(x => x.Name)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            return result;
         }
 
         private static string FindPropertyName(
@@ -2428,6 +3225,85 @@ namespace Anfeta.UI.Services.Notion
                 : clean;
         }
 
+        private static string DetectActivePersonFromTitle(
+            string title)
+        {
+            var value =
+                title ?? string.Empty;
+
+            var activeTags =
+                new Dictionary<string, string>(
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    ["jjohn"] = "John",
+                    ["kkarl"] = "Karla",
+                    ["iisai"] = "Isaias",
+                    ["ssote"] = "Sotelo",
+                    ["eedua"] = "Sotelo",
+                    ["aacal"] = "Acalli",
+                    ["aandr"] = "Andrade",
+                    ["eemma"] = "Emmanuel",
+                    ["bbria"] = "Brian",
+                    ["ggena"] = "Genaro",
+                    ["nneft"] = "Neftali"
+                };
+
+            var matches =
+                Regex.Matches(
+                    value,
+                    @"(?<![\p{L}\p{Nd}_])(?<tag>[a-z]{5})(?<suffix>\d*)(?![\p{L}\p{Nd}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            // Normalmente solo existe uno. Si hubiera más de uno por
+            // historial, el último representa la asignación actual.
+            for (var index = matches.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                var tag =
+                    matches[index]
+                        .Groups["tag"]
+                        .Value;
+
+                if (activeTags.TryGetValue(
+                        tag,
+                        out var person))
+                {
+                    return person;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static bool ContainsKnownPersonTag(
+            string title)
+        {
+            var value = title ?? string.Empty;
+
+            var tags = new[]
+            {
+                "jjohn", "john",
+                "kkarl", "karl",
+                "iisai", "isai",
+                "ssote", "sote", "eedua", "edua",
+                "aacal", "acal",
+                "aandr", "andr",
+                "eemma", "emma",
+                "bbria", "bria",
+                "ggena", "gena",
+                "nneft", "neft"
+            };
+
+            return tags.Any(tag =>
+                Regex.IsMatch(
+                    value,
+                    $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(tag)}\d*(?![\p{{L}}\p{{Nd}}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant));
+        }
+
         private static string DetectPersonFromTitle(string title)
         {
             var normalized = Normalize(title)
@@ -2442,7 +3318,7 @@ namespace Anfeta.UI.Services.Notion
                 ("karla", "Karla"),
                 ("karl", "Karla"),
 
-                ("iisaia", "Isaias"),
+                ("iisai", "Isaias"),
                 ("isaias", "Isaias"),
                 ("isai", "Isaias"),
 
@@ -2475,7 +3351,6 @@ namespace Anfeta.UI.Services.Notion
                 ("genaro", "Genaro"),
                 ("gena", "Genaro"),
 
-                ("nnetf", "Neftali"),
                 ("nneft", "Neftali"),
                 ("neftali", "Neftali"),
                 ("neft", "Neftali")
@@ -2539,121 +3414,60 @@ namespace Anfeta.UI.Services.Notion
             };
         }
 
-        private static async Task<HttpResponseMessage> SendGetWithRetryAsync(
+        private static Task<HttpResponseMessage> SendGetWithRetryAsync(
             HttpClient http,
             string requestUri,
             CancellationToken cancellationToken)
         {
-            return await SendWithRetryAsync(
-                async () => await http.GetAsync(
-                    requestUri,
-                    cancellationToken),
-                cancellationToken);
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Get,
+                    requestUri),
+                cancellationToken,
+                MaxRetryAttempts);
         }
 
-        private static async Task<HttpResponseMessage> SendPostWithRetryAsync(
+        private static Task<HttpResponseMessage> SendPostWithRetryAsync(
             HttpClient http,
             string requestUri,
             string json,
             CancellationToken cancellationToken)
         {
-            return await SendWithRetryAsync(
-                async () =>
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Post,
+                    requestUri)
                 {
-                    using var content = new StringContent(
+                    Content = new StringContent(
                         json,
                         Encoding.UTF8,
-                        "application/json");
-
-                    return await http.PostAsync(
-                        requestUri,
-                        content,
-                        cancellationToken);
+                        "application/json")
                 },
-                cancellationToken);
+                cancellationToken,
+                MaxRetryAttempts);
         }
 
-        private static async Task<HttpResponseMessage> SendPatchWithRetryAsync(
+        private static Task<HttpResponseMessage> SendPatchWithRetryAsync(
             HttpClient http,
             string requestUri,
             string json,
             CancellationToken cancellationToken)
         {
-            return await SendWithRetryAsync(
-                async () =>
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Patch,
+                    requestUri)
                 {
-                    using var request =
-                        new HttpRequestMessage(
-                            HttpMethod.Patch,
-                            requestUri)
-                        {
-                            Content =
-                                new StringContent(
-                                    json,
-                                    Encoding.UTF8,
-                                    "application/json")
-                        };
-
-                    return await http.SendAsync(
-                        request,
-                        cancellationToken);
+                    Content = new StringContent(
+                        json,
+                        Encoding.UTF8,
+                        "application/json")
                 },
-                cancellationToken);
-        }
-
-        private static async Task<HttpResponseMessage> SendWithRetryAsync(
-            Func<Task<HttpResponseMessage>> send,
-            CancellationToken cancellationToken)
-        {
-            Exception? lastException = null;
-
-            for (var attempt = 1;
-                 attempt <= MaxRetryAttempts;
-                 attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    var response = await send();
-
-                    var numeric = (int)response.StatusCode;
-                    var retry =
-                        response.StatusCode ==
-                            HttpStatusCode.TooManyRequests ||
-                        numeric == 529 ||
-                        numeric >= 500;
-
-                    if (!retry || attempt == MaxRetryAttempts)
-                        return response;
-
-                    response.Dispose();
-
-                    await Task.Delay(
-                        TimeSpan.FromSeconds(
-                            Math.Min(
-                                12,
-                                Math.Pow(2, attempt - 1))),
-                        cancellationToken);
-                }
-                catch (Exception ex)
-                    when (attempt < MaxRetryAttempts &&
-                          ex is HttpRequestException or TaskCanceledException)
-                {
-                    lastException = ex;
-
-                    await Task.Delay(
-                        TimeSpan.FromSeconds(
-                            Math.Min(
-                                12,
-                                Math.Pow(2, attempt - 1))),
-                        cancellationToken);
-                }
-            }
-
-            throw new HttpRequestException(
-                "Notion no respondió después de varios intentos.",
-                lastException);
+                cancellationToken,
+                MaxRetryAttempts);
         }
 
         private static InvalidOperationException CreateNotionException(

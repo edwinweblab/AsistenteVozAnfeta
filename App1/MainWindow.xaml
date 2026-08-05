@@ -297,9 +297,14 @@
 
             <!--  Items principales  -->
             <NavigationView.MenuItems>
+                <!--
+                    El módulo de voz se conserva en el proyecto, pero ya no forma
+                    parte de la navegación principal ni se carga al iniciar ANFETA.
+                -->
                 <NavigationViewItem
                     Content="Panel Principal"
                     Tag="Home"
+                    Visibility="Collapsed"
                     ToolTipService.ToolTip="Panel principal del asistente">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE80F;" />

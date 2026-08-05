@@ -62,17 +62,22 @@ namespace Anfeta.UI.Services.Notion
                 }
             };
 
-            using var request = new HttpRequestMessage(
-                HttpMethod.Patch,
-                $"pages/{NormalizeId(pageId)}")
-            {
-                Content = new StringContent(
-                    JsonSerializer.Serialize(payload),
-                    Encoding.UTF8,
-                    "application/json")
-            };
+            var payloadJson =
+                JsonSerializer.Serialize(payload);
 
-            using var response = await http.SendAsync(request, cancellationToken);
+            using var response =
+                await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () => new HttpRequestMessage(
+                        HttpMethod.Patch,
+                        $"pages/{NormalizeId(pageId)}")
+                    {
+                        Content = new StringContent(
+                            payloadJson,
+                            Encoding.UTF8,
+                            "application/json")
+                    },
+                    cancellationToken);
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -95,17 +100,22 @@ namespace Anfeta.UI.Services.Notion
                 ["in_trash"] = true
             };
 
-            using var request = new HttpRequestMessage(
-                HttpMethod.Patch,
-                $"pages/{NormalizeId(pageId)}")
-            {
-                Content = new StringContent(
-                    JsonSerializer.Serialize(payload),
-                    Encoding.UTF8,
-                    "application/json")
-            };
+            var payloadJson =
+                JsonSerializer.Serialize(payload);
 
-            using var response = await http.SendAsync(request, cancellationToken);
+            using var response =
+                await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () => new HttpRequestMessage(
+                        HttpMethod.Patch,
+                        $"pages/{NormalizeId(pageId)}")
+                    {
+                        Content = new StringContent(
+                            payloadJson,
+                            Encoding.UTF8,
+                            "application/json")
+                    },
+                    cancellationToken);
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -129,9 +139,13 @@ namespace Anfeta.UI.Services.Notion
                 return cachedTitleProperty;
             }
 
-            using var response = await http.GetAsync(
-                $"data_sources/{NormalizeId(dataSourceId)}",
-                cancellationToken);
+            using var response =
+                await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () => new HttpRequestMessage(
+                        HttpMethod.Get,
+                        $"data_sources/{NormalizeId(dataSourceId)}"),
+                    cancellationToken);
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 

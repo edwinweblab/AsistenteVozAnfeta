@@ -91,10 +91,16 @@ namespace Anfeta.UI.Views
                 .Where(entry =>
                     entry.Kind == MessageThreadKind.Message &&
                     !string.IsNullOrWhiteSpace(entry.Id) &&
-                    string.Equals(
-                        entry.RecipientTag,
+                    !string.Equals(
+                        entry.AuthorTag,
                         currentTag,
-                        StringComparison.OrdinalIgnoreCase))
+                        StringComparison.OrdinalIgnoreCase) &&
+                    (string.Equals(
+                         entry.RecipientTag,
+                         currentTag,
+                         StringComparison.OrdinalIgnoreCase) ||
+                     IsGroupMessageRecipient(
+                         entry.RecipientTag)))
                 .OrderByDescending(entry => entry.CreatedAt)
                 .FirstOrDefault();
 

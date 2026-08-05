@@ -980,9 +980,10 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="210" />
-                            <ColumnDefinition Width="175" />
-                            <ColumnDefinition Width="245" />
+                            <ColumnDefinition Width="185" />
+                            <ColumnDefinition Width="155" />
+                            <ColumnDefinition Width="155" />
+                            <ColumnDefinition Width="220" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -1018,8 +1019,20 @@
                         </ComboBox>
 
                         <ComboBox
-                            x:Name="MessagesGroupCombo"
+                            x:Name="MessagesTypeCombo"
                             Grid.Column="3"
+                            Height="32"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="MessagesTypeCombo_SelectionChanged">
+                            <ComboBoxItem Content="Todos los tipos" Tag="all" />
+                            <ComboBoxItem Content="Recordatorios" Tag="reminders" />
+                            <ComboBoxItem Content="Proyectos" Tag="projects" />
+                            <ComboBoxItem Content="Revisiones" Tag="reviews" />
+                        </ComboBox>
+
+                        <ComboBox
+                            x:Name="MessagesGroupCombo"
+                            Grid.Column="4"
                             Height="32"
                             HorizontalAlignment="Stretch"
                             SelectionChanged="MessagesGroupCombo_SelectionChanged">
@@ -1032,20 +1045,20 @@
 
                         <TextBox
                             x:Name="MessagesSearchBox"
-                            Grid.Column="4"
+                            Grid.Column="5"
                             Height="32"
                             PlaceholderText="Buscar en mensajes..."
                             TextChanged="MessagesSearchBox_TextChanged" />
 
                         <TextBlock
                             x:Name="MessagesSummaryText"
-                            Grid.Column="5"
+                            Grid.Column="6"
                             VerticalAlignment="Center"
                             Opacity="0.72"
                             Text="0 mensajes" />
 
                         <Button
-                            Grid.Column="6"
+                            Grid.Column="7"
                             Height="30"
                             Padding="12,0"
                             Click="MessagesRefresh_Click"
@@ -1053,7 +1066,7 @@
                             CornerRadius="6" />
 
                         <Button
-                            Grid.Column="7"
+                            Grid.Column="8"
                             Width="32"
                             Height="30"
                             Padding="0"
@@ -1098,18 +1111,27 @@
                                     BorderBrush="{Binding CardBorderBrush}"
                                     BorderThickness="1"
                                     CornerRadius="10">
-                                    <Grid ColumnSpacing="14">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
+                                    <Grid RowSpacing="10">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
 
-                                        <StackPanel Grid.Column="0" Spacing="5">
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <StackPanel Grid.Row="0" Spacing="5">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+
                                                 <Border
+                                                    Grid.Column="0"
                                                     Padding="6,2"
                                                     Background="#E5484D"
                                                     CornerRadius="8"
+                                                    VerticalAlignment="Top"
                                                     Visibility="{Binding UnreadVisibility}">
                                                     <TextBlock
                                                         FontSize="9"
@@ -1119,9 +1141,11 @@
                                                 </Border>
 
                                                 <Border
+                                                    Grid.Column="1"
                                                     Padding="7,2"
                                                     Background="#2563EB"
                                                     CornerRadius="8"
+                                                    VerticalAlignment="Top"
                                                     Visibility="{Binding TutorialBadgeVisibility}">
                                                     <TextBlock
                                                         FontSize="9"
@@ -1130,34 +1154,53 @@
                                                         Text="TUTORIAL" />
                                                 </Border>
 
+                                                <Border
+                                                    Grid.Column="2"
+                                                    Padding="7,2"
+                                                    Background="#334155"
+                                                    CornerRadius="8"
+                                                    VerticalAlignment="Top">
+                                                    <TextBlock
+                                                        FontSize="9"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="White"
+                                                        Text="{Binding MessageTypeLabel}" />
+                                                </Border>
+
                                                 <TextBlock
+                                                    Grid.Column="3"
                                                     FontSize="15"
                                                     FontWeight="SemiBold"
                                                     Text="{Binding Message}"
                                                     TextWrapping="Wrap" />
+                                            </Grid>
+
+                                            <StackPanel Spacing="2">
+                                                <TextBlock
+                                                    Opacity="0.72"
+                                                    Text="{Binding DirectionLabel}"
+                                                    TextWrapping="Wrap" />
+                                                <TextBlock
+                                                    Opacity="0.72"
+                                                    Text="{Binding ScheduledLabel}"
+                                                    TextWrapping="Wrap" />
+                                                <TextBlock
+                                                    Opacity="0.72"
+                                                    Text="{Binding StatusLabel}"
+                                                    TextWrapping="Wrap" />
                                             </StackPanel>
 
-                                            <StackPanel Orientation="Horizontal" Spacing="12">
-                                                <TextBlock
-                                                    Opacity="0.72"
-                                                    Text="{Binding DirectionLabel}" />
-                                                <TextBlock
-                                                    Opacity="0.72"
-                                                    Text="{Binding ScheduledLabel}" />
-                                                <TextBlock
-                                                    Opacity="0.72"
-                                                    Text="{Binding StatusLabel}" />
-                                            </StackPanel>
-
-                                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <StackPanel Spacing="2">
                                                 <TextBlock
                                                     Opacity="0.72"
                                                     Text="{Binding LastReplyLabel}"
+                                                    TextWrapping="Wrap"
                                                     Visibility="{Binding LastReplyVisibility}" />
                                                 <TextBlock
                                                     Opacity="0.78"
                                                     FontWeight="SemiBold"
-                                                    Text="{Binding WaitingForLabel}" />
+                                                    Text="{Binding WaitingForLabel}"
+                                                    TextWrapping="Wrap" />
                                             </StackPanel>
 
                                             <TextBlock
@@ -1167,84 +1210,120 @@
                                                 TextTrimming="CharacterEllipsis" />
                                         </StackPanel>
 
-                                        <StackPanel
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            Orientation="Horizontal"
-                                            Spacing="6">
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageCopyText_Click"
-                                                Content="Copiar texto"
-                                                Tag="{Binding}"
-                                                ToolTipService.ToolTip="Copiar el contenido del mensaje" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageOpen_Click"
-                                                Content="Abrir"
-                                                Tag="{Binding}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageHistory_Click"
-                                                Content="Historial"
-                                                Tag="{Binding}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageOpenTutorial_Click"
-                                                Content="Abrir tutorial"
-                                                Tag="{Binding}"
-                                                Visibility="{Binding TutorialActionsVisibility}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageSnooze15_Click"
-                                                Content="En 15 min"
-                                                Tag="{Binding}"
-                                                Visibility="{Binding TutorialActionsVisibility}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageSnooze60_Click"
-                                                Content="En 1 hora"
-                                                Tag="{Binding}"
-                                                Visibility="{Binding TutorialActionsVisibility}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageBusy_Click"
-                                                Content="Estoy ocupado…"
-                                                Tag="{Binding}"
-                                                Visibility="{Binding TutorialActionsVisibility}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageOpenOriginalActivity_Click"
-                                                Content="Abrir actividad"
-                                                Tag="{Binding}"
-                                                Visibility="{Binding ReviewOriginalButtonVisibility}"
-                                                ToolTipService.ToolTip="Abrir la actividad exacta que originó esta alerta" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageReassign_Click"
-                                                Content="Reasignar"
-                                                Tag="{Binding}"
-                                                Visibility="{Binding MessageEditActionsVisibility}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageReschedule_Click"
-                                                Content="Reprogramar"
-                                                Tag="{Binding}"
-                                                Visibility="{Binding MessageEditActionsVisibility}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageComplete_Click"
-                                                Content="{Binding CompleteButtonText}"
-                                                IsEnabled="{Binding CanComplete}"
-                                                Tag="{Binding}"
-                                                ToolTipService.ToolTip="{Binding CompleteButtonToolTip}" />
-                                            <Button
-                                                Padding="10,5"
-                                                Click="MessageDelete_Click"
-                                                Content="{Binding DeleteButtonText}"
-                                                Tag="{Binding}"
-                                                ToolTipService.ToolTip="{Binding DeleteButtonToolTip}" />
-                                        </StackPanel>
+                                        <ScrollViewer
+                                            Grid.Row="1"
+                                            HorizontalScrollBarVisibility="Auto"
+                                            HorizontalScrollMode="Enabled"
+                                            VerticalScrollBarVisibility="Disabled"
+                                            VerticalScrollMode="Disabled"
+                                            ZoomMode="Disabled">
+                                            <StackPanel
+                                                Orientation="Horizontal"
+                                                Spacing="6">
+                                                <Button
+                                                    MinWidth="112"
+                                                    Padding="10,5"
+                                                    Click="MessageOpenOriginalActivity_Click"
+                                                    Content="Abrir actividad"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding OriginalActivityButtonVisibility}"
+                                                    ToolTipService.ToolTip="Abrir primero la actividad real vinculada" />
+                                                <Button
+                                                    MinWidth="118"
+                                                    Padding="10,5"
+                                                    Click="MessageOpen_Click"
+                                                    Content="Abrir recordatorio"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding NormalReminderOpenButtonVisibility}"
+                                                    ToolTipService.ToolTip="Abrir la página propia del recordatorio" />
+                                                <Button
+                                                    MinWidth="82"
+                                                    Padding="10,5"
+                                                    Click="MessageHistory_Click"
+                                                    Content="Historial"
+                                                    Tag="{Binding}" />
+                                                <Button
+                                                    MinWidth="122"
+                                                    Padding="10,5"
+                                                    Click="MessageMarkRead_Click"
+                                                    Content="Marcar como visto"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding MarkReadButtonVisibility}"
+                                                    ToolTipService.ToolTip="Quitar el estado de nuevo sin borrar el historial" />
+                                                <Button
+                                                    MinWidth="118"
+                                                    Padding="10,5"
+                                                    Click="MessageOpen_Click"
+                                                    Content="Abrir notificación"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding ProjectNotificationOpenButtonVisibility}"
+                                                    ToolTipService.ToolTip="Abrir la página auxiliar creada para la notificación" />
+                                                <Button
+                                                    MinWidth="88"
+                                                    Padding="10,5"
+                                                    Click="MessageCopyText_Click"
+                                                    Content="Copiar texto"
+                                                    Tag="{Binding}"
+                                                    ToolTipService.ToolTip="Copiar el contenido del mensaje" />
+                                                <Button
+                                                    MinWidth="106"
+                                                    Padding="10,5"
+                                                    Click="MessageOpenTutorial_Click"
+                                                    Content="Abrir tutorial"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding TutorialActionsVisibility}" />
+                                                <Button
+                                                    MinWidth="86"
+                                                    Padding="10,5"
+                                                    Click="MessageSnooze15_Click"
+                                                    Content="En 15 min"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding TutorialActionsVisibility}" />
+                                                <Button
+                                                    MinWidth="86"
+                                                    Padding="10,5"
+                                                    Click="MessageSnooze60_Click"
+                                                    Content="En 1 hora"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding TutorialActionsVisibility}" />
+                                                <Button
+                                                    MinWidth="118"
+                                                    Padding="10,5"
+                                                    Click="MessageBusy_Click"
+                                                    Content="Estoy ocupado…"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding TutorialActionsVisibility}" />
+                                                <Button
+                                                    MinWidth="92"
+                                                    Padding="10,5"
+                                                    Click="MessageReassign_Click"
+                                                    Content="Reasignar"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding MessageEditActionsVisibility}" />
+                                                <Button
+                                                    MinWidth="104"
+                                                    Padding="10,5"
+                                                    Click="MessageReschedule_Click"
+                                                    Content="Reprogramar"
+                                                    Tag="{Binding}"
+                                                    Visibility="{Binding MessageEditActionsVisibility}" />
+                                                <Button
+                                                    MinWidth="116"
+                                                    Padding="10,5"
+                                                    Click="MessageComplete_Click"
+                                                    Content="{Binding CompleteButtonText}"
+                                                    IsEnabled="{Binding CanComplete}"
+                                                    Tag="{Binding}"
+                                                    ToolTipService.ToolTip="{Binding CompleteButtonToolTip}" />
+                                                <Button
+                                                    MinWidth="96"
+                                                    Padding="10,5"
+                                                    Click="MessageDelete_Click"
+                                                    Content="{Binding DeleteButtonText}"
+                                                    Tag="{Binding}"
+                                                    ToolTipService.ToolTip="{Binding DeleteButtonToolTip}" />
+                                            </StackPanel>
+                                        </ScrollViewer>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -1280,6 +1359,7 @@
         Background="#111820"
         Visibility="Collapsed">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
@@ -1434,7 +1514,8 @@
                             Padding="10,0"
                             Click="CalendarRefresh_Click"
                             Content="Actualizar"
-                            CornerRadius="6" />
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Actualización rápida incremental · Ctrl + clic para recarga completa" />
 
                         <Button
                             Grid.Column="14"
@@ -1446,38 +1527,190 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="1">
-                    <ScrollViewer
-                        x:Name="CalendarScrollViewer"
-                        HorizontalScrollBarVisibility="Auto"
-                        HorizontalScrollMode="Enabled"
-                        VerticalScrollBarVisibility="Auto"
-                        VerticalScrollMode="Enabled"
-                        PointerWheelChanged="CalendarScrollViewer_PointerWheelChanged"
-                        ViewChanged="CalendarScrollViewer_ViewChanged">
-                        <Canvas
-                    x:Name="CalendarCanvas"
-                    MinWidth="900"
-                    MinHeight="820"
-                    Background="#10161E" />
-                    </ScrollViewer>
+                <!--
+                    Progreso no bloqueante del calendario. La caché permanece
+                    visible mientras ANFETA consulta y aplica cambios de Notion.
+                -->
+                <Border
+                    x:Name="CalendarProcessPanel"
+                    Grid.Row="1"
+                    Padding="12,7"
+                    Background="#151B22"
+                    BorderBrush="#34404D"
+                    BorderThickness="0,0,0,1"
+                    Visibility="Collapsed">
+                    <Grid RowSpacing="5">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <ProgressRing
+                                x:Name="CalendarProcessRing"
+                                Grid.Column="0"
+                                Width="16"
+                                Height="16"
+                                IsActive="True" />
+
+                            <TextBlock
+                                x:Name="CalendarProcessStageText"
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Text="Preparando calendario..." />
+
+                            <TextBlock
+                                x:Name="CalendarProcessDetailText"
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                FontSize="10.5"
+                                Opacity="0.72"
+                                Text=""
+                                TextTrimming="CharacterEllipsis" />
+
+                            <TextBlock
+                                x:Name="CalendarProcessElapsedText"
+                                Grid.Column="3"
+                                MinWidth="72"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                FontSize="10.5"
+                                Opacity="0.65"
+                                Text="00:00" />
+                        </Grid>
+
+                        <ProgressBar
+                            x:Name="CalendarProcessBar"
+                            Grid.Row="1"
+                            Height="4"
+                            Minimum="0"
+                            Maximum="100"
+                            IsIndeterminate="True"
+                            Value="0" />
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0">
+                        <ScrollViewer
+                            x:Name="CalendarScrollViewer"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Enabled"
+                            VerticalScrollBarVisibility="Auto"
+                            VerticalScrollMode="Enabled"
+                            PointerWheelChanged="CalendarScrollViewer_PointerWheelChanged"
+                            ViewChanged="CalendarScrollViewer_ViewChanged">
+                            <Canvas
+                                x:Name="CalendarCanvas"
+                                MinWidth="900"
+                                MinHeight="820"
+                                Background="#10161E" />
+                        </ScrollViewer>
+
+                        <Border
+                            x:Name="CalendarEmptyState"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Padding="22,16"
+                            Background="#E61B1F23"
+                            BorderBrush="#465566"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Visibility="Collapsed">
+                            <TextBlock
+                                x:Name="CalendarEmptyText"
+                                MaxWidth="520"
+                                Text="No hay actividades para este día."
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+                        </Border>
+                    </Grid>
+
+                    <!--
+                        Panel solicitado para revisar rápidamente todas las
+                        actividades de una persona. Los resúmenes usan la carga
+                        existente del calendario; el contenido de Notion solo se
+                        consulta cuando se pulsa "Ver contenido" en una tarjeta.
+                    -->
                     <Border
-                x:Name="CalendarEmptyState"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Padding="22,16"
-                Background="#E61B1F23"
-                BorderBrush="#465566"
-                BorderThickness="1"
-                CornerRadius="10"
-                Visibility="Collapsed">
-                        <TextBlock
-                    x:Name="CalendarEmptyText"
-                    MaxWidth="520"
-                    Text="No hay actividades para este día."
-                    TextAlignment="Center"
-                    TextWrapping="Wrap" />
+                        x:Name="CalendarPersonPreviewPanel"
+                        Grid.Column="1"
+                        Width="420"
+                        Padding="14"
+                        Background="#171B21"
+                        BorderBrush="#34404D"
+                        BorderThickness="1,0,0,0"
+                        Visibility="Collapsed">
+                        <Grid RowSpacing="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Spacing="2">
+                                    <TextBlock
+                                        x:Name="CalendarPersonPreviewTitle"
+                                        FontSize="16"
+                                        FontWeight="SemiBold"
+                                        Text="Actividades" />
+                                    <TextBlock
+                                        x:Name="CalendarPersonPreviewDate"
+                                        FontSize="11"
+                                        Opacity="0.66"
+                                        Text="Día seleccionado" />
+                                </StackPanel>
+
+                                <Button
+                                    Grid.Column="1"
+                                    Width="32"
+                                    Height="30"
+                                    Padding="0"
+                                    Click="CalendarPersonPreviewClose_Click"
+                                    Content="✕"
+                                    CornerRadius="6"
+                                    ToolTipService.ToolTip="Cerrar vista previa por persona" />
+                            </Grid>
+
+                            <TextBlock
+                                x:Name="CalendarPersonPreviewSummary"
+                                Grid.Row="1"
+                                FontSize="11"
+                                Opacity="0.72"
+                                Text="Selecciona el ojo de una persona para ver sus actividades."
+                                TextWrapping="Wrap" />
+
+                            <ScrollViewer
+                                Grid.Row="2"
+                                HorizontalScrollBarVisibility="Disabled"
+                                VerticalScrollBarVisibility="Auto"
+                                VerticalScrollMode="Enabled">
+                                <StackPanel
+                                    x:Name="CalendarPersonPreviewItems"
+                                    Padding="0,0,6,8"
+                                    Spacing="10" />
+                            </ScrollViewer>
+                        </Grid>
                     </Border>
                 </Grid>
             </Grid>

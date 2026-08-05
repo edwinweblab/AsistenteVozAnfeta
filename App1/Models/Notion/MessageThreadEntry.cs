@@ -32,6 +32,23 @@ namespace Anfeta.UI.Models.Notion
         public string Title { get; init; } = string.Empty;
     }
 
+
+    public sealed class ReviewFlowMetadata
+    {
+        public string OriginalPerson { get; init; } = string.Empty;
+        public string ReviewAssignee { get; init; } = string.Empty;
+        public string State { get; init; } = string.Empty;
+        public DateTimeOffset SubmittedAt { get; init; }
+        public DateTimeOffset UpdatedAt { get; init; }
+        public string UpdatedBy { get; init; } = string.Empty;
+        public string Note { get; init; } = string.Empty;
+
+        // Página auxiliar que funciona como notificación y como hilo único
+        // de toda la revisión: envío, correcciones, respuestas y aprobación.
+        public string AlertPageId { get; init; } = string.Empty;
+        public string AlertPageUrl { get; init; } = string.Empty;
+    }
+
     public sealed class MessageThreadEntry
     {
         public string Id { get; init; } = string.Empty;

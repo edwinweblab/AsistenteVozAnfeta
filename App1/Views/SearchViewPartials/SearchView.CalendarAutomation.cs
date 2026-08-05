@@ -17,8 +17,8 @@ namespace Anfeta.UI.Views
     {
         private const string LS_DailyCalendarAutomationLastRun =
             "Search.Calendar.DailyAutomation.LastRun";
-        private const string LS_DailyCalendarAutomationLastReport =
-            "Search.Calendar.DailyAutomation.LastReport";
+        private const string DailyCalendarReportFileName =
+            "calendar_daily_report.json";
 
         private sealed record DailyCalendarMovement(
             string PageId,
@@ -275,8 +275,12 @@ namespace Anfeta.UI.Views
                         "yyyy-MM-dd",
                         CultureInfo.InvariantCulture);
 
-                values[LS_DailyCalendarAutomationLastReport] =
-                    JsonSerializer.Serialize(report);
+                values.Remove(
+                    "Search.Calendar.DailyAutomation.LastReport");
+
+                await SaveDailyCalendarReportAsync(
+                    report,
+                    cts.Token);
 
                 var todayCache =
                     await _notionCalendarService
@@ -334,36 +338,80 @@ namespace Anfeta.UI.Views
                 RegexOptions.CultureInvariant);
         }
 
-        private async Task ShowLastDailyCalendarReportAsync()
+
+        private static async Task SaveDailyCalendarReportAsync(
+            DailyCalendarReport report,
+            CancellationToken cancellationToken)
         {
-            var raw =
-                ApplicationData.Current.LocalSettings.Values[
-                    LS_DailyCalendarAutomationLastReport] as string;
+            var file =
+                await ApplicationData.Current.LocalFolder
+                    .CreateFileAsync(
+                        DailyCalendarReportFileName,
+                        CreationCollisionOption.ReplaceExisting);
 
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                var emptyDialog =
-                    new ContentDialog
+            var json =
+                JsonSerializer.Serialize(
+                    report,
+                    new JsonSerializerOptions
                     {
-                        XamlRoot = XamlRoot,
-                        Title = "Reporte diario",
-                        Content =
-                            "Todavía no existe un reporte de automatización diaria.",
-                        CloseButtonText = "Cerrar"
-                    };
+                        WriteIndented = false
+                    });
 
-                await emptyDialog.ShowAsync();
-                return;
-            }
+            await FileIO.WriteTextAsync(
+                file,
+                json)
+                .AsTask(cancellationToken);
+        }
+
+        private static async Task<DailyCalendarReport?>
+            LoadDailyCalendarReportAsync()
+        {
+            StorageFile file;
 
             try
             {
+                file =
+                    await ApplicationData.Current.LocalFolder
+                        .GetFileAsync(
+                            DailyCalendarReportFileName);
+            }
+            catch
+            {
+                return null;
+            }
+
+            var raw =
+                await FileIO.ReadTextAsync(file);
+
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            return JsonSerializer.Deserialize<
+                DailyCalendarReport>(raw);
+        }
+
+        private async Task ShowLastDailyCalendarReportAsync()
+        {
+            try
+            {
                 var report =
-                    JsonSerializer.Deserialize<
-                        DailyCalendarReport>(raw);
+                    await LoadDailyCalendarReportAsync();
 
                 if (report == null)
-                    throw new InvalidOperationException();
+                {
+                    var emptyDialog =
+                        new ContentDialog
+                        {
+                            XamlRoot = XamlRoot,
+                            Title = "Reporte diario",
+                            Content =
+                                "Todavía no existe un reporte de automatización diaria.",
+                            CloseButtonText = "Cerrar"
+                        };
+
+                    await emptyDialog.ShowAsync();
+                    return;
+                }
 
                 await ShowDailyCalendarReportAsync(
                     report);

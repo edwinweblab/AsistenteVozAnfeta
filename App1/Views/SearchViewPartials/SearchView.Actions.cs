@@ -105,6 +105,15 @@ namespace Anfeta.UI.Views
                 }
             }
 
+            // Para una sola página de Notion, el helper ya indicó si
+            // se abrió en Desktop o en el navegador. No se reemplaza ese
+            // mensaje por un "Abierto" genérico.
+            if (rows.Count == 1 &&
+                IsNotionRow(rows[0]))
+            {
+                return;
+            }
+
             if (failed == 0)
             {
                 StatusText.Text = opened == 1
@@ -4685,54 +4694,25 @@ namespace Anfeta.UI.Views
             RoutedEventArgs e)
         {
             if (sender is not MenuFlyoutItem item ||
-                item.Tag is not string url ||
-                string.IsNullOrWhiteSpace(url) ||
-                !Uri.TryCreate(url, UriKind.Absolute, out var webUri))
+                item.Tag is not string url)
             {
                 StatusText.Text =
                     "Estado: La vista de Notion no tiene un enlace válido.";
                 return;
             }
 
-            var desktopUri =
-                BuildNotionDesktopUri(webUri);
-
-            try
-            {
-                var support =
-                    await Launcher.QueryUriSupportAsync(
-                        desktopUri,
-                        LaunchQuerySupportType.Uri);
-
-                if (support ==
-                    LaunchQuerySupportStatus.Available)
-                {
-                    StatusText.Text =
-                        $"Estado: Abriendo {item.Text} en Notion...";
-
-                    if (await Launcher.LaunchUriAsync(
-                            desktopUri))
-                    {
-                        StatusText.Text =
-                            $"Estado: Vista abierta en Notion ✅ {item.Text}";
-                        return;
-                    }
-                }
-
-                var browserOpened =
-                    await Launcher.LaunchUriAsync(
-                        webUri);
-
-                StatusText.Text = browserOpened
-                    ? $"Estado: Vista abierta en navegador ✅ {item.Text}"
-                    : "Estado: No fue posible abrir la vista.";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text =
-                    $"Estado: Error abriendo la vista → {ex.Message}";
-            }
+            await OpenNotionPageWithFallbackAsync(
+                url,
+                desktopSuccessStatus:
+                    $"Vista abierta en Notion Desktop · {item.Text}",
+                browserSuccessStatus:
+                    $"Vista abierta en el navegador · {item.Text}",
+                failureStatus:
+                    "No se pudo abrir la vista de Notion",
+                invalidUrlStatus:
+                    "La vista de Notion no tiene un enlace válido");
         }
+
 
         #endregion
 
@@ -4745,171 +4725,18 @@ namespace Anfeta.UI.Views
             if (row == null || !IsNotionRow(row))
                 return false;
 
-            var webUrl = GetRowTarget(row);
-
-            if (string.IsNullOrWhiteSpace(webUrl) ||
-                !Uri.TryCreate(webUrl, UriKind.Absolute, out var webUri))
-            {
-                StatusText.Text =
-                    "Estado: La página no tiene una URL válida de Notion.";
-                return false;
-            }
-
-            var desktopUri =
-                BuildNotionDesktopUri(webUri);
-
-            LaunchQuerySupportStatus supportStatus;
-
-            try
-            {
-                supportStatus =
-                    await Launcher.QueryUriSupportAsync(
-                        desktopUri,
-                        LaunchQuerySupportType.Uri);
-            }
-            catch
-            {
-                supportStatus =
-                    LaunchQuerySupportStatus.Unknown;
-            }
-
-            if (supportStatus ==
-                LaunchQuerySupportStatus.Available)
-            {
-                try
-                {
-                    StatusText.Text =
-                        "Estado: Abriendo en Notion Desktop...";
-
-                    var desktopOpened =
-                        await Launcher.LaunchUriAsync(
-                            desktopUri);
-
-                    if (desktopOpened)
-                    {
-                        StatusText.Text =
-                            "Estado: Página abierta en Notion Desktop ✅";
-                        return true;
-                    }
-                }
-                catch
-                {
-                    // Notion estaba registrado, pero Windows no pudo iniciarlo.
-                }
-            }
-
-            if (!allowBrowserFallback)
-            {
-                StatusText.Text =
-                    "Estado: No fue posible abrir Notion Desktop.";
-                return false;
-            }
-
-            return await PromptOpenNotionInBrowserAsync(
-                webUri,
-                supportStatus);
-        }
-
-        private static Uri BuildNotionDesktopUri(Uri webUri)
-        {
-            var absolute = webUri.AbsoluteUri;
-
-            if (absolute.StartsWith(
-                    "notion://",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return webUri;
-            }
-
-            var hostAndPath = absolute
-                .Replace(
-                    "https://",
-                    string.Empty,
-                    StringComparison.OrdinalIgnoreCase)
-                .Replace(
-                    "http://",
-                    string.Empty,
-                    StringComparison.OrdinalIgnoreCase);
-
-            return new Uri(
-                $"notion://{hostAndPath}",
-                UriKind.Absolute);
-        }
-
-        private async Task<bool> PromptOpenNotionInBrowserAsync(
-            Uri webUri,
-            LaunchQuerySupportStatus supportStatus)
-        {
-            var content = new StackPanel
-            {
-                Spacing = 8
-            };
-
-            var reason = supportStatus switch
-            {
-                LaunchQuerySupportStatus.AppNotInstalled =>
-                    "No se encontró una aplicación instalada para abrir enlaces de Notion.",
-                LaunchQuerySupportStatus.AppUnavailable =>
-                    "Notion Desktop está instalado, pero no se encuentra disponible en este momento.",
-                LaunchQuerySupportStatus.NotSupported =>
-                    "Windows no tiene una aplicación asociada al protocolo de Notion.",
-                _ =>
-                    "No fue posible abrir la aplicación de escritorio de Notion."
-            };
-
-            content.Children.Add(
-                new TextBlock
-                {
-                    Text = reason,
-                    TextWrapping = TextWrapping.Wrap
-                });
-
-            content.Children.Add(
-                new TextBlock
-                {
-                    Text =
-                        "Verifica que Notion Desktop esté instalado y que la opción " +
-                        "“Abrir enlaces en la aplicación de escritorio” esté activa. " +
-                        "También puedes abrir esta página en el navegador.",
-                    TextWrapping = TextWrapping.Wrap,
-                    Opacity = 0.75
-                });
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = this.XamlRoot,
-                Title = "Notion Desktop no disponible",
-                Content = content,
-                PrimaryButtonText = "Abrir en navegador",
-                CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Primary
-            };
-
-            if (await dialog.ShowAsync() !=
-                ContentDialogResult.Primary)
-            {
-                StatusText.Text =
-                    "Estado: Apertura cancelada.";
-                return false;
-            }
-
-            try
-            {
-                var browserOpened =
-                    await Launcher.LaunchUriAsync(webUri);
-
-                StatusText.Text = browserOpened
-                    ? "Estado: Página abierta en el navegador ✅"
-                    : "Estado: No fue posible abrir la página.";
-
-                return browserOpened;
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text =
-                    $"Estado: Error abriendo la página → {ex.Message}";
-                return false;
-            }
+            return await OpenNotionPageWithFallbackAsync(
+                GetRowTarget(row),
+                desktopSuccessStatus:
+                    "Página abierta en Notion Desktop",
+                browserSuccessStatus:
+                    "Página abierta en el navegador",
+                failureStatus:
+                    "No se pudo abrir la página de Notion",
+                invalidUrlStatus:
+                    "La página no tiene una URL válida de Notion",
+                allowBrowserFallback:
+                    allowBrowserFallback);
         }
 
         private static string GetRowTarget(SearchResultRow row)

@@ -424,9 +424,8 @@ namespace Anfeta.UI.Views
             await EnsureIndexBootstrappedAsync();
             await ApplyDefaultTagIfEmptyAsync();
 
-            // Precarga silenciosa del calendario del día actual.
-            // No bloquea el buscador ni muestra overlay.
-            _ = PreloadCalendarOnStartupAsync();
+            // El calendario permanece inactivo durante el arranque.
+            // Solo se carga cuando el usuario abre la vista Calendario.
 
             // Después de las 7:00 AM y una sola vez por día,
             // mueve pendientes de ayer a hoy y guarda un reporte local.

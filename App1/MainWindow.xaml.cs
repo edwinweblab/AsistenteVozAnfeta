@@ -19,6 +19,7 @@ using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using System.Reflection;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Windows.ApplicationModel;
 using Windows.Storage;
@@ -60,11 +61,15 @@ namespace Anfeta.UI
                     ContentFrame?.Navigate(typeof(LinkSharedAccountView));
             };
 
+            // ANFETA inicia directamente en el Buscador. El antiguo panel
+            // principal de voz permanece en el proyecto, pero ya no se crea
+            // ni se selecciona durante el arranque normal.
             if (ContentFrame != null)
-                ContentFrame.Navigate(typeof(HomeView));
+                ContentFrame.Navigate(typeof(SearchTabsView));
 
-            if (AppNav?.MenuItems.Count > 0)
-                AppNav.SelectedItem = AppNav.MenuItems[0];
+            var initialSearchItem = FindNavItem("Search");
+            if (initialSearchItem != null)
+                AppNav.SelectedItem = initialSearchItem;
 
             // Mostrar/ocultar footer de versión + overlay del panel sin desplazar contenido.
             // Cuando el panel se expande, se aplica un desplazamiento negativo al Frame
@@ -86,7 +91,6 @@ namespace Anfeta.UI
 
             SubscribeDropboxState();
             CheckGoogleCalendarStatusOnStartup();
-            _ = StartCalendarWarmupOnStartupAsync();
             _hotkeyService = App.AppHost.Services.GetRequiredService<GlobalHotkeyService>();
             _hotkeyService.SearchHotkeyPressed += OnSearchHotkeyPressed;
 
@@ -269,14 +273,35 @@ namespace Anfeta.UI
 
                 if (install)
                 {
-                    var source = Uri.EscapeDataString(
-                        AppInstallerUrl);
+                    SetUpdateStatus(
+                        "Descargando instalador de actualización…",
+                        Color.FromArgb(255, 251, 191, 36));
 
-                    var installerUri = new Uri(
-                        $"ms-appinstaller:?source={source}");
+                    var installerBytes =
+                        await http.GetByteArrayAsync(
+                            AppInstallerUrl);
 
-                    var opened = await Windows.System.Launcher
-                        .LaunchUriAsync(installerUri);
+                    var installerFile =
+                        await ApplicationData.Current.TemporaryFolder
+                            .CreateFileAsync(
+                                "ANFETA.appinstaller",
+                                CreationCollisionOption.ReplaceExisting);
+
+                    await FileIO.WriteBytesAsync(
+                        installerFile,
+                        installerBytes);
+
+                    var opened =
+                        await Windows.System.Launcher
+                            .LaunchFileAsync(installerFile);
+
+                    if (!opened)
+                    {
+                        opened =
+                            await Windows.System.Launcher
+                                .LaunchUriAsync(
+                                    new Uri(AppInstallerUrl));
+                    }
 
                     SetUpdateStatus(
                         opened
@@ -363,7 +388,9 @@ namespace Anfeta.UI
 
             Type pageType = tag switch
             {
-                "Home" => typeof(HomeView),
+                // Home queda redirigido al Buscador por compatibilidad con
+                // accesos antiguos, aunque el elemento ya está oculto.
+                "Home" => typeof(SearchTabsView),
                 "Commands" => typeof(CommandsView),
                 "AllowedApps" => typeof(AllowedAppsView),
                 "Search" => typeof(SearchTabsView),
@@ -371,7 +398,7 @@ namespace Anfeta.UI
                 "Tests" => typeof(TestRunner),
                 "GoogleCalendar" => typeof(GoogleCalendarView),
                 "Todoist" => typeof(TodoistView),
-                _ => typeof(HomeView)
+                _ => typeof(SearchTabsView)
             };
 
             if (ContentFrame.CurrentSourcePageType != pageType)
@@ -684,52 +711,67 @@ namespace Anfeta.UI
                     Spacing = 8
                 };
 
-                if (reminder.Source == Models.Weblab.SearchSource.Notion &&
+                var isProjectReminder =
+                    IsReminderProjectMessage(
+                        reminder.Message);
+
+                Uri? notionUri = null;
+
+                var hasNotionTarget =
+                    reminder.Source ==
+                        Models.Weblab.SearchSource.Notion &&
                     Uri.TryCreate(
                         reminder.Target,
                         UriKind.Absolute,
-                        out var notionUri))
+                        out notionUri);
+
+                if (isProjectReminder &&
+                    reminder.Source ==
+                        Models.Weblab.SearchSource.Notion &&
+                    !string.IsNullOrWhiteSpace(
+                        reminder.PageId))
                 {
-                    var openButton = new Button
-                    {
-                        Content = "Abrir en Notion",
-                        HorizontalAlignment = HorizontalAlignment.Left
-                    };
-
-                    openButton.Click += async (_, __) =>
-                    {
-                        try
+                    var openActivityButton =
+                        new Button
                         {
-                            var desktopUri = new Uri(
-                                notionUri.AbsoluteUri.Replace(
-                                    "https://",
-                                    "notion://",
-                                    StringComparison.OrdinalIgnoreCase));
+                            Content = "Abrir actividad",
+                            HorizontalAlignment =
+                                HorizontalAlignment.Left
+                        };
 
-                            var support =
-                                await Windows.System.Launcher.QueryUriSupportAsync(
-                                    desktopUri,
-                                    Windows.System.LaunchQuerySupportType.Uri);
+                    ToolTipService.SetToolTip(
+                        openActivityButton,
+                        "Abrir primero la actividad real vinculada al proyecto o revisión.");
 
-                            var opened =
-                                support == Windows.System.LaunchQuerySupportStatus.Available &&
-                                await Windows.System.Launcher.LaunchUriAsync(desktopUri);
-
-                            if (!opened)
-                                opened = await Windows.System.Launcher.LaunchUriAsync(notionUri);
-
-                            actionStatus.Text = opened
-                                ? "Mensaje abierto ✅"
-                                : "No se pudo abrir el mensaje.";
-                        }
-                        catch (Exception ex)
+                    openActivityButton.Click +=
+                        async (_, __) =>
                         {
                             actionStatus.Text =
-                                $"No se pudo abrir → {ex.Message}";
-                        }
-                    };
+                                "Buscando la actividad real...";
 
-                    actions.Children.Add(openButton);
+                            reminderDialog?.Hide();
+
+                            await Task.Delay(150);
+
+                            await OpenReminderQuickActionAsync(
+                                reminder,
+                                "open-original");
+                        };
+
+                    actions.Children.Add(
+                        openActivityButton);
+                }
+
+                if (!isProjectReminder &&
+                    hasNotionTarget &&
+                    notionUri != null)
+                {
+                    actions.Children.Add(
+                        CreateReminderNotionButton(
+                            "Abrir recordatorio",
+                            notionUri,
+                            actionStatus,
+                            "Recordatorio"));
                 }
 
                 if (reminder.Source ==
@@ -759,9 +801,20 @@ namespace Anfeta.UI
                                 reminder);
                         };
 
-                    actions.Children.Insert(
-                        0,
+                    actions.Children.Add(
                         conversationButton);
+                }
+
+                if (isProjectReminder &&
+                    hasNotionTarget &&
+                    notionUri != null)
+                {
+                    actions.Children.Add(
+                        CreateReminderNotionButton(
+                            "Abrir notificación",
+                            notionUri,
+                            actionStatus,
+                            "Notificación"));
                 }
 
                 var copyStatus =
@@ -797,6 +850,157 @@ namespace Anfeta.UI
 
                 actions.Children.Add(copyButton);
                 content.Children.Add(actions);
+
+                if (reminder.Source ==
+                        Models.Weblab.SearchSource.Notion &&
+                    !string.IsNullOrWhiteSpace(
+                        reminder.PageId))
+                {
+                    var isReviewAlert =
+                        IsReminderReviewAlert(
+                            reminder.Message);
+
+                    content.Children.Add(
+                        new TextBlock
+                        {
+                            Text = "Acciones rápidas",
+                            Margin = new Thickness(0, 4, 0, 0),
+                            FontWeight =
+                                Microsoft.UI.Text.FontWeights.SemiBold,
+                            Opacity = 0.88
+                        });
+
+                    var quickActions = new Grid
+                    {
+                        ColumnSpacing = 8,
+                        RowSpacing = 8
+                    };
+
+                    for (var index = 0;
+                         index < 3;
+                         index++)
+                    {
+                        quickActions.ColumnDefinitions.Add(
+                            new ColumnDefinition
+                            {
+                                Width = new GridLength(
+                                    1,
+                                    GridUnitType.Star)
+                            });
+                    }
+
+                    quickActions.RowDefinitions.Add(
+                        new RowDefinition
+                        {
+                            Height = GridLength.Auto
+                        });
+
+                    quickActions.RowDefinitions.Add(
+                        new RowDefinition
+                        {
+                            Height = GridLength.Auto
+                        });
+
+                    Button AddQuickAction(
+                        string text,
+                        string action,
+                        int column,
+                        int row,
+                        bool enabled = true,
+                        string? toolTip = null)
+                    {
+                        var button = new Button
+                        {
+                            Content = text,
+                            Tag = action,
+                            IsEnabled = enabled,
+                            HorizontalAlignment =
+                                HorizontalAlignment.Stretch,
+                            HorizontalContentAlignment =
+                                HorizontalAlignment.Center,
+                            MinHeight = 36,
+                            Padding =
+                                new Thickness(10, 6, 10, 6)
+                        };
+
+                        if (!string.IsNullOrWhiteSpace(toolTip))
+                        {
+                            ToolTipService.SetToolTip(
+                                button,
+                                toolTip);
+                        }
+
+                        button.Click += async (_, __) =>
+                        {
+                            actionStatus.Text =
+                                $"Abriendo {text.ToLowerInvariant()}...";
+
+                            reminderDialog?.Hide();
+
+                            await Task.Delay(150);
+
+                            await OpenReminderQuickActionAsync(
+                                reminder,
+                                action);
+                        };
+
+                        Grid.SetColumn(button, column);
+                        Grid.SetRow(button, row);
+                        quickActions.Children.Add(button);
+
+                        return button;
+                    }
+
+                    AddQuickAction(
+                        "Historial",
+                        "history",
+                        0,
+                        0);
+
+                    AddQuickAction(
+                        "Reasignar",
+                        "reassign",
+                        1,
+                        0,
+                        enabled: !isReviewAlert,
+                        toolTip: isReviewAlert
+                            ? "Las alertas de revisión no se pueden reasignar."
+                            : null);
+
+                    AddQuickAction(
+                        "Reprogramar",
+                        "reschedule",
+                        2,
+                        0,
+                        enabled: !isReviewAlert,
+                        toolTip: isReviewAlert
+                            ? "Las alertas de revisión no se pueden reprogramar."
+                            : null);
+
+                    AddQuickAction(
+                        isReviewAlert
+                            ? "Atender alerta"
+                            : "Terminar",
+                        "complete",
+                        0,
+                        1);
+
+                    AddQuickAction(
+                        isReviewAlert
+                            ? "Eliminar notificación"
+                            : "Eliminar",
+                        "delete",
+                        1,
+                        1);
+
+                    AddQuickAction(
+                        "Marcar como visto",
+                        "mark-read",
+                        2,
+                        1);
+
+                    content.Children.Add(quickActions);
+                }
 
                 var snoozePanel = new Grid
                 {
@@ -853,8 +1057,16 @@ namespace Anfeta.UI
                     Content = content,
                     PrimaryButtonText = "Entendido",
                     DefaultButton =
-                        ContentDialogButton.Primary
+                        ContentDialogButton.Primary,
+                    MinWidth = 620,
+                    MaxWidth = 620
                 };
+
+                reminderDialog.Resources[
+                    "ContentDialogMinWidth"] = 620d;
+
+                reminderDialog.Resources[
+                    "ContentDialogMaxWidth"] = 620d;
 
                 var dialog = reminderDialog;
 
@@ -890,6 +1102,63 @@ namespace Anfeta.UI
             {
                 _reminderDialogLock.Release();
             }
+        }
+
+        private static Button CreateReminderNotionButton(
+            string text,
+            Uri notionUri,
+            TextBlock actionStatus,
+            string successLabel)
+        {
+            var button = new Button
+            {
+                Content = text,
+                HorizontalAlignment =
+                    HorizontalAlignment.Left
+            };
+
+            button.Click += async (_, __) =>
+            {
+                try
+                {
+                    var desktopUri = new Uri(
+                        notionUri.AbsoluteUri.Replace(
+                            "https://",
+                            "notion://",
+                            StringComparison.OrdinalIgnoreCase));
+
+                    var support =
+                        await Windows.System.Launcher
+                            .QueryUriSupportAsync(
+                                desktopUri,
+                                Windows.System
+                                    .LaunchQuerySupportType.Uri);
+
+                    var opened =
+                        support == Windows.System
+                            .LaunchQuerySupportStatus.Available &&
+                        await Windows.System.Launcher
+                            .LaunchUriAsync(desktopUri);
+
+                    if (!opened)
+                    {
+                        opened =
+                            await Windows.System.Launcher
+                                .LaunchUriAsync(notionUri);
+                    }
+
+                    actionStatus.Text = opened
+                        ? $"{successLabel} abierto ✅"
+                        : $"No se pudo abrir {successLabel.ToLowerInvariant()}.";
+                }
+                catch (Exception ex)
+                {
+                    actionStatus.Text =
+                        $"No se pudo abrir → {ex.Message}";
+                }
+            };
+
+            return button;
         }
 
         private async Task OpenReminderConversationAsync(
@@ -928,6 +1197,98 @@ namespace Anfeta.UI
 
             SearchView.RequestOpenConversation(
                 reminder.PageId);
+        }
+
+        private async Task OpenReminderQuickActionAsync(
+            IndexedFileReminder reminder,
+            string action)
+        {
+            if (string.IsNullOrWhiteSpace(
+                    reminder.PageId) ||
+                string.IsNullOrWhiteSpace(action))
+            {
+                return;
+            }
+
+            var hwnd =
+                WindowNative.GetWindowHandle(this);
+
+            if (hwnd != IntPtr.Zero)
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+                Activate();
+                SetForegroundWindow(hwnd);
+            }
+
+            var searchItem =
+                FindNavItem("Search");
+
+            if (searchItem != null)
+                AppNav.SelectedItem = searchItem;
+
+            if (ContentFrame.CurrentSourcePageType !=
+                typeof(SearchTabsView))
+            {
+                ContentFrame.Navigate(
+                    typeof(SearchTabsView));
+
+                await Task.Delay(300);
+            }
+            else
+            {
+                await Task.Delay(100);
+            }
+
+            SearchView.RequestReminderQuickAction(
+                reminder.PageId,
+                action);
+        }
+
+        private static bool IsReminderReviewAlert(
+            string? message)
+        {
+            var value =
+                (message ?? string.Empty).Trim();
+
+            return value.StartsWith(
+                       "Actividad lista para revisión",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith(
+                       "Correcciones solicitadas",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith(
+                       "Revisión aprobada",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+
+        private static bool IsReminderProjectMessage(
+            string? message)
+        {
+            if (IsReminderReviewAlert(message))
+                return true;
+
+            var value =
+                (message ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var hasProjectToken =
+                Regex.IsMatch(
+                    value,
+                    @"(?<![a-z0-9_])(?:sseo|aapli|aads|wwebs|pprog|sprtuzrevision|prtuzrevision|rtuzrevision|zrevision)(?![a-z0-9_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            return hasProjectToken &&
+                   (value.Contains('/') ||
+                    value.Contains(
+                        "revisión",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    value.Contains(
+                        "revision",
+                        StringComparison.OrdinalIgnoreCase));
         }
 
         // ═══════════════════════════════════════════

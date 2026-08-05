@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,6 +17,68 @@ namespace Anfeta.UI.Services.Notion
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
         private const int HttpTimeoutSeconds = 30;
+
+        // Un solo recorrido del índice puede estar activo a la vez, incluso
+        // cuando existen varias pestañas de SearchView.
+        private static readonly SemaphoreSlim IndexBuildGate =
+            new(1, 1);
+
+
+        private static readonly Regex CompletedReminderNotificationPattern =
+            new(
+                @"^\s*(?:\[Revisiones\]\s*)?" +
+                @"\d{4}-\d{2}-\d{2}[ T]\d{2}[:\-]\d{2}\s+" +
+                @"(?:jjohn|kkarl|iisai|iisaia|eedua|aacal|aandr|eemma|bbria|ggena|nneft|__all__)\b" +
+                @".*(?:^|\s)\[TERMINADO\](?:\s|$)",
+                RegexOptions.Compiled |
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant |
+                RegexOptions.Singleline);
+
+        /// <summary>
+        /// Identifica únicamente páginas de notificación de Revisiones que
+        /// siguen el formato fecha + destinatario y contienen [TERMINADO].
+        /// No afecta actividades normales cuyo título use la palabra terminado.
+        /// </summary>
+        public static bool IsCompletedReminderNotification(
+            SearchResultRow? row)
+        {
+            if (row == null ||
+                row.Source != SearchSource.Notion ||
+                !string.Equals(
+                    row.ExternalSourceName,
+                    "Revisiones",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var title =
+                (row.Name ?? string.Empty).Trim();
+
+            return CompletedReminderNotificationPattern.IsMatch(
+                title);
+        }
+
+        private static bool IsArchivedOrInTrash(
+            JsonElement page)
+        {
+            var archived =
+                page.TryGetProperty(
+                    "archived",
+                    out var archivedValue) &&
+                archivedValue.ValueKind ==
+                    JsonValueKind.True;
+
+            var inTrash =
+                page.TryGetProperty(
+                    "in_trash",
+                    out var trashValue) &&
+                trashValue.ValueKind ==
+                    JsonValueKind.True;
+
+            return archived || inTrash;
+        }
 
         public static async Task<List<SearchResultRow>> BuildAsync(
             string token,
@@ -31,119 +94,145 @@ namespace Anfeta.UI.Services.Notion
             if (string.IsNullOrWhiteSpace(dataSourceId))
                 throw new ArgumentException("Data Source ID de Notion vacío.");
 
-            var results = new List<SearchResultRow>();
-            string? nextCursor = null;
-            bool hasMore;
+            await IndexBuildGate.WaitAsync(ct);
 
-            using var http = new HttpClient
+            try
             {
-                BaseAddress = new Uri(NotionBaseUrl),
-                Timeout = TimeSpan.FromSeconds(HttpTimeoutSeconds)
-            };
+                using var fullSyncLease =
+                    await NotionRequestCoordinator.EnterFullSyncAsync(ct);
 
-            http.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", token.Trim());
+                var results = new List<SearchResultRow>();
+                string? nextCursor = null;
+                bool hasMore;
 
-            http.DefaultRequestHeaders.TryAddWithoutValidation(
-                "Notion-Version",
-                NotionVersion);
-
-            do
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var remaining = maxItems.HasValue
-                    ? Math.Max(0, maxItems.Value - results.Count)
-                    : 100;
-
-                if (maxItems.HasValue && remaining <= 0)
-                    break;
-
-                var pageSize = maxItems.HasValue
-                    ? Math.Min(100, remaining)
-                    : 100;
-
-                var payload = new Dictionary<string, object?>
+                using var http = new HttpClient
                 {
-                    ["page_size"] = pageSize
+                    BaseAddress = new Uri(NotionBaseUrl),
+                    Timeout = TimeSpan.FromSeconds(HttpTimeoutSeconds)
                 };
 
-                if (lastEditedAfterUtc.HasValue)
-                {
-                    var afterUtc = lastEditedAfterUtc.Value
-                        .ToUniversalTime()
-                        .AddSeconds(-2) // margen pequeño para no perder cambios cercanos
-                        .ToString("O");
+                http.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", token.Trim());
 
-                    payload["filter"] = new Dictionary<string, object?>
+                http.DefaultRequestHeaders.TryAddWithoutValidation(
+                    "Notion-Version",
+                    NotionVersion);
+
+                do
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var remaining = maxItems.HasValue
+                        ? Math.Max(0, maxItems.Value - results.Count)
+                        : 100;
+
+                    if (maxItems.HasValue && remaining <= 0)
+                        break;
+
+                    var pageSize = maxItems.HasValue
+                        ? Math.Min(100, remaining)
+                        : 100;
+
+                    var payload = new Dictionary<string, object?>
                     {
-                        ["timestamp"] = "last_edited_time",
-                        ["last_edited_time"] = new Dictionary<string, object?>
-                        {
-                            ["after"] = afterUtc
-                        }
+                        ["page_size"] = pageSize
                     };
 
-                    payload["sorts"] = new[]
+                    if (lastEditedAfterUtc.HasValue)
                     {
+                        var afterUtc = lastEditedAfterUtc.Value
+                            .ToUniversalTime()
+                            .AddSeconds(-2) // margen pequeño para no perder cambios cercanos
+                            .ToString("O");
+
+                        payload["filter"] = new Dictionary<string, object?>
+                        {
+                            ["timestamp"] = "last_edited_time",
+                            ["last_edited_time"] = new Dictionary<string, object?>
+                            {
+                                ["after"] = afterUtc
+                            }
+                        };
+
+                        payload["sorts"] = new[]
+                        {
         new Dictionary<string, object?>
         {
             ["timestamp"] = "last_edited_time",
             ["direction"] = "ascending"
         }
     };
-                }
-
-                if (!string.IsNullOrWhiteSpace(nextCursor))
-                    payload["start_cursor"] = nextCursor;
-
-                var jsonBody = JsonSerializer.Serialize(payload);
-
-                using var content = new StringContent(
-                    jsonBody,
-                    Encoding.UTF8,
-                    "application/json");
-
-                using var response = await http.PostAsync(
-                    $"data_sources/{dataSourceId.Trim()}/query",
-                    content,
-                    ct);
-
-                var json = await response.Content.ReadAsStringAsync(ct);
-
-                if (!response.IsSuccessStatusCode)
-                    throw new InvalidOperationException(
-                        $"Error Notion {(int)response.StatusCode}: {json}");
-
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-
-                if (root.TryGetProperty("results", out var pages) &&
-                    pages.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var page in pages.EnumerateArray())
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        results.Add(MapPageToSearchRow(page, sourceName));
-
-                        if (maxItems.HasValue && results.Count >= maxItems.Value)
-                            break;
                     }
-                }
 
-                hasMore =
-                    root.TryGetProperty("has_more", out var hasMoreEl) &&
-                    hasMoreEl.ValueKind == JsonValueKind.True;
+                    if (!string.IsNullOrWhiteSpace(nextCursor))
+                        payload["start_cursor"] = nextCursor;
 
-                nextCursor =
-                    root.TryGetProperty("next_cursor", out var cursorEl) &&
-                    cursorEl.ValueKind == JsonValueKind.String
-                        ? cursorEl.GetString()
-                        : null;
+                    var jsonBody = JsonSerializer.Serialize(payload);
 
-            } while (hasMore && !string.IsNullOrWhiteSpace(nextCursor));
+                    using var response =
+                        await NotionRequestCoordinator.SendAsync(
+                            http,
+                            () => new HttpRequestMessage(
+                                HttpMethod.Post,
+                                $"data_sources/{dataSourceId.Trim()}/query")
+                            {
+                                Content = new StringContent(
+                                    jsonBody,
+                                    Encoding.UTF8,
+                                    "application/json")
+                            },
+                            ct);
 
-            return results;
+                    var json = await response.Content.ReadAsStringAsync(ct);
+
+                    if (!response.IsSuccessStatusCode)
+                        throw new InvalidOperationException(
+                            $"Error Notion {(int)response.StatusCode}: {json}");
+
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("results", out var pages) &&
+                        pages.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var page in pages.EnumerateArray())
+                        {
+                            ct.ThrowIfCancellationRequested();
+
+                            if (IsArchivedOrInTrash(page))
+                                continue;
+
+                            results.Add(
+                                MapPageToSearchRow(
+                                    page,
+                                    sourceName));
+
+                            if (maxItems.HasValue &&
+                                results.Count >= maxItems.Value)
+                            {
+                                break;
+                            }
+                        }
+                    }
+
+                    hasMore =
+                        root.TryGetProperty("has_more", out var hasMoreEl) &&
+                        hasMoreEl.ValueKind == JsonValueKind.True;
+
+                    nextCursor =
+                        root.TryGetProperty("next_cursor", out var cursorEl) &&
+                        cursorEl.ValueKind == JsonValueKind.String
+                            ? cursorEl.GetString()
+                            : null;
+
+                } while (hasMore && !string.IsNullOrWhiteSpace(nextCursor));
+
+                return results;
+            }
+            finally
+            {
+                IndexBuildGate.Release();
+            }
         }
         public static Task<List<SearchResultRow>> BuildChangedSinceAsync(
             string token,

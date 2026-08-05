@@ -1,6 +1,8 @@
 ﻿using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Services.Notion;
+using Anfeta.UI.Services.Search;
 using Microsoft.UI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -20,6 +22,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
 using Windows.System;
+using Windows.Media.Core;
+using Windows.Media.Playback;
 using Windows.UI;
 
 namespace Anfeta.UI.Views
@@ -35,7 +39,11 @@ namespace Anfeta.UI.Views
             "Search.Calendar.ColumnWidths";
         private const string LS_CalendarPeopleSelectionVersion =
             "Search.Calendar.PeopleSelectionVersion";
-        private const int CalendarPeopleSelectionVersion = 3;
+        private const string LS_SearchLastSubView =
+            "Search.LastSubView";
+        private const string LS_CalendarLastSyncUtc =
+            "Search.Calendar.LastSyncUtc";
+        private const int CalendarPeopleSelectionVersion = 4;
 
         private static readonly string[] ActiveCalendarPeople =
         {
@@ -84,11 +92,49 @@ namespace Anfeta.UI.Views
         private Popup? _calendarActivityPreviewPopup;
         private Border? _calendarActivityPreviewPopupCard;
         private ContentControl? _calendarActivityPreviewHost;
+
+        // Panel fijo de actividades por persona. El listado usa únicamente
+        // los datos ya cargados del calendario; cada contenido de página se
+        // obtiene bajo demanda al pulsar su botón.
+        private CancellationTokenSource? _calendarPersonPreviewCts;
+        private string _calendarPersonPreviewPerson = string.Empty;
+
         private bool _calendarSizeHandlerHooked;
         private double _calendarLastViewportWidth;
         private string _calendarSearchQuery = string.Empty;
         private string _calendarPhaseFilter = string.Empty;
         private bool _calendarReviewAlertSending;
+        private readonly NotionMessageThreadService
+            _calendarReviewFlowService = new();
+        private readonly Dictionary<string, ReviewFlowMetadata?>
+            _calendarReviewFlowCache =
+                new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string>
+            _calendarReviewAssigneeRepairAttempted =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        // Conserva temporalmente las personas que tenía cada actividad antes
+        // de que Notion cambie manualmente sus tags. Esto permite recuperar al
+        // responsable original cuando la actividad pasa a John o Genaro.
+        private readonly Dictionary<string, string>
+            _calendarLastKnownPeople =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        private bool _calendarReviewFlowHydrating;
+
+        private const string CalendarReviewFlowCacheFileName =
+            "calendar_review_flow_cache_v2.json";
+
+        private readonly SemaphoreSlim
+            _calendarReviewFlowHydrationLock =
+                new(1, 1);
+
+        private readonly SemaphoreSlim
+            _calendarReviewFlowLocalCacheLock =
+                new(1, 1);
+
+        private bool
+            _calendarReviewFlowLocalCacheLoaded;
 
         private ComboBox? CalendarPhaseFilterControl =>
             FindName("CalendarPhaseFilterCombo") as ComboBox;
@@ -96,6 +142,12 @@ namespace Anfeta.UI.Views
         private DispatcherTimer? _calendarChangesTimer;
         private DateTimeOffset _calendarLastChangesCheckUtc = DateTimeOffset.UtcNow.AddMinutes(-5);
         private bool _calendarChangesRefreshRunning;
+        private string _calendarLastVisualFingerprint = string.Empty;
+
+        private DispatcherTimer? _calendarProcessElapsedTimer;
+        private DateTimeOffset _calendarProcessStartedAt;
+        private string _calendarProcessBaseDetail = string.Empty;
+        private long _calendarProcessUiVersion;
 
         private Button? _calendarDraggingButton;
         private NotionCalendarActivity? _calendarDraggingActivity;
@@ -133,6 +185,30 @@ namespace Anfeta.UI.Views
         private double CalendarHeaderHeight => 54 * _calendarZoom;
         private double CalendarFontScale => Math.Clamp(_calendarZoom, 0.70, 1.35);
 
+        private async Task RestoreLastSearchSubViewAsync()
+        {
+            var lastView =
+                (ApplicationData.Current.LocalSettings.Values[
+                    LS_SearchLastSubView] as string ??
+                 string.Empty).Trim();
+
+            if (string.Equals(
+                    lastView,
+                    "calendar",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await ShowCalendarAsync(DateTime.Today);
+            }
+        }
+
+        private static void SaveLastSearchSubView(
+            string value)
+        {
+            ApplicationData.Current.LocalSettings.Values[
+                LS_SearchLastSubView] =
+                (value ?? string.Empty).Trim();
+        }
+
         private async void ToggleCalendarView_Click(
             object sender,
             RoutedEventArgs e)
@@ -151,8 +227,11 @@ namespace Anfeta.UI.Views
         {
             LoadCalendarPreferences();
 
+            await EnsureCalendarReviewFlowLocalCacheLoadedAsync();
+
             _calendarViewActive = true;
             _calendarSelectedDate = date.Date;
+            SaveLastSearchSubView("calendar");
 
             CalendarHost.Visibility = Visibility.Visible;
             ToggleCalendarView.IsChecked = true;
@@ -191,7 +270,12 @@ namespace Anfeta.UI.Views
                     _calendarSelectedDate);
 
             if (cached != null)
+            {
                 _calendarActivities = cached;
+
+                ApplyCachedCalendarReviewFlow(
+                    _calendarActivities);
+            }
 
             DrawCalendar(_calendarActivities);
 
@@ -205,7 +289,9 @@ namespace Anfeta.UI.Views
             {
                 _calendarChangesTimer = new DispatcherTimer
                 {
-                    Interval = TimeSpan.FromSeconds(25)
+                    // Menos consultas automáticas y más margen para Notion.
+                    // El botón Actualizar sigue disponible en todo momento.
+                    Interval = TimeSpan.FromSeconds(180)
                 };
 
                 _calendarChangesTimer.Tick += async (_, __) =>
@@ -214,9 +300,6 @@ namespace Anfeta.UI.Views
 
             _calendarChangesTimer.Stop();
             _calendarChangesTimer.Start();
-
-            // Al entrar al calendario se valida inmediatamente sin bloquear la UI.
-            _ = RefreshCalendarChangesSilentlyAsync();
         }
 
         private void StopCalendarChangesTimer()
@@ -224,70 +307,215 @@ namespace Anfeta.UI.Views
             _calendarChangesTimer?.Stop();
         }
 
+        private long BeginCalendarProcess(
+            string stage,
+            string detail)
+        {
+            var version = Interlocked.Increment(
+                ref _calendarProcessUiVersion);
+
+            _calendarProcessStartedAt = DateTimeOffset.Now;
+            _calendarProcessBaseDetail = detail ?? string.Empty;
+
+            if (CalendarProcessPanel == null)
+                return version;
+
+            CalendarProcessPanel.Visibility = Visibility.Visible;
+            CalendarProcessRing.IsActive = true;
+            CalendarProcessStageText.Text = stage;
+            CalendarProcessDetailText.Text = _calendarProcessBaseDetail;
+            CalendarProcessElapsedText.Text = "00:00";
+            CalendarProcessBar.IsIndeterminate = true;
+            CalendarProcessBar.Value = 0;
+
+            if (_calendarProcessElapsedTimer == null)
+            {
+                _calendarProcessElapsedTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(500)
+                };
+
+                _calendarProcessElapsedTimer.Tick += (_, __) =>
+                {
+                    if (CalendarProcessPanel?.Visibility !=
+                        Visibility.Visible)
+                    {
+                        return;
+                    }
+
+                    var elapsed =
+                        DateTimeOffset.Now - _calendarProcessStartedAt;
+
+                    CalendarProcessElapsedText.Text =
+                        elapsed.TotalHours >= 1
+                            ? elapsed.ToString(@"hh\:mm\:ss")
+                            : elapsed.ToString(@"mm\:ss");
+
+                    if (NotionRequestCoordinator.IsCoolingDown)
+                    {
+                        var seconds = Math.Max(1,
+                            (int)Math.Ceiling(
+                                NotionRequestCoordinator
+                                    .CooldownRemaining
+                                    .TotalSeconds));
+
+                        CalendarProcessDetailText.Text =
+                            $"Notion está regulando las solicitudes · " +
+                            $"reintento en {seconds}s · " +
+                            _calendarProcessBaseDetail;
+                    }
+                    else
+                    {
+                        CalendarProcessDetailText.Text =
+                            _calendarProcessBaseDetail;
+                    }
+                };
+            }
+
+            _calendarProcessElapsedTimer.Stop();
+            _calendarProcessElapsedTimer.Start();
+
+            return version;
+        }
+
+        private void UpdateCalendarProcess(
+            long version,
+            NotionCalendarProgress report)
+        {
+            if (version != _calendarProcessUiVersion ||
+                CalendarProcessPanel == null)
+            {
+                return;
+            }
+
+            CalendarProcessPanel.Visibility = Visibility.Visible;
+            CalendarProcessRing.IsActive = true;
+            CalendarProcessStageText.Text = report.Stage;
+            _calendarProcessBaseDetail = report.Detail ?? string.Empty;
+            CalendarProcessDetailText.Text = _calendarProcessBaseDetail;
+
+            var hasTotal = report.Total > 0;
+            CalendarProcessBar.IsIndeterminate = !hasTotal;
+
+            if (hasTotal)
+                CalendarProcessBar.Value = report.Percentage;
+
+            StatusText.Text = hasTotal
+                ? $"Estado: {report.Stage} {report.Percentage}%"
+                : $"Estado: {report.Stage}...";
+        }
+
+        private void UpdateCalendarReviewProgress(
+            long version,
+            int current,
+            int total)
+        {
+            if (version <= 0 ||
+                version != _calendarProcessUiVersion ||
+                CalendarProcessPanel == null)
+            {
+                return;
+            }
+
+            CalendarProcessStageText.Text =
+                "Obteniendo datos de revisión";
+
+            _calendarProcessBaseDetail =
+                $"Actividad de revisión {current} de {total}";
+
+            CalendarProcessDetailText.Text =
+                _calendarProcessBaseDetail;
+
+            CalendarProcessBar.IsIndeterminate = total <= 0;
+
+            if (total > 0)
+            {
+                CalendarProcessBar.Value =
+                    Math.Clamp(
+                        current * 100d / total,
+                        0,
+                        100);
+            }
+        }
+
+        private void CompleteCalendarProcess(
+            long version,
+            string stage,
+            string detail,
+            bool success = true)
+        {
+            if (version != _calendarProcessUiVersion ||
+                CalendarProcessPanel == null)
+            {
+                return;
+            }
+
+            _calendarProcessElapsedTimer?.Stop();
+            CalendarProcessRing.IsActive = false;
+            CalendarProcessStageText.Text = stage;
+            _calendarProcessBaseDetail = detail ?? string.Empty;
+            CalendarProcessDetailText.Text = _calendarProcessBaseDetail;
+            CalendarProcessBar.IsIndeterminate = false;
+            CalendarProcessBar.Value = success ? 100 : 0;
+
+            DispatcherQueue.TryEnqueue(
+                async () =>
+                {
+                    await Task.Delay(
+                        success
+                            ? TimeSpan.FromSeconds(2.5)
+                            : TimeSpan.FromSeconds(5));
+
+                    if (version == _calendarProcessUiVersion &&
+                        CalendarProcessPanel != null)
+                    {
+                        CalendarProcessPanel.Visibility =
+                            Visibility.Collapsed;
+                    }
+                });
+        }
+
+        private DateTimeOffset GetCalendarChangesAnchorUtc()
+        {
+            var raw =
+                ApplicationData.Current.LocalSettings.Values[
+                    LS_CalendarLastSyncUtc] as string;
+
+            if (DateTimeOffset.TryParse(
+                    raw,
+                    out var saved))
+            {
+                return saved
+                    .ToUniversalTime()
+                    .Subtract(TimeSpan.FromSeconds(20));
+            }
+
+            return _calendarLastChangesCheckUtc
+                .Subtract(TimeSpan.FromSeconds(20));
+        }
+
+        private void SaveCalendarChangesCheckpoint()
+        {
+            _calendarLastChangesCheckUtc =
+                DateTimeOffset.UtcNow;
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_CalendarLastSyncUtc] =
+                _calendarLastChangesCheckUtc.ToString("O");
+        }
+
         private async Task RefreshCalendarChangesSilentlyAsync()
         {
-            if (!_calendarViewActive || _calendarChangesRefreshRunning)
+            if (!_calendarViewActive ||
+                _calendarChangesRefreshRunning)
+            {
                 return;
-
-            var token =
-                ApplicationData.Current.LocalSettings.Values[
-                    "Notion.Token"] as string;
-
-            if (string.IsNullOrWhiteSpace(token))
-                return;
-
-            _calendarChangesRefreshRunning = true;
-
-            // Se deja margen para no perder cambios que Notion publique
-            // con unos segundos de retraso en last_edited_time.
-            var changedAfter =
-                _calendarLastChangesCheckUtc.Subtract(
-                    TimeSpan.FromSeconds(20));
-
-            try
-            {
-                using var cts =
-                    new CancellationTokenSource(
-                        TimeSpan.FromMinutes(2));
-
-                var changed =
-                    await _notionCalendarService.RefreshChangedSinceAsync(
-                        token,
-                        changedAfter,
-                        cts.Token);
-
-                _calendarLastChangesCheckUtc =
-                    DateTimeOffset.UtcNow;
-
-                if (!changed || !_calendarViewActive)
-                    return;
-
-                var cached =
-                    await _notionCalendarService.TryGetCachedDayAsync(
-                        _calendarSelectedDate,
-                        cts.Token);
-
-                if (cached == null)
-                    return;
-
-                _calendarActivities = cached;
-                DrawCalendar(_calendarActivities);
-
-                StatusText.Text =
-                    "Estado: Cambios recientes del calendario aplicados automáticamente ✅";
             }
-            catch (OperationCanceledException)
-            {
-            }
-            catch
-            {
-                // La validación automática nunca debe vaciar la vista ni
-                // interrumpir el uso normal del calendario.
-            }
-            finally
-            {
-                _calendarChangesRefreshRunning = false;
-            }
+
+            await RefreshCalendarDaySilentlyAsync(
+                _calendarSelectedDate.Date,
+                _calendarLoadVersion,
+                userInitiated: false);
         }
 
         private void EnsureCalendarSizeHandler()
@@ -334,7 +562,15 @@ namespace Anfeta.UI.Views
         private void CloseCalendarView()
         {
             _calendarViewActive = false;
+            SaveLastSearchSubView("results");
             StopCalendarChangesTimer();
+            _calendarProcessElapsedTimer?.Stop();
+            Interlocked.Increment(ref _calendarProcessUiVersion);
+
+            if (CalendarProcessPanel != null)
+                CalendarProcessPanel.Visibility = Visibility.Collapsed;
+
+            CloseCalendarPersonPreviewPanel(redrawCalendar: false);
 
             try
             {
@@ -431,14 +667,16 @@ namespace Anfeta.UI.Views
                 cached ??
                 Array.Empty<NotionCalendarActivity>();
 
+            ApplyCachedCalendarReviewFlow(
+                _calendarActivities);
+
             CalendarDateTitle.Text =
                 FormatCalendarDate(_calendarSelectedDate);
 
             DrawCalendar(_calendarActivities);
 
-            // Valida cambios externos al cambiar de día sin esperar al botón Actualizar.
-            _ = RefreshCalendarChangesSilentlyAsync();
-
+            // LoadCalendarDayAsync muestra la caché y programa una sola
+            // validación incremental para el nuevo día.
             await LoadCalendarDayAsync(
                 preferCache: true);
         }
@@ -447,9 +685,21 @@ namespace Anfeta.UI.Views
             object sender,
             RoutedEventArgs e)
         {
-            await LoadCalendarDayAsync(
-                preferCache: false,
-                forceRefresh: true);
+            // Actualizar usa la ruta incremental para responder rápido.
+            // Ctrl + Actualizar conserva una recarga completa para diagnóstico.
+            if (IsCalendarControlDown())
+            {
+                await LoadCalendarDayAsync(
+                    preferCache: false,
+                    forceRefresh: true);
+
+                return;
+            }
+
+            await RefreshCalendarDaySilentlyAsync(
+                _calendarSelectedDate.Date,
+                _calendarLoadVersion,
+                userInitiated: true);
         }
 
         private async Task LoadCalendarDayAsync(
@@ -497,22 +747,23 @@ namespace Anfeta.UI.Views
                     }
 
                     _calendarActivities = cached;
+                    ApplyCachedCalendarReviewFlow(
+                        _calendarActivities);
                     DrawCalendar(_calendarActivities);
 
                     ModeText.Text =
                         "Modo: Calendario (Revisiones)";
-
                     CountText.Text =
                         $"{cached.Count} actividades";
-
                     StatusText.Text =
-                        "Estado: Calendario cargado desde caché ✅";
+                        "Estado: Calendario cargado desde caché ✅ · comprobando cambios...";
 
-                    // La caché se muestra al instante, pero se valida en segundo
-                    // plano para traer revisiones, estados y colores recientes.
+                    // Ya no se descarga toda la base al mostrar la caché.
+                    // Solo se solicitan páginas modificadas desde el último sync.
                     _ = RefreshCalendarDaySilentlyAsync(
                         requestedDate,
-                        loadVersion);
+                        loadVersion,
+                        userInitiated: false);
 
                     return;
                 }
@@ -534,6 +785,13 @@ namespace Anfeta.UI.Views
             var cancellationToken =
                 _calendarCts.Token;
 
+            var processVersion =
+                BeginCalendarProcess(
+                    forceRefresh
+                        ? "Recarga completa del calendario"
+                        : "Preparando calendario",
+                    "Esperando turno para consultar Notion...");
+
             try
             {
                 ShowLoadingState(
@@ -549,6 +807,10 @@ namespace Anfeta.UI.Views
                             {
                                 return;
                             }
+
+                            UpdateCalendarProcess(
+                                processVersion,
+                                report);
 
                             var percentText =
                                 report.Total > 0
@@ -581,18 +843,29 @@ namespace Anfeta.UI.Views
                 }
 
                 _calendarActivities = activities;
+
+                await HydrateCalendarReviewFlowAsync(
+                    _calendarActivities,
+                    cancellationToken,
+                    processVersion);
+
                 DrawCalendar(_calendarActivities);
+                SaveCalendarChangesCheckpoint();
 
                 ModeText.Text =
                     "Modo: Calendario (Revisiones)";
-
                 CountText.Text =
                     $"{activities.Count} actividades";
 
                 StatusText.Text =
                     activities.Count > 0
-                        ? $"Estado: Calendario actualizado ✅ ({activities.Count}) · {_notionCalendarService.LastDiagnostics}"
-                        : $"Estado: Calendario sin coincidencias · {_notionCalendarService.LastDiagnostics}";
+                        ? $"Estado: Calendario actualizado ✅ ({activities.Count})"
+                        : "Estado: Calendario sin coincidencias";
+
+                CompleteCalendarProcess(
+                    processVersion,
+                    "Calendario actualizado",
+                    $"{activities.Count} actividades listas.");
             }
             catch (OperationCanceledException)
             {
@@ -610,33 +883,36 @@ namespace Anfeta.UI.Views
                 {
                     _calendarActivities = cached;
                     DrawCalendar(_calendarActivities);
-
                     CountText.Text =
                         $"{cached.Count} actividades";
-
                     StatusText.Text =
                         "Estado: Se conservó la información guardada del calendario ✅";
 
+                    CompleteCalendarProcess(
+                        processVersion,
+                        "Consulta cancelada",
+                        "Se conserva la caché visible.",
+                        success: false);
                     return;
                 }
 
                 _calendarActivities =
                     Array.Empty<NotionCalendarActivity>();
-
                 DrawCalendar(_calendarActivities);
 
                 CalendarEmptyText.Text =
                     "La consulta tardó demasiado y fue cancelada. " +
-                    "La cuadrícula permanece disponible; pulsa Actualizar para intentarlo de nuevo.";
-
+                    "Pulsa Actualizar para intentarlo de nuevo.";
                 CalendarEmptyState.Visibility =
                     Visibility.Visible;
-
-                ModeText.Text =
-                    "Modo: Calendario (Revisiones)";
-
                 StatusText.Text =
                     "Estado: Carga del calendario cancelada por tiempo de espera.";
+
+                CompleteCalendarProcess(
+                    processVersion,
+                    "Carga cancelada",
+                    "Notion tardó demasiado en responder.",
+                    success: false);
             }
             catch (Exception ex)
             {
@@ -654,25 +930,32 @@ namespace Anfeta.UI.Views
                 {
                     _calendarActivities = cached;
                     DrawCalendar(_calendarActivities);
-
                     StatusText.Text =
                         "Estado: No se pudo actualizar; se conserva la caché del calendario.";
+
+                    CompleteCalendarProcess(
+                        processVersion,
+                        "No se pudo actualizar",
+                        "La información guardada sigue visible.",
+                        success: false);
                     return;
                 }
 
                 _calendarActivities =
                     Array.Empty<NotionCalendarActivity>();
-
                 DrawCalendar(_calendarActivities);
-
                 CalendarEmptyText.Text =
                     $"No se pudo cargar el calendario.\n{ex.Message}";
-
                 CalendarEmptyState.Visibility =
                     Visibility.Visible;
-
                 StatusText.Text =
                     $"Estado: Error en calendario → {ex.Message}";
+
+                CompleteCalendarProcess(
+                    processVersion,
+                    "Error en calendario",
+                    ex.Message,
+                    success: false);
             }
             finally
             {
@@ -683,8 +966,20 @@ namespace Anfeta.UI.Views
 
         private async Task RefreshCalendarDaySilentlyAsync(
             DateTime requestedDate,
-            long loadVersion)
+            long loadVersion,
+            bool userInitiated = false)
         {
+            if (_calendarChangesRefreshRunning)
+            {
+                if (userInitiated)
+                {
+                    StatusText.Text =
+                        "Estado: El calendario ya se está actualizando...";
+                }
+
+                return;
+            }
+
             var token =
                 ApplicationData.Current.LocalSettings.Values[
                     "Notion.Token"] as string;
@@ -692,19 +987,36 @@ namespace Anfeta.UI.Views
             if (string.IsNullOrWhiteSpace(token))
                 return;
 
+            _calendarChangesRefreshRunning = true;
+
+            var processVersion =
+                BeginCalendarProcess(
+                    userInitiated
+                        ? "Actualizando calendario"
+                        : "Mostrando caché",
+                    "Esperando turno para comprobar cambios recientes...");
+
             try
             {
                 using var cts =
                     new CancellationTokenSource(
-                        TimeSpan.FromMinutes(8));
+                        TimeSpan.FromMinutes(4));
 
-                var activities =
-                    await _notionCalendarService.GetDayAsync(
+                var progress =
+                    new Progress<NotionCalendarProgress>(
+                        report =>
+                            UpdateCalendarProcess(
+                                processVersion,
+                                report));
+
+                var changed =
+                    await _notionCalendarService.RefreshChangedSinceAsync(
                         token,
-                        requestedDate,
-                        progress: null,
+                        GetCalendarChangesAnchorUtc(),
                         cts.Token,
-                        forceRefresh: true);
+                        progress);
+
+                SaveCalendarChangesCheckpoint();
 
                 if (!_calendarViewActive ||
                     requestedDate != _calendarSelectedDate.Date ||
@@ -713,30 +1025,163 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                _calendarActivities = activities;
-                DrawCalendar(_calendarActivities);
+                var activities =
+                    await _notionCalendarService.TryGetCachedDayAsync(
+                        requestedDate,
+                        cts.Token);
+
+                if (activities == null)
+                {
+                    CompleteCalendarProcess(
+                        processVersion,
+                        "Sin caché disponible",
+                        "Pulsa Ctrl + Actualizar para realizar una recarga completa.",
+                        success: false);
+                    return;
+                }
+
+                if (changed)
+                {
+                    await HydrateCalendarReviewFlowAsync(
+                        activities,
+                        cts.Token,
+                        processVersion);
+
+                    var incomingFingerprint =
+                        BuildCalendarVisualFingerprint(activities);
+
+                    var currentFingerprint =
+                        BuildCalendarVisualFingerprint(
+                            _calendarActivities);
+
+                    if (!string.Equals(
+                            incomingFingerprint,
+                            currentFingerprint,
+                            StringComparison.Ordinal))
+                    {
+                        _calendarActivities = activities;
+                        DrawCalendarPreservingView(
+                            _calendarActivities);
+                    }
+                }
 
                 CountText.Text =
                     $"{activities.Count} actividades";
 
-                StatusText.Text =
-                    $"Estado: Calendario actualizado ✅ ({activities.Count})";
+                StatusText.Text = changed
+                    ? $"Estado: Calendario actualizado ✅ ({activities.Count})"
+                    : $"Estado: Calendario al día ✅ ({activities.Count})";
+
+                CompleteCalendarProcess(
+                    processVersion,
+                    changed
+                        ? "Cambios aplicados"
+                        : "Calendario al día",
+                    changed
+                        ? $"{activities.Count} actividades listas."
+                        : "No se encontraron cambios nuevos en Notion.");
             }
-            catch
+            catch (OperationCanceledException)
             {
-                // La caché ya está visible; una validación silenciosa fallida
-                // no debe vaciar el calendario ni mostrar overlay.
+                CompleteCalendarProcess(
+                    processVersion,
+                    "Comprobación cancelada",
+                    "La caché continúa visible.",
+                    success: false);
             }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    "Estado: No se pudo comprobar Notion; se conserva la caché.";
+
+                CompleteCalendarProcess(
+                    processVersion,
+                    "No se pudo comprobar Notion",
+                    ex.Message,
+                    success: false);
+            }
+            finally
+            {
+                _calendarChangesRefreshRunning = false;
+            }
+        }
+
+        private static string BuildCalendarVisualFingerprint(
+            IReadOnlyList<NotionCalendarActivity> activities)
+        {
+            if (activities == null || activities.Count == 0)
+                return string.Empty;
+
+            return string.Join(
+                "\n",
+                activities
+                    .OrderBy(item => item.PageId)
+                    .ThenBy(item => item.Person)
+                    .Select(item =>
+                        string.Join(
+                            "|",
+                            item.PageId,
+                            item.Title,
+                            item.Person,
+                            item.OriginalPerson,
+                            item.ReviewAssignee,
+                            item.ReviewState,
+                            item.Start.ToString("O"),
+                            item.End.ToString("O"),
+                            item.Status,
+                            item.StatusColor,
+                            item.UpdateText)));
+        }
+
+        private void DrawCalendarPreservingView(
+            IReadOnlyList<NotionCalendarActivity> activities,
+            bool force = false)
+        {
+            var fingerprint =
+                BuildCalendarVisualFingerprint(activities);
+
+            if (!force &&
+                string.Equals(
+                    fingerprint,
+                    _calendarLastVisualFingerprint,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var horizontalOffset =
+                CalendarScrollViewer?.HorizontalOffset ?? 0;
+
+            var verticalOffset =
+                CalendarScrollViewer?.VerticalOffset ?? 0;
+
+            DrawCalendar(activities);
+
+            _calendarLastVisualFingerprint = fingerprint;
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                CalendarScrollViewer?.ChangeView(
+                    horizontalOffset,
+                    verticalOffset,
+                    null,
+                    disableAnimation: true);
+            });
         }
 
         private void DrawCalendar(
             IReadOnlyList<NotionCalendarActivity> activities)
         {
+            ApplyCachedCalendarReviewFlow(activities);
+
+            var expandedActivities =
+                ExpandCalendarReviewActivities(activities);
+
             var phaseActivities =
                 string.IsNullOrWhiteSpace(
                     _calendarPhaseFilter)
-                    ? activities
-                    : activities
+                    ? expandedActivities
+                    : expandedActivities
                         .Where(activity =>
                             ContainsExactCalendarPart(
                                 BuildCalendarActivitySearchableText(
@@ -845,35 +1290,93 @@ namespace Anfeta.UI.Views
                 var columnWidth =
                     GetResolvedCalendarColumnWidth(person);
 
-                var headerButton = new Button
+                var headerContainer = new Grid
                 {
-                    Content = person,
                     Width = columnWidth - 8,
                     Height = headerHeight - 4,
-                    Padding = new Thickness(8, 0, 8, 0),
-                    HorizontalContentAlignment =
-                        HorizontalAlignment.Left,
-                    VerticalContentAlignment =
-                        VerticalAlignment.Center,
-                    FontSize = 14 * CalendarFontScale,
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold,
                     Background =
                         new SolidColorBrush(
                             Darken(_calendarThemeColor, 0.02)),
+                    Tag = person
+                };
+
+                headerContainer.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(
+                            1,
+                            GridUnitType.Star)
+                    });
+
+                headerContainer.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = GridLength.Auto
+                    });
+
+                var headerButton = new Button
+                {
+                    Content = person,
+                    Padding = new Thickness(8, 0, 4, 0),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    FontSize = 14 * CalendarFontScale,
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    Background = new SolidColorBrush(Colors.Transparent),
                     BorderThickness = new Thickness(0),
                     CornerRadius = new CornerRadius(0),
                     Tag = person
                 };
 
-                headerButton.ContextFlyout =
+                var previewButton = new Button
+                {
+                    Content = "👁",
+                    Width = 32,
+                    Height = Math.Max(28, headerHeight - 12),
+                    Margin = new Thickness(0, 4, 4, 4),
+                    Padding = new Thickness(0),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    FontSize = 12 * CalendarFontScale,
+                    Background =
+                        new SolidColorBrush(
+                            Lighten(_calendarThemeColor, 0.06)),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            Lighten(_calendarThemeColor, 0.20)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Tag = person
+                };
+
+                ToolTipService.SetToolTip(
+                    previewButton,
+                    $"Ver actividades de {person}");
+
+                previewButton.Click +=
+                    CalendarPersonPreview_Click;
+
+                var headerContextFlyout =
                     BuildCalendarHeaderContextFlyout(person);
 
-                Canvas.SetLeft(headerButton, left + 2);
-                Canvas.SetTop(headerButton, 2);
-                Canvas.SetZIndex(headerButton, 300);
-                CalendarCanvas.Children.Add(headerButton);
-                _calendarStickyHeaders.Add(headerButton);
+                headerButton.ContextFlyout = headerContextFlyout;
+
+                Grid.SetColumn(headerButton, 0);
+                headerContainer.Children.Add(headerButton);
+
+                Grid.SetColumn(previewButton, 1);
+                headerContainer.Children.Add(previewButton);
+
+                Canvas.SetLeft(headerContainer, left + 2);
+                Canvas.SetTop(headerContainer, 2);
+                Canvas.SetZIndex(headerContainer, 300);
+                CalendarCanvas.Children.Add(headerContainer);
+                _calendarStickyHeaders.Add(headerContainer);
 
                 AddVerticalLine(
                     left,
@@ -979,33 +1482,84 @@ namespace Anfeta.UI.Views
                         ? $"Modo: Calendario · {phaseLabel}"
                         : $"Modo: Calendario · {phaseLabel} · {_calendarSearchQuery}";
             }
+
+            _calendarLastVisualFingerprint =
+                BuildCalendarVisualFingerprint(activities);
+
+            RefreshCalendarPersonPreviewIfOpen();
+        }
+
+        private static bool HasExactCalendarPhase(
+            NotionCalendarActivity activity,
+            string phase)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(phase))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(
+                activity.Title ?? string.Empty,
+                $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(phase)}(?![\p{{L}}\p{{Nd}}_])",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+        }
+
+        private static bool HasCurrentReviewMirrorPhase(
+            NotionCalendarActivity activity)
+        {
+            // La copia visual existe exclusivamente durante rtuzREVISION.
+            // zREVISION ya representa una revisión aprobada y debe mostrarse
+            // como una sola actividad normal del responsable original.
+            return HasExactCalendarPhase(
+                activity,
+                "rtuzREVISION");
+        }
+
+        private static bool IsReviewEligibleActivity(
+            NotionCalendarActivity activity)
+        {
+            // Estas fases contienen o conservan metadata del flujo.
+            // prtuzREVISION no se hidrata como revisión para evitar consultas
+            // innecesarias y nunca genera copia visual.
+            return HasExactCalendarPhase(
+                       activity,
+                       "rtuzREVISION") ||
+                   HasExactCalendarPhase(
+                       activity,
+                       "zREVISION");
+        }
+
+        private static bool CanSendCalendarActivityToReview(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null || activity.IsReviewMirror)
+                return false;
+
+            // Una actividad vuelve a estar lista para revisión cuando está
+            // en prtuzREVISION, o puede reenviarse desde zREVISION.
+            // sprtuzREVISION queda excluido por coincidencia exacta.
+            return HasExactCalendarPhase(
+                       activity,
+                       "prtuzREVISION") ||
+                   HasExactCalendarPhase(
+                       activity,
+                       "zREVISION") ||
+                   (HasExactCalendarPhase(
+                        activity,
+                        "rtuzREVISION") &&
+                    (!activity.IsPendingReview ||
+                     activity.IsReturnedForCorrections));
         }
 
         private static bool IsPendingReviewActivity(
             NotionCalendarActivity activity)
         {
-            if (activity == null)
-                return false;
-
-            var searchable = string.Join(
-                " ",
-                new[]
-                {
-                    activity.Title,
-                    activity.Project,
-                    activity.Status,
-                    activity.UpdateText,
-                    activity.Description
-                }.Where(value =>
-                    !string.IsNullOrWhiteSpace(value)));
-
-            // Solo rtuzREVISION se considera pendiente para estas vistas.
-            // No coincide con prtuzREVISION, zREVISION ni con fragmentos.
-            return Regex.IsMatch(
-                searchable,
-                @"(?<![\p{L}\p{Nd}_])rtuzREVISION(?![\p{L}\p{Nd}_])",
-                RegexOptions.IgnoreCase |
-                RegexOptions.CultureInvariant);
+            return HasExactCalendarPhase(
+                       activity,
+                       "rtuzREVISION") &&
+                   activity.IsPendingReview;
         }
 
         private static string BuildCalendarActivitySearchableText(
@@ -1353,6 +1907,44 @@ namespace Anfeta.UI.Views
             content.Children.Add(titleText);
             content.Children.Add(timeText);
 
+            if (string.Equals(
+                    person,
+                    "Sin asignar",
+                    StringComparison.OrdinalIgnoreCase) &&
+                ContainsAnyCalendarPersonTag(activity.Title))
+            {
+                content.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            "Tag activo no reconocido",
+                        FontSize = 8.4 * CalendarFontScale,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold,
+                        Opacity = 0.90,
+                        MaxLines = 1,
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis,
+                        IsHitTestVisible = false
+                    });
+            }
+
+            if (!string.IsNullOrWhiteSpace(
+                    activity.ReviewBadgeLabel))
+            {
+                content.Children.Add(
+                    new TextBlock
+                    {
+                        Text = activity.ReviewBadgeLabel,
+                        FontSize = 8.4 * CalendarFontScale,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Opacity = 0.88,
+                        MaxLines = 2,
+                        TextWrapping = TextWrapping.Wrap,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        IsHitTestVisible = false
+                    });
+            }
 
             if (_calendarZoom >= 0.90 &&
                 !string.IsNullOrWhiteSpace(activity.Project))
@@ -1440,7 +2032,7 @@ namespace Anfeta.UI.Views
                 BuildCalendarActivityContextFlyout(
                     activity);
 
-            button.Click += CalendarActivity_Click;
+            button.DoubleTapped += CalendarActivity_DoubleTapped;
 
             Canvas.SetLeft(button, left);
             Canvas.SetTop(button, top);
@@ -1455,6 +2047,13 @@ namespace Anfeta.UI.Views
             if (sender is not Button button ||
                 button.Tag is not NotionCalendarActivity activity)
             {
+                return;
+            }
+
+            if (activity.IsReviewMirror)
+            {
+                StatusText.Text =
+                    "Estado: Esta es una tarjeta de seguimiento. Ábrela con doble clic; no se puede mover.";
                 return;
             }
 
@@ -1785,6 +2384,10 @@ namespace Anfeta.UI.Views
                 CalendarContextOpen_Click);
 
             AddItem(
+                "Enviar mensaje…",
+                CalendarContextSendMessage_Click);
+
+            AddItem(
                 "Copiar nombre",
                 CalendarContextCopyName_Click);
 
@@ -1803,12 +2406,51 @@ namespace Anfeta.UI.Views
                 "Ir al dominio",
                 CalendarContextOpenDomain_Click);
 
+            // La tarjeta espejo conserva el historial visual, pero no
+            // puede modificar la actividad real.
+            if (activity.IsReviewMirror)
+                return flyout;
+
             flyout.Items.Add(
                 new MenuFlyoutSeparator());
 
             AddItem(
                 "Renombrar página…",
                 CalendarContextRename_Click);
+
+            flyout.Items.Add(
+                new MenuFlyoutSeparator());
+
+            if (HasExactCalendarPhase(
+                    activity,
+                    "rtuzREVISION") &&
+                activity.IsPendingReview &&
+                !activity.IsReviewMirror &&
+                CanCurrentUserResolveReview(activity))
+            {
+                AddItem(
+                    "Aprobar revisión",
+                    CalendarContextApproveReview_Click);
+
+                AddItem(
+                    "Regresar con correcciones…",
+                    CalendarContextReturnReview_Click);
+            }
+            else if (CanSendCalendarActivityToReview(activity))
+            {
+                AddItem(
+                    "Enviar a revisión…",
+                    CalendarContextSendToReview_Click);
+            }
+
+            if (HasExactCalendarPhase(
+                    activity,
+                    "zREVISION"))
+            {
+                AddItem(
+                    "Reasignar y pasar a prtuzREVISION…",
+                    CalendarContextReassignApproved_Click);
+            }
 
             AddItem(
                 "Mover a papelera…",
@@ -1877,47 +2519,40 @@ namespace Anfeta.UI.Views
             await OpenCalendarActivityAsync(activity);
         }
 
+        private async void CalendarContextSendMessage_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            HideCalendarActivityPreviewFlyout();
+
+            await ShowCalendarMessageComposerAsync(
+                activity);
+        }
+
         private async Task OpenCalendarActivityAsync(
             NotionCalendarActivity activity)
         {
-            if (string.IsNullOrWhiteSpace(activity.PageUrl) ||
-                !Uri.TryCreate(
-                    activity.PageUrl,
-                    UriKind.Absolute,
-                    out var webUri))
-            {
+            if (activity == null)
                 return;
-            }
 
-            try
-            {
-                var desktopUri =
-                    new Uri(
-                        activity.PageUrl.Replace(
-                            "https://",
-                            "notion://",
-                            StringComparison.OrdinalIgnoreCase));
-
-                var support =
-                    await Launcher.QueryUriSupportAsync(
-                        desktopUri,
-                        LaunchQuerySupportType.Uri);
-
-                if (support ==
-                    LaunchQuerySupportStatus.Available &&
-                    await Launcher.LaunchUriAsync(desktopUri))
-                {
-                    return;
-                }
-
-                await Launcher.LaunchUriAsync(webUri);
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text =
-                    $"Estado: No se pudo abrir la actividad → {ex.Message}";
-            }
+            await OpenNotionPageWithFallbackAsync(
+                activity.PageUrl,
+                desktopSuccessStatus:
+                    "Actividad abierta en Notion Desktop",
+                browserSuccessStatus:
+                    "Actividad abierta en el navegador",
+                failureStatus:
+                    "No se pudo abrir la actividad",
+                invalidUrlStatus:
+                    "La actividad no tiene una URL válida de Notion");
         }
+
 
         private void CalendarContextCopyName_Click(
             object sender,
@@ -2616,6 +3251,855 @@ namespace Anfeta.UI.Views
                 : CalendarTimeColumnWidth;
         }
 
+        private void CalendarPersonPreview_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element)
+                return;
+
+            var person =
+                (element.Tag?.ToString() ??
+                 string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(person))
+                return;
+
+            ShowCalendarPersonPreview(person);
+        }
+
+        private void CalendarPersonPreviewClose_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            CloseCalendarPersonPreviewPanel();
+        }
+
+        private void ShowCalendarPersonPreview(
+            string person)
+        {
+            if (CalendarPersonPreviewPanel == null ||
+                CalendarPersonPreviewItems == null)
+            {
+                return;
+            }
+
+            person =
+                NormalizeCalendarPerson(person);
+
+            if (string.IsNullOrWhiteSpace(person))
+                return;
+
+            var personChanged =
+                !string.Equals(
+                    _calendarPersonPreviewPerson,
+                    person,
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (personChanged ||
+                _calendarPersonPreviewCts == null ||
+                _calendarPersonPreviewCts.IsCancellationRequested)
+            {
+                try
+                {
+                    _calendarPersonPreviewCts?.Cancel();
+                    _calendarPersonPreviewCts?.Dispose();
+                }
+                catch
+                {
+                }
+
+                _calendarPersonPreviewCts =
+                    new CancellationTokenSource();
+            }
+
+            _calendarPersonPreviewPerson = person;
+
+            CalendarPersonPreviewPanel.Visibility =
+                Visibility.Visible;
+
+            CalendarPersonPreviewTitle.Text =
+                $"Actividades de {person}";
+
+            CalendarPersonPreviewDate.Text =
+                FormatCalendarDate(_calendarSelectedDate);
+
+            RenderCalendarPersonPreviewItems(person);
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_calendarViewActive)
+                    DrawCalendar(_calendarActivities);
+            });
+        }
+
+        private IReadOnlyList<NotionCalendarActivity>
+            GetCalendarPersonPreviewActivities(
+                string person)
+        {
+            var expanded =
+                ExpandCalendarReviewActivities(
+                    _calendarActivities);
+
+            var phaseFiltered =
+                string.IsNullOrWhiteSpace(
+                    _calendarPhaseFilter)
+                    ? expanded
+                    : expanded
+                        .Where(activity =>
+                            ContainsExactCalendarPart(
+                                BuildCalendarActivitySearchableText(
+                                    activity),
+                                _calendarPhaseFilter))
+                        .ToList();
+
+            var visible =
+                FilterCalendarActivities(
+                    phaseFiltered,
+                    _calendarSearchQuery);
+
+            return visible
+                .Where(activity =>
+                    SplitPersons(activity.Person)
+                        .Select(NormalizeCalendarPerson)
+                        .Any(candidate =>
+                            string.Equals(
+                                candidate,
+                                person,
+                                StringComparison.OrdinalIgnoreCase)))
+                .GroupBy(activity =>
+                    string.Join(
+                        "|",
+                        activity.PageId,
+                        activity.Person,
+                        activity.IsReviewMirror,
+                        activity.Start.ToString("O")),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(activity => activity.Start)
+                .ThenBy(activity => activity.End)
+                .ThenBy(activity => activity.Title)
+                .ToList();
+        }
+
+        private static string BuildCalendarActivitySpeechText(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks = null)
+        {
+            if (activity == null)
+                return string.Empty;
+
+            var parts = new List<string>();
+
+            var duration =
+                activity.End > activity.Start
+                    ? activity.End - activity.Start
+                    : TimeSpan.FromHours(1);
+
+            var durationText =
+                duration.TotalMinutes < 60
+                    ? $"Duración aproximada: {Math.Max(1, (int)Math.Round(duration.TotalMinutes))} minutos"
+                    : duration.TotalMinutes % 60 < 1
+                        ? $"Duración aproximada: {Math.Max(1, (int)Math.Round(duration.TotalHours))} horas"
+                        : $"Duración aproximada: {(int)duration.TotalHours} horas y {duration.Minutes} minutos";
+
+            parts.Add(
+                $"Horario: {activity.Start:HH:mm} a {activity.End:HH:mm}. {durationText}");
+
+            var title = CleanSpeechText(activity.Title);
+            if (!string.IsNullOrWhiteSpace(title))
+                parts.Add($"Actividad: {title}");
+
+            var status = CleanSpeechText(activity.Status);
+            if (!string.IsNullOrWhiteSpace(status))
+                parts.Add($"Estado: {status}");
+
+            var update = CleanSpeechText(activity.UpdateText);
+            if (!string.IsNullOrWhiteSpace(update))
+                parts.Add($"Última actualización: {update}");
+
+            var description = CleanSpeechText(activity.Description);
+            if (!string.IsNullOrWhiteSpace(description))
+                parts.Add($"Resumen: {description}");
+
+            foreach (var block in
+                     (blocks ?? Array.Empty<NotionPreviewBlock>())
+                     .Where(block =>
+                         !block.IsStrikethrough &&
+                         !(block.Kind == NotionPreviewBlockKind.ToDo && block.IsChecked) &&
+                         block.Kind != NotionPreviewBlockKind.Divider &&
+                         block.Kind != NotionPreviewBlockKind.Image &&
+                         block.Kind != NotionPreviewBlockKind.Pdf &&
+                         block.Kind != NotionPreviewBlockKind.File &&
+                         block.Kind != NotionPreviewBlockKind.Audio &&
+                         block.Kind != NotionPreviewBlockKind.Video &&
+                         block.Kind != NotionPreviewBlockKind.Embed)
+                     .Take(12))
+            {
+                var text = CleanSpeechText(block.Text);
+                if (!string.IsNullOrWhiteSpace(text))
+                    parts.Add(text);
+            }
+
+            return string.Join(
+                ". ",
+                parts
+                    .Where(value =>
+                        !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase));
+        }
+
+        private async Task StartCalendarActivitySpeechAsync(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks,
+            Button readButton,
+            Button stopButton)
+        {
+            var speechText =
+                BuildCalendarActivitySpeechText(
+                    activity,
+                    blocks);
+
+            if (string.IsNullOrWhiteSpace(speechText))
+            {
+                StatusText.Text =
+                    "Estado: Esta actividad no tiene contenido para leer.";
+                return;
+            }
+
+            try
+            {
+                StopNotionPreviewSpeech();
+
+                readButton.Content = "🔊 Leyendo...";
+                readButton.IsEnabled = false;
+                stopButton.IsEnabled = true;
+
+                var stream =
+                    await _previewSpeechSynth
+                        .SynthesizeTextToStreamAsync(
+                            speechText);
+
+                var player = new MediaPlayer
+                {
+                    Source =
+                        MediaSource.CreateFromStream(
+                            stream,
+                            stream.ContentType)
+                };
+
+                _previewSpeechPlayer = player;
+                _previewSpeechPlaying = true;
+
+                void ResetButtons()
+                {
+                    if (ReferenceEquals(
+                            _previewSpeechPlayer,
+                            player))
+                    {
+                        StopNotionPreviewSpeech();
+                    }
+
+                    readButton.Content = "▶ Leer resumen";
+                    readButton.IsEnabled = true;
+                    stopButton.IsEnabled = false;
+                }
+
+                player.MediaEnded +=
+                    (_, __) =>
+                        DispatcherQueue.TryEnqueue(
+                            ResetButtons);
+
+                player.MediaFailed +=
+                    (_, __) =>
+                        DispatcherQueue.TryEnqueue(
+                            ResetButtons);
+
+                StatusText.Text =
+                    "Estado: Leyendo resumen de la actividad...";
+
+                player.Play();
+            }
+            catch (Exception ex)
+            {
+                StopNotionPreviewSpeech();
+                readButton.Content = "▶ Leer resumen";
+                readButton.IsEnabled = true;
+                stopButton.IsEnabled = false;
+                StatusText.Text =
+                    $"Estado: No se pudo leer la actividad → {ex.Message}";
+            }
+        }
+
+        private FrameworkElement BuildCalendarPersonPreviewCard(
+            NotionCalendarActivity activity)
+        {
+            var root = new StackPanel
+            {
+                Spacing = 7
+            };
+
+            var heading = new Grid
+            {
+                ColumnSpacing = 8
+            };
+
+            heading.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = GridLength.Auto
+                });
+
+            heading.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = new GridLength(
+                        1,
+                        GridUnitType.Star)
+                });
+
+            var time = new TextBlock
+            {
+                Text = activity.TimeLabel,
+                MinWidth = 76,
+                FontSize = 11,
+                FontWeight =
+                    Microsoft.UI.Text.FontWeights.SemiBold,
+                Opacity = 0.82
+            };
+
+            var title = new TextBlock
+            {
+                Text = activity.Title,
+                FontSize = 12.5,
+                FontWeight =
+                    Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+                TextTrimming = TextTrimming.None
+            };
+
+            Grid.SetColumn(time, 0);
+            heading.Children.Add(time);
+
+            Grid.SetColumn(title, 1);
+            heading.Children.Add(title);
+
+            root.Children.Add(heading);
+
+            void AddSummary(
+                string label,
+                string value)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                    return;
+
+                root.Children.Add(
+                    new TextBlock
+                    {
+                        Text = $"{label}: {value}",
+                        FontSize = 10.5,
+                        TextWrapping = TextWrapping.Wrap,
+                        Opacity = 0.76
+                    });
+            }
+
+            AddSummary("Estado", activity.Status);
+            AddSummary(
+                "Última actualización",
+                activity.UpdateText);
+
+            if (activity.IsReviewMirror)
+            {
+                root.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            "Copia visual de seguimiento",
+                        FontSize = 10,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold,
+                        Opacity = 0.70
+                    });
+            }
+
+            var contentHost = new ContentControl
+            {
+                HorizontalContentAlignment =
+                    HorizontalAlignment.Stretch,
+                Visibility = Visibility.Collapsed
+            };
+
+            var actions = new VariableSizedWrapGrid
+            {
+                Orientation = Orientation.Horizontal,
+                MaximumRowsOrColumns = 3,
+                ItemWidth = 116,
+                ItemHeight = 36,
+                Width = 370
+            };
+
+            Button BuildCardActionButton(
+                string text)
+            {
+                return new Button
+                {
+                    Content = text,
+                    Width = 110,
+                    Height = 32,
+                    Margin = new Thickness(0, 0, 6, 4),
+                    Padding = new Thickness(8, 4, 8, 4),
+                    CornerRadius = new CornerRadius(6),
+                    Tag = activity
+                };
+            }
+
+            var previewButton =
+                BuildCardActionButton(
+                    "Ver contenido");
+
+            previewButton.Click +=
+                async (_, __) =>
+                {
+                    await ToggleCalendarPersonActivityContentAsync(
+                        activity,
+                        previewButton,
+                        contentHost);
+                };
+
+            var messageButton =
+                BuildCardActionButton(
+                    "Mensaje");
+
+            messageButton.Click +=
+                async (_, __) =>
+                {
+                    await ShowCalendarMessageComposerAsync(
+                        activity,
+                        _calendarPersonPreviewPerson);
+                };
+
+            ToolTipService.SetToolTip(
+                messageButton,
+                "Enviar mensaje con los datos de esta actividad");
+
+            var openButton =
+                BuildCardActionButton(
+                    "Abrir");
+
+            openButton.Click +=
+                async (_, __) =>
+                {
+                    await OpenCalendarActivityAsync(activity);
+                };
+
+            var readButton =
+                BuildCardActionButton(
+                    "▶ Leer resumen");
+
+            var stopSpeechButton =
+                BuildCardActionButton(
+                    "■ Detener");
+
+            stopSpeechButton.IsEnabled = false;
+
+            readButton.Click +=
+                async (_, __) =>
+                {
+                    await StartCalendarActivitySpeechAsync(
+                        activity,
+                        blocks: null,
+                        readButton,
+                        stopSpeechButton);
+                };
+
+            stopSpeechButton.Click +=
+                (_, __) =>
+                {
+                    StopNotionPreviewSpeech();
+                    readButton.Content = "▶ Leer resumen";
+                    readButton.IsEnabled = true;
+                    stopSpeechButton.IsEnabled = false;
+                };
+
+            actions.Children.Add(previewButton);
+            actions.Children.Add(messageButton);
+            actions.Children.Add(openButton);
+            actions.Children.Add(readButton);
+            actions.Children.Add(stopSpeechButton);
+
+            root.Children.Add(actions);
+            root.Children.Add(contentHost);
+
+            return new Border
+            {
+                Padding = new Thickness(11),
+                CornerRadius = new CornerRadius(9),
+                Background =
+                    new SolidColorBrush(
+                        Color.FromArgb(
+                            46,
+                            255,
+                            255,
+                            255)),
+                BorderBrush =
+                    GetActivityBrush(
+                        activity.Status,
+                        activity.StatusColor),
+                BorderThickness = new Thickness(1),
+                Child = root
+            };
+        }
+
+        private async Task ToggleCalendarPersonActivityContentAsync(
+            NotionCalendarActivity activity,
+            Button previewButton,
+            ContentControl contentHost)
+        {
+            if (contentHost.Visibility == Visibility.Visible)
+            {
+                contentHost.Visibility = Visibility.Collapsed;
+                previewButton.Content = "Ver contenido";
+                return;
+            }
+
+            contentHost.Visibility = Visibility.Visible;
+            previewButton.Content = "Ocultar contenido";
+
+            var loading = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Margin = new Thickness(0, 4, 0, 2)
+            };
+
+            loading.Children.Add(
+                new ProgressRing
+                {
+                    Width = 18,
+                    Height = 18,
+                    IsActive = true
+                });
+
+            loading.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Cargando únicamente esta actividad...",
+                    VerticalAlignment =
+                        VerticalAlignment.Center,
+                    FontSize = 10.5,
+                    Opacity = 0.72
+                });
+
+            contentHost.Content = loading;
+
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    "Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                contentHost.Content =
+                    BuildCalendarPersonPreviewMessage(
+                        "Configura primero el token de Notion.",
+                        isError: true);
+                return;
+            }
+
+            var panelToken =
+                _calendarPersonPreviewCts?.Token ??
+                CancellationToken.None;
+
+            using var cts =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    panelToken);
+
+            cts.CancelAfter(
+                TimeSpan.FromMinutes(3));
+
+            previewButton.IsEnabled = false;
+
+            try
+            {
+                var blocks =
+                    await _notionPreviewService
+                        .GetPagePreviewAsync(
+                            token,
+                            activity.PageId,
+                            cts.Token);
+
+                cts.Token.ThrowIfCancellationRequested();
+
+                contentHost.Content =
+                    BuildCalendarPersonActivityContent(
+                        activity,
+                        blocks);
+            }
+            catch (OperationCanceledException)
+            {
+                contentHost.Content =
+                    BuildCalendarPersonPreviewMessage(
+                        "La carga se canceló.",
+                        isError: false);
+            }
+            catch (Exception ex)
+            {
+                contentHost.Content =
+                    BuildCalendarPersonPreviewMessage(
+                        $"No se pudo cargar el contenido.\n{ex.Message}",
+                        isError: true);
+            }
+            finally
+            {
+                previewButton.IsEnabled = true;
+            }
+        }
+
+        private FrameworkElement BuildCalendarPersonActivityContent(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock> blocks)
+        {
+            var content = new StackPanel
+            {
+                Spacing = 6,
+                Margin = new Thickness(0, 5, 0, 0)
+            };
+
+            if (!string.IsNullOrWhiteSpace(
+                    activity.Description))
+            {
+                content.Children.Add(
+                    CreateSectionLabel(
+                        "DESCRIPCIÓN"));
+
+                content.Children.Add(
+                    CreatePreviewText(
+                        activity.Description,
+                        10.5,
+                        Microsoft.UI.Text.FontWeights.Normal,
+                        0.86,
+                        0));
+            }
+
+            var visibleBlocks = blocks
+                .Where(block =>
+                    block.Kind ==
+                        NotionPreviewBlockKind.Divider ||
+                    !string.IsNullOrWhiteSpace(
+                        block.Text) ||
+                    !string.IsNullOrWhiteSpace(
+                        block.Url))
+                .Take(120)
+                .ToList();
+
+            if (visibleBlocks.Count > 0)
+            {
+                content.Children.Add(
+                    CreateSectionLabel(
+                        "CONTENIDO DE LA ACTIVIDAD"));
+            }
+
+            var number = 0;
+
+            foreach (var block in visibleBlocks)
+            {
+                if (block.Kind ==
+                    NotionPreviewBlockKind.NumberedListItem)
+                {
+                    number++;
+                }
+                else
+                {
+                    number = 0;
+                }
+
+                var element =
+                    CreateBlockElement(
+                        block,
+                        number);
+
+                if (element == null)
+                    continue;
+
+                ConstrainCalendarPreviewElement(
+                    element,
+                    350);
+
+                content.Children.Add(element);
+            }
+
+            if (visibleBlocks.Count == 0 &&
+                string.IsNullOrWhiteSpace(
+                    activity.Description))
+            {
+                content.Children.Add(
+                    CreatePreviewText(
+                        "La actividad no contiene bloques visibles.",
+                        10.5,
+                        Microsoft.UI.Text.FontWeights.Normal,
+                        0.64,
+                        0));
+            }
+
+            return new Border
+            {
+                Padding = new Thickness(9),
+                CornerRadius = new CornerRadius(7),
+                Background =
+                    new SolidColorBrush(
+                        Color.FromArgb(
+                            30,
+                            255,
+                            255,
+                            255)),
+                Child = content
+            };
+        }
+
+        private static FrameworkElement
+            BuildCalendarPersonPreviewMessage(
+                string message,
+                bool isError)
+        {
+            return new Border
+            {
+                Margin = new Thickness(0, 5, 0, 0),
+                Padding = new Thickness(9),
+                CornerRadius = new CornerRadius(7),
+                Background =
+                    new SolidColorBrush(
+                        isError
+                            ? Color.FromArgb(
+                                34,
+                                248,
+                                113,
+                                113)
+                            : Color.FromArgb(
+                                30,
+                                255,
+                                255,
+                                255)),
+                Child = new TextBlock
+                {
+                    Text = message,
+                    FontSize = 10.5,
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.78
+                }
+            };
+        }
+
+        private void RefreshCalendarPersonPreviewIfOpen()
+        {
+            if (CalendarPersonPreviewPanel?.Visibility !=
+                    Visibility.Visible ||
+                string.IsNullOrWhiteSpace(
+                    _calendarPersonPreviewPerson))
+            {
+                return;
+            }
+
+            // Solo se reconstruye el listado si el panel no está siendo creado
+            // por esta misma llamada de DrawCalendar. La actualización diferida
+            // evita modificar el árbol visual mientras se recorre el calendario.
+            var person =
+                _calendarPersonPreviewPerson;
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_calendarViewActive &&
+                    CalendarPersonPreviewPanel?.Visibility ==
+                        Visibility.Visible &&
+                    string.Equals(
+                        person,
+                        _calendarPersonPreviewPerson,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    RenderCalendarPersonPreviewItems(person);
+                }
+            });
+        }
+
+        private void RenderCalendarPersonPreviewItems(
+            string person)
+        {
+            if (CalendarPersonPreviewItems == null ||
+                CalendarPersonPreviewPanel?.Visibility !=
+                    Visibility.Visible)
+            {
+                return;
+            }
+
+            CalendarPersonPreviewTitle.Text =
+                $"Actividades de {person}";
+
+            CalendarPersonPreviewDate.Text =
+                FormatCalendarDate(_calendarSelectedDate);
+
+            var activities =
+                GetCalendarPersonPreviewActivities(person);
+
+            CalendarPersonPreviewSummary.Text =
+                activities.Count == 0
+                    ? "No hay actividades visibles para esta persona en el día y filtros actuales."
+                    : activities.Count == 1
+                        ? "1 actividad · el contenido de Notion se carga solo al solicitarlo."
+                        : $"{activities.Count} actividades · el contenido de Notion se carga solo al solicitarlo.";
+
+            CalendarPersonPreviewItems.Children.Clear();
+
+            if (activities.Count == 0)
+            {
+                CalendarPersonPreviewItems.Children.Add(
+                    BuildCalendarPersonPreviewMessage(
+                        "No se encontraron actividades para mostrar.",
+                        isError: false));
+                return;
+            }
+
+            foreach (var activity in activities)
+            {
+                CalendarPersonPreviewItems.Children.Add(
+                    BuildCalendarPersonPreviewCard(
+                        activity));
+            }
+        }
+
+        private void CloseCalendarPersonPreviewPanel(
+            bool redrawCalendar = true)
+        {
+            StopNotionPreviewSpeech();
+            try
+            {
+                _calendarPersonPreviewCts?.Cancel();
+                _calendarPersonPreviewCts?.Dispose();
+            }
+            catch
+            {
+            }
+
+            _calendarPersonPreviewCts = null;
+            _calendarPersonPreviewPerson = string.Empty;
+
+            if (CalendarPersonPreviewItems != null)
+                CalendarPersonPreviewItems.Children.Clear();
+
+            if (CalendarPersonPreviewPanel != null)
+            {
+                CalendarPersonPreviewPanel.Visibility =
+                    Visibility.Collapsed;
+            }
+
+            if (redrawCalendar)
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_calendarViewActive)
+                        DrawCalendar(_calendarActivities);
+                });
+            }
+        }
+
         private MenuFlyout BuildCalendarHeaderContextFlyout(
             string person)
         {
@@ -2976,7 +4460,7 @@ namespace Anfeta.UI.Views
             {
                 ("jjohn", "John"), ("john", "John"),
                 ("kkarl", "Karla"), ("karla", "Karla"),
-                ("iisaia", "Isaias"), ("isaias", "Isaias"),
+                ("iisai", "Isaias"), ("isaias", "Isaias"),
                 ("ssote", "Sotelo"), ("sotelo", "Sotelo"),
                 ("sote", "Sotelo"), ("eedua", "Sotelo"),
                 ("eduardo", "Sotelo"), ("edua", "Sotelo"),
@@ -2986,7 +4470,7 @@ namespace Anfeta.UI.Views
                 ("eemma", "Emmanuel"), ("emmanuel", "Emmanuel"),
                 ("bbria", "Brian"), ("brian", "Brian"),
                 ("ggena", "Genaro"), ("genaro", "Genaro"),
-                ("nnetf", "Neftali"), ("nneft", "Neftali"),
+                ("nneft", "Neftali"),
                 ("neftali", "Neftali"), ("neft", "Neftali")
             };
 
@@ -2999,9 +4483,9 @@ namespace Anfeta.UI.Views
             return "Sin asignar";
         }
 
-        private async void CalendarActivity_Click(
+        private async void CalendarActivity_DoubleTapped(
             object sender,
-            RoutedEventArgs e)
+            DoubleTappedRoutedEventArgs e)
         {
             if (sender is not Button button ||
                 button.Tag is not NotionCalendarActivity activity)
@@ -3010,23 +4494,2100 @@ namespace Anfeta.UI.Views
             }
 
             var clickIsSuppressed =
+                _calendarDragActive ||
                 _calendarSuppressNextActivityClick ||
-                (DateTimeOffset.UtcNow <= _calendarSuppressActivityClickUntil &&
-                 (string.IsNullOrWhiteSpace(_calendarSuppressedActivityPageId) ||
-                  string.Equals(
-                      _calendarSuppressedActivityPageId,
-                      activity.PageId,
-                      StringComparison.OrdinalIgnoreCase)));
+                DateTimeOffset.UtcNow <=
+                    _calendarSuppressActivityClickUntil;
 
             if (clickIsSuppressed)
             {
                 _calendarSuppressNextActivityClick = false;
-                _calendarSuppressActivityClickUntil = DateTimeOffset.MinValue;
-                _calendarSuppressedActivityPageId = string.Empty;
+                _calendarSuppressActivityClickUntil =
+                    DateTimeOffset.MinValue;
+                _calendarSuppressedActivityPageId =
+                    string.Empty;
+                e.Handled = true;
                 return;
             }
 
+            e.Handled = true;
             await OpenCalendarActivityAsync(activity);
+        }
+
+        private async Task EnsureCalendarReviewFlowLocalCacheLoadedAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (_calendarReviewFlowLocalCacheLoaded)
+                return;
+
+            await _calendarReviewFlowLocalCacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                if (_calendarReviewFlowLocalCacheLoaded)
+                    return;
+
+                try
+                {
+                    var file =
+                        await ApplicationData.Current.LocalFolder
+                            .GetFileAsync(
+                                CalendarReviewFlowCacheFileName);
+
+                    var json =
+                        await FileIO.ReadTextAsync(file);
+
+                    var restored =
+                        JsonSerializer.Deserialize<
+                            Dictionary<string, ReviewFlowMetadata?>>(json);
+
+                    if (restored != null)
+                    {
+                        foreach (var item in restored)
+                        {
+                            if (!string.IsNullOrWhiteSpace(item.Key))
+                            {
+                                _calendarReviewFlowCache[
+                                    item.Key] = item.Value;
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // La primera ejecución todavía no tiene archivo local.
+                }
+
+                _calendarReviewFlowLocalCacheLoaded = true;
+            }
+            finally
+            {
+                _calendarReviewFlowLocalCacheLock.Release();
+            }
+        }
+
+        private async Task PersistCalendarReviewFlowLocalCacheAsync(
+            CancellationToken cancellationToken = default)
+        {
+            await _calendarReviewFlowLocalCacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                var snapshot =
+                    _calendarReviewFlowCache
+                        .Where(item =>
+                            !string.IsNullOrWhiteSpace(item.Key) &&
+                            item.Value != null)
+                        .ToDictionary(
+                            item => item.Key,
+                            item => item.Value,
+                            StringComparer.OrdinalIgnoreCase);
+
+                var json =
+                    JsonSerializer.Serialize(
+                        snapshot,
+                        new JsonSerializerOptions
+                        {
+                            WriteIndented = false
+                        });
+
+                var file =
+                    await ApplicationData.Current.LocalFolder
+                        .CreateFileAsync(
+                            CalendarReviewFlowCacheFileName,
+                            CreationCollisionOption.ReplaceExisting);
+
+                await FileIO.WriteTextAsync(
+                    file,
+                    json)
+                    .AsTask(cancellationToken);
+            }
+            finally
+            {
+                _calendarReviewFlowLocalCacheLock.Release();
+            }
+        }
+
+        private void ApplyCachedCalendarReviewFlow(
+            IReadOnlyList<NotionCalendarActivity> activities)
+        {
+            if (activities == null)
+                return;
+
+            foreach (var activity in activities)
+            {
+                if (activity == null ||
+                    string.IsNullOrWhiteSpace(activity.PageId))
+                {
+                    continue;
+                }
+
+                if (_calendarReviewFlowCache.TryGetValue(
+                        activity.PageId,
+                        out var metadata) &&
+                    metadata != null)
+                {
+                    ApplyReviewFlowMetadata(
+                        activity,
+                        metadata);
+                }
+            }
+        }
+
+        private static string GetActiveCalendarPersonFromTitle(
+            string title)
+        {
+            var value =
+                title ?? string.Empty;
+
+            var activeTags =
+                new Dictionary<string, string>(
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    ["jjohn"] = "John",
+                    ["kkarl"] = "Karla",
+                    ["iisai"] = "Isaias",
+                    ["ssote"] = "Sotelo",
+                    ["eedua"] = "Sotelo",
+                    ["aacal"] = "Acalli",
+                    ["aandr"] = "Andrade",
+                    ["eemma"] = "Emmanuel",
+                    ["bbria"] = "Brian",
+                    ["ggena"] = "Genaro",
+                    ["nneft"] = "Neftali"
+                };
+
+            var matches =
+                Regex.Matches(
+                    value,
+                    @"(?<![\p{L}\p{Nd}_])(?<tag>[a-z]{5})(?<suffix>\d*)(?![\p{L}\p{Nd}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            for (var index = matches.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                var tag =
+                    matches[index]
+                        .Groups["tag"]
+                        .Value;
+
+                if (activeTags.TryGetValue(
+                        tag,
+                        out var person))
+                {
+                    return person;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static bool ContainsAnyCalendarPersonTag(
+            string title)
+        {
+            var value = title ?? string.Empty;
+
+            var tags = new[]
+            {
+                "jjohn", "john",
+                "kkarl", "karl",
+                "iisai", "isai",
+                "ssote", "sote", "eedua", "edua",
+                "aacal", "acal",
+                "aandr", "andr",
+                "eemma", "emma",
+                "bbria", "bria",
+                "ggena", "gena",
+                "nneft", "neft"
+            };
+
+            return tags.Any(tag =>
+                Regex.IsMatch(
+                    value,
+                    $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(tag)}\d*(?![\p{{L}}\p{{Nd}}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant));
+        }
+
+        private IReadOnlyList<NotionCalendarActivity>
+            ExpandCalendarReviewActivities(
+                IReadOnlyList<NotionCalendarActivity> activities)
+        {
+            var result =
+                new List<NotionCalendarActivity>();
+
+            foreach (var activity in activities)
+            {
+                if (activity == null)
+                    continue;
+
+                var activePerson =
+                    GetActiveCalendarPersonFromTitle(
+                        activity.Title);
+
+                var personFromAssignee =
+                    NormalizeCalendarPerson(
+                        activity.Person);
+
+                var reviewFinished =
+                    string.Equals(
+                        activity.ReviewState,
+                        "approved",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(
+                        activity.ReviewState,
+                        "returned",
+                        StringComparison.OrdinalIgnoreCase);
+
+                var originalFromFlow =
+                    NormalizeCalendarPerson(
+                        activity.OriginalPerson);
+
+                var resolvedPerson =
+                    reviewFinished &&
+                    !string.IsNullOrWhiteSpace(originalFromFlow) &&
+                    !string.Equals(
+                        originalFromFlow,
+                        "Sin asignar",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? originalFromFlow
+                        : !string.IsNullOrWhiteSpace(personFromAssignee) &&
+                          !string.Equals(
+                              personFromAssignee,
+                              "Sin asignar",
+                              StringComparison.OrdinalIgnoreCase)
+                            ? personFromAssignee
+                            : activePerson;
+
+                if (activity.IsPendingReview &&
+                    HasCurrentReviewMirrorPhase(activity) &&
+                    !string.IsNullOrWhiteSpace(
+                        activity.OriginalPerson) &&
+                    !string.IsNullOrWhiteSpace(
+                        activity.ReviewAssignee))
+                {
+                    // La copia histórica existe únicamente mientras la fase
+                    // actual siga siendo rtuzREVISION. Al aprobar o regresar,
+                    // la actividad vuelve a mostrarse como una sola tarjeta.
+                    var originalCard =
+                        CloneCalendarActivity(activity);
+
+                    originalCard.Person =
+                        NormalizeCalendarPerson(
+                            activity.OriginalPerson);
+
+                    originalCard.IsReviewMirror = true;
+                    result.Add(originalCard);
+
+                    // En una revisión pendiente el título puede cambiar
+                    // antes de que Notion recalcule Assignee. Por eso aquí sí
+                    // se permite usar el tag activo como señal inmediata.
+                    var reviewerPerson =
+                        !string.IsNullOrWhiteSpace(activePerson)
+                            ? activePerson
+                            : resolvedPerson;
+
+                    if (string.Equals(
+                            reviewerPerson,
+                            NormalizeCalendarPerson(
+                                activity.ReviewAssignee),
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        var reviewerCard =
+                            CloneCalendarActivity(activity);
+
+                        reviewerCard.Person =
+                            reviewerPerson;
+
+                        reviewerCard.IsReviewMirror = false;
+                        result.Add(reviewerCard);
+                    }
+
+                    continue;
+                }
+
+                // Para actividades normales o regresadas:
+                // Assignee resuelto por el servicio primero; tag activo solo como respaldo.
+                if (!string.IsNullOrWhiteSpace(resolvedPerson) &&
+                    !string.Equals(
+                        resolvedPerson,
+                        "Sin asignar",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var assignedCard =
+                        CloneCalendarActivity(activity);
+
+                    assignedCard.Person =
+                        resolvedPerson;
+
+                    if (string.IsNullOrWhiteSpace(
+                            assignedCard.OriginalPerson) ||
+                        string.Equals(
+                            NormalizeCalendarPerson(
+                                assignedCard.OriginalPerson),
+                            "Sin asignar",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        assignedCard.OriginalPerson =
+                            resolvedPerson;
+                    }
+
+                    assignedCard.IsReviewMirror = false;
+                    result.Add(assignedCard);
+                    continue;
+                }
+
+                // No se elimina ninguna actividad silenciosamente.
+                // Si el título contiene tags pero ninguno activo fue válido,
+                // se conserva en Sin asignar para que el problema sea visible
+                // y pueda corregirse, en vez de desaparecer del calendario.
+                if (ContainsAnyCalendarPersonTag(activity.Title))
+                {
+                    var unresolved =
+                        CloneCalendarActivity(activity);
+
+                    unresolved.Person =
+                        "Sin asignar";
+
+                    unresolved.OriginalPerson =
+                        string.Empty;
+
+                    unresolved.IsReviewMirror = false;
+                    result.Add(unresolved);
+                    continue;
+                }
+
+                result.Add(activity);
+            }
+
+            return result;
+        }
+
+        private static NotionCalendarActivity CloneCalendarActivity(
+            NotionCalendarActivity activity)
+        {
+            return new NotionCalendarActivity
+            {
+                PageId = activity.PageId,
+                PageUrl = activity.PageUrl,
+                Title = activity.Title,
+                Person = activity.Person,
+                OriginalPerson = activity.OriginalPerson,
+                ReviewAssignee = activity.ReviewAssignee,
+                ReviewState = activity.ReviewState,
+                ReviewSubmittedAt = activity.ReviewSubmittedAt,
+                ReviewUpdatedAt = activity.ReviewUpdatedAt,
+                ReviewUpdatedBy = activity.ReviewUpdatedBy,
+                ReviewNote = activity.ReviewNote,
+                IsReviewMirror = activity.IsReviewMirror,
+                IsCompletedForReview = activity.IsCompletedForReview,
+                Project = activity.Project,
+                Status = activity.Status,
+                StatusColor = activity.StatusColor,
+                UpdateText = activity.UpdateText,
+                Description = activity.Description,
+                DatePropertyName = activity.DatePropertyName,
+                Start = activity.Start,
+                End = activity.End
+            };
+        }
+
+        private async Task RepairCompletedReviewAssigneesAsync(
+            string token,
+            IReadOnlyList<NotionCalendarActivity> activities,
+            CancellationToken cancellationToken)
+        {
+            foreach (var activity in activities)
+            {
+                if (activity == null ||
+                    string.IsNullOrWhiteSpace(activity.PageId) ||
+                    _calendarReviewAssigneeRepairAttempted.Contains(
+                        activity.PageId))
+                {
+                    continue;
+                }
+
+                var isCompletedFlow =
+                    string.Equals(
+                        activity.ReviewState,
+                        "approved",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(
+                        activity.ReviewState,
+                        "returned",
+                        StringComparison.OrdinalIgnoreCase);
+
+                if (!isCompletedFlow)
+                    continue;
+
+                var reviewer =
+                    NormalizeCalendarPerson(
+                        activity.ReviewAssignee);
+
+                var original =
+                    NormalizeCalendarPerson(
+                        activity.OriginalPerson);
+
+                var currentAssignee =
+                    NormalizeCalendarPerson(
+                        activity.Person);
+
+                if (!IsUsableOriginalReviewPerson(
+                        original,
+                        reviewer) ||
+                    string.Equals(
+                        currentAssignee,
+                        original,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                _calendarReviewAssigneeRepairAttempted.Add(
+                    activity.PageId);
+
+                try
+                {
+                    await _notionCalendarService
+                        .UpdateActivityAssigneeAsync(
+                            token,
+                            activity.PageId,
+                            original,
+                            cancellationToken);
+
+                    activity.Person =
+                        original;
+                }
+                catch
+                {
+                    // La vista seguirá usando OriginalPerson para no dejar la
+                    // tarjeta con el revisor. Se intentará de nuevo al reiniciar.
+                }
+            }
+        }
+
+        private async Task HydrateCalendarReviewFlowAsync(
+            IReadOnlyList<NotionCalendarActivity> activities,
+            CancellationToken cancellationToken = default,
+            long processVersion = 0)
+        {
+            if (activities == null ||
+                activities.Count == 0)
+            {
+                return;
+            }
+
+            await EnsureCalendarReviewFlowLocalCacheLoadedAsync(
+                cancellationToken);
+
+            await _calendarReviewFlowHydrationLock.WaitAsync(
+                cancellationToken);
+
+            _calendarReviewFlowHydrating = true;
+
+            try
+            {
+                ApplyCachedCalendarReviewFlow(activities);
+
+                var token =
+                    ApplicationData.Current.LocalSettings.Values[
+                        "Notion.Token"] as string;
+
+                if (string.IsNullOrWhiteSpace(token))
+                    return;
+
+                await RepairCompletedReviewAssigneesAsync(
+                    token,
+                    activities,
+                    cancellationToken);
+
+                // Antes se consultaba metadata para todas las actividades del
+                // día. Ahora solo se consulta un PageId desconocido cuando su
+                // fase actual realmente participa en rtuz/zREVISION.
+                var candidates = activities
+                    .Where(activity =>
+                        activity != null &&
+                        !string.IsNullOrWhiteSpace(activity.PageId) &&
+                        IsReviewEligibleActivity(activity) &&
+                        (!_calendarReviewFlowCache.TryGetValue(
+                             activity.PageId,
+                             out var cachedMetadata) ||
+                         cachedMetadata == null))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+
+                if (candidates.Count == 0)
+                    return;
+
+                var completed = 0;
+
+                // Dos productores son suficientes; el coordinador global
+                // conserva una sola petición activa y el ritmo seguro.
+                using var gate =
+                    new SemaphoreSlim(2, 2);
+
+                var tasks = candidates.Select(async activity =>
+                {
+                    await gate.WaitAsync(cancellationToken);
+
+                    try
+                    {
+                        _calendarLastKnownPeople.TryGetValue(
+                            activity.PageId,
+                            out var previousPeople);
+
+                        if (string.IsNullOrWhiteSpace(previousPeople))
+                        {
+                            previousPeople =
+                                GetPersistedCalendarPeople(
+                                    activity.PageId);
+                        }
+
+                        var metadata =
+                            await _calendarReviewFlowService
+                                .GetReviewFlowAsync(
+                                    token,
+                                    activity.PageId,
+                                    cancellationToken);
+
+                        if (metadata == null)
+                        {
+                            metadata = TryInferManualReviewFlow(
+                                activity,
+                                previousPeople);
+
+                            if (metadata != null)
+                            {
+                                await _calendarReviewFlowService
+                                    .SaveReviewFlowAsync(
+                                        token,
+                                        activity.PageId,
+                                        metadata,
+                                        cancellationToken);
+                            }
+                        }
+
+                        _calendarReviewFlowCache[
+                            activity.PageId] = metadata;
+
+                        ApplyReviewFlowMetadata(
+                            activity,
+                            metadata);
+
+                        var knownPeople = metadata != null
+                            ? string.Join(
+                                ", ",
+                                new[]
+                                {
+                                    metadata.OriginalPerson,
+                                    metadata.ReviewAssignee
+                                }.Where(value =>
+                                    !string.IsNullOrWhiteSpace(value)))
+                            : activity.Person;
+
+                        _calendarLastKnownPeople[
+                            activity.PageId] = knownPeople;
+
+                        PersistCalendarPeople(
+                            activity.PageId,
+                            knownPeople);
+                    }
+                    catch
+                    {
+                        // Una página sin historial no bloquea el resto.
+                    }
+                    finally
+                    {
+                        gate.Release();
+
+                        var current =
+                            Interlocked.Increment(ref completed);
+
+                        DispatcherQueue.TryEnqueue(() =>
+                            UpdateCalendarReviewProgress(
+                                processVersion,
+                                current,
+                                candidates.Count));
+                    }
+                });
+
+                await Task.WhenAll(tasks);
+
+                await PersistCalendarReviewFlowLocalCacheAsync(
+                    cancellationToken);
+
+                ApplyCachedCalendarReviewFlow(activities);
+            }
+            finally
+            {
+                _calendarReviewFlowHydrating = false;
+                _calendarReviewFlowHydrationLock.Release();
+            }
+        }
+
+        private static ReviewFlowMetadata?
+            TryInferManualReviewFlow(
+                NotionCalendarActivity activity,
+                string? previousPeople)
+        {
+            var current = SplitPersons(activity.Person)
+                .Select(NormalizeCalendarPerson)
+                .Where(person =>
+                    !string.IsNullOrWhiteSpace(person) &&
+                    !string.Equals(
+                        person,
+                        "Sin asignar",
+                        StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var previous = SplitPersons(previousPeople ?? string.Empty)
+                .Select(NormalizeCalendarPerson)
+                .Where(person =>
+                    !string.IsNullOrWhiteSpace(person) &&
+                    !string.Equals(
+                        person,
+                        "Sin asignar",
+                        StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            static bool IsReviewer(string person) =>
+                string.Equals(
+                    person,
+                    "Genaro",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    person,
+                    "John",
+                    StringComparison.OrdinalIgnoreCase);
+
+            var reviewer = current.FirstOrDefault(IsReviewer) ??
+                           previous.FirstOrDefault(IsReviewer) ??
+                           string.Empty;
+
+            var original = previous
+                .FirstOrDefault(person => !IsReviewer(person)) ??
+                current.FirstOrDefault(person => !IsReviewer(person)) ??
+                string.Empty;
+
+            if (string.IsNullOrWhiteSpace(original) ||
+                string.IsNullOrWhiteSpace(reviewer) ||
+                string.Equals(
+                    original,
+                    reviewer,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return new ReviewFlowMetadata
+            {
+                OriginalPerson = original,
+                ReviewAssignee = reviewer,
+                State = "pending",
+                SubmittedAt = DateTimeOffset.Now,
+                UpdatedAt = DateTimeOffset.Now,
+                UpdatedBy = "ANFETA",
+                Note =
+                    "Flujo reconstruido automáticamente después de un cambio manual de tags."
+            };
+        }
+
+        private static bool IsUsableOriginalReviewPerson(
+            string? person,
+            string reviewer)
+        {
+            var normalizedPerson =
+                NormalizeCalendarPerson(
+                    person ?? string.Empty);
+
+            var normalizedReviewer =
+                NormalizeCalendarPerson(
+                    reviewer ?? string.Empty);
+
+            return !string.IsNullOrWhiteSpace(
+                       normalizedPerson) &&
+                   !string.Equals(
+                       normalizedPerson,
+                       "Sin asignar",
+                       StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(
+                       normalizedPerson,
+                       normalizedReviewer,
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolveLastNonReviewerPersonFromTitle(
+            string title,
+            string reviewer)
+        {
+            var normalizedReviewer =
+                NormalizeCalendarPerson(
+                    reviewer ?? string.Empty);
+
+            var matches =
+                new List<(int Index, string Person)>();
+
+            foreach (var pair in CalendarReviewPersonTags)
+            {
+                if (string.Equals(
+                        pair.Key,
+                        normalizedReviewer,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                foreach (Match match in Regex.Matches(
+                             title ?? string.Empty,
+                             $@"(?<![\p{{L}}\p{{Nd}}_])(?:{Regex.Escape(pair.Value.Active)}|{Regex.Escape(pair.Value.Passive)})\d*(?![\p{{L}}\p{{Nd}}_])",
+                             RegexOptions.IgnoreCase |
+                             RegexOptions.CultureInvariant))
+                {
+                    matches.Add(
+                        (match.Index, pair.Key));
+                }
+            }
+
+            return matches
+                .OrderByDescending(item => item.Index)
+                .Select(item => item.Person)
+                .FirstOrDefault() ??
+                string.Empty;
+        }
+
+        private static string ResolveOriginalReviewPerson(
+            NotionCalendarActivity activity,
+            string reviewer)
+        {
+            // La persona que pulsa "Enviar a revisión" es la fuente más
+            // confiable antes de cambiar Assignee al revisor. Si intenta
+            // enviársela a sí misma, se usa el responsable actual de la
+            // actividad como respaldo.
+            var candidates = new List<string>
+            {
+                GetCurrentCalendarUserName(),
+                activity.Person,
+                activity.OriginalPerson,
+                ResolveLastNonReviewerPersonFromTitle(
+                    activity.Title,
+                    reviewer)
+            };
+
+            candidates.AddRange(
+                SplitPersons(
+                    GetPersistedCalendarPeople(
+                        activity.PageId)));
+
+            foreach (var candidate in candidates)
+            {
+                if (!IsUsableOriginalReviewPerson(
+                        candidate,
+                        reviewer))
+                {
+                    continue;
+                }
+
+                return NormalizeCalendarPerson(
+                    candidate);
+            }
+
+            return NormalizeCalendarPerson(
+                activity.Person);
+        }
+
+        private static string ResolveOriginalReviewPersonForCompletion(
+            NotionCalendarActivity activity,
+            string reviewer,
+            ReviewFlowMetadata? previousMetadata)
+        {
+            // Mientras está en rtuzREVISION, BuildReviewTitleForState deja
+            // al responsable original inmediatamente antes del revisor.
+            // Esta señal corrige también metadata antigua que haya guardado
+            // por error al propio revisor como OriginalPerson.
+            var candidates = new List<string>
+            {
+                ResolveLastNonReviewerPersonFromTitle(
+                    activity.Title,
+                    reviewer),
+                previousMetadata?.OriginalPerson ?? string.Empty,
+                activity.OriginalPerson,
+                activity.Person
+            };
+
+            candidates.AddRange(
+                SplitPersons(
+                    GetPersistedCalendarPeople(
+                        activity.PageId)));
+
+            foreach (var candidate in candidates)
+            {
+                if (!IsUsableOriginalReviewPerson(
+                        candidate,
+                        reviewer))
+                {
+                    continue;
+                }
+
+                return NormalizeCalendarPerson(
+                    candidate);
+            }
+
+            return NormalizeCalendarPerson(
+                activity.OriginalPerson);
+        }
+
+        private static void ApplyReviewFlowMetadata(
+            NotionCalendarActivity activity,
+            ReviewFlowMetadata? metadata)
+        {
+            if (activity == null || metadata == null)
+                return;
+
+            var normalizedReviewer =
+                NormalizeCalendarPerson(
+                    metadata.ReviewAssignee);
+
+            var normalizedOriginal =
+                NormalizeCalendarPerson(
+                    metadata.OriginalPerson);
+
+            // El título pendiente conserva al responsable real justo
+            // antes del revisor. Se prioriza esa señal para reparar metadata
+            // antigua, incluso si OriginalPerson quedó con otra persona válida.
+            var originalFromTitle =
+                ResolveLastNonReviewerPersonFromTitle(
+                    activity.Title,
+                    normalizedReviewer);
+
+            if (IsUsableOriginalReviewPerson(
+                    originalFromTitle,
+                    normalizedReviewer))
+            {
+                normalizedOriginal =
+                    originalFromTitle;
+            }
+            else if (!IsUsableOriginalReviewPerson(
+                         normalizedOriginal,
+                         normalizedReviewer))
+            {
+                normalizedOriginal =
+                    string.Empty;
+            }
+
+            if (IsUsableOriginalReviewPerson(
+                    normalizedOriginal,
+                    normalizedReviewer))
+            {
+                activity.OriginalPerson =
+                    normalizedOriginal;
+            }
+            else if (string.IsNullOrWhiteSpace(
+                         activity.OriginalPerson))
+            {
+                activity.OriginalPerson =
+                    activity.Person;
+            }
+
+            activity.ReviewAssignee =
+                normalizedReviewer;
+
+            activity.ReviewState =
+                metadata.State ?? string.Empty;
+
+            activity.ReviewSubmittedAt =
+                metadata.SubmittedAt == default
+                    ? null
+                    : metadata.SubmittedAt;
+
+            activity.ReviewUpdatedAt =
+                metadata.UpdatedAt == default
+                    ? null
+                    : metadata.UpdatedAt;
+
+            activity.ReviewUpdatedBy =
+                metadata.UpdatedBy ?? string.Empty;
+
+            activity.ReviewNote =
+                metadata.Note ?? string.Empty;
+        }
+
+        private async void CalendarContextSendToReview_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity = GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            await PromptAndSendCalendarActivityToReviewAsync(
+                activity);
+        }
+
+        private async Task<bool>
+            PromptAndSendCalendarActivityToReviewAsync(
+                NotionCalendarActivity activity)
+        {
+            if (activity == null)
+                return false;
+
+            if (!CanSendCalendarActivityToReview(activity))
+            {
+                StatusText.Text =
+                    "Estado: Enviar a revisión aplica a prtuzREVISION, zREVISION o una revisión regresada.";
+                return false;
+            }
+
+            var combo = new ComboBox
+            {
+                Header = "Enviar para revisión a",
+                MinWidth = 320
+            };
+
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = "Genaro",
+                Tag = "Genaro"
+            });
+
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = "John",
+                Tag = "John"
+            });
+
+            combo.SelectedIndex = 0;
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Enviar actividad a revisión",
+                Content = combo,
+                PrimaryButtonText = "Enviar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                return false;
+            }
+
+            var reviewer =
+                (combo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ??
+                "Genaro";
+
+            var original =
+                ResolveOriginalReviewPerson(
+                    activity,
+                    reviewer);
+
+            _calendarReviewFlowCache.TryGetValue(
+                activity.PageId,
+                out var existingReviewMetadata);
+
+            var pendingMetadata =
+                new ReviewFlowMetadata
+                {
+                    OriginalPerson = original,
+                    ReviewAssignee = reviewer,
+                    State = "pending",
+                    SubmittedAt = activity.ReviewSubmittedAt ??
+                        existingReviewMetadata?.SubmittedAt ??
+                        DateTimeOffset.Now,
+                    UpdatedAt = DateTimeOffset.Now,
+                    UpdatedBy = GetCurrentCalendarUserName(),
+                    Note = "Enviada a revisión desde ANFETA.",
+                    AlertPageId =
+                        existingReviewMetadata?.AlertPageId ??
+                        string.Empty,
+                    AlertPageUrl =
+                        existingReviewMetadata?.AlertPageUrl ??
+                        string.Empty
+                };
+
+            await SaveCalendarReviewFlowAsync(
+                activity,
+                pendingMetadata,
+                "Actividad enviada a revisión");
+
+            var alert =
+                await SendCalendarReviewAlertAsync(
+                    activity,
+                    reviewer,
+                    "Actividad lista para revisión");
+
+            if (alert != null &&
+                !string.IsNullOrWhiteSpace(alert.PageId))
+            {
+                var linkedMetadata =
+                    new ReviewFlowMetadata
+                    {
+                        OriginalPerson = pendingMetadata.OriginalPerson,
+                        ReviewAssignee = pendingMetadata.ReviewAssignee,
+                        State = pendingMetadata.State,
+                        SubmittedAt = pendingMetadata.SubmittedAt,
+                        UpdatedAt = DateTimeOffset.Now,
+                        UpdatedBy = pendingMetadata.UpdatedBy,
+                        Note = pendingMetadata.Note,
+                        AlertPageId = alert.PageId,
+                        AlertPageUrl = alert.PageUrl
+                    };
+
+                var token =
+                    ApplicationData.Current.LocalSettings.Values[
+                        "Notion.Token"] as string;
+
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    using var cts =
+                        new CancellationTokenSource(
+                            TimeSpan.FromMinutes(2));
+
+                    await _calendarReviewFlowService.SaveReviewFlowAsync(
+                        token,
+                        activity.PageId,
+                        linkedMetadata,
+                        cts.Token);
+
+                    _calendarReviewFlowCache[
+                        activity.PageId] = linkedMetadata;
+
+                    await PersistCalendarReviewFlowLocalCacheAsync(
+                        cts.Token);
+
+                    foreach (var item in _calendarActivities.Where(item =>
+                                 string.Equals(
+                                     item.PageId,
+                                     activity.PageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        ApplyReviewFlowMetadata(
+                            item,
+                            linkedMetadata);
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        private async void CalendarContextApproveReview_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity = GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            if (!CanCurrentUserResolveReview(activity))
+            {
+                StatusText.Text =
+                    $"Estado: Solo {activity.ReviewAssignee} puede aprobar esta revisión.";
+                return;
+            }
+
+            _calendarReviewFlowCache.TryGetValue(
+                activity.PageId,
+                out var previousMetadata);
+
+            var resolvedReviewer =
+                NormalizeCalendarPerson(
+                    !string.IsNullOrWhiteSpace(
+                        previousMetadata?.ReviewAssignee)
+                        ? previousMetadata.ReviewAssignee
+                        : activity.ReviewAssignee);
+
+            var resolvedOriginal =
+                ResolveOriginalReviewPersonForCompletion(
+                    activity,
+                    resolvedReviewer,
+                    previousMetadata);
+
+            var approvedMetadata =
+                new ReviewFlowMetadata
+                {
+                    OriginalPerson = resolvedOriginal,
+                    ReviewAssignee = resolvedReviewer,
+                    State = "approved",
+                    SubmittedAt = activity.ReviewSubmittedAt ??
+                        previousMetadata?.SubmittedAt ??
+                        DateTimeOffset.Now,
+                    UpdatedAt = DateTimeOffset.Now,
+                    UpdatedBy = GetCurrentCalendarUserName(),
+                    Note = "Revisión aprobada desde ANFETA.",
+                    AlertPageId =
+                        previousMetadata?.AlertPageId ??
+                        string.Empty,
+                    AlertPageUrl =
+                        previousMetadata?.AlertPageUrl ??
+                        string.Empty
+                };
+
+            await SaveCalendarReviewFlowAsync(
+                activity,
+                approvedMetadata,
+                "Actividad aprobada");
+
+            try
+            {
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(2));
+
+                var token =
+                    ApplicationData.Current.LocalSettings.Values[
+                        "Notion.Token"] as string;
+
+                var threadIsActive =
+                    !string.IsNullOrWhiteSpace(
+                        approvedMetadata.AlertPageId) &&
+                    !string.IsNullOrWhiteSpace(token) &&
+                    await _calendarReviewFlowService
+                        .IsPageActiveAsync(
+                            token,
+                            approvedMetadata.AlertPageId,
+                            cts.Token);
+
+                if (threadIsActive)
+                {
+                    await AppendReviewHistoryEntryAsync(
+                        approvedMetadata,
+                        approvedMetadata.OriginalPerson,
+                        "Revisión aprobada.",
+                        retargetNotification: true,
+                        cts.Token);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private async void CalendarContextReturnReview_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity = GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            if (!CanCurrentUserResolveReview(activity))
+            {
+                StatusText.Text =
+                    $"Estado: Solo {activity.ReviewAssignee} puede regresar esta revisión.";
+                return;
+            }
+
+            var noteBox = new TextBox
+            {
+                Header = "Correcciones solicitadas",
+                PlaceholderText = "Describe brevemente qué debe corregirse…",
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                MinWidth = 380,
+                MinHeight = 90
+            };
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Regresar actividad",
+                Content = noteBox,
+                PrimaryButtonText = "Regresar",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var correctionText =
+                string.IsNullOrWhiteSpace(noteBox.Text)
+                    ? "Regresada con correcciones desde ANFETA."
+                    : noteBox.Text.Trim();
+
+            _calendarReviewFlowCache.TryGetValue(
+                activity.PageId,
+                out var previousMetadata);
+
+            var resolvedReviewer =
+                NormalizeCalendarPerson(
+                    !string.IsNullOrWhiteSpace(
+                        previousMetadata?.ReviewAssignee)
+                        ? previousMetadata.ReviewAssignee
+                        : activity.ReviewAssignee);
+
+            var resolvedOriginal =
+                ResolveOriginalReviewPersonForCompletion(
+                    activity,
+                    resolvedReviewer,
+                    previousMetadata);
+
+            var returnedMetadata =
+                new ReviewFlowMetadata
+                {
+                    OriginalPerson = resolvedOriginal,
+                    ReviewAssignee = resolvedReviewer,
+                    State = "returned",
+                    SubmittedAt = activity.ReviewSubmittedAt ??
+                        previousMetadata?.SubmittedAt ??
+                        DateTimeOffset.Now,
+                    UpdatedAt = DateTimeOffset.Now,
+                    UpdatedBy = GetCurrentCalendarUserName(),
+                    Note = correctionText,
+                    AlertPageId =
+                        previousMetadata?.AlertPageId ??
+                        string.Empty,
+                    AlertPageUrl =
+                        previousMetadata?.AlertPageUrl ??
+                        string.Empty
+                };
+
+            await SaveCalendarReviewFlowAsync(
+                activity,
+                returnedMetadata,
+                "Actividad regresada con correcciones");
+
+            try
+            {
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(2));
+
+                var token =
+                    ApplicationData.Current.LocalSettings.Values[
+                        "Notion.Token"] as string;
+
+                var threadIsActive =
+                    !string.IsNullOrWhiteSpace(
+                        returnedMetadata.AlertPageId) &&
+                    !string.IsNullOrWhiteSpace(token) &&
+                    await _calendarReviewFlowService
+                        .IsPageActiveAsync(
+                            token,
+                            returnedMetadata.AlertPageId,
+                            cts.Token);
+
+                if (threadIsActive)
+                {
+                    await AppendReviewHistoryEntryAsync(
+                        returnedMetadata,
+                        returnedMetadata.OriginalPerson,
+                        $"Correcciones solicitadas: {correctionText}",
+                        retargetNotification: true,
+                        cts.Token);
+
+                    RequestOpenConversation(
+                        returnedMetadata.AlertPageId);
+                }
+                else
+                {
+                    var newAlert =
+                        await SendCalendarReviewAlertAsync(
+                            activity,
+                            returnedMetadata.OriginalPerson,
+                            $"Correcciones solicitadas: {correctionText}");
+
+                    if (newAlert != null &&
+                        !string.IsNullOrWhiteSpace(
+                            newAlert.PageId))
+                    {
+                        var relinkedMetadata =
+                            new ReviewFlowMetadata
+                            {
+                                OriginalPerson =
+                                    returnedMetadata.OriginalPerson,
+                                ReviewAssignee =
+                                    returnedMetadata.ReviewAssignee,
+                                State =
+                                    returnedMetadata.State,
+                                SubmittedAt =
+                                    returnedMetadata.SubmittedAt,
+                                UpdatedAt =
+                                    DateTimeOffset.Now,
+                                UpdatedBy =
+                                    returnedMetadata.UpdatedBy,
+                                Note =
+                                    returnedMetadata.Note,
+                                AlertPageId =
+                                    newAlert.PageId,
+                                AlertPageUrl =
+                                    newAlert.PageUrl
+                            };
+
+                        await _calendarReviewFlowService
+                            .SaveReviewFlowAsync(
+                                token!,
+                                activity.PageId,
+                                relinkedMetadata,
+                                cts.Token);
+
+                        _calendarReviewFlowCache[
+                            activity.PageId] =
+                            relinkedMetadata;
+
+                        await PersistCalendarReviewFlowLocalCacheAsync(
+                            cts.Token);
+
+                        RequestOpenConversation(
+                            newAlert.PageId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: La actividad regresó, pero no se pudo crear o actualizar la notificación → {ex.Message}";
+            }
+        }
+
+
+        private async void CalendarContextReassignApproved_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null ||
+                activity.IsReviewMirror)
+            {
+                return;
+            }
+
+            if (!HasExactCalendarPhase(
+                    activity,
+                    "zREVISION"))
+            {
+                StatusText.Text =
+                    "Estado: Esta opción solo está disponible en zREVISION.";
+                return;
+            }
+
+            var combo = new ComboBox
+            {
+                Header = "Nuevo responsable",
+                MinWidth = 340,
+                HorizontalAlignment =
+                    HorizontalAlignment.Stretch
+            };
+
+            foreach (var person in
+                     CalendarReviewPersonTags.Keys
+                         .OrderBy(value => value))
+            {
+                combo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = person,
+                        Tag = person
+                    });
+            }
+
+            var currentPerson =
+                NormalizeCalendarPerson(activity.Person);
+
+            combo.SelectedItem = combo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item =>
+                    string.Equals(
+                        item.Tag?.ToString(),
+                        currentPerson,
+                        StringComparison.OrdinalIgnoreCase));
+
+            if (combo.SelectedIndex < 0)
+                combo.SelectedIndex = 0;
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title =
+                    "Reasignar y pasar a prtuzREVISION",
+                Content = combo,
+                PrimaryButtonText = "Reasignar",
+                CloseButtonText = "Cancelar",
+                DefaultButton =
+                    ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() !=
+                    ContentDialogResult.Primary ||
+                combo.SelectedItem is not ComboBoxItem selected)
+            {
+                return;
+            }
+
+            var newPerson =
+                NormalizeCalendarPerson(
+                    selected.Tag?.ToString() ??
+                    string.Empty);
+
+            await ReassignApprovedCalendarActivityAsync(
+                activity,
+                newPerson);
+        }
+
+        private static string BuildCalendarReassignedTitle(
+            string currentTitle,
+            string newPerson)
+        {
+            var normalizedPerson =
+                NormalizeCalendarPerson(newPerson);
+
+            if (!CalendarReviewPersonTags.TryGetValue(
+                    normalizedPerson,
+                    out var selectedTags))
+            {
+                throw new InvalidOperationException(
+                    $"No se encontró la configuración de tags para {newPerson}.");
+            }
+
+            var result = ReplaceCalendarReviewPhase(
+                currentTitle,
+                "prtuzREVISION");
+
+            var selectedSuffix =
+                ReadCalendarPersonTagSuffix(
+                    result,
+                    selectedTags.Active,
+                    selectedTags.Passive);
+
+            result = RemoveCalendarPersonTags(
+                result,
+                selectedTags.Active,
+                selectedTags.Passive);
+
+            foreach (var pair in CalendarReviewPersonTags)
+            {
+                if (string.Equals(
+                        pair.Key,
+                        normalizedPerson,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                result = Regex.Replace(
+                    result,
+                    $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(pair.Value.Active)}(?<suffix>\d*)(?![\p{{L}}\p{{Nd}}_])",
+                    match =>
+                        pair.Value.Passive +
+                        match.Groups["suffix"].Value,
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+            }
+
+            result = Regex.Replace(
+                    result,
+                    @"\s{2,}",
+                    " ")
+                .Trim();
+
+            return string.Join(
+                " ",
+                new[]
+                {
+                    result,
+                    selectedTags.Active + selectedSuffix
+                }.Where(value =>
+                    !string.IsNullOrWhiteSpace(value)));
+        }
+
+        private async Task ReassignApprovedCalendarActivityAsync(
+            NotionCalendarActivity activity,
+            string newPerson)
+        {
+            if (string.IsNullOrWhiteSpace(newPerson) ||
+                string.Equals(
+                    newPerson,
+                    "Sin asignar",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                StatusText.Text =
+                    "Estado: Selecciona un responsable válido.";
+                return;
+            }
+
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    "Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            try
+            {
+                ShowLoadingState(
+                    "Estado: Reasignando actividad…",
+                    activity.Title);
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(2));
+
+                var updatedTitle =
+                    BuildCalendarReassignedTitle(
+                        activity.Title,
+                        newPerson);
+
+                await _notionCalendarService
+                    .UpdateActivityTitleAsync(
+                        token,
+                        activity.PageId,
+                        updatedTitle,
+                        cts.Token);
+
+                try
+                {
+                    await _notionCalendarService
+                        .UpdateActivityAssigneeAsync(
+                            token,
+                            activity.PageId,
+                            newPerson,
+                            cts.Token);
+                }
+                catch
+                {
+                    // El título ya quedó actualizado. La propiedad puede ser
+                    // de solo lectura y recalcularse unos segundos después.
+                }
+
+                _calendarReviewFlowCache.TryGetValue(
+                    activity.PageId,
+                    out var previousMetadata);
+
+                var metadata = new ReviewFlowMetadata
+                {
+                    OriginalPerson = newPerson,
+                    ReviewAssignee =
+                        activity.ReviewAssignee,
+                    State = "reassigned",
+                    SubmittedAt =
+                        activity.ReviewSubmittedAt ??
+                        previousMetadata?.SubmittedAt ??
+                        DateTimeOffset.Now,
+                    UpdatedAt = DateTimeOffset.Now,
+                    UpdatedBy =
+                        GetCurrentCalendarUserName(),
+                    Note =
+                        $"Actividad reasignada a {newPerson} y enviada a prtuzREVISION desde ANFETA.",
+                    AlertPageId =
+                        previousMetadata?.AlertPageId ??
+                        string.Empty,
+                    AlertPageUrl =
+                        previousMetadata?.AlertPageUrl ??
+                        string.Empty
+                };
+
+                await _calendarReviewFlowService
+                    .SaveReviewFlowAsync(
+                        token,
+                        activity.PageId,
+                        metadata,
+                        cts.Token);
+
+                _calendarReviewFlowCache[
+                    activity.PageId] = metadata;
+
+                await PersistCalendarReviewFlowLocalCacheAsync(
+                    cts.Token);
+
+                foreach (var item in _calendarActivities.Where(item =>
+                             string.Equals(
+                                 item.PageId,
+                                 activity.PageId,
+                                 StringComparison.OrdinalIgnoreCase)))
+                {
+                    item.Title = updatedTitle;
+                    item.Person = newPerson;
+                    item.OriginalPerson = newPerson;
+                    item.IsReviewMirror = false;
+                    ApplyReviewFlowMetadata(
+                        item,
+                        metadata);
+                }
+
+                activity.Title = updatedTitle;
+                activity.Person = newPerson;
+                activity.OriginalPerson = newPerson;
+                activity.IsReviewMirror = false;
+                ApplyReviewFlowMetadata(
+                    activity,
+                    metadata);
+
+                var assignmentNotification =
+                    await SendCalendarReviewAlertAsync(
+                        activity,
+                        newPerson,
+                        "Actividad reasignada para continuar",
+                        requireReviewPhase: false);
+
+                if (assignmentNotification != null &&
+                    !string.IsNullOrWhiteSpace(
+                        assignmentNotification.PageId))
+                {
+                    metadata = new ReviewFlowMetadata
+                    {
+                        OriginalPerson = metadata.OriginalPerson,
+                        ReviewAssignee = metadata.ReviewAssignee,
+                        State = metadata.State,
+                        SubmittedAt = metadata.SubmittedAt,
+                        UpdatedAt = DateTimeOffset.Now,
+                        UpdatedBy = metadata.UpdatedBy,
+                        Note = metadata.Note,
+                        AlertPageId =
+                            assignmentNotification.PageId,
+                        AlertPageUrl =
+                            assignmentNotification.PageUrl
+                    };
+
+                    await _calendarReviewFlowService
+                        .SaveReviewFlowAsync(
+                            token,
+                            activity.PageId,
+                            metadata,
+                            cts.Token);
+
+                    _calendarReviewFlowCache[
+                        activity.PageId] = metadata;
+
+                    await PersistCalendarReviewFlowLocalCacheAsync(
+                        cts.Token);
+
+                    foreach (var item in _calendarActivities.Where(item =>
+                                 string.Equals(
+                                     item.PageId,
+                                     activity.PageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        ApplyReviewFlowMetadata(
+                            item,
+                            metadata);
+                    }
+
+                    ApplyReviewFlowMetadata(
+                        activity,
+                        metadata);
+                }
+
+                DrawCalendar(_calendarActivities);
+
+                StatusText.Text =
+                    assignmentNotification != null
+                        ? $"Estado: Actividad reasignada a {newPerson}, cambiada a prtuzREVISION y recordatorio enviado ✅"
+                        : $"Estado: Actividad reasignada a {newPerson} y cambiada a prtuzREVISION; no se pudo crear el recordatorio.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo reasignar la actividad → {ex.Message}";
+            }
+            finally
+            {
+                HideLoadingState();
+            }
+        }
+
+
+        private enum ReviewTitleTagState
+        {
+            Pending,
+            Returned,
+            Approved
+        }
+
+        private static string ReplaceCalendarReviewPhase(
+            string title,
+            string targetPhase)
+        {
+            var value = title ?? string.Empty;
+
+            var pattern =
+                @"(?<![\p{L}\p{Nd}_])(?:sprtuzREVISION|prtuzREVISION|rtuzREVISION|zREVISION)(?![\p{L}\p{Nd}_])";
+
+            var replaced = Regex.Replace(
+                value,
+                pattern,
+                targetPhase,
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+
+            if (string.Equals(
+                    replaced,
+                    value,
+                    StringComparison.Ordinal))
+            {
+                replaced = $"{targetPhase} {value}";
+            }
+
+            return Regex.Replace(
+                    replaced,
+                    @"\s{2,}",
+                    " ")
+                .Trim();
+        }
+
+        private static readonly Dictionary<string, (string Active, string Passive)>
+            CalendarReviewPersonTags =
+                new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["John"] = ("jjohn", "john"),
+                    ["Karla"] = ("kkarl", "karl"),
+                    ["Isaias"] = ("iisai", "isai"),
+                    ["Sotelo"] = ("ssote", "sote"),
+                    ["Acalli"] = ("aacal", "acal"),
+                    ["Andrade"] = ("aandr", "andr"),
+                    ["Emmanuel"] = ("eemma", "emma"),
+                    ["Brian"] = ("bbria", "bria"),
+                    ["Genaro"] = ("ggena", "gena"),
+                    ["Neftali"] = ("nneft", "neft")
+                };
+
+        private static string BuildReviewTitleForState(
+            string currentTitle,
+            string originalPerson,
+            string reviewer,
+            ReviewTitleTagState state)
+        {
+            if (!CalendarReviewPersonTags.TryGetValue(
+                    NormalizeCalendarPerson(originalPerson),
+                    out var originalTags))
+            {
+                throw new InvalidOperationException(
+                    $"No se encontró la configuración de tags para {originalPerson}.");
+            }
+
+            if (!CalendarReviewPersonTags.TryGetValue(
+                    NormalizeCalendarPerson(reviewer),
+                    out var reviewerTags))
+            {
+                throw new InvalidOperationException(
+                    $"No se encontró la configuración de tags para {reviewer}.");
+            }
+
+            // En revisión pendiente y al aprobar, el responsable original
+            // conserva el tag pasivo. Solo al regresar con correcciones
+            // recupera el tag activo para indicar que vuelve a trabajarla.
+            var originalTarget =
+                state == ReviewTitleTagState.Returned
+                    ? originalTags.Active
+                    : originalTags.Passive;
+
+            var reviewerTarget =
+                state == ReviewTitleTagState.Pending
+                    ? reviewerTags.Active
+                    : reviewerTags.Passive;
+
+            var originalSuffix =
+                ReadCalendarPersonTagSuffix(
+                    currentTitle,
+                    originalTags.Active,
+                    originalTags.Passive);
+
+            var reviewerSuffix =
+                ReadCalendarPersonTagSuffix(
+                    currentTitle,
+                    reviewerTags.Active,
+                    reviewerTags.Passive);
+
+            var result =
+                RemoveCalendarPersonTags(
+                    currentTitle,
+                    originalTags.Active,
+                    originalTags.Passive);
+
+            result =
+                RemoveCalendarPersonTags(
+                    result,
+                    reviewerTags.Active,
+                    reviewerTags.Passive);
+
+            var targetPhase =
+                state == ReviewTitleTagState.Pending
+                    ? "rtuzREVISION"
+                    : state == ReviewTitleTagState.Approved
+                        ? "zREVISION"
+                        : "prtuzREVISION";
+
+            result = ReplaceCalendarReviewPhase(
+                result,
+                targetPhase);
+
+            return string.Join(
+                " ",
+                new[]
+                {
+                    result,
+                    originalTarget + originalSuffix,
+                    reviewerTarget + reviewerSuffix
+                }.Where(value =>
+                    !string.IsNullOrWhiteSpace(value)));
+        }
+
+        private static string ReadCalendarPersonTagSuffix(
+            string title,
+            string activeTag,
+            string passiveTag)
+        {
+            var match =
+                Regex.Match(
+                    title ?? string.Empty,
+                    $@"(?<![\p{{L}}\p{{Nd}}_])(?:{Regex.Escape(activeTag)}|{Regex.Escape(passiveTag)})(?<suffix>\d*)(?![\p{{L}}\p{{Nd}}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            return match.Success
+                ? match.Groups["suffix"].Value
+                : string.Empty;
+        }
+
+        private static string RemoveCalendarPersonTags(
+            string title,
+            string activeTag,
+            string passiveTag)
+        {
+            return Regex.Replace(
+                title ?? string.Empty,
+                $@"(?<![\p{{L}}\p{{Nd}}_])(?:{Regex.Escape(activeTag)}|{Regex.Escape(passiveTag)})\d*(?![\p{{L}}\p{{Nd}}_])",
+                " ",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+        }
+
+        private async Task UpdateCalendarReviewTitleAsync(
+            NotionCalendarActivity activity,
+            ReviewFlowMetadata metadata,
+            ReviewTitleTagState state,
+            string token,
+            CancellationToken cancellationToken)
+        {
+            var currentTitle =
+                activity.Title ?? string.Empty;
+
+            var updatedTitle =
+                BuildReviewTitleForState(
+                    currentTitle,
+                    metadata.OriginalPerson,
+                    metadata.ReviewAssignee,
+                    state);
+
+            var titleChanged =
+                !string.Equals(
+                    currentTitle,
+                    updatedTitle,
+                    StringComparison.Ordinal);
+
+            var targetPerson =
+                state == ReviewTitleTagState.Pending
+                    ? NormalizeCalendarPerson(
+                        metadata.ReviewAssignee)
+                    : NormalizeCalendarPerson(
+                        metadata.OriginalPerson);
+
+            if (string.IsNullOrWhiteSpace(targetPerson) ||
+                string.Equals(
+                    targetPerson,
+                    "Sin asignar",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                targetPerson =
+                    GetActiveCalendarPersonFromTitle(
+                        updatedTitle);
+            }
+
+            if (titleChanged)
+            {
+                await _notionCalendarService.UpdateActivityTitleAsync(
+                    token,
+                    activity.PageId,
+                    updatedTitle,
+                    cancellationToken);
+            }
+
+            try
+            {
+                await _notionCalendarService.UpdateActivityAssigneeAsync(
+                    token,
+                    activity.PageId,
+                    targetPerson,
+                    cancellationToken);
+            }
+            catch
+            {
+                // Si Assignee es fórmula o Notion todavía no permite
+                // modificarlo, el título y la caché local conservan el
+                // responsable correcto mientras Notion recalcula.
+            }
+
+            foreach (var item in _calendarActivities.Where(item =>
+                         string.Equals(
+                             item.PageId,
+                             activity.PageId,
+                             StringComparison.OrdinalIgnoreCase)))
+            {
+                item.Title = updatedTitle;
+                item.Person = targetPerson;
+                item.IsReviewMirror = false;
+            }
+
+            activity.Title = updatedTitle;
+            activity.Person = targetPerson;
+            activity.IsReviewMirror = false;
+        }
+
+        private async Task SaveCalendarReviewFlowAsync(
+            NotionCalendarActivity activity,
+            ReviewFlowMetadata metadata,
+            string successText)
+        {
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    "Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            try
+            {
+                ShowLoadingState(
+                    "Estado: Guardando flujo de revisión…",
+                    activity.Title);
+
+                using var cts = new CancellationTokenSource(
+                    TimeSpan.FromMinutes(2));
+
+                var titleState =
+                    string.Equals(
+                        metadata.State,
+                        "returned",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? ReviewTitleTagState.Returned
+                        : string.Equals(
+                            metadata.State,
+                            "approved",
+                            StringComparison.OrdinalIgnoreCase)
+                            ? ReviewTitleTagState.Approved
+                            : ReviewTitleTagState.Pending;
+
+                await UpdateCalendarReviewTitleAsync(
+                    activity,
+                    metadata,
+                    titleState,
+                    token,
+                    cts.Token);
+
+                await _calendarReviewFlowService.SaveReviewFlowAsync(
+                    token,
+                    activity.PageId,
+                    metadata,
+                    cts.Token);
+
+                _calendarReviewFlowCache[activity.PageId] = metadata;
+
+                await PersistCalendarReviewFlowLocalCacheAsync(
+                    cts.Token);
+
+                foreach (var item in _calendarActivities.Where(item =>
+                             string.Equals(
+                                 item.PageId,
+                                 activity.PageId,
+                                 StringComparison.OrdinalIgnoreCase)))
+                {
+                    ApplyReviewFlowMetadata(item, metadata);
+                }
+
+                DrawCalendar(_calendarActivities);
+
+                StatusText.Text =
+                    $"Estado: {successText} ✅";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo guardar el flujo → {ex.Message}";
+            }
+            finally
+            {
+                HideLoadingState();
+            }
+        }
+
+        private static bool CanCurrentUserResolveReview(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.ReviewAssignee))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                GetCurrentCalendarUserName(),
+                NormalizeCalendarPerson(activity.ReviewAssignee),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string CalendarPeopleSettingsKey(string pageId)
+        {
+            return $"Calendar.ReviewPeople.{pageId}";
+        }
+
+        private static string GetPersistedCalendarPeople(string pageId)
+        {
+            if (string.IsNullOrWhiteSpace(pageId))
+                return string.Empty;
+
+            return ApplicationData.Current.LocalSettings.Values[
+                       CalendarPeopleSettingsKey(pageId)] as string ??
+                   string.Empty;
+        }
+
+        private static void PersistCalendarPeople(
+            string pageId,
+            string people)
+        {
+            if (string.IsNullOrWhiteSpace(pageId) ||
+                string.IsNullOrWhiteSpace(people))
+            {
+                return;
+            }
+
+            ApplicationData.Current.LocalSettings.Values[
+                CalendarPeopleSettingsKey(pageId)] = people;
+        }
+
+        private static string GetCurrentCalendarUserName()
+        {
+            var tag =
+                ApplicationData.Current.LocalSettings.Values[
+                    "Messaging.CurrentUserTag"] as string ??
+                string.Empty;
+
+            return NormalizeCalendarPerson(tag);
         }
 
         private void DrawCurrentTimeLine(double headerHeight)
@@ -3669,6 +7230,7 @@ namespace Anfeta.UI.Views
         private void HideCalendarActivityPreviewFlyout()
         {
             StopCalendarPreviewCloseTimer();
+            StopNotionPreviewSpeech();
 
             try
             {
@@ -3823,7 +7385,8 @@ namespace Anfeta.UI.Views
                 activity,
                 content,
                 statusText:
-                    "Clic en la actividad para abrir la página en Notion.");
+                    "Clic en la actividad para abrir la página en Notion.",
+                speechBlocks: blocks);
         }
 
         private static void ConstrainCalendarPreviewElement(
@@ -3953,7 +7516,8 @@ namespace Anfeta.UI.Views
         private FrameworkElement BuildCalendarActivityPreviewShell(
             NotionCalendarActivity activity,
             UIElement? content,
-            string statusText)
+            string statusText,
+            IReadOnlyList<NotionPreviewBlock>? speechBlocks = null)
         {
             var root = new StackPanel
             {
@@ -4058,12 +7622,20 @@ namespace Anfeta.UI.Views
                 Margin = new Thickness(0, 4, 0, 2)
             };
 
-            if (IsPendingReviewActivity(activity))
+            if (!activity.IsReviewMirror &&
+                HasExactCalendarPhase(
+                    activity,
+                    "rtuzREVISION") &&
+                activity.IsPendingReview &&
+                CanCurrentUserResolveReview(activity))
             {
-                var alertButton =
-                    new Button
+                Button AddReviewerButton(
+                    string text,
+                    RoutedEventHandler handler)
+                {
+                    var button = new Button
                     {
-                        Content = "🔔 Enviar alerta de revisión",
+                        Content = text,
                         Width = 220,
                         Height = 30,
                         Margin = new Thickness(0, 0, 8, 6),
@@ -4072,31 +7644,116 @@ namespace Anfeta.UI.Views
                         Tag = activity
                     };
 
-                alertButton.Click +=
+                    button.Click += handler;
+                    actionsPanel.Children.Add(button);
+                    return button;
+                }
+
+                AddReviewerButton(
+                    "Aprobar revisión",
+                    CalendarContextApproveReview_Click);
+
+                AddReviewerButton(
+                    "Regresar con correcciones…",
+                    CalendarContextReturnReview_Click);
+            }
+            else if (CanSendCalendarActivityToReview(activity))
+            {
+                var reviewButton =
+                    new Button
+                    {
+                        Content = "Enviar a revisión…",
+                        Width = 220,
+                        Height = 30,
+                        Margin = new Thickness(0, 0, 8, 6),
+                        Padding = new Thickness(10, 0, 10, 0),
+                        CornerRadius = new CornerRadius(6),
+                        Tag = activity
+                    };
+
+                reviewButton.Click +=
                     async (_, __) =>
                     {
-                        alertButton.IsEnabled = false;
+                        reviewButton.IsEnabled = false;
 
                         try
                         {
-                            await SendCalendarReviewAlertAsync(
-                                activity);
+                            var sent =
+                                await PromptAndSendCalendarActivityToReviewAsync(
+                                    activity);
 
-                            alertButton.Content =
-                                "Alerta enviada ✅";
+                            if (sent)
+                            {
+                                reviewButton.Content =
+                                    "Enviada a revisión ✅";
+                            }
                         }
                         finally
                         {
-                            await Task.Delay(1200);
-                            alertButton.IsEnabled = true;
-                            alertButton.Content =
-                                "🔔 Enviar alerta de revisión";
+                            await Task.Delay(900);
+                            reviewButton.IsEnabled = true;
+                            reviewButton.Content =
+                                "Enviar a revisión…";
                         }
                     };
 
                 actionsPanel.Children.Add(
-                    alertButton);
+                    reviewButton);
             }
+
+            if (!activity.IsReviewMirror &&
+                HasExactCalendarPhase(
+                    activity,
+                    "zREVISION"))
+            {
+                var reassignButton = new Button
+                {
+                    Content =
+                        "Reasignar → prtuzREVISION",
+                    Width = 220,
+                    Height = 30,
+                    Margin =
+                        new Thickness(0, 0, 8, 6),
+                    Padding =
+                        new Thickness(10, 0, 10, 0),
+                    CornerRadius =
+                        new CornerRadius(6),
+                    Tag = activity
+                };
+
+                reassignButton.Click +=
+                    CalendarContextReassignApproved_Click;
+
+                actionsPanel.Children.Add(
+                    reassignButton);
+            }
+
+            var messageButton =
+                new Button
+                {
+                    Content = "Enviar mensaje…",
+                    Width = 220,
+                    Height = 30,
+                    Margin = new Thickness(0, 0, 8, 6),
+                    Padding = new Thickness(10, 0, 10, 0),
+                    CornerRadius = new CornerRadius(6),
+                    Tag = activity
+                };
+
+            messageButton.Click +=
+                async (_, __) =>
+                {
+                    HideCalendarActivityPreviewFlyout();
+
+                    await ShowCalendarMessageComposerAsync(
+                        activity);
+                };
+
+            ToolTipService.SetToolTip(
+                messageButton,
+                "Crear un mensaje relacionado con esta actividad");
+
+            actionsPanel.Children.Add(messageButton);
 
             Button AddMoveButton(
                 string text,
@@ -4122,9 +7779,72 @@ namespace Anfeta.UI.Views
                 return button;
             }
 
-            AddMoveButton("Mover a mañana", 1);
-            AddMoveButton("+3 días", 3);
-            AddMoveButton("+1 semana", 7);
+            if (!activity.IsReviewMirror)
+            {
+                AddMoveButton("Mover a mañana", 1);
+                AddMoveButton("+3 días", 3);
+                AddMoveButton("+1 semana", 7);
+            }
+            else
+            {
+                actionsPanel.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            "Copia visual de seguimiento · solo lectura",
+                        Width = 448,
+                        Margin = new Thickness(0, 6, 0, 8),
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold,
+                        Opacity = 0.78,
+                        TextWrapping = TextWrapping.Wrap
+                    });
+            }
+
+            var readSpeechButton = new Button
+            {
+                Content = "▶ Leer resumen",
+                Width = 220,
+                Height = 30,
+                Margin = new Thickness(0, 0, 8, 6),
+                Padding = new Thickness(10, 0, 10, 0),
+                CornerRadius = new CornerRadius(6),
+                Tag = activity
+            };
+
+            var stopSpeechButton = new Button
+            {
+                Content = "■ Detener lectura",
+                Width = 220,
+                Height = 30,
+                Margin = new Thickness(0, 0, 8, 6),
+                Padding = new Thickness(10, 0, 10, 0),
+                CornerRadius = new CornerRadius(6),
+                IsEnabled = false,
+                Tag = activity
+            };
+
+            readSpeechButton.Click +=
+                async (_, __) =>
+                {
+                    await StartCalendarActivitySpeechAsync(
+                        activity,
+                        speechBlocks,
+                        readSpeechButton,
+                        stopSpeechButton);
+                };
+
+            stopSpeechButton.Click +=
+                (_, __) =>
+                {
+                    StopNotionPreviewSpeech();
+                    readSpeechButton.Content = "▶ Leer resumen";
+                    readSpeechButton.IsEnabled = true;
+                    stopSpeechButton.IsEnabled = false;
+                };
+
+            actionsPanel.Children.Add(readSpeechButton);
+            actionsPanel.Children.Add(stopSpeechButton);
 
             root.Children.Add(actionsPanel);
 
@@ -4220,17 +7940,63 @@ namespace Anfeta.UI.Views
             return scrollViewer;
         }
 
-        private async Task SendCalendarReviewAlertAsync(
-            NotionCalendarActivity activity)
+        private static string GetCalendarMessageRecipientTag(
+            string person)
+        {
+            return NormalizeCalendarPerson(person) switch
+            {
+                "John" => "jjohn",
+                "Karla" => "kkarl",
+                "Isaias" => "iisai",
+                "Sotelo" => "eedua",
+                "Acalli" => "aacal",
+                "Andrade" => "aandr",
+                "Emmanuel" => "eemma",
+                "Brian" => "bbria",
+                "Genaro" => "ggena",
+                "Neftali" => "nneft",
+                _ => string.Empty
+            };
+        }
+
+        private static string GetCalendarMessagePersonName(
+            string person)
+        {
+            var normalized = NormalizeCalendarPerson(person);
+            return string.IsNullOrWhiteSpace(normalized)
+                ? "Sin identificar"
+                : normalized;
+        }
+
+        private async Task<ReviewAlertSourceLink?>
+            SendCalendarReviewAlertAsync(
+                NotionCalendarActivity activity,
+                string recipientPerson,
+                string messagePrefix,
+                bool requireReviewPhase = true)
         {
             if (_calendarReviewAlertSending)
-                return;
+                return null;
 
-            if (!IsPendingReviewActivity(activity))
+            if (requireReviewPhase &&
+                !IsReviewEligibleActivity(activity))
             {
                 StatusText.Text =
-                    "Estado: La alerta solo está disponible para rtuzREVISION.";
-                return;
+                    "Estado: La revisión debe estar en rtuzREVISION o zREVISION.";
+                return null;
+            }
+
+            recipientPerson =
+                NormalizeCalendarPerson(recipientPerson);
+
+            var recipientTag =
+                GetCalendarMessageRecipientTag(recipientPerson);
+
+            if (string.IsNullOrWhiteSpace(recipientTag))
+            {
+                StatusText.Text =
+                    "Estado: No se pudo identificar al destinatario.";
+                return null;
             }
 
             var values =
@@ -4247,7 +8013,7 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text =
                     "Estado: Configura Notion antes de enviar alertas.";
-                return;
+                return null;
             }
 
             _calendarReviewAlertSending = true;
@@ -4255,11 +8021,88 @@ namespace Anfeta.UI.Views
             try
             {
                 StatusText.Text =
-                    "Estado: Enviando alerta a John y Genaro...";
+                    $"Estado: Enviando alerta a {recipientPerson}...";
 
                 using var cts =
                     new CancellationTokenSource(
                         TimeSpan.FromMinutes(2));
+
+                var senderTag =
+                    (values["Messaging.CurrentUserTag"] as string ??
+                     string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(senderTag))
+                    senderTag = "anfeta";
+
+                var senderPerson =
+                    GetCurrentCalendarUserName();
+
+                var now =
+                    DateTimeOffset.Now;
+
+                var message =
+                    string.Join(
+                        " · ",
+                        new[]
+                        {
+                            string.IsNullOrWhiteSpace(messagePrefix)
+                                ? "Actividad de revisión"
+                                : messagePrefix,
+                            activity.TimeLabel,
+                            activity.Title
+                        }.Where(value =>
+                            !string.IsNullOrWhiteSpace(value)));
+
+                _calendarReviewFlowCache.TryGetValue(
+                    activity.PageId,
+                    out var existingMetadata);
+
+                // Una actividad conserva una sola página auxiliar. Al volver
+                // a enviarla, se actualiza el destinatario y se agrega otra
+                // entrada al mismo historial; no se crea un segundo mensaje.
+                if (existingMetadata != null &&
+                    !string.IsNullOrWhiteSpace(
+                        existingMetadata.AlertPageId))
+                {
+                    var existingThreadIsActive =
+                        await _calendarReviewFlowService
+                            .IsPageActiveAsync(
+                                token,
+                                existingMetadata.AlertPageId,
+                                cts.Token);
+
+                    if (existingThreadIsActive)
+                    {
+                        await AppendReviewHistoryEntryAsync(
+                            existingMetadata,
+                            recipientPerson,
+                            message,
+                            retargetNotification: true,
+                            cts.Token);
+
+                        var existingNotification =
+                            new ReviewAlertSourceLink
+                            {
+                                PageId = existingMetadata.AlertPageId,
+                                PageUrl = existingMetadata.AlertPageUrl,
+                                Title =
+                                    $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm} " +
+                                    $"{recipientTag} de:{senderTag} [RESPUESTA] " +
+                                    $"{message}"
+                            };
+
+                        await UpsertCalendarNotificationInLocalIndexAsync(
+                            existingNotification);
+
+                        StatusText.Text =
+                            $"Estado: Hilo existente enviado a {recipientPerson} ✅";
+
+                        return existingNotification;
+                    }
+
+                    // La notificación anterior ya fue atendida y enviada a
+                    // papelera. Se cierra ese hilo y se crea uno nuevo.
+                }
 
                 using var http =
                     new HttpClient
@@ -4285,38 +8128,12 @@ namespace Anfeta.UI.Views
                         dataSourceId,
                         cts.Token);
 
-                var senderTag =
-                    (values["Messaging.CurrentUserTag"] as string ??
-                     string.Empty).Trim();
+                var title =
+                    $"{now:yyyy-MM-dd HH:mm} " +
+                    $"{recipientTag} de:{senderTag} [RESPUESTA] " +
+                    $"{message}";
 
-                if (string.IsNullOrWhiteSpace(senderTag))
-                    senderTag = "anfeta";
-
-                var now =
-                    DateTimeOffset.Now;
-
-                var responsible =
-                    (activity.Person ?? string.Empty).Trim();
-
-                var messageParts = new[]
-                {
-                    "Actividad lista para revisión",
-                    responsible,
-                    activity.TimeLabel,
-                    activity.Title
-                }
-                .Where(value => !string.IsNullOrWhiteSpace(value));
-
-                var message = string.Join(" · ", messageParts);
-
-                foreach (var recipient in
-                         new[] { "jjohn", "ggena" })
-                {
-                    var title =
-                        $"{now:yyyy-MM-dd HH:mm} " +
-                        $"{recipient} de:{senderTag} [RESPUESTA] " +
-                        $"{message}";
-
+                var created =
                     await CreateReviewAlertPageAsync(
                         http,
                         dataSourceId,
@@ -4324,19 +8141,248 @@ namespace Anfeta.UI.Views
                         title,
                         activity,
                         cts.Token);
-                }
+
+                await _calendarReviewFlowService.AppendEntryAsync(
+                    token,
+                    created.PageId,
+                    new MessageThreadEntry
+                    {
+                        Kind = MessageThreadKind.System,
+                        AuthorTag = senderTag,
+                        AuthorName = senderPerson,
+                        RecipientTag = recipientTag,
+                        RecipientName = recipientPerson,
+                        CreatedAt = DateTimeOffset.Now,
+                        Text = message
+                    },
+                    cts.Token);
+
+                await UpsertCalendarNotificationInLocalIndexAsync(
+                    created);
 
                 StatusText.Text =
-                    "Estado: Alerta enviada a John y Genaro ✅";
+                    $"Estado: Alerta enviada a {recipientPerson} ✅";
+
+                return created;
             }
             catch (Exception ex)
             {
                 StatusText.Text =
                     $"Estado: No se pudo enviar la alerta → {ex.Message}";
+                return null;
             }
             finally
             {
                 _calendarReviewAlertSending = false;
+            }
+        }
+
+        private async Task UpsertCalendarNotificationInLocalIndexAsync(
+            ReviewAlertSourceLink notification)
+        {
+            if (notification == null ||
+                string.IsNullOrWhiteSpace(notification.PageId) ||
+                string.IsNullOrWhiteSpace(notification.Title))
+            {
+                return;
+            }
+
+            var snapshot =
+                App.LocalIndex.GetAll();
+
+            var row = snapshot.FirstOrDefault(item =>
+                item.Source ==
+                    Anfeta.UI.Models.Weblab.SearchSource.Notion &&
+                string.Equals(
+                    item.ExternalId,
+                    notification.PageId,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (row == null)
+            {
+                row = new Anfeta.UI.Models.Weblab.SearchResultRow
+                {
+                    ExternalId = notification.PageId,
+                    NodeId = notification.PageId,
+                    ExternalSourceName = "Revisiones",
+                    ExternalUrl = notification.PageUrl,
+                    Target = notification.PageUrl,
+                    Type = "NOTION_PAGE",
+                    Source =
+                        Anfeta.UI.Models.Weblab.SearchSource.Notion
+                };
+
+                snapshot.Add(row);
+            }
+
+            row.ExternalSourceName = "Revisiones";
+            row.ExternalUrl = notification.PageUrl;
+            row.Target = notification.PageUrl;
+            row.Name =
+                $"[Revisiones] {notification.Title}";
+            row.SearchText =
+                $"Revisiones {notification.Title}";
+            row.ServerModified =
+                DateTime.Now.ToString(
+                    "yyyy-MM-dd HH:mm",
+                    CultureInfo.InvariantCulture);
+
+            App.LocalIndex.Set(snapshot);
+
+            await PersistCombinedIndexIfPossibleAsync(
+                snapshot);
+
+            RefreshMessagesView();
+
+            try
+            {
+                var reminderService =
+                    App.AppHost.Services.GetRequiredService<
+                        IndexedFileReminderService>();
+
+                reminderService.ScanNow();
+            }
+            catch
+            {
+                // El índice ya quedó actualizado. El timer normal volverá
+                // a revisar el recordatorio aunque el disparo inmediato falle.
+            }
+        }
+
+        private async Task AppendReviewHistoryEntryAsync(
+            ReviewFlowMetadata metadata,
+            string recipientPerson,
+            string text,
+            bool retargetNotification,
+            CancellationToken cancellationToken)
+        {
+            if (metadata == null ||
+                string.IsNullOrWhiteSpace(metadata.AlertPageId))
+            {
+                return;
+            }
+
+            var values =
+                ApplicationData.Current.LocalSettings.Values;
+
+            var token =
+                values["Notion.Token"] as string;
+
+            var dataSourceId =
+                values["Notion.DataSourceId"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+                return;
+
+            var recipientTag =
+                GetCalendarMessageRecipientTag(recipientPerson);
+
+            var authorTag =
+                (values["Messaging.CurrentUserTag"] as string ??
+                 string.Empty).Trim();
+
+            await _calendarReviewFlowService.AppendEntryAsync(
+                token,
+                metadata.AlertPageId,
+                new MessageThreadEntry
+                {
+                    Kind = MessageThreadKind.Message,
+                    AuthorTag = authorTag,
+                    AuthorName = GetCurrentCalendarUserName(),
+                    RecipientTag = recipientTag,
+                    RecipientName = recipientPerson,
+                    CreatedAt = DateTimeOffset.Now,
+                    Text = text
+                },
+                cancellationToken);
+
+            if (!retargetNotification ||
+                string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                return;
+            }
+
+            using var http =
+                new HttpClient
+                {
+                    BaseAddress =
+                        new Uri("https://api.notion.com/v1/"),
+                    Timeout =
+                        TimeSpan.FromMinutes(2)
+                };
+
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    token.Trim());
+
+            http.DefaultRequestHeaders.Add(
+                "Notion-Version",
+                "2026-03-11");
+
+            var titlePropertyName =
+                await ResolveReviewAlertTitlePropertyAsync(
+                    http,
+                    dataSourceId,
+                    cancellationToken);
+
+            var title =
+                $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm} " +
+                $"{recipientTag} de:{authorTag} [RESPUESTA] " +
+                $"{text}";
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["properties"] =
+                        new Dictionary<string, object?>
+                        {
+                            [titlePropertyName] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["type"] = "title",
+                                    ["title"] =
+                                        new object[]
+                                        {
+                                            new Dictionary<string, object?>
+                                            {
+                                                ["type"] = "text",
+                                                ["text"] =
+                                                    new Dictionary<string, object?>
+                                                    {
+                                                        ["content"] = title
+                                                    }
+                                            }
+                                        }
+                                }
+                        }
+                };
+
+            using var request =
+                new HttpRequestMessage(
+                    HttpMethod.Patch,
+                    $"pages/{metadata.AlertPageId}")
+                {
+                    Content =
+                        new StringContent(
+                            JsonSerializer.Serialize(payload),
+                            Encoding.UTF8,
+                            "application/json")
+                };
+
+            using var response =
+                await http.SendAsync(
+                    request,
+                    cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                throw new InvalidOperationException(
+                    $"No se pudo actualizar la notificación ({(int)response.StatusCode}): {body}");
             }
         }
 
@@ -4392,7 +8438,7 @@ namespace Anfeta.UI.Views
                 "La base de Revisiones no expone una propiedad de título.");
         }
 
-        private static async Task CreateReviewAlertPageAsync(
+        private static async Task<ReviewAlertSourceLink> CreateReviewAlertPageAsync(
             HttpClient http,
             string dataSourceId,
             string titlePropertyName,
@@ -4420,8 +8466,8 @@ namespace Anfeta.UI.Views
                 new
                 {
                     @object = "block",
-                    type = "paragraph",
-                    paragraph = new
+                    type = "toggle",
+                    toggle = new
                     {
                         rich_text = new[]
                         {
@@ -4431,8 +8477,7 @@ namespace Anfeta.UI.Views
                                 text = new
                                 {
                                     content =
-                                        NotionMessageThreadService.ReviewSourcePrefix +
-                                        sourceEncoded
+                                        "Datos internos de ANFETA"
                                 },
                                 annotations = new
                                 {
@@ -4440,8 +8485,41 @@ namespace Anfeta.UI.Views
                                     italic = false,
                                     strikethrough = false,
                                     underline = false,
-                                    code = true,
+                                    code = false,
                                     color = "gray"
+                                }
+                            }
+                        },
+                        children = new object[]
+                        {
+                            new
+                            {
+                                @object = "block",
+                                type = "paragraph",
+                                paragraph = new
+                                {
+                                    rich_text = new[]
+                                    {
+                                        new
+                                        {
+                                            type = "text",
+                                            text = new
+                                            {
+                                                content =
+                                                    NotionMessageThreadService.ReviewSourcePrefix +
+                                                    sourceEncoded
+                                            },
+                                            annotations = new
+                                            {
+                                                bold = false,
+                                                italic = false,
+                                                strikethrough = false,
+                                                underline = false,
+                                                code = true,
+                                                color = "gray"
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -4568,12 +8646,39 @@ namespace Anfeta.UI.Views
                 throw new InvalidOperationException(
                     $"Notion rechazó la alerta ({(int)response.StatusCode}): {json}");
             }
+
+            using var document =
+                JsonDocument.Parse(json);
+
+            return new ReviewAlertSourceLink
+            {
+                PageId =
+                    document.RootElement.TryGetProperty(
+                        "id",
+                        out var id)
+                        ? id.GetString() ?? string.Empty
+                        : string.Empty,
+                PageUrl =
+                    document.RootElement.TryGetProperty(
+                        "url",
+                        out var url)
+                        ? url.GetString() ?? string.Empty
+                        : string.Empty,
+                Title = title
+            };
         }
 
         private async Task MoveCalendarActivityByDaysAsync(
             NotionCalendarActivity activity,
             int days)
         {
+            if (activity?.IsReviewMirror == true)
+            {
+                StatusText.Text =
+                    "Estado: La copia de seguimiento es solo visual.";
+                return;
+            }
+
             if (activity == null ||
                 string.IsNullOrWhiteSpace(activity.PageId))
             {

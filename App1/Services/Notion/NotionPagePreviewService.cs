@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -20,14 +19,81 @@ namespace Anfeta.UI.Services.Notion
         private const int MaxDepth = 3;
         private const int MaxRetryAttempts = 4;
 
+        private const string HiddenMetadataLabel =
+            "Datos internos de ANFETA";
+
+        private static readonly string[] TechnicalMetadataPrefixes =
+        {
+            "[ANFETA_THREAD_V1]",
+            "[ANFETA_REVIEW_SOURCE_V1]",
+            "[ANFETA_REVIEW_FLOW_V1]"
+        };
+
         private static readonly ConcurrentDictionary<string, CacheEntry> Cache =
             new(StringComparer.OrdinalIgnoreCase);
+
+        // Si el usuario pasa varias veces por la misma tarjeta, todos los
+        // consumidores esperan una sola descarga del preview.
+        private static readonly ConcurrentDictionary<
+            string,
+            Task<IReadOnlyList<NotionPreviewBlock>>> ActivePreviewLoads =
+                new(StringComparer.OrdinalIgnoreCase);
 
         private sealed record CacheEntry(
             DateTimeOffset StoredAt,
             IReadOnlyList<NotionPreviewBlock> Blocks);
 
-        public async Task<IReadOnlyList<NotionPreviewBlock>> GetPagePreviewAsync(
+        public Task<IReadOnlyList<NotionPreviewBlock>> GetPagePreviewAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException(
+                    "No hay un token de Notion configurado.");
+
+            var normalizedPageId = NormalizeId(pageId);
+
+            if (string.IsNullOrWhiteSpace(normalizedPageId))
+                throw new ArgumentException(
+                    "La página de Notion no tiene identificador.");
+
+            if (Cache.TryGetValue(normalizedPageId, out var cached) &&
+                DateTimeOffset.UtcNow - cached.StoredAt < TimeSpan.FromMinutes(5))
+            {
+                return Task.FromResult(cached.Blocks);
+            }
+
+            var task = ActivePreviewLoads.GetOrAdd(
+                normalizedPageId,
+                _ => GetPagePreviewCoreAsync(
+                    token,
+                    normalizedPageId,
+                    cancellationToken));
+
+            return AwaitSharedPreviewAsync(normalizedPageId, task);
+        }
+
+        private static async Task<IReadOnlyList<NotionPreviewBlock>>
+            AwaitSharedPreviewAsync(
+                string pageId,
+                Task<IReadOnlyList<NotionPreviewBlock>> task)
+        {
+            try
+            {
+                return await task;
+            }
+            finally
+            {
+                if (ActivePreviewLoads.TryGetValue(pageId, out var current) &&
+                    ReferenceEquals(current, task))
+                {
+                    ActivePreviewLoads.TryRemove(pageId, out _);
+                }
+            }
+        }
+
+        private async Task<IReadOnlyList<NotionPreviewBlock>> GetPagePreviewCoreAsync(
             string token,
             string pageId,
             CancellationToken cancellationToken = default)
@@ -41,12 +107,6 @@ namespace Anfeta.UI.Services.Notion
             if (string.IsNullOrWhiteSpace(pageId))
                 throw new ArgumentException(
                     "La página de Notion no tiene identificador.");
-
-            if (Cache.TryGetValue(pageId, out var cached) &&
-                DateTimeOffset.UtcNow - cached.StoredAt < TimeSpan.FromMinutes(5))
-            {
-                return cached.Blocks;
-            }
 
             using var http = CreateClient(token);
             var blocks = new List<NotionPreviewBlock>();
@@ -87,6 +147,40 @@ namespace Anfeta.UI.Services.Notion
                 NotionVersion);
 
             return http;
+        }
+
+        private static bool IsTechnicalMetadataBlock(
+            JsonElement block)
+        {
+            var type =
+                ReadString(block, "type");
+
+            if (string.IsNullOrWhiteSpace(type) ||
+                !block.TryGetProperty(
+                    type,
+                    out var payload))
+            {
+                return false;
+            }
+
+            var text =
+                ReadRichText(payload);
+
+            if (string.Equals(
+                    text,
+                    HiddenMetadataLabel,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return TechnicalMetadataPrefixes.Any(prefix =>
+                       text.StartsWith(
+                           prefix,
+                           StringComparison.Ordinal)) ||
+                   text.StartsWith(
+                       "[ANFETA_",
+                       StringComparison.Ordinal);
         }
 
         private static async Task ReadChildrenRecursiveAsync(
@@ -141,6 +235,12 @@ namespace Anfeta.UI.Services.Notion
                     foreach (var block in results.EnumerateArray())
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+
+                        // Los bloques internos relacionan conversaciones,
+                        // alertas y actividades. Se conservan en Notion, pero
+                        // nunca deben mostrarse en previews ni recorrerse.
+                        if (IsTechnicalMetadataBlock(block))
+                            continue;
 
                         var mapped =
                             MapBlock(block, depth);
@@ -437,101 +537,18 @@ namespace Anfeta.UI.Services.Notion
             return string.Empty;
         }
 
-        private static async Task<HttpResponseMessage> SendGetWithRetryAsync(
+        private static Task<HttpResponseMessage> SendGetWithRetryAsync(
             HttpClient http,
             string requestUri,
             CancellationToken cancellationToken)
         {
-            Exception? lastException = null;
-
-            for (var attempt = 1;
-                 attempt <= MaxRetryAttempts;
-                 attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    var response =
-                        await http.GetAsync(
-                            requestUri,
-                            cancellationToken);
-
-                    if (!ShouldRetry(response.StatusCode) ||
-                        attempt == MaxRetryAttempts)
-                    {
-                        return response;
-                    }
-
-                    var delay =
-                        GetRetryDelay(response, attempt);
-
-                    response.Dispose();
-
-                    await Task.Delay(
-                        delay,
-                        cancellationToken);
-                }
-                catch (TaskCanceledException ex)
-                    when (!cancellationToken.IsCancellationRequested &&
-                          attempt < MaxRetryAttempts)
-                {
-                    lastException = ex;
-                    await Task.Delay(
-                        GetExponentialDelay(attempt),
-                        cancellationToken);
-                }
-                catch (HttpRequestException ex)
-                    when (attempt < MaxRetryAttempts)
-                {
-                    lastException = ex;
-                    await Task.Delay(
-                        GetExponentialDelay(attempt),
-                        cancellationToken);
-                }
-            }
-
-            throw new HttpRequestException(
-                "Notion no respondió después de varios intentos.",
-                lastException);
-        }
-
-        private static bool ShouldRetry(HttpStatusCode statusCode)
-        {
-            var numeric = (int)statusCode;
-
-            return statusCode == HttpStatusCode.TooManyRequests ||
-                   numeric == 529 ||
-                   numeric >= 500;
-        }
-
-        private static TimeSpan GetRetryDelay(
-            HttpResponseMessage response,
-            int attempt)
-        {
-            if (response.Headers.RetryAfter?.Delta is TimeSpan delta &&
-                delta > TimeSpan.Zero)
-            {
-                return delta;
-            }
-
-            if (response.Headers.RetryAfter?.Date is DateTimeOffset date)
-            {
-                var wait = date - DateTimeOffset.UtcNow;
-
-                if (wait > TimeSpan.Zero)
-                    return wait;
-            }
-
-            return GetExponentialDelay(attempt);
-        }
-
-        private static TimeSpan GetExponentialDelay(int attempt)
-        {
-            var seconds =
-                Math.Min(12, Math.Pow(2, attempt - 1));
-
-            return TimeSpan.FromSeconds(seconds);
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Get,
+                    requestUri),
+                cancellationToken,
+                MaxRetryAttempts);
         }
 
         private static string NormalizeId(string value)

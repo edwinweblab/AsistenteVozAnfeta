@@ -25,10 +25,359 @@ namespace Anfeta.UI.Services.Notion
         public const string ReviewSourcePrefix =
             "[ANFETA_REVIEW_SOURCE_V1]";
 
+        public const string ReviewFlowPrefix =
+            "[ANFETA_REVIEW_FLOW_V1]";
+
+        private const string HiddenMetadataLabel =
+            "Datos internos de ANFETA";
+
+        private static readonly string[] TechnicalPrefixes =
+        {
+            EntryPrefix,
+            ReviewSourcePrefix,
+            ReviewFlowPrefix
+        };
+
         private sealed record ResolvedAttachmentBlock(
             string FileName,
             string Url,
             string BlockType);
+
+        private static Dictionary<string, object?>
+            BuildHiddenMetadataToggle(
+                string encoded)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["object"] = "block",
+                ["type"] = "toggle",
+                ["toggle"] = new Dictionary<string, object?>
+                {
+                    ["rich_text"] = new object[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "text",
+                            ["text"] = new Dictionary<string, object?>
+                            {
+                                ["content"] = HiddenMetadataLabel
+                            },
+                            ["annotations"] = new Dictionary<string, object?>
+                            {
+                                ["bold"] = false,
+                                ["italic"] = false,
+                                ["strikethrough"] = false,
+                                ["underline"] = false,
+                                ["code"] = false,
+                                ["color"] = "gray"
+                            }
+                        }
+                    },
+                    ["children"] = new object[]
+                    {
+                        BuildEncodedParagraph(encoded)
+                    }
+                }
+            };
+        }
+
+        private static Dictionary<string, object?>
+            BuildEncodedParagraph(
+                string encoded)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["object"] = "block",
+                ["type"] = "paragraph",
+                ["paragraph"] = new Dictionary<string, object?>
+                {
+                    ["rich_text"] = new object[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "text",
+                            ["text"] = new Dictionary<string, object?>
+                            {
+                                ["content"] = encoded
+                            },
+                            ["annotations"] = new Dictionary<string, object?>
+                            {
+                                ["bold"] = false,
+                                ["italic"] = false,
+                                ["strikethrough"] = false,
+                                ["underline"] = false,
+                                ["code"] = true,
+                                ["color"] = "gray"
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        private static bool IsToggleBlock(
+            JsonElement block)
+        {
+            return string.Equals(
+                ReadString(block, "type"),
+                "toggle",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsTechnicalPayload(
+            string value)
+        {
+            return TechnicalPrefixes.Any(prefix =>
+                (value ?? string.Empty).StartsWith(
+                    prefix,
+                    StringComparison.Ordinal));
+        }
+
+        private static async Task<IReadOnlyList<JsonElement>>
+            ReadToggleChildrenAsync(
+                HttpClient http,
+                JsonElement toggleBlock,
+                CancellationToken cancellationToken)
+        {
+            if (!IsToggleBlock(toggleBlock))
+                return Array.Empty<JsonElement>();
+
+            var blockId =
+                ReadString(toggleBlock, "id");
+
+            if (string.IsNullOrWhiteSpace(blockId))
+                return Array.Empty<JsonElement>();
+
+            var children =
+                new List<JsonElement>();
+
+            string? cursor = null;
+            var hasMore = true;
+
+            while (hasMore)
+            {
+                var url =
+                    $"blocks/{NormalizeId(blockId)}/children?page_size=100";
+
+                if (!string.IsNullOrWhiteSpace(cursor))
+                {
+                    url +=
+                        $"&start_cursor={Uri.EscapeDataString(cursor)}";
+                }
+
+                using var response =
+                    await SendGetAsync(
+                        http,
+                        url,
+                        cancellationToken);
+
+                var json =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw CreateNotionException(
+                        "consultar datos internos",
+                        response,
+                        json);
+                }
+
+                using var document =
+                    JsonDocument.Parse(json);
+
+                var root =
+                    document.RootElement;
+
+                if (root.TryGetProperty(
+                        "results",
+                        out var results) &&
+                    results.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var child in results.EnumerateArray())
+                        children.Add(child.Clone());
+                }
+
+                hasMore =
+                    root.TryGetProperty(
+                        "has_more",
+                        out var more) &&
+                    more.ValueKind == JsonValueKind.True;
+
+                cursor =
+                    root.TryGetProperty(
+                        "next_cursor",
+                        out var next) &&
+                    next.ValueKind == JsonValueKind.String
+                        ? next.GetString()
+                        : null;
+
+                if (string.IsNullOrWhiteSpace(cursor))
+                    hasMore = false;
+            }
+
+            return children;
+        }
+
+        private static async Task MigrateVisibleTechnicalBlocksAsync(
+            HttpClient http,
+            string pageId,
+            CancellationToken cancellationToken)
+        {
+            string? cursor = null;
+            var hasMore = true;
+            var legacyBlocks =
+                new List<(string BlockId, string Raw)>();
+
+            while (hasMore)
+            {
+                var url =
+                    $"blocks/{NormalizeId(pageId)}/children?page_size=100";
+
+                if (!string.IsNullOrWhiteSpace(cursor))
+                {
+                    url +=
+                        $"&start_cursor={Uri.EscapeDataString(cursor)}";
+                }
+
+                using var response =
+                    await SendGetAsync(
+                        http,
+                        url,
+                        cancellationToken);
+
+                var json =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                    return;
+
+                using var document =
+                    JsonDocument.Parse(json);
+
+                var root =
+                    document.RootElement;
+
+                if (root.TryGetProperty(
+                        "results",
+                        out var results) &&
+                    results.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var block in results.EnumerateArray())
+                    {
+                        var raw =
+                            ReadParagraphPlainText(block);
+
+                        if (!IsTechnicalPayload(raw))
+                            continue;
+
+                        var id =
+                            ReadString(block, "id");
+
+                        if (!string.IsNullOrWhiteSpace(id))
+                            legacyBlocks.Add((id, raw));
+                    }
+                }
+
+                hasMore =
+                    root.TryGetProperty(
+                        "has_more",
+                        out var more) &&
+                    more.ValueKind == JsonValueKind.True;
+
+                cursor =
+                    root.TryGetProperty(
+                        "next_cursor",
+                        out var next) &&
+                    next.ValueKind == JsonValueKind.String
+                        ? next.GetString()
+                        : null;
+
+                if (string.IsNullOrWhiteSpace(cursor))
+                    hasMore = false;
+            }
+
+            foreach (var legacy in legacyBlocks)
+            {
+                var payload =
+                    new Dictionary<string, object?>
+                    {
+                        ["children"] = new object[]
+                        {
+                            BuildHiddenMetadataToggle(legacy.Raw)
+                        }
+                    };
+
+                using var appendResponse =
+                    await SendJsonAsync(
+                        http,
+                        HttpMethod.Patch,
+                        $"blocks/{NormalizeId(pageId)}/children",
+                        payload,
+                        cancellationToken);
+
+                if (!appendResponse.IsSuccessStatusCode)
+                    continue;
+
+                using var archiveResponse =
+                    await SendJsonAsync(
+                        http,
+                        HttpMethod.Patch,
+                        $"blocks/{NormalizeId(legacy.BlockId)}",
+                        new Dictionary<string, object?>
+                        {
+                            ["archived"] = true
+                        },
+                        cancellationToken);
+            }
+        }
+
+        public async Task<bool> IsPageActiveAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken = default)
+        {
+            Validate(token, pageId);
+
+            using var http =
+                CreateClient(token);
+
+            using var response =
+                await SendGetAsync(
+                    http,
+                    $"pages/{NormalizeId(pageId)}",
+                    cancellationToken);
+
+            var json =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            using var document =
+                JsonDocument.Parse(json);
+
+            var root =
+                document.RootElement;
+
+            var archived =
+                root.TryGetProperty(
+                    "archived",
+                    out var archivedValue) &&
+                archivedValue.ValueKind ==
+                    JsonValueKind.True;
+
+            var inTrash =
+                root.TryGetProperty(
+                    "in_trash",
+                    out var trashValue) &&
+                trashValue.ValueKind ==
+                    JsonValueKind.True;
+
+            return !archived && !inTrash;
+        }
 
         public async Task<IReadOnlyList<MessageThreadEntry>>
             GetThreadAsync(
@@ -69,7 +418,8 @@ namespace Anfeta.UI.Services.Notion
                 }
 
                 using var response =
-                    await http.GetAsync(
+                    await SendGetAsync(
+                        http,
                         url,
                         cancellationToken);
 
@@ -101,39 +451,50 @@ namespace Anfeta.UI.Services.Notion
                     foreach (var block in
                              results.EnumerateArray())
                     {
-                        var attachmentBlock =
-                            TryParseAttachmentBlock(block);
+                        var blocksToRead =
+                            IsToggleBlock(block)
+                                ? await ReadToggleChildrenAsync(
+                                    http,
+                                    block,
+                                    cancellationToken)
+                                : new[] { block.Clone() };
 
-                        if (attachmentBlock != null)
+                        foreach (var readableBlock in blocksToRead)
                         {
-                            pendingAttachments.Add(
-                                attachmentBlock);
+                            var attachmentBlock =
+                                TryParseAttachmentBlock(readableBlock);
 
-                            continue;
+                            if (attachmentBlock != null)
+                            {
+                                pendingAttachments.Add(
+                                    attachmentBlock);
+
+                                continue;
+                            }
+
+                            var entry =
+                                TryParseEntry(readableBlock);
+
+                            if (entry == null)
+                                continue;
+
+                            if (pendingAttachments.Count > 0)
+                            {
+                                entry =
+                                    entry.Attachments != null &&
+                                    entry.Attachments.Count > 0
+                                        ? EnrichEntryAttachments(
+                                            entry,
+                                            pendingAttachments)
+                                        : AttachLegacyResolvedAttachments(
+                                            entry,
+                                            pendingAttachments);
+
+                                pendingAttachments.Clear();
+                            }
+
+                            entries.Add(entry);
                         }
-
-                        var entry =
-                            TryParseEntry(block);
-
-                        if (entry == null)
-                            continue;
-
-                        if (pendingAttachments.Count > 0)
-                        {
-                            entry =
-                                entry.Attachments != null &&
-                                entry.Attachments.Count > 0
-                                    ? EnrichEntryAttachments(
-                                        entry,
-                                        pendingAttachments)
-                                    : AttachLegacyResolvedAttachments(
-                                        entry,
-                                        pendingAttachments);
-
-                            pendingAttachments.Clear();
-                        }
-
-                        entries.Add(entry);
                     }
                 }
 
@@ -162,15 +523,15 @@ namespace Anfeta.UI.Services.Notion
                 .ToList();
         }
 
-        public async Task<ReviewAlertSourceLink?>
-            GetReviewAlertSourceAsync(
-                string token,
-                string pageId,
-                CancellationToken cancellationToken = default)
+        public async Task<ReviewFlowMetadata?> GetReviewFlowAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken = default)
         {
             Validate(token, pageId);
 
             using var http = CreateClient(token);
+            ReviewFlowMetadata? latest = null;
             string? cursor = null;
             var hasMore = true;
 
@@ -187,8 +548,179 @@ namespace Anfeta.UI.Services.Notion
                         $"&start_cursor={Uri.EscapeDataString(cursor)}";
                 }
 
+                using var response = await SendGetAsync(
+                    http,
+                    url,
+                    cancellationToken);
+
+                var json = await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw CreateNotionException(
+                        "consultar el flujo de revisión",
+                        response,
+                        json);
+                }
+
+                using var document = JsonDocument.Parse(json);
+                var root = document.RootElement;
+
+                if (root.TryGetProperty("results", out var results) &&
+                    results.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var block in results.EnumerateArray())
+                    {
+                        var blocksToRead =
+                            IsToggleBlock(block)
+                                ? await ReadToggleChildrenAsync(
+                                    http,
+                                    block,
+                                    cancellationToken)
+                                : new[] { block.Clone() };
+
+                        foreach (var readableBlock in blocksToRead)
+                        {
+                            var plainText =
+                                ReadParagraphPlainText(readableBlock);
+
+                            if (!plainText.StartsWith(
+                                    ReviewFlowPrefix,
+                                    StringComparison.Ordinal))
+                            {
+                                continue;
+                            }
+
+                            try
+                            {
+                                var encoded = plainText.Substring(
+                                    ReviewFlowPrefix.Length);
+
+                                var payloadJson = Encoding.UTF8.GetString(
+                                    Convert.FromBase64String(encoded));
+
+                                var parsed =
+                                    JsonSerializer.Deserialize<ReviewFlowMetadata>(
+                                        payloadJson);
+
+                                if (parsed != null &&
+                                    (latest == null ||
+                                     parsed.UpdatedAt >= latest.UpdatedAt))
+                                {
+                                    latest = parsed;
+                                }
+                            }
+                            catch
+                            {
+                            }
+                        }
+                    }
+                }
+
+                hasMore =
+                    root.TryGetProperty("has_more", out var more) &&
+                    more.ValueKind == JsonValueKind.True;
+
+                cursor =
+                    root.TryGetProperty("next_cursor", out var next) &&
+                    next.ValueKind == JsonValueKind.String
+                        ? next.GetString()
+                        : null;
+
+                if (string.IsNullOrWhiteSpace(cursor))
+                    hasMore = false;
+            }
+
+            return latest;
+        }
+
+        public async Task SaveReviewFlowAsync(
+            string token,
+            string pageId,
+            ReviewFlowMetadata metadata,
+            CancellationToken cancellationToken = default)
+        {
+            Validate(token, pageId);
+
+            if (metadata == null ||
+                string.IsNullOrWhiteSpace(metadata.OriginalPerson) ||
+                string.IsNullOrWhiteSpace(metadata.State))
+            {
+                throw new ArgumentException(
+                    "El flujo de revisión no contiene información válida.");
+            }
+
+            var json = JsonSerializer.Serialize(metadata);
+            var encoded = ReviewFlowPrefix +
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["children"] = new object[]
+                {
+                    BuildHiddenMetadataToggle(encoded)
+                }
+            };
+
+            using var http = CreateClient(token);
+
+            using var response =
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Patch,
+                    $"blocks/{NormalizeId(pageId)}/children",
+                    payload,
+                    cancellationToken);
+
+            var responseJson = await response.Content.ReadAsStringAsync(
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "guardar el flujo de revisión",
+                    response,
+                    responseJson);
+            }
+
+            await MigrateVisibleTechnicalBlocksAsync(
+                http,
+                pageId,
+                cancellationToken);
+        }
+
+        public async Task<ReviewAlertSourceLink?>
+            GetReviewAlertSourceAsync(
+                string token,
+                string pageId,
+                CancellationToken cancellationToken = default)
+        {
+            Validate(token, pageId);
+
+            using var http = CreateClient(token);
+            string? cursor = null;
+            var hasMore = true;
+            ReviewAlertSourceLink? threadReference = null;
+
+            while (hasMore)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var url =
+                    $"blocks/{NormalizeId(pageId)}/children?page_size=100";
+
+                if (!string.IsNullOrWhiteSpace(cursor))
+                {
+                    url +=
+                        $"&start_cursor={Uri.EscapeDataString(cursor)}";
+                }
+
                 using var response =
-                    await http.GetAsync(url, cancellationToken);
+                    await SendGetAsync(
+                        http,
+                        url,
+                        cancellationToken);
 
                 var json =
                     await response.Content.ReadAsStringAsync(
@@ -210,49 +742,71 @@ namespace Anfeta.UI.Services.Notion
                 {
                     foreach (var block in results.EnumerateArray())
                     {
-                        var plainText = ReadParagraphPlainText(block);
+                        var blocksToRead =
+                            IsToggleBlock(block)
+                                ? await ReadToggleChildrenAsync(
+                                    http,
+                                    block,
+                                    cancellationToken)
+                                : new[] { block.Clone() };
 
-                        if (plainText.StartsWith(
-                                ReviewSourcePrefix,
-                                StringComparison.Ordinal))
+                        foreach (var readableBlock in blocksToRead)
                         {
-                            try
+                            var plainText =
+                                ReadParagraphPlainText(readableBlock);
+
+                            if (plainText.StartsWith(
+                                    ReviewSourcePrefix,
+                                    StringComparison.Ordinal))
                             {
-                                var encoded = plainText.Substring(
-                                    ReviewSourcePrefix.Length);
-
-                                var payloadJson = Encoding.UTF8.GetString(
-                                    Convert.FromBase64String(encoded));
-
-                                var source =
-                                    JsonSerializer.Deserialize<ReviewAlertSourceLink>(
-                                        payloadJson);
-
-                                if (source != null &&
-                                    (!string.IsNullOrWhiteSpace(source.PageId) ||
-                                     !string.IsNullOrWhiteSpace(source.PageUrl)))
+                                try
                                 {
-                                    return source;
+                                    var encoded = plainText.Substring(
+                                        ReviewSourcePrefix.Length);
+
+                                    var payloadJson = Encoding.UTF8.GetString(
+                                        Convert.FromBase64String(encoded));
+
+                                    var source =
+                                        JsonSerializer.Deserialize<ReviewAlertSourceLink>(
+                                            payloadJson);
+
+                                    if (source != null &&
+                                        (!string.IsNullOrWhiteSpace(source.PageId) ||
+                                         !string.IsNullOrWhiteSpace(source.PageUrl)))
+                                    {
+                                        return source;
+                                    }
+                                }
+                                catch
+                                {
                                 }
                             }
-                            catch
-                            {
-                                // Ignora metadatos dañados y prueba el vínculo visible.
-                            }
-                        }
 
-                        if (plainText.StartsWith(
-                                "Abrir actividad original:",
-                                StringComparison.OrdinalIgnoreCase))
-                        {
-                            var legacyUrl = TryReadFirstParagraphLink(block);
-
-                            if (!string.IsNullOrWhiteSpace(legacyUrl))
+                            if (plainText.StartsWith(
+                                    "Abrir actividad original:",
+                                    StringComparison.OrdinalIgnoreCase))
                             {
-                                return new ReviewAlertSourceLink
+                                var legacyUrl =
+                                    TryReadFirstParagraphLink(readableBlock);
+
+                                if (!string.IsNullOrWhiteSpace(legacyUrl))
                                 {
-                                    PageUrl = legacyUrl
-                                };
+                                    return new ReviewAlertSourceLink
+                                    {
+                                        PageUrl = legacyUrl
+                                    };
+                                }
+                            }
+
+                            var threadEntry =
+                                TryParseEntry(readableBlock);
+
+                            if (threadEntry != null)
+                            {
+                                threadReference ??=
+                                    TryExtractActivityReference(
+                                        threadEntry.Text);
                             }
                         }
                     }
@@ -272,7 +826,88 @@ namespace Anfeta.UI.Services.Notion
                     hasMore = false;
             }
 
-            return null;
+            return threadReference;
+        }
+
+        private static ReviewAlertSourceLink?
+            TryExtractActivityReference(
+                string? text)
+        {
+            var value =
+                (text ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            var lines = value
+                .Split(
+                    new[] { "\r\n", "\n", "\r" },
+                    StringSplitOptions.None)
+                .Select(line => line.Trim())
+                .ToList();
+
+            var titleLine = lines
+                .FirstOrDefault(line =>
+                    line.StartsWith(
+                        "Actividad:",
+                        StringComparison.OrdinalIgnoreCase));
+
+            var title =
+                titleLine == null
+                    ? string.Empty
+                    : titleLine
+                        .Substring("Actividad:".Length)
+                        .Trim();
+
+            var notionLine = lines
+                .FirstOrDefault(line =>
+                    line.StartsWith(
+                        "Notion:",
+                        StringComparison.OrdinalIgnoreCase));
+
+            var urlCandidate =
+                notionLine == null
+                    ? string.Empty
+                    : notionLine
+                        .Substring("Notion:".Length)
+                        .Trim();
+
+            if (string.IsNullOrWhiteSpace(urlCandidate))
+            {
+                var match =
+                    System.Text.RegularExpressions.Regex.Match(
+                        value,
+                        @"https://(?:www\.)?notion\.(?:so|site)/[^\s<>()]+",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+                if (match.Success)
+                    urlCandidate = match.Value;
+            }
+
+            urlCandidate =
+                urlCandidate.TrimEnd(
+                    '.',
+                    ',',
+                    ';',
+                    ':',
+                    ')',
+                    ']',
+                    '}');
+
+            if (!Uri.TryCreate(
+                    urlCandidate,
+                    UriKind.Absolute,
+                    out var uri))
+            {
+                return null;
+            }
+
+            return new ReviewAlertSourceLink
+            {
+                PageUrl = uri.AbsoluteUri,
+                Title = title
+            };
         }
 
         private static string TryReadFirstParagraphLink(
@@ -358,49 +993,19 @@ namespace Anfeta.UI.Services.Notion
                     ["children"] =
                         new object[]
                         {
-                            new Dictionary<string, object?>
-                            {
-                                ["object"] = "block",
-                                ["type"] = "paragraph",
-                                ["paragraph"] =
-                                    new Dictionary<string, object?>
-                                    {
-                                        ["rich_text"] =
-                                            new object[]
-                                            {
-                                                new Dictionary<string, object?>
-                                                {
-                                                    ["type"] = "text",
-                                                    ["text"] =
-                                                        new Dictionary<string, object?>
-                                                        {
-                                                            ["content"] =
-                                                                encoded
-                                                        }
-                                                }
-                                            }
-                                    }
-                            }
+                            BuildHiddenMetadataToggle(encoded)
                         }
                 };
 
             using var http =
                 CreateClient(token);
 
-            using var request =
-                new HttpRequestMessage(
-                    HttpMethod.Patch,
-                    $"blocks/{NormalizeId(pageId)}/children")
-                {
-                    Content = new StringContent(
-                        JsonSerializer.Serialize(payload),
-                        Encoding.UTF8,
-                        "application/json")
-                };
-
             using var response =
-                await http.SendAsync(
-                    request,
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Patch,
+                    $"blocks/{NormalizeId(pageId)}/children",
+                    payload,
                     cancellationToken);
 
             var json =
@@ -415,6 +1020,11 @@ namespace Anfeta.UI.Services.Notion
                     response,
                     json);
             }
+
+            await MigrateVisibleTechnicalBlocksAsync(
+                http,
+                pageId,
+                cancellationToken);
         }
 
         public async Task UpdateEntryAsync(
@@ -457,21 +1067,13 @@ namespace Anfeta.UI.Services.Notion
                 };
 
             using var http = CreateClient(token);
-            using var request =
-                new HttpRequestMessage(
-                    HttpMethod.Patch,
-                    $"blocks/{NormalizeId(blockId)}")
-                {
-                    Content =
-                        new StringContent(
-                            JsonSerializer.Serialize(payload),
-                            Encoding.UTF8,
-                            "application/json")
-                };
 
             using var response =
-                await http.SendAsync(
-                    request,
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Patch,
+                    $"blocks/{NormalizeId(blockId)}",
+                    payload,
                     cancellationToken);
 
             var json =
@@ -501,21 +1103,13 @@ namespace Anfeta.UI.Services.Notion
                 };
 
             using var http = CreateClient(token);
-            using var request =
-                new HttpRequestMessage(
-                    HttpMethod.Patch,
-                    $"blocks/{NormalizeId(blockId)}")
-                {
-                    Content =
-                        new StringContent(
-                            JsonSerializer.Serialize(payload),
-                            Encoding.UTF8,
-                            "application/json")
-                };
 
             using var response =
-                await http.SendAsync(
-                    request,
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Patch,
+                    $"blocks/{NormalizeId(blockId)}",
+                    payload,
                     cancellationToken);
 
             var json =
@@ -991,6 +1585,47 @@ namespace Anfeta.UI.Services.Notion
             return builder
                 .ToString()
                 .Trim();
+        }
+
+        private const int MaxRetryAttempts = 5;
+
+        private static Task<HttpResponseMessage> SendGetAsync(
+            HttpClient http,
+            string requestUri,
+            CancellationToken cancellationToken)
+        {
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Get,
+                    requestUri),
+                cancellationToken,
+                MaxRetryAttempts);
+        }
+
+        private static Task<HttpResponseMessage> SendJsonAsync(
+            HttpClient http,
+            HttpMethod method,
+            string requestUri,
+            object payload,
+            CancellationToken cancellationToken)
+        {
+            var serialized =
+                JsonSerializer.Serialize(payload);
+
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    method,
+                    requestUri)
+                {
+                    Content = new StringContent(
+                        serialized,
+                        Encoding.UTF8,
+                        "application/json")
+                },
+                cancellationToken,
+                MaxRetryAttempts);
         }
 
         private static HttpClient CreateClient(

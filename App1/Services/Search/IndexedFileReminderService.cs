@@ -34,6 +34,9 @@ namespace Anfeta.UI.Services.Search
         private const string LS_SnoozedReminders =
             "Search.IndexedReminders.Snoozed.v1";
 
+        private const string LS_MessagesReadState =
+            "Messaging.ReadState.v1";
+
         private static readonly Regex ReminderPattern = new(
             @"(?<!\d)(?<date>\d{4}-\d{2}-\d{2})[ T](?<hour>\d{2})[:\-](?<minute>\d{2})(?!\d)",
             RegexOptions.Compiled |
@@ -51,7 +54,8 @@ namespace Anfeta.UI.Services.Search
                 ["eemma"] = "Emmanuel",
                 ["bbria"] = "Brian",
                 ["ggena"] = "Genaro",
-                ["nneft"] = "Neftali"
+                ["nneft"] = "Neftali",
+                ["__all__"] = "Todos los usuarios"
             };
 
         private readonly Dictionary<string, DateTimeOffset> _fired =
@@ -85,6 +89,14 @@ namespace Anfeta.UI.Services.Search
             _scanTimer.Interval = TimeSpan.FromSeconds(30);
             _scanTimer.Tick += ScanTimer_Tick;
             _scanTimer.Start();
+
+            ScanForDueReminders();
+        }
+
+        public void ScanNow()
+        {
+            if (!_started || _disposed)
+                return;
 
             ScanForDueReminders();
         }
@@ -127,6 +139,10 @@ namespace Anfeta.UI.Services.Search
             if (rows.Count == 0)
                 return;
 
+            // Si una notificación fue terminada, eliminada o enviada a
+            // papelera mientras estaba pospuesta, se limpia de inmediato.
+            PruneInactiveSnoozedReminders();
+
             var now = DateTimeOffset.Now;
 
             FireDueSnoozedReminders(now);
@@ -154,6 +170,14 @@ namespace Anfeta.UI.Services.Search
 
                 if (!ShouldShowForCurrentUser(recipientTag))
                     continue;
+
+                if (row.Source == SearchSource.Notion &&
+                    IsReminderMarkedAsRead(
+                        row.ExternalId,
+                        reminderAt))
+                {
+                    continue;
+                }
 
                 if (reminderAt > now ||
                     reminderAt < oldestAllowed)
@@ -216,6 +240,92 @@ namespace Anfeta.UI.Services.Search
             return text;
         }
 
+        private static bool ContainsCompletedMarker(
+            string? value)
+        {
+            return !string.IsNullOrWhiteSpace(value) &&
+                   value.Contains(
+                       "[TERMINADO]",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsReminderStillActive(
+            IndexedFileReminder reminder)
+        {
+            if (reminder == null ||
+                ContainsCompletedMarker(
+                    reminder.Title))
+            {
+                return false;
+            }
+
+            if (reminder.Source != SearchSource.Notion ||
+                string.IsNullOrWhiteSpace(
+                    reminder.PageId))
+            {
+                return true;
+            }
+
+            if (IsReminderMarkedAsRead(
+                    reminder.PageId,
+                    reminder.ReminderAt))
+            {
+                return false;
+            }
+
+            var row =
+                App.LocalIndex
+                    .GetAll()
+                    .FirstOrDefault(item =>
+                        item != null &&
+                        item.Source == SearchSource.Notion &&
+                        string.Equals(
+                            item.ExternalId,
+                            reminder.PageId,
+                            StringComparison.OrdinalIgnoreCase));
+
+            if (row == null)
+                return false;
+
+            var currentTitle =
+                StripReminderSourcePrefix(
+                    row.Name);
+
+            return !ContainsCompletedMarker(
+                currentTitle);
+        }
+
+        private static bool IsReminderMarkedAsRead(
+            string? pageId,
+            DateTimeOffset reminderAt)
+        {
+            if (string.IsNullOrWhiteSpace(pageId))
+                return false;
+
+            try
+            {
+                var raw =
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_MessagesReadState] as string;
+
+                if (string.IsNullOrWhiteSpace(raw))
+                    return false;
+
+                var readState = JsonSerializer.Deserialize<
+                    Dictionary<string, DateTimeOffset>>(raw);
+
+                return readState != null &&
+                       readState.TryGetValue(
+                           pageId.Trim(),
+                           out var readAt) &&
+                       readAt >= reminderAt;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static bool TryParseReminder(
             string title,
             out DateTimeOffset reminderAt,
@@ -232,8 +342,11 @@ namespace Anfeta.UI.Services.Search
             senderTag = string.Empty;
             senderName = string.Empty;
 
-            if (string.IsNullOrWhiteSpace(title))
+            if (string.IsNullOrWhiteSpace(title) ||
+                ContainsCompletedMarker(title))
+            {
                 return false;
+            }
 
             var match =
                 ReminderPattern.Match(title);
@@ -372,8 +485,14 @@ namespace Anfeta.UI.Services.Search
             if (string.IsNullOrWhiteSpace(currentUserTag))
                 return true;
 
-            if (string.IsNullOrWhiteSpace(recipientTag))
+            if (string.IsNullOrWhiteSpace(recipientTag) ||
+                string.Equals(
+                    recipientTag,
+                    "__all__",
+                    StringComparison.OrdinalIgnoreCase))
+            {
                 return true;
+            }
 
             return string.Equals(
                 currentUserTag,
@@ -409,6 +528,33 @@ namespace Anfeta.UI.Services.Search
             return row.Target ?? string.Empty;
         }
 
+        public void DismissPage(
+            string? pageId)
+        {
+            var cleanPageId =
+                (pageId ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(cleanPageId))
+                return;
+
+            var removed = false;
+
+            foreach (var key in _snoozed
+                .Where(item =>
+                    string.Equals(
+                        item.Value.Reminder.PageId,
+                        cleanPageId,
+                        StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Key)
+                .ToList())
+            {
+                removed |= _snoozed.Remove(key);
+            }
+
+            if (removed)
+                SaveSnoozedReminders();
+        }
+
         public void Snooze(
             IndexedFileReminder reminder,
             TimeSpan delay)
@@ -429,6 +575,25 @@ namespace Anfeta.UI.Services.Search
             SaveSnoozedReminders();
         }
 
+        private void PruneInactiveSnoozedReminders()
+        {
+            var inactiveKeys =
+                _snoozed
+                    .Where(item =>
+                        !IsReminderStillActive(
+                            item.Value.Reminder))
+                    .Select(item => item.Key)
+                    .ToList();
+
+            if (inactiveKeys.Count == 0)
+                return;
+
+            foreach (var key in inactiveKeys)
+                _snoozed.Remove(key);
+
+            SaveSnoozedReminders();
+        }
+
         private void FireDueSnoozedReminders(
             DateTimeOffset now)
         {
@@ -439,7 +604,16 @@ namespace Anfeta.UI.Services.Search
             foreach (var item in due)
             {
                 _snoozed.Remove(item.Key);
-                ReminderDue?.Invoke(this, item.Value.Reminder);
+
+                if (!IsReminderStillActive(
+                        item.Value.Reminder))
+                {
+                    continue;
+                }
+
+                ReminderDue?.Invoke(
+                    this,
+                    item.Value.Reminder);
             }
 
             if (due.Count > 0)

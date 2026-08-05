@@ -333,16 +333,12 @@ namespace Anfeta.UI.Services.Notion
                     ["children"] = children
                 };
 
-            using var content =
-                new StringContent(
-                    JsonSerializer.Serialize(payload),
-                    Encoding.UTF8,
-                    "application/json");
-
             using var response =
-                await http.PatchAsync(
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Patch,
                     $"blocks/{pageId.Trim()}/children",
-                    content,
+                    JsonSerializer.Serialize(payload),
                     cancellationToken);
 
             var json =
@@ -389,6 +385,109 @@ namespace Anfeta.UI.Services.Notion
             return http;
         }
 
+        private static Task<HttpResponseMessage> SendJsonAsync(
+            HttpClient http,
+            HttpMethod method,
+            string requestUri,
+            string json,
+            CancellationToken cancellationToken)
+        {
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    method,
+                    requestUri)
+                {
+                    Content = new StringContent(
+                        json,
+                        Encoding.UTF8,
+                        "application/json")
+                },
+                cancellationToken);
+        }
+
+        private static Task<HttpResponseMessage> SendMultipartBytesAsync(
+            HttpClient http,
+            string requestUri,
+            byte[] buffer,
+            int count,
+            string fileName,
+            string contentType,
+            int? partNumber,
+            CancellationToken cancellationToken)
+        {
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () =>
+                {
+                    var form = new MultipartFormDataContent();
+                    var partContent = new ByteArrayContent(
+                        buffer,
+                        0,
+                        count);
+
+                    partContent.Headers.ContentType =
+                        new MediaTypeHeaderValue(contentType);
+
+                    form.Add(partContent, "file", fileName);
+
+                    if (partNumber.HasValue)
+                    {
+                        form.Add(
+                            new StringContent(
+                                partNumber.Value.ToString(
+                                    System.Globalization.CultureInfo.InvariantCulture)),
+                            "part_number");
+                    }
+
+                    return new HttpRequestMessage(
+                        HttpMethod.Post,
+                        requestUri)
+                    {
+                        Content = form
+                    };
+                },
+                cancellationToken);
+        }
+
+        private static Task<HttpResponseMessage> SendFileAsync(
+            HttpClient http,
+            string requestUri,
+            string localFilePath,
+            string fileName,
+            string contentType,
+            CancellationToken cancellationToken)
+        {
+            return NotionRequestCoordinator.SendAsync(
+                http,
+                () =>
+                {
+                    var stream = new FileStream(
+                        localFilePath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.Read,
+                        bufferSize: 81920,
+                        useAsync: true);
+
+                    var form = new MultipartFormDataContent();
+                    var fileContent = new StreamContent(stream);
+
+                    fileContent.Headers.ContentType =
+                        new MediaTypeHeaderValue(contentType);
+
+                    form.Add(fileContent, "file", fileName);
+
+                    return new HttpRequestMessage(
+                        HttpMethod.Post,
+                        requestUri)
+                    {
+                        Content = form
+                    };
+                },
+                cancellationToken);
+        }
+
         private static async Task<string> CreateFileUploadAsync(
             HttpClient http,
             string fileName,
@@ -410,15 +509,13 @@ namespace Anfeta.UI.Services.Notion
             if (multiPart)
                 payload["number_of_parts"] = numberOfParts;
 
-            using var content = new StringContent(
-                JsonSerializer.Serialize(payload),
-                Encoding.UTF8,
-                "application/json");
-
-            using var response = await http.PostAsync(
-                "file_uploads",
-                content,
-                cancellationToken);
+            using var response =
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Post,
+                    "file_uploads",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -528,36 +625,15 @@ namespace Anfeta.UI.Services.Notion
                     totalRead += read;
                 }
 
-                using var form =
-                    new MultipartFormDataContent();
-
-                using var partContent =
-                    new ByteArrayContent(
-                        buffer,
-                        0,
-                        totalRead);
-
-                partContent.Headers.ContentType =
-                    new MediaTypeHeaderValue(
-                        contentType);
-
-                form.Add(
-                    partContent,
-                    "file",
-                    file.Name);
-
-                form.Add(
-                    new StringContent(
-                        part.ToString(
-                            System.Globalization
-                                .CultureInfo
-                                .InvariantCulture)),
-                    "part_number");
-
                 using var response =
-                    await http.PostAsync(
+                    await SendMultipartBytesAsync(
+                        http,
                         $"file_uploads/{uploadId}/send",
-                        form,
+                        buffer,
+                        totalRead,
+                        file.Name,
+                        contentType,
+                        part,
                         cancellationToken);
 
                 var json =
@@ -588,16 +664,12 @@ namespace Anfeta.UI.Services.Notion
                         file.Length));
             }
 
-            using var completeContent =
-                new StringContent(
-                    "{}",
-                    Encoding.UTF8,
-                    "application/json");
-
             using var completeResponse =
-                await http.PostAsync(
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Post,
                     $"file_uploads/{uploadId}/complete",
-                    completeContent,
+                    "{}",
                     cancellationToken);
 
             var completeJson =
@@ -624,26 +696,14 @@ namespace Anfeta.UI.Services.Notion
             string contentType,
             CancellationToken cancellationToken)
         {
-            await using var stream = new FileStream(
-                localFilePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 81920,
-                useAsync: true);
-
-            using var form = new MultipartFormDataContent();
-            using var fileContent = new StreamContent(stream);
-
-            fileContent.Headers.ContentType =
-                new MediaTypeHeaderValue(contentType);
-
-            form.Add(fileContent, "file", fileName);
-
-            using var response = await http.PostAsync(
-                $"file_uploads/{fileUploadId}/send",
-                form,
-                cancellationToken);
+            using var response =
+                await SendFileAsync(
+                    http,
+                    $"file_uploads/{fileUploadId}/send",
+                    localFilePath,
+                    fileName,
+                    contentType,
+                    cancellationToken);
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -728,15 +788,13 @@ namespace Anfeta.UI.Services.Notion
                 ["children"] = children
             };
 
-            using var content = new StringContent(
-                JsonSerializer.Serialize(payload),
-                Encoding.UTF8,
-                "application/json");
-
-            using var response = await http.PostAsync(
-                "pages",
-                content,
-                cancellationToken);
+            using var response =
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Post,
+                    "pages",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 

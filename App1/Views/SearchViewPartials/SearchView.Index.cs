@@ -25,6 +25,13 @@ namespace Anfeta.UI.Views
         private bool _notionSyncRunning;
         private DispatcherQueueTimer? _notionNoticeTimer;
 
+        private static readonly object CompletedReminderCleanupLock =
+            new();
+
+        private static readonly HashSet<string>
+            CompletedReminderCleanupQueued =
+                new(StringComparer.OrdinalIgnoreCase);
+
         private const string LS_DropboxSyncCursor = "Dropbox.SyncCursor";
         private DispatcherQueueTimer? _dropboxChangeTimer;
         private bool _dropboxSyncRunning;
@@ -501,6 +508,150 @@ namespace Anfeta.UI.Views
             return string.Empty;
         }
 
+        private static void QueueCompletedReminderTrashCleanup(
+            string token,
+            IEnumerable<SearchResultRow> rows)
+        {
+            if (string.IsNullOrWhiteSpace(token) ||
+                rows == null)
+            {
+                return;
+            }
+
+            var ids =
+                rows
+                    .Where(NotionIndexBuilder
+                        .IsCompletedReminderNotification)
+                    .Select(GetNotionIdentity)
+                    .Where(id =>
+                        !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            if (ids.Count == 0)
+                return;
+
+            var queuedIds =
+                new List<string>();
+
+            lock (CompletedReminderCleanupLock)
+            {
+                foreach (var id in ids)
+                {
+                    if (CompletedReminderCleanupQueued.Add(id))
+                        queuedIds.Add(id);
+                }
+            }
+
+            if (queuedIds.Count == 0)
+                return;
+
+            _ = Task.Run(
+                async () =>
+                {
+                    var service =
+                        new NotionPageActionsService();
+
+                    foreach (var id in queuedIds)
+                    {
+                        try
+                        {
+                            using var cts =
+                                new CancellationTokenSource(
+                                    TimeSpan.FromMinutes(2));
+
+                            await service.MovePageToTrashAsync(
+                                token,
+                                id,
+                                cts.Token);
+                        }
+                        catch
+                        {
+                            // La página se mantiene oculta localmente. La
+                            // siguiente sincronización volverá a intentar.
+                        }
+                        finally
+                        {
+                            lock (CompletedReminderCleanupLock)
+                            {
+                                CompletedReminderCleanupQueued.Remove(
+                                    id);
+                            }
+                        }
+                    }
+                });
+        }
+
+        private async Task<int>
+            RemoveCompletedReminderNotificationsFromLocalIndexAsync(
+                string token,
+                IEnumerable<string>? additionalPageIds = null)
+        {
+            var current =
+                App.LocalIndex.GetAll().ToList();
+
+            var completedRows =
+                current
+                    .Where(NotionIndexBuilder
+                        .IsCompletedReminderNotification)
+                    .ToList();
+
+            QueueCompletedReminderTrashCleanup(
+                token,
+                completedRows);
+
+            var ids =
+                completedRows
+                    .Select(GetNotionIdentity)
+                    .Concat(
+                        additionalPageIds ??
+                        Array.Empty<string>())
+                    .Where(id =>
+                        !string.IsNullOrWhiteSpace(id))
+                    .ToHashSet(
+                        StringComparer.OrdinalIgnoreCase);
+
+            if (ids.Count == 0)
+                return 0;
+
+            var removed =
+                current.RemoveAll(row =>
+                    row.Source == SearchSource.Notion &&
+                    ids.Contains(
+                        GetNotionIdentity(row)));
+
+            if (removed <= 0)
+                return 0;
+
+            App.LocalIndex.Set(current);
+
+            await PersistCombinedIndexIfPossibleAsync(
+                current);
+
+            return removed;
+        }
+
+        private static List<SearchResultRow>
+            FilterCompletedReminderNotifications(
+                string token,
+                IEnumerable<SearchResultRow> rows)
+        {
+            var snapshot =
+                (rows ??
+                 Array.Empty<SearchResultRow>())
+                    .ToList();
+
+            QueueCompletedReminderTrashCleanup(
+                token,
+                snapshot);
+
+            return snapshot
+                .Where(row =>
+                    !NotionIndexBuilder
+                        .IsCompletedReminderNotification(row))
+                .ToList();
+        }
+
         private async Task RefreshNotionIncrementalAsync(bool automatic = false)
         {
             if (_notionSyncRunning)
@@ -572,6 +723,31 @@ namespace Anfeta.UI.Views
                         NotionDataSources.Default,
                         CancellationToken.None);
                 }
+
+                var completedChangedIds =
+                    changedItems
+                        .Where(NotionIndexBuilder
+                            .IsCompletedReminderNotification)
+                        .Select(GetNotionIdentity)
+                        .Where(id =>
+                            !string.IsNullOrWhiteSpace(id))
+                        .ToHashSet(
+                            StringComparer.OrdinalIgnoreCase);
+
+                QueueCompletedReminderTrashCleanup(
+                    token,
+                    changedItems);
+
+                changedItems =
+                    changedItems
+                        .Where(row =>
+                            !NotionIndexBuilder
+                                .IsCompletedReminderNotification(row))
+                        .ToList();
+
+                await RemoveCompletedReminderNotificationsFromLocalIndexAsync(
+                    token,
+                    completedChangedIds);
 
                 if (changedItems.Count > 0)
                 {
@@ -689,6 +865,11 @@ namespace Anfeta.UI.Views
                 NotionDataSources.Default,
                 ct);
 
+                notionItems =
+                    FilterCompletedReminderNotifications(
+                        token,
+                        notionItems);
+
                 var currentWithoutNotion = App.LocalIndex
                     .GetAll()
                     .Where(x => x.Source != SearchSource.Notion)
@@ -714,6 +895,17 @@ namespace Anfeta.UI.Views
         }
         private async Task PaintLoadedIndexAsync()
         {
+            if (!App.LocalIndex.HasData)
+                return;
+
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    LS_NotionToken] as string ??
+                string.Empty;
+
+            await RemoveCompletedReminderNotificationsFromLocalIndexAsync(
+                token);
+
             if (!App.LocalIndex.HasData)
                 return;
 
@@ -1095,6 +1287,11 @@ namespace Anfeta.UI.Views
                   NotionDataSources.Default,
                   CancellationToken.None);
 
+                freshNotionItems =
+                    FilterCompletedReminderNotifications(
+                        token,
+                        freshNotionItems);
+
                 var freshIds = freshNotionItems
                     .Select(GetNotionRowId)
                     .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -1176,6 +1373,11 @@ namespace Anfeta.UI.Views
                  token,
                  NotionDataSources.Default,
                  CancellationToken.None);
+
+                freshNotionItems =
+                    FilterCompletedReminderNotifications(
+                        token,
+                        freshNotionItems);
 
                 var currentWithoutNotion = App.LocalIndex
                     .GetAll()
