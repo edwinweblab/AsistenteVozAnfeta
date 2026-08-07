@@ -295,13 +295,32 @@ namespace Anfeta.UI.Services.Notion
 
                 description = GetPropText(props, "Descripción / Notas");
 
+                var normalizedSourceName =
+                    NormalizePropertyName(sourceName);
+
+                var isCobrarPagarSource =
+                    normalizedSourceName.Contains(
+                        "cobrar",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    normalizedSourceName.Contains(
+                        "pagar",
+                        StringComparison.OrdinalIgnoreCase);
+
+                // BD COBRAR Y PAGAR usa su propia fecha calendarizable.
                 scheduledDate =
-                    GetPropTextByFlexibleAliases(
-                        props,
-                        "Fecha POR Hacer (Trabajando)",
-                        "Fecha por hacer",
-                        "Fecha POR Hacer",
-                        "Fecha de Inicio");
+                    isCobrarPagarSource
+                        ? GetPropTextByFlexibleAliases(
+                            props,
+                            "Due Fecha Recordatorio",
+                            "Due Fecha recordatorio",
+                            "Fecha Recordatorio",
+                            "Fecha de Recordatorio")
+                        : GetPropTextByFlexibleAliases(
+                            props,
+                            "Fecha POR Hacer (Trabajando)",
+                            "Fecha por hacer",
+                            "Fecha POR Hacer",
+                            "Fecha de Inicio");
 
                 projectUpdateStatus =
                     GetProjectUpdateStatus(props, sourceName);

@@ -67,19 +67,22 @@
                 <!--  7 · Actualizar Notion oculto  -->
                 <ColumnDefinition Width="Auto" />
 
-                <!--  8 · Calendario  -->
+                <!--  8 · Calendario de actividades  -->
                 <ColumnDefinition Width="Auto" />
 
-                <!--  9 · Pantallazo  -->
+                <!--  9 · Mensajes  -->
                 <ColumnDefinition Width="Auto" />
 
-                <!--  10 · Vistas  -->
+                <!--  10 · Calendario de recordatorios  -->
                 <ColumnDefinition Width="Auto" />
 
-                <!--  11 · Vistas  -->
+                <!--  11 · Pantallazo  -->
                 <ColumnDefinition Width="Auto" />
 
-                <!--  12 · Menú adicional  -->
+                <!--  12 · Vistas de Notion  -->
+                <ColumnDefinition Width="Auto" />
+
+                <!--  13 · Menú adicional  -->
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
@@ -443,7 +446,7 @@
             <!--  Vistas rápidas de Notion  -->
             <Button
                 x:Name="BtnNotionViews"
-                Grid.Column="11"
+                Grid.Column="12"
                 MinWidth="86"
                 Height="32"
                 Padding="10,0"
@@ -521,10 +524,53 @@
                 </Grid>
             </ToggleButton>
 
+            <!--  Calendario exclusivo de recordatorios  -->
+            <ToggleButton
+                x:Name="ToggleRemindersCalendarView"
+                Grid.Column="10"
+                Width="44"
+                Height="32"
+                Padding="0"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                VerticalAlignment="Center"
+                Click="ToggleRemindersCalendarView_Click"
+                CornerRadius="6"
+                ToolTipService.ToolTip="Abrir calendario de recordatorios">
+                <Grid>
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="15"
+                        Text="🔔" />
+
+                    <Border
+                        x:Name="RemindersCalendarBadge"
+                        MinWidth="16"
+                        Height="16"
+                        Margin="0,-8,-18,0"
+                        Padding="4,0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Background="#A855F7"
+                        CornerRadius="8"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="RemindersCalendarBadgeText"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontSize="9"
+                            FontWeight="SemiBold"
+                            Foreground="White"
+                            Text="0" />
+                    </Border>
+                </Grid>
+            </ToggleButton>
+
             <!--  Pantallazo de resultados  -->
             <Button
                 x:Name="BtnCaptureResults"
-                Grid.Column="10"
+                Grid.Column="11"
                 Width="38"
                 Height="32"
                 Padding="0"
@@ -541,7 +587,7 @@
 
             <!--  Menú ⋯  -->
             <Button
-                Grid.Column="12"
+                Grid.Column="13"
                 Width="36"
                 Height="32"
                 Padding="0"
@@ -1036,9 +1082,9 @@
                             Height="32"
                             HorizontalAlignment="Stretch"
                             SelectionChanged="MessagesGroupCombo_SelectionChanged">
+                            <ComboBoxItem Content="Dominio / proyecto" Tag="domainproject" />
                             <ComboBoxItem Content="Sin agrupar" Tag="none" />
                             <ComboBoxItem Content="Por persona" Tag="person" />
-                            <ComboBoxItem Content="Dominio / proyecto" Tag="domainproject" />
                             <ComboBoxItem Content="Tipo de proyecto" Tag="project" />
                             <ComboBoxItem Content="Por mes" Tag="month" />
                         </ComboBox>
@@ -1077,276 +1123,576 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="1">
-                    <ListView
-                        x:Name="MessagesList"
-                        Margin="12"
-                        IsItemClickEnabled="False"
-                        SelectionMode="None">
-                        <ListView.GroupStyle>
-                            <GroupStyle>
-                                <GroupStyle.HeaderTemplate>
-                                    <DataTemplate>
-                                        <Border
-                                            Margin="0,8,0,6"
-                                            Padding="10,6"
-                                            Background="#202A35"
-                                            CornerRadius="7">
-                                            <TextBlock
-                                                FontSize="14"
-                                                FontWeight="SemiBold"
-                                                Text="{Binding Name}" />
-                                        </Border>
-                                    </DataTemplate>
-                                </GroupStyle.HeaderTemplate>
-                            </GroupStyle>
-                        </ListView.GroupStyle>
+                <Grid Grid.Row="1" Background="#0B1118">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="390" MinWidth="320" MaxWidth="480" />
+                        <ColumnDefinition Width="1" />
+                        <ColumnDefinition Width="*" MinWidth="420" />
+                    </Grid.ColumnDefinitions>
 
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Border
-                                    Margin="0,0,0,8"
-                                    Padding="14"
-                                    Background="{Binding CardBackground}"
-                                    BorderBrush="{Binding CardBorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="10">
-                                    <Grid RowSpacing="10">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
+                    <!--  Bandeja compacta de conversaciones  -->
+                    <Grid Grid.Column="0" Background="#111820">
+                        <ListView
+                            x:Name="MessagesList"
+                            Margin="6"
+                            IsItemClickEnabled="True"
+                            ItemClick="MessagesList_ItemClick"
+                            SelectionMode="Single">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,1" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
 
-                                        <StackPanel Grid.Row="0" Spacing="5">
-                                            <Grid ColumnSpacing="8">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
+                            <ListView.GroupStyle>
+                                <GroupStyle>
+                                    <GroupStyle.HeaderTemplate>
+                                        <DataTemplate>
+                                            <Border
+                                                Margin="6,8,6,3"
+                                                Padding="8,4"
+                                                Background="#202A35"
+                                                CornerRadius="6">
+                                                <TextBlock
+                                                    FontSize="11.5"
+                                                    FontWeight="SemiBold"
+                                                    Opacity="0.86"
+                                                    Text="{Binding Header}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </GroupStyle.HeaderTemplate>
+                                </GroupStyle>
+                            </ListView.GroupStyle>
 
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Border
+                                        Padding="10,9"
+                                        Background="{Binding CardBackground}"
+                                        BorderBrush="{Binding CardBorderBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        CornerRadius="7">
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="44" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border
+                                                Grid.Column="0"
+                                                Width="42"
+                                                Height="42"
+                                                VerticalAlignment="Top"
+                                                Background="{Binding AvatarBrush}"
+                                                CornerRadius="21">
+                                                <TextBlock
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="12"
+                                                    FontWeight="Bold"
+                                                    Foreground="White"
+                                                    Text="{Binding AvatarText}" />
+                                            </Border>
+
+                                            <StackPanel Grid.Column="1" Spacing="2">
+                                                <TextBlock
+                                                    FontSize="13.5"
+                                                    FontWeight="SemiBold"
+                                                    MaxLines="1"
+                                                    Text="{Binding ConversationTitle}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    FontSize="11.5"
+                                                    MaxLines="1"
+                                                    Opacity="0.82"
+                                                    Text="{Binding ConversationPreview}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    FontSize="10.5"
+                                                    MaxLines="1"
+                                                    Opacity="0.58"
+                                                    Text="{Binding ConversationContactLabel}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+
+                                            <StackPanel
+                                                Grid.Column="2"
+                                                HorizontalAlignment="Right"
+                                                Spacing="5">
+                                                <TextBlock
+                                                    HorizontalAlignment="Right"
+                                                    FontSize="10"
+                                                    Opacity="0.68"
+                                                    Text="{Binding ConversationTimeLabel}" />
                                                 <Border
-                                                    Grid.Column="0"
-                                                    Padding="6,2"
+                                                    HorizontalAlignment="Right"
+                                                    Padding="5,2"
                                                     Background="#E5484D"
                                                     CornerRadius="8"
-                                                    VerticalAlignment="Top"
                                                     Visibility="{Binding UnreadVisibility}">
                                                     <TextBlock
-                                                        FontSize="9"
+                                                        FontSize="8.5"
                                                         FontWeight="SemiBold"
                                                         Foreground="White"
                                                         Text="NUEVO" />
                                                 </Border>
-
                                                 <Border
-                                                    Grid.Column="1"
-                                                    Padding="7,2"
-                                                    Background="#2563EB"
-                                                    CornerRadius="8"
-                                                    VerticalAlignment="Top"
-                                                    Visibility="{Binding TutorialBadgeVisibility}">
-                                                    <TextBlock
-                                                        FontSize="9"
-                                                        FontWeight="SemiBold"
-                                                        Foreground="White"
-                                                        Text="TUTORIAL" />
-                                                </Border>
-
-                                                <Border
-                                                    Grid.Column="2"
-                                                    Padding="7,2"
+                                                    HorizontalAlignment="Right"
+                                                    Padding="5,2"
                                                     Background="#334155"
-                                                    CornerRadius="8"
-                                                    VerticalAlignment="Top">
+                                                    CornerRadius="7">
                                                     <TextBlock
-                                                        FontSize="9"
+                                                        FontSize="8.5"
                                                         FontWeight="SemiBold"
                                                         Foreground="White"
                                                         Text="{Binding MessageTypeLabel}" />
                                                 </Border>
-
-                                                <TextBlock
-                                                    Grid.Column="3"
-                                                    FontSize="15"
-                                                    FontWeight="SemiBold"
-                                                    Text="{Binding Message}"
-                                                    TextWrapping="Wrap" />
-                                            </Grid>
-
-                                            <StackPanel Spacing="2">
-                                                <TextBlock
-                                                    Opacity="0.72"
-                                                    Text="{Binding DirectionLabel}"
-                                                    TextWrapping="Wrap" />
-                                                <TextBlock
-                                                    Opacity="0.72"
-                                                    Text="{Binding ScheduledLabel}"
-                                                    TextWrapping="Wrap" />
-                                                <TextBlock
-                                                    Opacity="0.72"
-                                                    Text="{Binding StatusLabel}"
-                                                    TextWrapping="Wrap" />
                                             </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
 
-                                            <StackPanel Spacing="2">
-                                                <TextBlock
-                                                    Opacity="0.72"
-                                                    Text="{Binding LastReplyLabel}"
-                                                    TextWrapping="Wrap"
-                                                    Visibility="{Binding LastReplyVisibility}" />
-                                                <TextBlock
-                                                    Opacity="0.78"
-                                                    FontWeight="SemiBold"
-                                                    Text="{Binding WaitingForLabel}"
-                                                    TextWrapping="Wrap" />
-                                            </StackPanel>
+                        <StackPanel
+                            x:Name="MessagesEmptyState"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="8"
+                            Visibility="Collapsed">
+                            <FontIcon
+                                HorizontalAlignment="Center"
+                                FontSize="32"
+                                Glyph="&#xE8BD;"
+                                Opacity="0.55" />
+                            <TextBlock
+                                x:Name="MessagesEmptyText"
+                                MaxWidth="260"
+                                FontSize="14"
+                                Opacity="0.72"
+                                Text="No hay mensajes para este filtro."
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
 
-                                            <TextBlock
-                                                MaxLines="1"
-                                                Opacity="0.55"
-                                                Text="{Binding IdentifierLabel}"
-                                                TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
+                    <Border Grid.Column="1" Background="#34404D" />
 
-                                        <ScrollViewer
-                                            Grid.Row="1"
-                                            HorizontalScrollBarVisibility="Auto"
-                                            HorizontalScrollMode="Enabled"
-                                            VerticalScrollBarVisibility="Disabled"
-                                            VerticalScrollMode="Disabled"
-                                            ZoomMode="Disabled">
-                                            <StackPanel
-                                                Orientation="Horizontal"
-                                                Spacing="6">
-                                                <Button
-                                                    MinWidth="112"
-                                                    Padding="10,5"
-                                                    Click="MessageOpenOriginalActivity_Click"
-                                                    Content="Abrir actividad"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding OriginalActivityButtonVisibility}"
-                                                    ToolTipService.ToolTip="Abrir primero la actividad real vinculada" />
-                                                <Button
-                                                    MinWidth="118"
-                                                    Padding="10,5"
-                                                    Click="MessageOpen_Click"
-                                                    Content="Abrir recordatorio"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding NormalReminderOpenButtonVisibility}"
-                                                    ToolTipService.ToolTip="Abrir la página propia del recordatorio" />
-                                                <Button
-                                                    MinWidth="82"
-                                                    Padding="10,5"
-                                                    Click="MessageHistory_Click"
-                                                    Content="Historial"
-                                                    Tag="{Binding}" />
-                                                <Button
-                                                    MinWidth="122"
-                                                    Padding="10,5"
-                                                    Click="MessageMarkRead_Click"
-                                                    Content="Marcar como visto"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding MarkReadButtonVisibility}"
-                                                    ToolTipService.ToolTip="Quitar el estado de nuevo sin borrar el historial" />
-                                                <Button
-                                                    MinWidth="118"
-                                                    Padding="10,5"
-                                                    Click="MessageOpen_Click"
-                                                    Content="Abrir notificación"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding ProjectNotificationOpenButtonVisibility}"
-                                                    ToolTipService.ToolTip="Abrir la página auxiliar creada para la notificación" />
-                                                <Button
-                                                    MinWidth="88"
-                                                    Padding="10,5"
-                                                    Click="MessageCopyText_Click"
-                                                    Content="Copiar texto"
-                                                    Tag="{Binding}"
-                                                    ToolTipService.ToolTip="Copiar el contenido del mensaje" />
-                                                <Button
-                                                    MinWidth="106"
-                                                    Padding="10,5"
-                                                    Click="MessageOpenTutorial_Click"
-                                                    Content="Abrir tutorial"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding TutorialActionsVisibility}" />
-                                                <Button
-                                                    MinWidth="86"
-                                                    Padding="10,5"
-                                                    Click="MessageSnooze15_Click"
-                                                    Content="En 15 min"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding TutorialActionsVisibility}" />
-                                                <Button
-                                                    MinWidth="86"
-                                                    Padding="10,5"
-                                                    Click="MessageSnooze60_Click"
-                                                    Content="En 1 hora"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding TutorialActionsVisibility}" />
-                                                <Button
-                                                    MinWidth="118"
-                                                    Padding="10,5"
-                                                    Click="MessageBusy_Click"
-                                                    Content="Estoy ocupado…"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding TutorialActionsVisibility}" />
-                                                <Button
-                                                    MinWidth="92"
-                                                    Padding="10,5"
-                                                    Click="MessageReassign_Click"
-                                                    Content="Reasignar"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding MessageEditActionsVisibility}" />
-                                                <Button
-                                                    MinWidth="104"
-                                                    Padding="10,5"
-                                                    Click="MessageReschedule_Click"
-                                                    Content="Reprogramar"
-                                                    Tag="{Binding}"
-                                                    Visibility="{Binding MessageEditActionsVisibility}" />
-                                                <Button
-                                                    MinWidth="116"
-                                                    Padding="10,5"
-                                                    Click="MessageComplete_Click"
-                                                    Content="{Binding CompleteButtonText}"
-                                                    IsEnabled="{Binding CanComplete}"
-                                                    Tag="{Binding}"
-                                                    ToolTipService.ToolTip="{Binding CompleteButtonToolTip}" />
-                                                <Button
-                                                    MinWidth="96"
-                                                    Padding="10,5"
-                                                    Click="MessageDelete_Click"
-                                                    Content="{Binding DeleteButtonText}"
-                                                    Tag="{Binding}"
-                                                    ToolTipService.ToolTip="{Binding DeleteButtonToolTip}" />
-                                            </StackPanel>
-                                        </ScrollViewer>
+                    <!--  Historial de la conversación seleccionada  -->
+                    <Grid Grid.Column="2" Background="#0D141C">
+                        <StackPanel
+                            x:Name="MessagesConversationEmptyState"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="10">
+                            <Border
+                                Width="68"
+                                Height="68"
+                                HorizontalAlignment="Center"
+                                Background="#1D2A36"
+                                CornerRadius="34">
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="30"
+                                    Glyph="&#xE8BD;"
+                                    Opacity="0.72" />
+                            </Border>
+                            <TextBlock
+                                FontSize="18"
+                                FontWeight="SemiBold"
+                                Text="Selecciona una conversación" />
+                            <TextBlock
+                                MaxWidth="430"
+                                Opacity="0.65"
+                                Text="El historial se abrirá aquí sin salir de la bandeja de mensajes."
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <Grid
+                            x:Name="MessagesConversationPanel"
+                            Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border
+                                Grid.Row="0"
+                                Padding="14,10"
+                                Background="#151E27"
+                                BorderBrush="#34404D"
+                                BorderThickness="0,0,0,1">
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="46" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border
+                                        Grid.Column="0"
+                                        Width="42"
+                                        Height="42"
+                                        Background="{Binding AvatarBrush}"
+                                        CornerRadius="21">
+                                        <TextBlock
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            FontWeight="Bold"
+                                            Foreground="White"
+                                            Text="{Binding AvatarText}" />
+                                    </Border>
+
+                                    <StackPanel Grid.Column="1" Spacing="1">
+                                        <TextBlock
+                                            x:Name="MessagesChatTitleText"
+                                            FontSize="16"
+                                            FontWeight="SemiBold"
+                                            MaxLines="1"
+                                            Text="{Binding ConversationTitle}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            MaxLines="1"
+                                            Opacity="0.76"
+                                            Text="{Binding ConversationPreview}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            x:Name="MessagesChatConversationStateText"
+                                            FontSize="10.5"
+                                            Opacity="0.58"
+                                            Text="Selecciona una conversación." />
+                                    </StackPanel>
+
+                                    <StackPanel
+                                        Grid.Column="2"
+                                        Orientation="Horizontal"
+                                        Spacing="6">
+                                        <Button
+                                            Padding="9,5"
+                                            Click="MessageOpenOriginalActivity_Click"
+                                            Content="Abrir actividad"
+                                            Tag="{Binding}"
+                                            Visibility="{Binding OriginalActivityButtonVisibility}" />
+                                        <Button
+                                            Padding="9,5"
+                                            Click="MessageOpen_Click"
+                                            Content="Abrir recordatorio"
+                                            Tag="{Binding}"
+                                            Visibility="{Binding NormalReminderOpenButtonVisibility}" />
+                                        <Button
+                                            Padding="9,5"
+                                            Click="MessageOpen_Click"
+                                            Content="Abrir notificación"
+                                            Tag="{Binding}"
+                                            Visibility="{Binding ProjectNotificationOpenButtonVisibility}" />
+                                        <Button
+                                            Padding="9,5"
+                                            Click="MessagesChatOpenFull_Click"
+                                            Content="Chat completo"
+                                            ToolTipService.ToolTip="Abrir adjuntos, audio y acciones avanzadas" />
+                                        <Button
+                                            Width="34"
+                                            Height="30"
+                                            Padding="0"
+                                            Click="MessagesChatRefresh_Click"
+                                            Content="↻"
+                                            ToolTipService.ToolTip="Actualizar historial" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <ScrollViewer
+                                x:Name="MessagesChatHistoryScroll"
+                                Grid.Row="1"
+                                Padding="18,14"
+                                HorizontalScrollBarVisibility="Disabled"
+                                HorizontalScrollMode="Disabled"
+                                VerticalScrollBarVisibility="Auto"
+                                VerticalScrollMode="Auto">
+                                <StackPanel
+                                    x:Name="MessagesChatHistoryPanel"
+                                    MaxWidth="780"
+                                    HorizontalAlignment="Stretch"
+                                    Spacing="6" />
+                            </ScrollViewer>
+
+                            <Border
+                                Grid.Row="2"
+                                Padding="12,9"
+                                Background="#151E27"
+                                BorderBrush="#34404D"
+                                BorderThickness="0,1,0,0">
+                                <Grid RowSpacing="6">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBox
+                                            x:Name="MessagesChatReplyBox"
+                                            Grid.Column="0"
+                                            MinHeight="38"
+                                            MaxHeight="88"
+                                            AcceptsReturn="True"
+                                            KeyDown="MessagesChatReplyBox_KeyDown"
+                                            PlaceholderText="Escribe una respuesta…  Ctrl + Enter para enviar"
+                                            TextWrapping="Wrap" />
+
+                                        <Button
+                                            Grid.Column="1"
+                                            Height="38"
+                                            Padding="12,0"
+                                            Click="MessagesChatOpenFull_Click"
+                                            Content="📎 Audio y archivos"
+                                            ToolTipService.ToolTip="Abrir el chat completo para adjuntar archivos o grabar audio" />
+
+                                        <Button
+                                            x:Name="MessagesChatSendButton"
+                                            Grid.Column="2"
+                                            Height="38"
+                                            MinWidth="92"
+                                            Padding="14,0"
+                                            Click="MessagesChatSend_Click"
+                                            Content="Enviar" />
                                     </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
 
-                    <StackPanel
-                        x:Name="MessagesEmptyState"
+                                    <Grid Grid.Row="1" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            x:Name="MessagesChatStatusText"
+                                            VerticalAlignment="Center"
+                                            FontSize="10.5"
+                                            Opacity="0.66"
+                                            Text="Selecciona una conversación para responder."
+                                            TextWrapping="Wrap" />
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            Orientation="Horizontal"
+                                            Spacing="6">
+                                            <Button
+                                                Padding="8,3"
+                                                Click="MessageCopyText_Click"
+                                                Content="Copiar"
+                                                Tag="{Binding}" />
+                                            <Button
+                                                Padding="8,3"
+                                                Click="MessageComplete_Click"
+                                                Content="{Binding CompleteButtonText}"
+                                                IsEnabled="{Binding CanComplete}"
+                                                Tag="{Binding}"
+                                                ToolTipService.ToolTip="{Binding CompleteButtonToolTip}" />
+                                            <Button
+                                                Padding="8,3"
+                                                Click="MessageDelete_Click"
+                                                Content="{Binding DeleteButtonText}"
+                                                Tag="{Binding}"
+                                                ToolTipService.ToolTip="{Binding DeleteButtonToolTip}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Grid>
+
+
+            <!--  Calendario exclusivo de recordatorios; lógica en SearchView.RemindersCalendar.cs  -->
+            <Grid
+                x:Name="RemindersCalendarHost"
+                Grid.Column="0"
+                Grid.ColumnSpan="5"
+                Canvas.ZIndex="520"
+                Background="#10151C"
+                Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    Grid.Row="0"
+                    Padding="12,9"
+                    Background="#191F28"
+                    BorderBrush="#4C3A63"
+                    BorderThickness="0,0,0,1">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontSize="17"
+                            FontWeight="SemiBold"
+                            Text="🔔 Recordatorios" />
+
+                        <Button
+                            Grid.Column="1"
+                            Height="30"
+                            Padding="10,0"
+                            Click="RemindersCalendarPreviousDay_Click"
+                            Content="‹"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Día anterior" />
+
+                        <Button
+                            Grid.Column="2"
+                            Height="30"
+                            Padding="10,0"
+                            Click="RemindersCalendarToday_Click"
+                            Content="Hoy"
+                            CornerRadius="6" />
+
+                        <Button
+                            Grid.Column="3"
+                            Height="30"
+                            Padding="10,0"
+                            Click="RemindersCalendarNextDay_Click"
+                            Content="›"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Día siguiente" />
+
+                        <Button
+                            Grid.Column="4"
+                            Height="30"
+                            Padding="11,0"
+                            Click="RemindersCalendarPeople_Click"
+                            Content="Personas"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Elegir personas visibles" />
+
+                        <TextBlock
+                            x:Name="RemindersCalendarDateTitle"
+                            Grid.Column="5"
+                            VerticalAlignment="Center"
+                            Margin="8,0,0,0"
+                            FontSize="14"
+                            FontWeight="SemiBold"
+                            Text="Día seleccionado"
+                            TextTrimming="CharacterEllipsis" />
+
+                        <Button
+                            Grid.Column="6"
+                            Height="30"
+                            Padding="12,0"
+                            Click="RemindersCalendarNew_Click"
+                            Content="+ Nuevo recordatorio"
+                            CornerRadius="6"
+                            Background="#5B2A86"
+                            BorderBrush="#A855F7" />
+
+                        <Button
+                            Grid.Column="7"
+                            Width="34"
+                            Height="30"
+                            Padding="0"
+                            Click="RemindersCalendarRefresh_Click"
+                            Content="↻"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Actualizar desde el índice local" />
+
+                        <Button
+                            Grid.Column="8"
+                            Width="34"
+                            Height="30"
+                            Padding="0"
+                            Click="RemindersCalendarClose_Click"
+                            Content="✕"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Cerrar calendario de recordatorios" />
+                    </Grid>
+                </Border>
+
+                <Border
+                    Grid.Row="1"
+                    Padding="12,7"
+                    Background="#151A22"
+                    BorderBrush="#2F3845"
+                    BorderThickness="0,0,0,1">
+                    <Grid>
+                        <TextBlock
+                            x:Name="RemindersCalendarSummaryText"
+                            FontSize="11"
+                            Opacity="0.76"
+                            Text="Recordatorios del día"
+                            TextWrapping="Wrap" />
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2">
+                    <ScrollViewer
+                        x:Name="RemindersCalendarScrollViewer"
+                        HorizontalScrollBarVisibility="Visible"
+                        HorizontalScrollMode="Enabled"
+                        VerticalScrollBarVisibility="Auto"
+                        VerticalScrollMode="Enabled">
+                        <Canvas
+                            x:Name="RemindersCalendarCanvas"
+                            MinWidth="0"
+                            MinHeight="1260"
+                            Background="#0F141A"
+                            DoubleTapped="RemindersCalendarCanvas_DoubleTapped" />
+                    </ScrollViewer>
+
+                    <Border
+                        x:Name="RemindersCalendarEmptyState"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        Spacing="8"
+                        Padding="22,16"
+                        Background="#E61B1F23"
+                        BorderBrush="#6B4C86"
+                        BorderThickness="1"
+                        CornerRadius="10"
                         Visibility="Collapsed">
-                        <FontIcon
-                            HorizontalAlignment="Center"
-                            FontSize="34"
-                            Glyph="&#xE8BD;"
-                            Opacity="0.55" />
-                        <TextBlock
-                            x:Name="MessagesEmptyText"
-                            FontSize="15"
-                            Opacity="0.72"
-                            Text="No hay mensajes para este filtro." />
-                    </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock
+                                FontSize="20"
+                                HorizontalAlignment="Center"
+                                Text="🔔" />
+                            <TextBlock
+                                x:Name="RemindersCalendarEmptyText"
+                                MaxWidth="520"
+                                Text="No hay recordatorios para este día."
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                MaxWidth="520"
+                                FontSize="10.5"
+                                Opacity="0.65"
+                                Text="Doble clic sobre una hora para crear uno con destinatario, fecha y hora precargados."
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Grid>
 
@@ -1378,6 +1724,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -1508,8 +1855,18 @@
                             CornerRadius="6"
                             ToolTipService.ToolTip="Abrir el último reporte diario" />
 
-                        <Button
+                        <ToggleButton
+                            x:Name="CalendarCobrosToggle"
                             Grid.Column="13"
+                            Height="30"
+                            Padding="10,0"
+                            Click="CalendarCobrosToggle_Click"
+                            Content="💰 Cobros"
+                            CornerRadius="6"
+                            ToolTipService.ToolTip="Mostrar u ocultar eventos de BD COBRAR Y PAGAR" />
+
+                        <Button
+                            Grid.Column="14"
                             Height="30"
                             Padding="10,0"
                             Click="CalendarRefresh_Click"
@@ -1518,7 +1875,7 @@
                             ToolTipService.ToolTip="Actualización rápida incremental · Ctrl + clic para recarga completa" />
 
                         <Button
-                            Grid.Column="14"
+                            Grid.Column="15"
                             Height="30"
                             Padding="10,0"
                             Click="CalendarClose_Click"
@@ -3238,6 +3595,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <StackPanel
@@ -3292,9 +3650,63 @@
                 </StackPanel>
             </Border>
 
+
+            <!--  Accesos rápidos a Google Meet  -->
+            <Button
+                x:Name="BtnMeetQuickLinks"
+                Grid.Column="2"
+                Height="26"
+                Padding="8,0"
+                VerticalAlignment="Center"
+                Background="#263F8CFF"
+                BorderBrush="#665EA7FF"
+                BorderThickness="1"
+                CornerRadius="7"
+                ToolTipService.ToolTip="Abrir un enlace frecuente de Google Meet">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="5">
+                    <FontIcon
+                        FontSize="12"
+                        Foreground="#8DC6FF"
+                        Glyph="&#xE714;" />
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="10.5"
+                        FontWeight="SemiBold"
+                        Text="Meet" />
+                    <FontIcon
+                        VerticalAlignment="Center"
+                        FontSize="8"
+                        Glyph="&#xE70D;"
+                        Opacity="0.75" />
+                </StackPanel>
+
+                <Button.Flyout>
+                    <MenuFlyout Placement="TopEdgeAlignedRight">
+                        <MenuFlyoutItem
+                            Click="OpenMeetQuickLink_Click"
+                            Tag="https://meet.google.com/eye-rmmg-rgb"
+                            Text="Meet 1 · eye-rmmg-rgb" />
+                        <MenuFlyoutItem
+                            Click="OpenMeetQuickLink_Click"
+                            Tag="https://meet.google.com/omp-srcb-uix"
+                            Text="Meet 2 · omp-srcb-uix" />
+                        <MenuFlyoutItem
+                            Click="OpenMeetQuickLink_Click"
+                            Tag="https://meet.google.com/vhv-vyjf-ten"
+                            Text="Meet 3 · vhv-vyjf-ten" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem
+                            Click="ConfigureMeetBrowser_Click"
+                            Text="Cambiar navegador…" />
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
+
             <ComboBox
                 x:Name="CalendarPhaseFilterCombo"
-                Grid.Column="2"
+                Grid.Column="3"
                 Width="205"
                 Height="30"
                 Margin="10,2"
@@ -3314,7 +3726,7 @@
 
             <TextBlock
                 x:Name="ModeText"
-                Grid.Column="3"
+                Grid.Column="4"
                 VerticalAlignment="Center"
                 FontSize="11"
                 Opacity="0.6"
@@ -3322,7 +3734,7 @@
 
             <TextBlock
                 x:Name="CountText"
-                Grid.Column="4"
+                Grid.Column="5"
                 VerticalAlignment="Center"
                 FontSize="11"
                 Opacity="0.6"

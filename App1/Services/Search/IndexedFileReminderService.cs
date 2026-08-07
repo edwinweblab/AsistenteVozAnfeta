@@ -528,6 +528,84 @@ namespace Anfeta.UI.Services.Search
             return row.Target ?? string.Empty;
         }
 
+
+        public void Acknowledge(
+            IndexedFileReminder reminder)
+        {
+            if (reminder == null)
+                return;
+
+            var pageId =
+                (reminder.PageId ?? string.Empty)
+                    .Trim();
+
+            if (!string.IsNullOrWhiteSpace(pageId))
+            {
+                try
+                {
+                    var values =
+                        ApplicationData.Current.LocalSettings.Values;
+
+                    var raw =
+                        values[LS_MessagesReadState] as string;
+
+                    Dictionary<string, DateTimeOffset> readState;
+
+                    if (string.IsNullOrWhiteSpace(raw))
+                    {
+                        readState =
+                            new Dictionary<string, DateTimeOffset>(
+                                StringComparer.OrdinalIgnoreCase);
+                    }
+                    else
+                    {
+                        var restored =
+                            JsonSerializer.Deserialize<
+                                Dictionary<string, DateTimeOffset>>(raw);
+
+                        readState =
+                            restored == null
+                                ? new Dictionary<string, DateTimeOffset>(
+                                    StringComparer.OrdinalIgnoreCase)
+                                : new Dictionary<string, DateTimeOffset>(
+                                    restored,
+                                    StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    readState[pageId] =
+                        DateTimeOffset.Now;
+
+                    values[LS_MessagesReadState] =
+                        JsonSerializer.Serialize(
+                            readState);
+                }
+                catch
+                {
+                    // El cierre visual del aviso no debe fallar si Windows
+                    // no permite persistir temporalmente el estado.
+                }
+
+                DismissPage(pageId);
+            }
+
+            var removed = false;
+
+            foreach (var key in _snoozed
+                .Where(item =>
+                    string.Equals(
+                        item.Value.Reminder.Identity,
+                        reminder.Identity,
+                        StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.Key)
+                .ToList())
+            {
+                removed |= _snoozed.Remove(key);
+            }
+
+            if (removed)
+                SaveSnoozedReminders();
+        }
+
         public void DismissPage(
             string? pageId)
         {

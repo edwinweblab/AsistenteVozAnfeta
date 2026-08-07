@@ -18,6 +18,32 @@ namespace Anfeta.UI.Models.Notion
         public bool IsReviewMirror { get; set; }
         public bool IsCompletedForReview { get; set; }
 
+        // Checkbox nativo de Notion: Bloqueada_ANFETA.
+        // Cuando está activo, las automatizaciones no pueden mover la actividad.
+        public bool IsAutomationLocked { get; set; }
+
+        // Avance calculado desde los bloques nativos "to_do" del contenido
+        // de la página de Notion. Los bloques sincronizados y la metadata
+        // técnica de ANFETA no se cuentan.
+        public bool ChecklistScanned { get; set; }
+        public int ChecklistTotal { get; set; }
+        public int ChecklistCompleted { get; set; }
+
+        public int ChecklistPending =>
+            Math.Max(0, ChecklistTotal - ChecklistCompleted);
+
+        public bool HasChecklist =>
+            ChecklistTotal > 0;
+
+        public int ChecklistPercentage =>
+            ChecklistTotal <= 0
+                ? 0
+                : Math.Clamp(
+                    (int)Math.Round(
+                        ChecklistCompleted * 100d / ChecklistTotal),
+                    0,
+                    100);
+
         public bool HasReviewFlow =>
             !string.IsNullOrWhiteSpace(ReviewState);
 
@@ -54,6 +80,50 @@ namespace Anfeta.UI.Models.Notion
         public string StatusColor { get; set; } = "";
         public string UpdateText { get; set; } = "";
         public string Description { get; set; } = "";
+
+        // Fechas de control para mostrar antigüedad y presupuesto visual
+        // dentro del calendario. Se leen directamente desde Notion.
+        public DateTime? ActivityCreatedDate { get; set; }
+        public DateTime? InternalDeadlineDate { get; set; }
+
+        public bool HasActivityDayRange =>
+            ActivityCreatedDate.HasValue &&
+            InternalDeadlineDate.HasValue;
+
+        public int ActivityBudgetDays
+        {
+            get
+            {
+                if (!HasActivityDayRange)
+                    return 0;
+
+                return Math.Max(
+                    1,
+                    (InternalDeadlineDate!.Value.Date -
+                     ActivityCreatedDate!.Value.Date).Days + 1);
+            }
+        }
+
+        public int ActivityElapsedDays
+        {
+            get
+            {
+                if (!ActivityCreatedDate.HasValue)
+                    return 0;
+
+                var today = DateTime.Today;
+                var start = ActivityCreatedDate.Value.Date;
+
+                return today < start
+                    ? 0
+                    : Math.Max(1, (today - start).Days + 1);
+            }
+        }
+
+        public bool IsActivityOverdue =>
+            HasActivityDayRange &&
+            ActivityElapsedDays > ActivityBudgetDays;
+
         public string DatePropertyName { get; set; } = "";
         public DateTime Start { get; set; }
         public DateTime End { get; set; }

@@ -5,6 +5,7 @@ using Anfeta.UI.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Input;
 using System;
@@ -32,9 +33,30 @@ namespace Anfeta.UI
         private GlobalHotkeyService? _hotkeyService;
         private readonly IndexedFileReminderService _indexedReminderService;
         private readonly SemaphoreSlim _reminderDialogLock = new(1, 1);
+
+        private sealed class ReminderToastEntry
+        {
+            public Popup Popup { get; init; } = null!;
+            public IndexedFileReminder Reminder { get; init; } = null!;
+        }
+
+        private readonly List<ReminderToastEntry>
+            _activeReminderToasts = new();
+
+        private const int MaxVisibleReminderToasts = 6;
+        private const double ReminderToastWidth = 360d;
+        private const double ReminderToastGap = 10d;
+        private const double ReminderToastMargin = 18d;
+
         private readonly NotionCalendarService _calendarStartupService = new();
         private const string LS_CalendarLastSyncUtc =
             "Search.Calendar.LastSyncUtc";
+
+        private const string LS_MessagingCurrentUserTag =
+            "Messaging.CurrentUserTag";
+
+        private const string MessagesAllRecipientsTag =
+            "__all__";
 
         private const string AppInstallerUrl =
             "https://github.com/neftaliweblab/anfeta-updates/releases/latest/download/ANFETA.appinstaller";
@@ -48,6 +70,10 @@ namespace Anfeta.UI
 
             _shell = App.AppHost.Services.GetRequiredService<ShellViewModel>();
             Root.DataContext = _shell;
+
+            Root.SizeChanged +=
+                (_, __) =>
+                    RepositionReminderToasts();
 
             _shell.RequestOpenLinkAccount += () =>
             {
@@ -574,16 +600,96 @@ namespace Anfeta.UI
             object? sender,
             IndexedFileReminder reminder)
         {
+            if (!ReminderBelongsToConfiguredUser(reminder))
+                return;
+
             DispatcherQueue.TryEnqueue(
-                async () =>
+                () =>
                 {
                     SignalIncomingReminder();
 
-                    await ShowIndexedReminderAsync(
-                        reminder);
+                    // El aviso inmediato ya no bloquea la aplicación con un
+                    // ContentDialog. Se muestra como tarjeta flotante y el
+                    // usuario decide cuándo abrir el detalle completo.
+                    ShowReminderToast(reminder);
                 });
         }
 
+
+        private static string NormalizeReminderPersonTag(
+            string? value)
+        {
+            var clean =
+                (value ?? string.Empty)
+                    .Trim()
+                    .ToLowerInvariant();
+
+            return clean switch
+            {
+                "iisai" or "iisiaia" or "isaias" => "iisaia",
+                _ => clean
+            };
+        }
+
+        private static bool ReminderBelongsToConfiguredUser(
+            IndexedFileReminder reminder)
+        {
+            if (reminder == null)
+                return false;
+
+            var recipientTag =
+                NormalizeReminderPersonTag(
+                    reminder.RecipientTag);
+
+            if (string.IsNullOrWhiteSpace(recipientTag) &&
+                reminder.Source ==
+                    Models.Weblab.SearchSource.Notion)
+            {
+                var legacyRecipient =
+                    Regex.Match(
+                        reminder.Title ?? string.Empty,
+                        @"(?<!\d)\d{4}-\d{2}-\d{2}[ T]\d{2}[:\-]\d{2}\s+(?<tag>[a-z0-9_\-]+)",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant);
+
+                if (legacyRecipient.Success)
+                {
+                    recipientTag =
+                        NormalizeReminderPersonTag(
+                            legacyRecipient.Groups["tag"].Value);
+                }
+            }
+
+            if (string.Equals(
+                    recipientTag,
+                    MessagesAllRecipientsTag,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var currentUserTag =
+                NormalizeReminderPersonTag(
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_MessagingCurrentUserTag] as string);
+
+            // Los recordatorios locales sin destinatario se conservan. Las
+            // páginas de Mensajes/Revisiones de Notion deben tener receptor y
+            // nunca se muestran a otro usuario por un título incompleto.
+            if (string.IsNullOrWhiteSpace(recipientTag))
+            {
+                return reminder.Source !=
+                    Models.Weblab.SearchSource.Notion;
+            }
+
+            if (string.IsNullOrWhiteSpace(currentUserTag))
+                return false;
+
+            return string.Equals(
+                recipientTag,
+                currentUserTag,
+                StringComparison.OrdinalIgnoreCase);
+        }
 
         private void SignalIncomingReminder()
         {
@@ -612,9 +718,401 @@ namespace Anfeta.UI
             }
         }
 
+
+        private void ShowReminderToast(
+            IndexedFileReminder reminder)
+        {
+            if (reminder == null ||
+                !ReminderBelongsToConfiguredUser(reminder))
+            {
+                return;
+            }
+
+            if (Root?.XamlRoot == null ||
+                Root.ActualWidth <= 0 ||
+                Root.ActualHeight <= 0)
+            {
+                DispatcherQueue.TryEnqueue(
+                    async () =>
+                    {
+                        await Task.Delay(250);
+                        ShowReminderToast(reminder);
+                    });
+                return;
+            }
+
+            // Evita duplicar visualmente el mismo recordatorio si el escaneo
+            // y un pospuesto coinciden durante el mismo ciclo.
+            if (_activeReminderToasts.Any(item =>
+                    string.Equals(
+                        item.Reminder.Identity,
+                        reminder.Identity,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            var title =
+                new TextBlock
+                {
+                    Text = "🔔 Nuevo recordatorio",
+                    FontSize = 13.5,
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                255,
+                                233,
+                                213,
+                                255))
+                };
+
+            var message =
+                new TextBlock
+                {
+                    Text = reminder.Message,
+                    FontSize = 12.5,
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 3,
+                    TextTrimming =
+                        TextTrimming.CharacterEllipsis
+                };
+
+            var schedule =
+                new TextBlock
+                {
+                    Text =
+                        $"{reminder.ReminderAt:dd/MM/yyyy · h:mm tt}" +
+                        (string.IsNullOrWhiteSpace(
+                             reminder.SenderName)
+                            ? string.Empty
+                            : $" · De {reminder.SenderName}"),
+                    FontSize = 10.5,
+                    Opacity = 0.72,
+                    TextWrapping = TextWrapping.Wrap
+                };
+
+            var actions =
+                new Grid
+                {
+                    ColumnSpacing = 8
+                };
+
+            actions.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
+            actions.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
+            actions.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
+            var viewButton =
+                new Button
+                {
+                    Content = "Ver",
+                    MinHeight = 32,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment =
+                        HorizontalAlignment.Center
+                };
+
+            var remindAgainButton =
+                new Button
+                {
+                    Content = "↻ 15 min",
+                    MinHeight = 32,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment =
+                        HorizontalAlignment.Center
+                };
+
+            ToolTipService.SetToolTip(
+                remindAgainButton,
+                "Cerrar este aviso y volver a mostrarlo en 15 minutos.");
+
+            var understoodButton =
+                new Button
+                {
+                    Content = "✓ Entendido",
+                    MinHeight = 32,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment =
+                        HorizontalAlignment.Center,
+                    Background =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                100,
+                                168,
+                                85,
+                                247)),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                220,
+                                192,
+                                132,
+                                252))
+                };
+
+            Grid.SetColumn(viewButton, 0);
+            actions.Children.Add(viewButton);
+
+            Grid.SetColumn(remindAgainButton, 1);
+            actions.Children.Add(remindAgainButton);
+
+            Grid.SetColumn(understoodButton, 2);
+            actions.Children.Add(understoodButton);
+
+            var body =
+                new StackPanel
+                {
+                    Spacing = 8
+                };
+
+            body.Children.Add(title);
+            body.Children.Add(message);
+            body.Children.Add(schedule);
+            body.Children.Add(actions);
+
+            var card =
+                new Border
+                {
+                    Width = ReminderToastWidth,
+                    Padding =
+                        new Thickness(13, 11, 13, 11),
+                    CornerRadius =
+                        new CornerRadius(10),
+                    Background =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                250,
+                                28,
+                                24,
+                                36)),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                255,
+                                217,
+                                70,
+                                239)),
+                    BorderThickness =
+                        new Thickness(2, 1, 1, 1),
+                    Child = body
+                };
+
+            var popup =
+                new Popup
+                {
+                    XamlRoot = Root.XamlRoot,
+                    IsLightDismissEnabled = false,
+                    Child = card
+                };
+
+            var entry =
+                new ReminderToastEntry
+                {
+                    Popup = popup,
+                    Reminder = reminder
+                };
+
+            viewButton.Click +=
+                async (_, __) =>
+                {
+                    DismissReminderToast(
+                        entry,
+                        acknowledged: false);
+
+                    await ShowIndexedReminderAsync(
+                        reminder);
+                };
+
+            remindAgainButton.Click +=
+                (_, __) =>
+                {
+                    // No marca el recordatorio como entendido. Solo cierra
+                    // esta tarjeta y la agenda de nuevo para dentro de 15 min.
+                    _indexedReminderService.Snooze(
+                        reminder,
+                        TimeSpan.FromMinutes(15));
+
+                    DismissReminderToast(
+                        entry,
+                        acknowledged: false);
+                };
+
+            understoodButton.Click +=
+                (_, __) =>
+                {
+                    DismissReminderToast(
+                        entry,
+                        acknowledged: true);
+                };
+
+            card.SizeChanged +=
+                (_, __) =>
+                    RepositionReminderToasts();
+
+            _activeReminderToasts.Add(entry);
+
+            while (_activeReminderToasts.Count >
+                   MaxVisibleReminderToasts)
+            {
+                var oldest =
+                    _activeReminderToasts[0];
+
+                oldest.Popup.IsOpen = false;
+                _activeReminderToasts.RemoveAt(0);
+            }
+
+            popup.IsOpen = true;
+            RepositionReminderToasts();
+        }
+
+        private void DismissReminderToast(
+            ReminderToastEntry entry,
+            bool acknowledged)
+        {
+            if (entry == null)
+                return;
+
+            if (acknowledged)
+            {
+                _indexedReminderService.Acknowledge(
+                    entry.Reminder);
+
+                if (!string.IsNullOrWhiteSpace(
+                        entry.Reminder.PageId))
+                {
+                    // Si el Buscador ya está cargado, actualiza de inmediato
+                    // sus badges y calendarios. Si no lo está, la solicitud
+                    // queda pendiente para cuando se abra.
+                    SearchView.RequestReminderQuickAction(
+                        entry.Reminder.PageId,
+                        "mark-read");
+                }
+            }
+
+            entry.Popup.IsOpen = false;
+            entry.Popup.Child = null;
+
+            _activeReminderToasts.Remove(entry);
+
+            RepositionReminderToasts();
+        }
+
+        private void RepositionReminderToasts()
+        {
+            if (_activeReminderToasts.Count == 0 ||
+                Root == null)
+            {
+                return;
+            }
+
+            var rootWidth =
+                Math.Max(
+                    ReminderToastWidth +
+                    ReminderToastMargin * 2,
+                    Root.ActualWidth);
+
+            var rootHeight =
+                Math.Max(
+                    200,
+                    Root.ActualHeight);
+
+            var x =
+                Math.Max(
+                    ReminderToastMargin,
+                    rootWidth -
+                    ReminderToastWidth -
+                    ReminderToastMargin);
+
+            var cursorBottom =
+                rootHeight -
+                ReminderToastMargin;
+
+            // La notificación más reciente queda abajo y las anteriores se
+            // apilan hacia arriba.
+            for (var index =
+                     _activeReminderToasts.Count - 1;
+                 index >= 0;
+                 index--)
+            {
+                var entry =
+                    _activeReminderToasts[index];
+
+                if (!entry.Popup.IsOpen ||
+                    entry.Popup.Child is not
+                        FrameworkElement child)
+                {
+                    continue;
+                }
+
+                var height =
+                    child.ActualHeight > 10
+                        ? child.ActualHeight
+                        : 116;
+
+                cursorBottom -= height;
+
+                entry.Popup.HorizontalOffset =
+                    x;
+
+                entry.Popup.VerticalOffset =
+                    Math.Max(
+                        ReminderToastMargin,
+                        cursorBottom);
+
+                cursorBottom -=
+                    ReminderToastGap;
+            }
+        }
+
+        private void ClearReminderToasts()
+        {
+            foreach (var entry in
+                     _activeReminderToasts.ToList())
+            {
+                entry.Popup.IsOpen = false;
+                entry.Popup.Child = null;
+            }
+
+            _activeReminderToasts.Clear();
+        }
+
         private async Task ShowIndexedReminderAsync(
             IndexedFileReminder reminder)
         {
+            // Segunda validación por seguridad. También cubre recordatorios
+            // pospuestos que fueron creados antes de cambiar de usuario.
+            if (!ReminderBelongsToConfiguredUser(reminder))
+                return;
+
             await _reminderDialogLock.WaitAsync();
 
             try
@@ -1030,9 +1528,102 @@ namespace Anfeta.UI
                 snoozeCombo.Items.Add(
                     new ComboBoxItem { Content = "10 minutos", Tag = "10" });
                 snoozeCombo.Items.Add(
+                    new ComboBoxItem { Content = "15 minutos", Tag = "15" });
+                snoozeCombo.Items.Add(
                     new ComboBoxItem { Content = "30 minutos", Tag = "30" });
                 snoozeCombo.Items.Add(
                     new ComboBoxItem { Content = "1 hora", Tag = "60" });
+                snoozeCombo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = "📅 Elegir fecha y hora…",
+                        Tag = "custom"
+                    });
+
+                var defaultCustomTarget =
+                    DateTimeOffset.Now.AddHours(1);
+
+                var customSnoozeDatePicker =
+                    new DatePicker
+                    {
+                        Header = "Fecha",
+                        MinYear =
+                            new DateTimeOffset(
+                                DateTime.Today),
+                        SelectedDate =
+                            new DateTimeOffset(
+                                defaultCustomTarget.Date),
+                        HorizontalAlignment =
+                            HorizontalAlignment.Stretch
+                    };
+
+                var customSnoozeTimePicker =
+                    new TimePicker
+                    {
+                        Header = "Hora",
+                        ClockIdentifier = "12HourClock",
+                        MinuteIncrement = 1,
+                        SelectedTime =
+                            defaultCustomTarget.TimeOfDay,
+                        HorizontalAlignment =
+                            HorizontalAlignment.Stretch
+                    };
+
+                var customSnoozePanel =
+                    new Grid
+                    {
+                        ColumnSpacing = 8,
+                        Margin = new Thickness(0, 8, 0, 0),
+                        Visibility = Visibility.Collapsed
+                    };
+
+                customSnoozePanel.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(
+                            1,
+                            GridUnitType.Star)
+                    });
+
+                customSnoozePanel.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(
+                            1,
+                            GridUnitType.Star)
+                    });
+
+                Grid.SetColumn(
+                    customSnoozeDatePicker,
+                    0);
+
+                customSnoozePanel.Children.Add(
+                    customSnoozeDatePicker);
+
+                Grid.SetColumn(
+                    customSnoozeTimePicker,
+                    1);
+
+                customSnoozePanel.Children.Add(
+                    customSnoozeTimePicker);
+
+                snoozeCombo.SelectionChanged +=
+                    (_, __) =>
+                    {
+                        var selectedTag =
+                            (snoozeCombo.SelectedItem as
+                                ComboBoxItem)?
+                                .Tag?
+                                .ToString();
+
+                        customSnoozePanel.Visibility =
+                            string.Equals(
+                                selectedTag,
+                                "custom",
+                                StringComparison.OrdinalIgnoreCase)
+                                ? Visibility.Visible
+                                : Visibility.Collapsed;
+                    };
 
                 var snoozeButton = new Button
                 {
@@ -1040,8 +1631,24 @@ namespace Anfeta.UI
                     VerticalAlignment = VerticalAlignment.Bottom
                 };
 
-                Grid.SetColumn(snoozeCombo, 0);
-                snoozePanel.Children.Add(snoozeCombo);
+                var snoozeOptionsPanel =
+                    new StackPanel
+                    {
+                        Spacing = 0
+                    };
+
+                snoozeOptionsPanel.Children.Add(
+                    snoozeCombo);
+
+                snoozeOptionsPanel.Children.Add(
+                    customSnoozePanel);
+
+                Grid.SetColumn(
+                    snoozeOptionsPanel,
+                    0);
+
+                snoozePanel.Children.Add(
+                    snoozeOptionsPanel);
 
                 Grid.SetColumn(snoozeButton, 1);
                 snoozePanel.Children.Add(snoozeButton);
@@ -1072,13 +1679,79 @@ namespace Anfeta.UI
 
                 snoozeButton.Click += (_, __) =>
                 {
-                    if (snoozeCombo.SelectedItem is not ComboBoxItem selected ||
-                        !double.TryParse(
-                            selected.Tag?.ToString(),
-                            out var minutes))
+                    if (snoozeCombo.SelectedItem is not
+                            ComboBoxItem selected)
                     {
                         actionStatus.Text =
                             "Selecciona un tiempo para posponer.";
+                        return;
+                    }
+
+                    var selectedTag =
+                        selected.Tag?.ToString() ??
+                        string.Empty;
+
+                    if (string.Equals(
+                            selectedTag,
+                            "custom",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!customSnoozeDatePicker
+                                .SelectedDate.HasValue ||
+                            !customSnoozeTimePicker
+                                .SelectedTime.HasValue)
+                        {
+                            actionStatus.Text =
+                                "Selecciona una fecha y una hora.";
+                            return;
+                        }
+
+                        var selectedLocalDateTime =
+                            customSnoozeDatePicker
+                                .SelectedDate
+                                .Value
+                                .Date
+                                .Add(
+                                    customSnoozeTimePicker
+                                        .SelectedTime
+                                        .Value);
+
+                        var selectedTarget =
+                            new DateTimeOffset(
+                                DateTime.SpecifyKind(
+                                    selectedLocalDateTime,
+                                    DateTimeKind.Local));
+
+                        var delay =
+                            selectedTarget -
+                            DateTimeOffset.Now;
+
+                        if (delay <=
+                            TimeSpan.FromSeconds(30))
+                        {
+                            actionStatus.Text =
+                                "La fecha y hora deben ser futuras.";
+                            return;
+                        }
+
+                        _indexedReminderService.Snooze(
+                            reminder,
+                            delay);
+
+                        actionStatus.Text =
+                            $"Recordatorio pospuesto hasta " +
+                            $"{selectedTarget:dd/MM/yyyy h:mm tt} ✅";
+
+                        dialog.Hide();
+                        return;
+                    }
+
+                    if (!double.TryParse(
+                            selectedTag,
+                            out var minutes))
+                    {
+                        actionStatus.Text =
+                            "Selecciona un tiempo válido.";
                         return;
                     }
 
@@ -1092,7 +1765,23 @@ namespace Anfeta.UI
                     dialog.Hide();
                 };
 
-                await dialog.ShowAsync();
+                var result =
+                    await dialog.ShowAsync();
+
+                if (result ==
+                        ContentDialogResult.Primary)
+                {
+                    _indexedReminderService.Acknowledge(
+                        reminder);
+
+                    if (!string.IsNullOrWhiteSpace(
+                            reminder.PageId))
+                    {
+                        SearchView.RequestReminderQuickAction(
+                            reminder.PageId,
+                            "mark-read");
+                    }
+                }
             }
             catch
             {
@@ -1302,6 +1991,7 @@ namespace Anfeta.UI
             _indexedReminderService.ReminderDue -=
                 IndexedReminderService_ReminderDue;
 
+            ClearReminderToasts();
             _indexedReminderService.Stop();
 
             Debug.WriteLine("MAINWINDOW: Closed");

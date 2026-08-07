@@ -37,12 +37,32 @@ namespace Anfeta.UI.Services.Notion
         int TodayCount,
         string Message);
 
+    public sealed record NotionChecklistStats(
+        int Total,
+        int Completed)
+    {
+        public int Pending =>
+            Math.Max(0, Total - Completed);
+
+        public bool HasChecklist =>
+            Total > 0;
+    }
+
+    public sealed record NotionCalendarScheduleUpdateResult(
+        NotionCalendarActivity Activity,
+        bool AuditLogWritten);
+
     public sealed class NotionCalendarService
     {
         public string LastDiagnostics { get; private set; } = "";
 
+        // IDs detectados por la última actualización incremental.
+        // SearchView los usa para refrescar solo esos checklist.
+        public IReadOnlyList<string> LastChangedPageIds { get; private set; } =
+            Array.Empty<string>();
+
         private const string CacheFileName =
-            "notion_calendar_cache_v10.json";
+            "notion_calendar_cache_v13.json";
 
         private static readonly SemaphoreSlim CacheLock =
             new(1, 1);
@@ -84,6 +104,22 @@ namespace Anfeta.UI.Services.Notion
             // Debe ser una propiedad editable de tipo date.
             "Fecha POR Hacer",
             "Fecha por hacer"
+        };
+
+        private static readonly string[] ActivityCreatedDateAliases =
+        {
+            "Fecha de inicio de actividad (Creacion)",
+            "Fecha de inicio de actividad (Creación)",
+            "Fecha inicio actividad (Creacion)",
+            "Fecha inicio actividad (Creación)"
+        };
+
+        private static readonly string[] InternalDeadlineDateAliases =
+        {
+            "Fecha límite interna PM",
+            "Fecha limite interna PM",
+            "Fecha límite interna pm",
+            "Fecha limite interna pm"
         };
 
         private static readonly string[] PersonAliases =
@@ -163,8 +199,29 @@ namespace Anfeta.UI.Services.Notion
             "Resumen"
         };
 
+        private static readonly string[] AuditLogAliases =
+        {
+            "Audit_FTF_Log",
+            "Audit FTF Log",
+            "Audit FTF",
+            "FTF Audit Log"
+        };
+
+        private static readonly string[] AutomationLockAliases =
+        {
+            "Bloqueada_ANFETA",
+            "Bloqueada ANFETA",
+            "Bloquear ANFETA",
+            "Bloqueada para automatización",
+            "Bloqueada para automatizacion"
+        };
+
         private readonly ConcurrentDictionary<string, string> _relatedTitleCache =
             new(StringComparer.OrdinalIgnoreCase);
+
+        private readonly ConcurrentDictionary<string, NotionChecklistStats>
+            _checklistStatsCache =
+                new(StringComparer.OrdinalIgnoreCase);
 
         private sealed record SchemaInfo(
             IReadOnlyList<string> DateProperties,
@@ -611,6 +668,530 @@ namespace Anfeta.UI.Services.Notion
                 forceRefresh: true);
         }
 
+
+        public async Task<NotionChecklistStats> GetChecklistStatsAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken = default,
+            bool forceRefresh = false)
+        {
+            if (string.IsNullOrWhiteSpace(token) ||
+                string.IsNullOrWhiteSpace(pageId))
+            {
+                return new NotionChecklistStats(0, 0);
+            }
+
+            if (!forceRefresh &&
+                _checklistStatsCache.TryGetValue(
+                    pageId,
+                    out var cached))
+            {
+                await ApplyChecklistStatsToCacheAsync(
+                    pageId,
+                    cached,
+                    cancellationToken);
+
+                return cached;
+            }
+
+            using var http = CreateClient(token);
+
+            var stats =
+                await ReadChecklistStatsRecursiveAsync(
+                    http,
+                    pageId,
+                    depth: 0,
+                    cancellationToken);
+
+            _checklistStatsCache[pageId] = stats;
+
+            await ApplyChecklistStatsToCacheAsync(
+                pageId,
+                stats,
+                cancellationToken);
+
+            return stats;
+        }
+
+        private static async Task ApplyChecklistStatsToCacheAsync(
+            string pageId,
+            NotionChecklistStats stats,
+            CancellationToken cancellationToken)
+        {
+            await EnsureCacheLoadedAsync(
+                cancellationToken);
+
+            await CacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                var changed = false;
+
+                foreach (var day in DayCache.Values)
+                {
+                    foreach (var activity in day.Where(activity =>
+                                 string.Equals(
+                                     activity.PageId,
+                                     pageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        if (activity.ChecklistScanned &&
+                            activity.ChecklistTotal == stats.Total &&
+                            activity.ChecklistCompleted == stats.Completed)
+                        {
+                            continue;
+                        }
+
+                        activity.ChecklistScanned = true;
+                        activity.ChecklistTotal = stats.Total;
+                        activity.ChecklistCompleted = stats.Completed;
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    await SaveCacheUnsafeAsync(
+                        cancellationToken);
+                }
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+        }
+
+        private static async Task<NotionChecklistStats>
+            ReadChecklistStatsRecursiveAsync(
+                HttpClient http,
+                string blockId,
+                int depth,
+                CancellationToken cancellationToken)
+        {
+            if (depth > 8 ||
+                string.IsNullOrWhiteSpace(blockId))
+            {
+                return new NotionChecklistStats(0, 0);
+            }
+
+            var total = 0;
+            var completed = 0;
+            string? cursor = null;
+            var hasMore = true;
+
+            while (hasMore)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var requestUri =
+                    $"blocks/{blockId}/children?page_size=100" +
+                    (string.IsNullOrWhiteSpace(cursor)
+                        ? string.Empty
+                        : $"&start_cursor={Uri.EscapeDataString(cursor)}");
+
+                using var response =
+                    await SendGetWithRetryAsync(
+                        http,
+                        requestUri,
+                        cancellationToken);
+
+                var json =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw CreateNotionException(
+                        "leer la checklist de la actividad",
+                        response,
+                        json);
+                }
+
+                using var document = JsonDocument.Parse(json);
+                var root = document.RootElement;
+
+                if (root.TryGetProperty(
+                        "results",
+                        out var blocks) &&
+                    blocks.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var block in blocks.EnumerateArray())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        if (IsArchivedOrTrashedBlock(block))
+                            continue;
+
+                        var type = ReadString(block, "type");
+
+                        // Los bloques sincronizados pueden repetir contenido de
+                        // otras páginas. No se recorren para evitar contar dos
+                        // veces la misma checklist.
+                        if (type.Equals(
+                                "synced_block",
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var plainText =
+                            ReadBlockPlainText(block, type);
+
+                        // La metadata interna de ANFETA tampoco forma parte del
+                        // trabajo operativo de la actividad.
+                        if (plainText.Contains(
+                                "[ANFETA_",
+                                StringComparison.OrdinalIgnoreCase) ||
+                            plainText.Contains(
+                                "Datos internos de ANFETA",
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var struckThrough =
+                            IsBlockRichTextStruckThrough(
+                                block,
+                                type);
+
+                        if (type.Equals(
+                                "to_do",
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Un checklist tachado suele pertenecer a una
+                            // sección histórica ya cerrada y no debe alterar el
+                            // porcentaje operativo actual.
+                            if (!struckThrough)
+                            {
+                                total++;
+
+                                if (block.TryGetProperty(
+                                        "to_do",
+                                        out var toDo) &&
+                                    toDo.ValueKind == JsonValueKind.Object &&
+                                    toDo.TryGetProperty(
+                                        "checked",
+                                        out var checkedValue) &&
+                                    checkedValue.ValueKind == JsonValueKind.True)
+                                {
+                                    completed++;
+                                }
+                            }
+                        }
+
+                        var hasChildren =
+                            block.TryGetProperty(
+                                "has_children",
+                                out var hasChildrenValue) &&
+                            hasChildrenValue.ValueKind == JsonValueKind.True;
+
+                        if (!hasChildren ||
+                            type.Equals(
+                                "child_page",
+                                StringComparison.OrdinalIgnoreCase) ||
+                            type.Equals(
+                                "child_database",
+                                StringComparison.OrdinalIgnoreCase) ||
+                            IsCompletedChecklistContainer(
+                                type,
+                                plainText,
+                                struckThrough))
+                        {
+                            continue;
+                        }
+
+                        var childId = ReadString(block, "id");
+
+                        var childStats =
+                            await ReadChecklistStatsRecursiveAsync(
+                                http,
+                                childId,
+                                depth + 1,
+                                cancellationToken);
+
+                        total += childStats.Total;
+                        completed += childStats.Completed;
+                    }
+                }
+
+                hasMore =
+                    root.TryGetProperty(
+                        "has_more",
+                        out var more) &&
+                    more.ValueKind == JsonValueKind.True;
+
+                cursor =
+                    root.TryGetProperty(
+                        "next_cursor",
+                        out var nextCursor) &&
+                    nextCursor.ValueKind == JsonValueKind.String
+                        ? nextCursor.GetString()
+                        : null;
+
+                if (string.IsNullOrWhiteSpace(cursor))
+                    hasMore = false;
+            }
+
+            return new NotionChecklistStats(
+                total,
+                completed);
+        }
+
+        private static string ReadBlockPlainText(
+            JsonElement block,
+            string type)
+        {
+            if (string.IsNullOrWhiteSpace(type) ||
+                !block.TryGetProperty(type, out var payload) ||
+                payload.ValueKind != JsonValueKind.Object ||
+                !payload.TryGetProperty(
+                    "rich_text",
+                    out var richText) ||
+                richText.ValueKind != JsonValueKind.Array)
+            {
+                return string.Empty;
+            }
+
+            return string.Concat(
+                richText.EnumerateArray()
+                    .Select(item => ReadString(item, "plain_text")))
+                .Trim();
+        }
+
+        private static bool IsArchivedOrTrashedBlock(
+            JsonElement block)
+        {
+            var archived =
+                block.TryGetProperty(
+                    "archived",
+                    out var archivedValue) &&
+                archivedValue.ValueKind == JsonValueKind.True;
+
+            var inTrash =
+                block.TryGetProperty(
+                    "in_trash",
+                    out var trashValue) &&
+                trashValue.ValueKind == JsonValueKind.True;
+
+            return archived || inTrash;
+        }
+
+        private static bool IsBlockRichTextStruckThrough(
+            JsonElement block,
+            string type)
+        {
+            if (string.IsNullOrWhiteSpace(type) ||
+                !block.TryGetProperty(type, out var payload) ||
+                payload.ValueKind != JsonValueKind.Object ||
+                !payload.TryGetProperty(
+                    "rich_text",
+                    out var richText) ||
+                richText.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            var hasText = false;
+
+            foreach (var item in richText.EnumerateArray())
+            {
+                var plain =
+                    ReadString(item, "plain_text");
+
+                if (string.IsNullOrWhiteSpace(plain))
+                    continue;
+
+                hasText = true;
+
+                if (!item.TryGetProperty(
+                        "annotations",
+                        out var annotations) ||
+                    annotations.ValueKind != JsonValueKind.Object ||
+                    !annotations.TryGetProperty(
+                        "strikethrough",
+                        out var struck) ||
+                    struck.ValueKind != JsonValueKind.True)
+                {
+                    return false;
+                }
+            }
+
+            return hasText;
+        }
+
+        private static bool IsCompletedChecklistContainer(
+            string type,
+            string plainText,
+            bool struckThrough)
+        {
+            var canContainWork =
+                type.Equals(
+                    "toggle",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "heading_1",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "heading_2",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "heading_3",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "callout",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!canContainWork)
+                return false;
+
+            if (struckThrough)
+                return true;
+
+            var normalized =
+                Normalize(plainText);
+
+            if (string.IsNullOrWhiteSpace(normalized))
+                return false;
+
+            var completedTokens = new[]
+            {
+                "terminado",
+                "terminada",
+                "completado",
+                "completada",
+                "finalizado",
+                "finalizada",
+                "realizado",
+                "realizada",
+                "historico",
+                "historial",
+                "cerrado",
+                "cerrada"
+            };
+
+            return completedTokens.Any(token =>
+                normalized.Contains(
+                    token,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
+        public async Task<bool> UpdateActivityAutomationLockAsync(
+            string token,
+            NotionCalendarActivity activity,
+            bool locked,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                throw new InvalidOperationException(
+                    "La actividad no contiene un identificador de Notion.");
+            }
+
+            using var http = CreateClient(token);
+
+            var page =
+                await ReadPageAsync(
+                    http,
+                    activity.PageId,
+                    cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "No se pudieron leer las propiedades actuales de la actividad.");
+            }
+
+            var propertyName =
+                FindCheckboxPropertyNameByAliases(
+                    properties,
+                    AutomationLockAliases);
+
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                throw new InvalidOperationException(
+                    "No existe la propiedad checkbox Bloqueada_ANFETA en la base Revisiones. " +
+                    "Créala como tipo Casilla de verificación y vuelve a intentar.");
+            }
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["properties"] =
+                        new Dictionary<string, object?>
+                        {
+                            [propertyName] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["checkbox"] = locked
+                                }
+                        }
+                };
+
+            using var response =
+                await SendPatchWithRetryAsync(
+                    http,
+                    $"pages/{activity.PageId}",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
+
+            var responseJson =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    locked
+                        ? "bloquear la actividad"
+                        : "desbloquear la actividad",
+                    response,
+                    responseJson);
+            }
+
+            activity.IsAutomationLocked = locked;
+
+            await EnsureCacheLoadedAsync(
+                cancellationToken);
+
+            await CacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                foreach (var day in DayCache.Values)
+                {
+                    foreach (var cached in day.Where(item =>
+                                 string.Equals(
+                                     item.PageId,
+                                     activity.PageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        cached.IsAutomationLocked = locked;
+                    }
+                }
+
+                await SaveCacheUnsafeAsync(
+                    cancellationToken);
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+
+            return locked;
+        }
 
         public async Task<string> UpdateActivityTitleAsync(
             string token,
@@ -1106,6 +1687,12 @@ namespace Anfeta.UI.Services.Notion
                     "La actividad no contiene un identificador de Notion.");
             }
 
+            if (activity.IsAutomationLocked)
+            {
+                throw new InvalidOperationException(
+                    "La actividad está bloqueada para automatizaciones. Desbloquéala antes de moverla.");
+            }
+
             using var http =
                 CreateClient(token);
 
@@ -1235,11 +1822,21 @@ namespace Anfeta.UI.Services.Notion
                     IsReviewMirror = activity.IsReviewMirror,
                     IsCompletedForReview =
                         activity.IsCompletedForReview,
+                    IsAutomationLocked =
+                        activity.IsAutomationLocked,
+                    ChecklistScanned =
+                        activity.ChecklistScanned,
+                    ChecklistTotal =
+                        activity.ChecklistTotal,
+                    ChecklistCompleted =
+                        activity.ChecklistCompleted,
                     Project = activity.Project,
                     Status = activity.Status,
                     StatusColor = activity.StatusColor,
                     UpdateText = activity.UpdateText,
                     Description = activity.Description,
+                    ActivityCreatedDate = activity.ActivityCreatedDate,
+                    InternalDeadlineDate = activity.InternalDeadlineDate,
                     DatePropertyName = propertyName,
                     Start = newStart,
                     End = newEnd
@@ -1298,6 +1895,27 @@ namespace Anfeta.UI.Services.Notion
                 DateTime targetStart,
                 CancellationToken cancellationToken = default)
         {
+            var result =
+                await UpdateActivityScheduleWithAuditAsync(
+                    token,
+                    activity,
+                    targetStart,
+                    targetEnd: null,
+                    auditLog: null,
+                    cancellationToken: cancellationToken);
+
+            return result.Activity;
+        }
+
+        public async Task<NotionCalendarScheduleUpdateResult>
+            UpdateActivityScheduleWithAuditAsync(
+                string token,
+                NotionCalendarActivity activity,
+                DateTime targetStart,
+                DateTime? targetEnd,
+                string? auditLog,
+                CancellationToken cancellationToken = default)
+        {
             if (string.IsNullOrWhiteSpace(token))
             {
                 throw new InvalidOperationException(
@@ -1309,6 +1927,12 @@ namespace Anfeta.UI.Services.Notion
             {
                 throw new InvalidOperationException(
                     "La actividad no contiene un identificador de Notion.");
+            }
+
+            if (activity.IsAutomationLocked)
+            {
+                throw new InvalidOperationException(
+                    "La actividad está bloqueada para automatizaciones. Desbloquéala antes de moverla.");
             }
 
             using var http =
@@ -1374,7 +1998,12 @@ namespace Anfeta.UI.Services.Notion
                     DateTimeKind.Local);
 
             var localEnd =
-                localStart.Add(duration);
+                targetEnd.HasValue &&
+                targetEnd.Value > targetStart
+                    ? DateTime.SpecifyKind(
+                        targetEnd.Value,
+                        DateTimeKind.Local)
+                    : localStart.Add(duration);
 
             var startOffset =
                 new DateTimeOffset(localStart);
@@ -1382,25 +2011,118 @@ namespace Anfeta.UI.Services.Notion
             var endOffset =
                 new DateTimeOffset(localEnd);
 
+            var propertiesPayload =
+                new Dictionary<string, object?>
+                {
+                    [propertyName] =
+                        new Dictionary<string, object?>
+                        {
+                            ["date"] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["start"] =
+                                        startOffset.ToString("O"),
+                                    ["end"] =
+                                        endOffset.ToString("O")
+                                }
+                        }
+                };
+
+            var auditLogWritten = false;
+
+            if (!string.IsNullOrWhiteSpace(auditLog))
+            {
+                foreach (var alias in AuditLogAliases)
+                {
+                    var normalizedAlias =
+                        Normalize(alias);
+
+                    var auditPropertyName = string.Empty;
+                    var auditPropertyValue = default(JsonElement);
+
+                    foreach (var property in
+                             properties.EnumerateObject())
+                    {
+                        if (Normalize(property.Name) !=
+                            normalizedAlias)
+                        {
+                            continue;
+                        }
+
+                        auditPropertyName = property.Name;
+                        auditPropertyValue = property.Value;
+                        break;
+                    }
+
+                    // No se accede a JsonProperty.Name sobre un valor default.
+                    // Ese acceso era la causa de: "Operation is not valid due
+                    // to the current state of the object" cuando Audit_FTF_Log
+                    // no existía en la base.
+                    if (string.IsNullOrWhiteSpace(
+                            auditPropertyName))
+                    {
+                        continue;
+                    }
+
+                    var auditType =
+                        ReadString(
+                            auditPropertyValue,
+                            "type");
+
+                    if (!auditType.Equals(
+                            "rich_text",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        break;
+                    }
+
+                    var existing =
+                        ExtractPropertyText(
+                            auditPropertyValue)
+                            .Trim();
+
+                    var nextLog =
+                        string.IsNullOrWhiteSpace(existing)
+                            ? auditLog.Trim()
+                            : $"{existing}\n{auditLog.Trim()}";
+
+                    if (nextLog.Length > 1900)
+                    {
+                        nextLog =
+                            nextLog.Substring(
+                                nextLog.Length - 1900);
+                    }
+
+                    propertiesPayload[
+                        auditPropertyName] =
+                            new Dictionary<string, object?>
+                            {
+                                ["rich_text"] =
+                                    new object[]
+                                    {
+                                        new Dictionary<string, object?>
+                                        {
+                                            ["type"] = "text",
+                                            ["text"] =
+                                                new Dictionary<string, object?>
+                                                {
+                                                    ["content"] =
+                                                        nextLog
+                                                }
+                                        }
+                                    }
+                            };
+
+                    auditLogWritten = true;
+                    break;
+                }
+            }
+
             var payload =
                 new Dictionary<string, object?>
                 {
                     ["properties"] =
-                        new Dictionary<string, object?>
-                        {
-                            [propertyName] =
-                                new Dictionary<string, object?>
-                                {
-                                    ["date"] =
-                                        new Dictionary<string, object?>
-                                        {
-                                            ["start"] =
-                                                startOffset.ToString("O"),
-                                            ["end"] =
-                                                endOffset.ToString("O")
-                                        }
-                                }
-                        }
+                        propertiesPayload
                 };
 
             using var response =
@@ -1439,11 +2161,21 @@ namespace Anfeta.UI.Services.Notion
                     IsReviewMirror = activity.IsReviewMirror,
                     IsCompletedForReview =
                         activity.IsCompletedForReview,
+                    IsAutomationLocked =
+                        activity.IsAutomationLocked,
+                    ChecklistScanned =
+                        activity.ChecklistScanned,
+                    ChecklistTotal =
+                        activity.ChecklistTotal,
+                    ChecklistCompleted =
+                        activity.ChecklistCompleted,
                     Project = activity.Project,
                     Status = activity.Status,
                     StatusColor = activity.StatusColor,
                     UpdateText = activity.UpdateText,
                     Description = activity.Description,
+                    ActivityCreatedDate = activity.ActivityCreatedDate,
+                    InternalDeadlineDate = activity.InternalDeadlineDate,
                     DatePropertyName = propertyName,
                     Start = localStart,
                     End = localEnd
@@ -1492,7 +2224,9 @@ namespace Anfeta.UI.Services.Notion
                 }
             }
 
-            return updated;
+            return new NotionCalendarScheduleUpdateResult(
+                updated,
+                auditLogWritten);
         }
 
         private static async Task RemoveActivityFromCacheAsync(
@@ -1531,6 +2265,8 @@ namespace Anfeta.UI.Services.Notion
             CancellationToken cancellationToken = default,
             IProgress<NotionCalendarProgress>? progress = null)
         {
+            LastChangedPageIds = Array.Empty<string>();
+
             if (string.IsNullOrWhiteSpace(token))
                 return false;
 
@@ -1635,6 +2371,29 @@ namespace Anfeta.UI.Services.Notion
 
             try
             {
+                // Mantiene el último porcentaje visible mientras se relee
+                // únicamente el body de las páginas modificadas.
+                var previousChecklist =
+                    DayCache.Values
+                        .SelectMany(day => day)
+                        .Where(activity =>
+                            activity != null &&
+                            changedIds.Contains(activity.PageId) &&
+                            activity.ChecklistScanned)
+                        .GroupBy(
+                            activity => activity.PageId,
+                            StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(
+                            group => group.Key,
+                            group =>
+                            {
+                                var item = group.First();
+                                return new NotionChecklistStats(
+                                    item.ChecklistTotal,
+                                    item.ChecklistCompleted);
+                            },
+                            StringComparer.OrdinalIgnoreCase);
+
                 foreach (var key in DayCache.Keys.ToList())
                 {
                     DayCache[key].RemoveAll(activity =>
@@ -1643,6 +2402,15 @@ namespace Anfeta.UI.Services.Notion
 
                 foreach (var activity in mapped)
                 {
+                    if (previousChecklist.TryGetValue(
+                            activity.PageId,
+                            out var priorStats))
+                    {
+                        activity.ChecklistScanned = true;
+                        activity.ChecklistTotal = priorStats.Total;
+                        activity.ChecklistCompleted = priorStats.Completed;
+                    }
+
                     foreach (var day in EnumerateActivityDays(activity))
                     {
                         var key =
@@ -1677,6 +2445,11 @@ namespace Anfeta.UI.Services.Notion
             {
                 CacheLock.Release();
             }
+
+            LastChangedPageIds =
+                changedIds
+                    .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
             progress?.Report(
                 new NotionCalendarProgress(
@@ -2211,6 +2984,23 @@ namespace Anfeta.UI.Services.Notion
                 props,
                 DescriptionAliases);
 
+            var hasActivityCreatedDate =
+                TryReadControlDateByAliases(
+                    props,
+                    ActivityCreatedDateAliases,
+                    out var activityCreatedDate);
+
+            var hasInternalDeadlineDate =
+                TryReadControlDateByAliases(
+                    props,
+                    InternalDeadlineDateAliases,
+                    out var internalDeadlineDate);
+
+            var isAutomationLocked =
+                ReadCheckboxByAliases(
+                    props,
+                    AutomationLockAliases);
+
             var pageId = ReadString(page, "id");
             var pageUrl = ReadString(page, "url");
 
@@ -2222,11 +3012,18 @@ namespace Anfeta.UI.Services.Notion
                 Person = people,
                 OriginalPerson = people,
                 IsCompletedForReview = IsCompletedReviewStatus(status),
+                IsAutomationLocked = isAutomationLocked,
                 Project = project,
                 Status = status,
                 StatusColor = statusColor,
                 UpdateText = updateText,
                 Description = description,
+                ActivityCreatedDate = hasActivityCreatedDate
+                    ? activityCreatedDate
+                    : null,
+                InternalDeadlineDate = hasInternalDeadlineDate
+                    ? internalDeadlineDate
+                    : null,
                 DatePropertyName = datePropertyName,
                 Start = start,
                 End = end
@@ -2394,6 +3191,61 @@ namespace Anfeta.UI.Services.Notion
             }
 
             return string.Empty;
+        }
+
+        private static bool TryReadControlDateByAliases(
+            JsonElement props,
+            IEnumerable<string> aliases,
+            out DateTime value)
+        {
+            value = default;
+
+            foreach (var alias in aliases)
+            {
+                var property =
+                    FindPropertyByAlias(
+                        props,
+                        alias);
+
+                if (property.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                if (TryReadDateRange(
+                        property,
+                        out var start,
+                        out _))
+                {
+                    value = start.Date;
+                    return true;
+                }
+
+                // Soporta también propiedades nativas created_time /
+                // last_edited_time por si la base cambia el tipo del campo.
+                foreach (var propertyName in new[]
+                         {
+                             "created_time",
+                             "last_edited_time"
+                         })
+                {
+                    if (!property.TryGetProperty(
+                            propertyName,
+                            out var raw) ||
+                        raw.ValueKind != JsonValueKind.String)
+                    {
+                        continue;
+                    }
+
+                    if (TryParseNotionDate(
+                            raw.GetString() ?? string.Empty,
+                            out var parsed))
+                    {
+                        value = parsed.Date;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private static bool TryReadDateRange(
@@ -2887,6 +3739,88 @@ namespace Anfeta.UI.Services.Notion
                        clean,
                        "False",
                        StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ReadCheckboxByAliases(
+            JsonElement props,
+            IEnumerable<string> aliases)
+        {
+            foreach (var alias in aliases)
+            {
+                var property =
+                    FindPropertyByAlias(
+                        props,
+                        alias);
+
+                if (property.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var type =
+                    ReadString(
+                        property,
+                        "type");
+
+                if (type.Equals(
+                        "checkbox",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    property.TryGetProperty(
+                        "checkbox",
+                        out var checkbox) &&
+                    (checkbox.ValueKind == JsonValueKind.True ||
+                     checkbox.ValueKind == JsonValueKind.False))
+                {
+                    return checkbox.GetBoolean();
+                }
+
+                if (type.Equals(
+                        "formula",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    property.TryGetProperty(
+                        "formula",
+                        out var formula) &&
+                    formula.ValueKind == JsonValueKind.Object &&
+                    ReadString(formula, "type").Equals(
+                        "boolean",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    formula.TryGetProperty(
+                        "boolean",
+                        out var boolean) &&
+                    (boolean.ValueKind == JsonValueKind.True ||
+                     boolean.ValueKind == JsonValueKind.False))
+                {
+                    return boolean.GetBoolean();
+                }
+            }
+
+            return false;
+        }
+
+        private static string FindCheckboxPropertyNameByAliases(
+            JsonElement properties,
+            IEnumerable<string> aliases)
+        {
+            foreach (var alias in aliases)
+            {
+                var normalizedAlias = Normalize(alias);
+
+                foreach (var property in properties.EnumerateObject())
+                {
+                    if (Normalize(property.Name) != normalizedAlias)
+                        continue;
+
+                    if (ReadString(
+                            property.Value,
+                            "type")
+                        .Equals(
+                            "checkbox",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return property.Name;
+                    }
+                }
+            }
+
+            return string.Empty;
         }
 
         private static string ReadByAliases(

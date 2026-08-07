@@ -11,6 +11,14 @@ using System.Threading.Tasks;
 
 namespace Anfeta.UI.Services.Notion
 {
+    public sealed class NotionDuplicatePageResult
+    {
+        public string PageId { get; init; } = string.Empty;
+        public string PageUrl { get; init; } = string.Empty;
+        public IReadOnlyList<string> SkippedProperties { get; init; } =
+            Array.Empty<string>();
+    }
+
     public sealed class NotionPageActionsService
     {
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
@@ -123,6 +131,525 @@ namespace Anfeta.UI.Services.Notion
                     "mover la página a la papelera",
                     response,
                     json);
+        }
+
+        public Task<NotionDuplicatePageResult> DuplicatePageWithoutBodyAsync(
+            string token,
+            string pageId,
+            string dataSourceId,
+            CancellationToken cancellationToken = default)
+        {
+            return DuplicatePageWithoutBodyAsync(
+                token,
+                pageId,
+                dataSourceId,
+                duplicateTitle: null,
+                cancellationToken);
+        }
+
+        public async Task<NotionDuplicatePageResult> DuplicatePageWithoutBodyAsync(
+            string token,
+            string pageId,
+            string dataSourceId,
+            string? duplicateTitle,
+            CancellationToken cancellationToken = default)
+        {
+            ValidateTokenAndPage(token, pageId);
+
+            if (string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                throw new ArgumentException(
+                    "No se pudo identificar la base de Notion.");
+            }
+
+            using var http = CreateClient(token);
+
+            using var sourceResponse =
+                await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () => new HttpRequestMessage(
+                        HttpMethod.Get,
+                        $"pages/{NormalizeId(pageId)}"),
+                    cancellationToken);
+
+            var sourceJson =
+                await sourceResponse.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!sourceResponse.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "leer la actividad que se va a duplicar",
+                    sourceResponse,
+                    sourceJson);
+            }
+
+            using var sourceDocument =
+                JsonDocument.Parse(sourceJson);
+
+            if (!sourceDocument.RootElement.TryGetProperty(
+                    "properties",
+                    out var sourceProperties) ||
+                sourceProperties.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "Notion no devolvió las propiedades de la actividad.");
+            }
+
+            var duplicateProperties =
+                new Dictionary<string, object?>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            var skippedProperties =
+                new List<string>();
+
+            var titlePropertyName = string.Empty;
+
+            foreach (var property in
+                     sourceProperties.EnumerateObject())
+            {
+                if (string.Equals(
+                        ReadString(property.Value, "type"),
+                        "title",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    titlePropertyName = property.Name;
+                }
+
+                if (TryBuildWritablePropertyValue(
+                        property.Value,
+                        out var writableValue))
+                {
+                    duplicateProperties[property.Name] =
+                        writableValue;
+                }
+                else
+                {
+                    skippedProperties.Add(property.Name);
+                }
+            }
+
+            duplicateTitle =
+                (duplicateTitle ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(duplicateTitle))
+            {
+                if (string.IsNullOrWhiteSpace(titlePropertyName))
+                {
+                    throw new InvalidOperationException(
+                        "No se pudo identificar la propiedad de título de la actividad.");
+                }
+
+                duplicateProperties[titlePropertyName] =
+                    new Dictionary<string, object?>
+                    {
+                        ["title"] = new object[]
+                        {
+                            new Dictionary<string, object?>
+                            {
+                                ["type"] = "text",
+                                ["text"] =
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["content"] = duplicateTitle
+                                    }
+                            }
+                        }
+                    };
+            }
+
+            if (duplicateProperties.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "No se encontraron propiedades editables para duplicar.");
+            }
+
+            // No se envía `children`: la página nueva conserva las propiedades
+            // de la actividad, pero el body/instrucciones queda vacío.
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["parent"] =
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "data_source_id",
+                            ["data_source_id"] =
+                                NormalizeId(dataSourceId)
+                        },
+                    ["properties"] = duplicateProperties
+                };
+
+            var payloadJson =
+                JsonSerializer.Serialize(payload);
+
+            using var createResponse =
+                await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () => new HttpRequestMessage(
+                        HttpMethod.Post,
+                        "pages")
+                    {
+                        Content = new StringContent(
+                            payloadJson,
+                            Encoding.UTF8,
+                            "application/json")
+                    },
+                    cancellationToken);
+
+            var createJson =
+                await createResponse.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!createResponse.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "duplicar la actividad",
+                    createResponse,
+                    createJson);
+            }
+
+            using var createdDocument =
+                JsonDocument.Parse(createJson);
+
+            return new NotionDuplicatePageResult
+            {
+                PageId = ReadString(
+                    createdDocument.RootElement,
+                    "id"),
+                PageUrl = ReadString(
+                    createdDocument.RootElement,
+                    "url"),
+                SkippedProperties = skippedProperties
+            };
+        }
+
+        private static bool TryBuildWritablePropertyValue(
+            JsonElement property,
+            out object? writableValue)
+        {
+            writableValue = null;
+
+            var type = ReadString(property, "type");
+
+            if (string.IsNullOrWhiteSpace(type))
+                return false;
+
+            switch (type)
+            {
+                case "title":
+                case "rich_text":
+                    {
+                        if (!property.TryGetProperty(
+                                type,
+                                out var richText) ||
+                            richText.ValueKind != JsonValueKind.Array)
+                        {
+                            return false;
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                [type] =
+                                    BuildWritableRichTextArray(
+                                        richText)
+                            };
+
+                        return true;
+                    }
+
+                case "number":
+                    {
+                        if (!property.TryGetProperty(
+                                "number",
+                                out var number))
+                        {
+                            return false;
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                ["number"] =
+                                    number.ValueKind ==
+                                        JsonValueKind.Null
+                                        ? null
+                                        : number.TryGetInt64(
+                                            out var integer)
+                                            ? integer
+                                            : number.GetDouble()
+                            };
+
+                        return true;
+                    }
+
+                case "select":
+                case "status":
+                    {
+                        if (!property.TryGetProperty(
+                                type,
+                                out var selected))
+                        {
+                            return false;
+                        }
+
+                        object? selectedPayload = null;
+
+                        if (selected.ValueKind ==
+                            JsonValueKind.Object)
+                        {
+                            var name =
+                                ReadString(selected, "name");
+
+                            if (!string.IsNullOrWhiteSpace(name))
+                            {
+                                selectedPayload =
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["name"] = name
+                                    };
+                            }
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                [type] = selectedPayload
+                            };
+
+                        return true;
+                    }
+
+                case "multi_select":
+                    {
+                        if (!property.TryGetProperty(
+                                "multi_select",
+                                out var values) ||
+                            values.ValueKind != JsonValueKind.Array)
+                        {
+                            return false;
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                ["multi_select"] = values
+                                    .EnumerateArray()
+                                    .Select(item =>
+                                        ReadString(item, "name"))
+                                    .Where(name =>
+                                        !string.IsNullOrWhiteSpace(name))
+                                    .Select(name =>
+                                        (object)new Dictionary<
+                                            string, object?>
+                                        {
+                                            ["name"] = name
+                                        })
+                                    .ToArray()
+                            };
+
+                        return true;
+                    }
+
+                case "date":
+                    {
+                        if (!property.TryGetProperty(
+                                "date",
+                                out var date))
+                        {
+                            return false;
+                        }
+
+                        object? datePayload = null;
+
+                        if (date.ValueKind == JsonValueKind.Object)
+                        {
+                            var start =
+                                ReadString(date, "start");
+
+                            if (!string.IsNullOrWhiteSpace(start))
+                            {
+                                var data =
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["start"] = start
+                                    };
+
+                                var end =
+                                    ReadString(date, "end");
+
+                                if (!string.IsNullOrWhiteSpace(end))
+                                    data["end"] = end;
+
+                                var timeZone =
+                                    ReadString(date, "time_zone");
+
+                                if (!string.IsNullOrWhiteSpace(timeZone))
+                                    data["time_zone"] = timeZone;
+
+                                datePayload = data;
+                            }
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                ["date"] = datePayload
+                            };
+
+                        return true;
+                    }
+
+                case "checkbox":
+                    {
+                        if (!property.TryGetProperty(
+                                "checkbox",
+                                out var checkbox) ||
+                            (checkbox.ValueKind != JsonValueKind.True &&
+                             checkbox.ValueKind != JsonValueKind.False))
+                        {
+                            return false;
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                ["checkbox"] = checkbox.GetBoolean()
+                            };
+
+                        return true;
+                    }
+
+                case "url":
+                case "email":
+                case "phone_number":
+                    {
+                        if (!property.TryGetProperty(
+                                type,
+                                out var scalar))
+                        {
+                            return false;
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                [type] =
+                                    scalar.ValueKind ==
+                                        JsonValueKind.String
+                                        ? scalar.GetString()
+                                        : null
+                            };
+
+                        return true;
+                    }
+
+                case "people":
+                case "relation":
+                    {
+                        if (!property.TryGetProperty(
+                                type,
+                                out var values) ||
+                            values.ValueKind != JsonValueKind.Array)
+                        {
+                            return false;
+                        }
+
+                        writableValue =
+                            new Dictionary<string, object?>
+                            {
+                                [type] = values
+                                    .EnumerateArray()
+                                    .Select(item =>
+                                        ReadString(item, "id"))
+                                    .Where(id =>
+                                        !string.IsNullOrWhiteSpace(id))
+                                    .Select(id =>
+                                        (object)new Dictionary<
+                                            string, object?>
+                                        {
+                                            ["id"] = id
+                                        })
+                                    .ToArray()
+                            };
+
+                        return true;
+                    }
+
+                // Estos tipos los administra Notion o requieren un flujo de
+                // carga/archivo distinto. Se omiten deliberadamente para no
+                // impedir la creación de la copia.
+                case "formula":
+                case "rollup":
+                case "created_time":
+                case "created_by":
+                case "last_edited_time":
+                case "last_edited_by":
+                case "unique_id":
+                case "verification":
+                case "button":
+                case "files":
+                default:
+                    return false;
+            }
+        }
+
+        private static object[] BuildWritableRichTextArray(
+            JsonElement richText)
+        {
+            var result = new List<object>();
+
+            foreach (var item in richText.EnumerateArray())
+            {
+                var content = string.Empty;
+                string? linkUrl = null;
+
+                if (item.TryGetProperty(
+                        "text",
+                        out var text) &&
+                    text.ValueKind == JsonValueKind.Object)
+                {
+                    content = ReadString(text, "content");
+
+                    if (text.TryGetProperty(
+                            "link",
+                            out var link) &&
+                        link.ValueKind == JsonValueKind.Object)
+                    {
+                        linkUrl = ReadString(link, "url");
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(content))
+                    content = ReadString(item, "plain_text");
+
+                if (string.IsNullOrEmpty(content))
+                    continue;
+
+                var textPayload =
+                    new Dictionary<string, object?>
+                    {
+                        ["content"] = content
+                    };
+
+                if (!string.IsNullOrWhiteSpace(linkUrl))
+                {
+                    textPayload["link"] =
+                        new Dictionary<string, object?>
+                        {
+                            ["url"] = linkUrl
+                        };
+                }
+
+                result.Add(
+                    new Dictionary<string, object?>
+                    {
+                        ["type"] = "text",
+                        ["text"] = textPayload
+                    });
+            }
+
+            return result.ToArray();
         }
 
         private static async Task<string> GetTitlePropertyNameAsync(
