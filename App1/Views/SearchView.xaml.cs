@@ -128,7 +128,8 @@ namespace Anfeta.UI.Views
         private CancellationTokenSource? _voiceCts;
         private readonly ISpeechToTextService _stt;
         private readonly VoiceCommandsRepository _repo;
-        private bool _voiceInitDone;
+        private static int _sharedVoiceInitStarted;
+        private static int _sharedDailyCalendarAutomationStarted;
         private readonly IVoicePostActionService _voicePost;
         private Brush? _voiceSplitDefaultBg;
         private Brush? _voiceSplitDefaultFg;
@@ -141,6 +142,14 @@ namespace Anfeta.UI.Views
         private readonly DropboxSyncService _dropboxSyncService;
         private readonly SemaphoreSlim _bootstrapLock = new(1, 1);
         private bool _bootstrappedOnce = false;
+
+        // Las pestañas restauradas que no están visibles pueden diferir su
+        // pintado inicial. Así no construimos miles de filas XAML para cada
+        // pestaña durante el arranque. SearchTabsView las activa al seleccionarlas.
+        public bool DeferInitialIndexPaint { get; set; }
+        private bool _deferredIndexPaintPending;
+        private long _lastPaintedIndexVersion = -1;
+
         private readonly SemaphoreSlim _mutLock = new(1, 1);
         private CancellationTokenSource? _refreshCts;
         private string? _currentFolderPath;
@@ -412,24 +421,43 @@ namespace Anfeta.UI.Views
             LoadSidebarExpandedStates();
             await LoadSavedFiltersAsync();
 
-            if (!_voiceInitDone)
+            if (!DeferInitialIndexPaint &&
+                Interlocked.CompareExchange(
+                    ref _sharedVoiceInitStarted,
+                    1,
+                    0) == 0)
             {
-                _voiceInitDone = true;
                 await _voiceEngine.ReloadAsync();
             }
 
             _ = LoadBookmarksAsync();
 
-            await ApplyIndexStateAsync();
-            await EnsureIndexBootstrappedAsync();
-            await ApplyDefaultTagIfEmptyAsync();
+            // Los tabs ocultos restaurados no hacen bootstrap ni pintan miles
+            // de filas. El tab visible hace la carga global y los demás reutilizan
+            // App.LocalIndex cuando el usuario realmente los selecciona.
+            if (!DeferInitialIndexPaint)
+            {
+                await EnsureIndexBootstrappedAsync();
+                await ApplyDefaultTagIfEmptyAsync();
+            }
+            else
+            {
+                _deferredIndexPaintPending = true;
+            }
 
             // El calendario permanece inactivo durante el arranque.
             // Solo se carga cuando el usuario abre la vista Calendario.
 
-            // Después de las 7:00 AM y una sola vez por día,
-            // mueve pendientes de ayer a hoy y guarda un reporte local.
-            _ = RunDailyCalendarAutomationIfNeededAsync();
+            // Esta automatización es global: varias pestañas no deben intentar
+            // ejecutarla simultáneamente al iniciar.
+            if (!DeferInitialIndexPaint &&
+                Interlocked.CompareExchange(
+                    ref _sharedDailyCalendarAutomationStarted,
+                    1,
+                    0) == 0)
+            {
+                _ = RunDailyCalendarAutomationIfNeededAsync();
+            }
 
             ApplyTextScaleToVisualTree();
 
@@ -450,6 +478,7 @@ namespace Anfeta.UI.Views
 
             DetachMessagesNavigationBridge();
             CloseMessagesView();
+            StopNotionChangeWatcher();
             StopDropboxChangeWatcher();
 
             try
@@ -502,6 +531,84 @@ namespace Anfeta.UI.Views
             {
             }
         }
+        /// <summary>
+        /// Guarda el estado de una pestaña restaurada sin ejecutar búsquedas ni
+        /// recorridos de carpeta. La pestaña se materializa cuando el usuario la abre.
+        /// </summary>
+        public void StageDeferredTabState(SearchTabState state)
+        {
+            if (state == null)
+                return;
+
+            DeferInitialIndexPaint = true;
+            _deferredIndexPaintPending = true;
+            _currentFolderPath = (state.CurrentFolder ?? string.Empty).Trim();
+
+            _allowProgrammaticSearch = true;
+            SearchBox.Text = state.Query ?? string.Empty;
+            _allowProgrammaticSearch = false;
+
+            SetTabTitle(SearchBox.Text);
+        }
+
+        /// <summary>
+        /// Activa una pestaña que estaba diferida. No vuelve a sincronizar; usa el
+        /// índice compartido en memoria y restaura únicamente su vista local.
+        /// </summary>
+        public async Task ActivateDeferredTabAsync(SearchTabState? state = null)
+        {
+            DeferInitialIndexPaint = false;
+
+            if (Interlocked.CompareExchange(
+                    ref _sharedVoiceInitStarted,
+                    1,
+                    0) == 0)
+            {
+                await _voiceEngine.ReloadAsync();
+            }
+
+            if (!_bootstrappedOnce)
+                await EnsureIndexBootstrappedAsync();
+
+            StartNotionChangeWatcher();
+            StartDropboxChangeWatcher();
+
+            if (Interlocked.CompareExchange(
+                    ref _sharedDailyCalendarAutomationStarted,
+                    1,
+                    0) == 0)
+            {
+                _ = RunDailyCalendarAutomationIfNeededAsync();
+            }
+
+            if (state != null)
+            {
+                _deferredIndexPaintPending = false;
+                await RestoreTabStateAsync(state);
+                await ApplyDefaultTagIfEmptyAsync();
+                return;
+            }
+
+            if (_deferredIndexPaintPending && App.LocalIndex.HasData)
+            {
+                _deferredIndexPaintPending = false;
+                await PaintLoadedIndexAsync();
+            }
+
+            await ApplyDefaultTagIfEmptyAsync();
+        }
+
+        public async Task RefreshFromSharedIndexIfChangedAsync()
+        {
+            if (DeferInitialIndexPaint || !App.LocalIndex.HasData)
+                return;
+
+            if (_lastPaintedIndexVersion == App.LocalIndex.Version)
+                return;
+
+            await PaintLoadedIndexAsync();
+        }
+
         private void OnSearchFocusRequested()
         {
             DispatcherQueue.TryEnqueue(async () =>

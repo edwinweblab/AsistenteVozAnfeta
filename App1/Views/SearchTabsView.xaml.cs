@@ -2,6 +2,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Windows.Storage;
@@ -17,10 +18,19 @@ namespace Anfeta.UI.Views
         private bool _workspaceRestored;
         private bool _restoreOnce;
 
+        // Las pestañas no seleccionadas conservan su estado, pero no ejecutan
+        // búsquedas ni pintan miles de resultados hasta que el usuario las abre.
+        private readonly Dictionary<SearchView, SearchTabState>
+            _pendingTabStates = new();
+
 
         public SearchTabsView()
         {
             InitializeComponent();
+
+            // El SearchView declarado en XAML no debe bootstrappear antes de
+            // saber si existe un workspace que lo va a reemplazar.
+            FirstSearchView.DeferInitialIndexPaint = true;
 
             // Hook del primer tab (Buscar 1)
             if (Tabs.TabItems.Count > 0)
@@ -43,7 +53,10 @@ namespace Anfeta.UI.Views
         {
             _tabCounter++;
 
-            var view = new SearchView();
+            var view = new SearchView
+            {
+                DeferInitialIndexPaint = false
+            };
             var tab = new TabViewItem
             {
                 Header = $"Buscar {_tabCounter}",
@@ -68,6 +81,10 @@ namespace Anfeta.UI.Views
         private void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
         {
             if (sender.TabItems.Count <= 1) return; // no cerrar el último
+
+            if (args.Tab?.Content is SearchView closingView)
+                _pendingTabStates.Remove(closingView);
+
             sender.TabItems.Remove(args.Tab);
             SaveWorkspace();
         }
@@ -113,7 +130,11 @@ namespace Anfeta.UI.Views
                 var json = ls[LS_TabsWorkspace] as string;
 
                 if (string.IsNullOrWhiteSpace(json))
+                {
+                    _workspaceRestored = true;
+                    await FirstSearchView.ActivateDeferredTabAsync();
                     return;
+                }
 
                 SearchTabsWorkspace? ws = null;
 
@@ -125,6 +146,8 @@ namespace Anfeta.UI.Views
                 catch
                 {
                     ls.Remove(LS_TabsWorkspace);
+                    _workspaceRestored = true;
+                    await FirstSearchView.ActivateDeferredTabAsync();
                     return;
                 }
 
@@ -132,6 +155,8 @@ namespace Anfeta.UI.Views
                 if (ws == null || ws.Tabs == null || ws.Tabs.Count == 0 || ws.Version != 1)
                 {
                     ls.Remove(LS_TabsWorkspace);
+                    _workspaceRestored = true;
+                    await FirstSearchView.ActivateDeferredTabAsync();
                     return;
                 }
 
@@ -153,6 +178,7 @@ namespace Anfeta.UI.Views
                 await Task.Yield();
 
                 Tabs.TabItems.Clear();
+                _pendingTabStates.Clear();
                 _tabCounter = 0;
 
                 // 5) Crear tabs
@@ -160,7 +186,14 @@ namespace Anfeta.UI.Views
                 {
                     _tabCounter++;
 
-                    var view = new SearchView();
+                    var isSelectedTab =
+                        i == ws.SelectedIndex;
+
+                    var view = new SearchView
+                    {
+                        DeferInitialIndexPaint = !isSelectedTab
+                    };
+
                     var tab = new TabViewItem
                     {
                         Header = $"Buscar {_tabCounter}",
@@ -170,6 +203,12 @@ namespace Anfeta.UI.Views
 
                     HookTabTitle(tab, view);
                     Tabs.TabItems.Add(tab);
+
+                    if (!isSelectedTab)
+                    {
+                        view.StageDeferredTabState(ws.Tabs[i]);
+                        _pendingTabStates[view] = ws.Tabs[i];
+                    }
                 }
 
                 // 6) Deja que WinUI “monte” los contenidos antes de seleccionar
@@ -188,8 +227,8 @@ namespace Anfeta.UI.Views
                 await WaitForIndexReadyAsync();
                 await RestoreSelectedTabStateAsync(ws);
 
-                // 9) Restaurar los demás sin bloquear
-                _ = RestoreOtherTabsStateAsync(ws);
+                // 9) Los demás tabs ya quedaron staged en memoria y se
+                // materializan solo cuando el usuario los selecciona.
 
                 // 10) Ya puedes permitir guardados
                 _workspaceRestored = true;
@@ -217,11 +256,39 @@ namespace Anfeta.UI.Views
             await RestoreWorkspaceAsync();
         }
 
-        private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_restoring) return;
-            if (!_workspaceRestored) return;   // 🔥 clave
+            if (!_workspaceRestored) return;
+
             SaveWorkspace();
+            await ActivateSelectedDeferredTabAsync();
+        }
+
+        private async Task ActivateSelectedDeferredTabAsync()
+        {
+            if (Tabs.SelectedItem is not TabViewItem tab ||
+                tab.Content is not SearchView view)
+            {
+                return;
+            }
+
+            if (_pendingTabStates.TryGetValue(view, out var pendingState))
+            {
+                _pendingTabStates.Remove(view);
+                await view.ActivateDeferredTabAsync(pendingState);
+                return;
+            }
+
+            if (view.DeferInitialIndexPaint)
+            {
+                await view.ActivateDeferredTabAsync();
+                return;
+            }
+
+            // Si otra pestaña sincronizó el índice, esta vista se actualiza desde
+            // memoria al seleccionarla. No realiza ninguna petición externa.
+            await view.RefreshFromSharedIndexIfChangedAsync();
         }
         private static Task WaitForLoadedAsync(FrameworkElement element)
         {
@@ -272,21 +339,12 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private async Task RestoreOtherTabsStateAsync(SearchTabsWorkspace ws)
+        private Task RestoreOtherTabsStateAsync(SearchTabsWorkspace ws)
         {
-            // espera un tick para que la UI se pinte
-            await Task.Delay(50);
-
-            for (int i = 0; i < Tabs.TabItems.Count && i < ws.Tabs.Count; i++)
-            {
-                if (i == Tabs.SelectedIndex) continue;
-
-                if (Tabs.TabItems[i] is TabViewItem tab && tab.Content is SearchView view)
-                {
-                    // NO esperes Loaded: RestoreTabStateAsync debe ser safe sin depender de timer
-                    await view.RestoreTabStateAsync(ws.Tabs[i]);
-                }
-            }
+            // Conservado por compatibilidad interna. Desde Performance Cache v1
+            // los tabs ocultos ya se preparan con StageDeferredTabState durante
+            // RestoreWorkspaceAsync y no ejecutan trabajo aquí.
+            return Task.CompletedTask;
         }
     }
 }

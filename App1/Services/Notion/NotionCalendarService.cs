@@ -52,6 +52,10 @@ namespace Anfeta.UI.Services.Notion
         NotionCalendarActivity Activity,
         bool AuditLogWritten);
 
+    public sealed record NotionActivityWorkUpdateResult(
+        NotionCalendarActivity Activity,
+        bool AuditLogWritten);
+
     public sealed class NotionCalendarService
     {
         public string LastDiagnostics { get; private set; } = "";
@@ -66,6 +70,24 @@ namespace Anfeta.UI.Services.Notion
 
         private static readonly SemaphoreSlim CacheLock =
             new(1, 1);
+
+        // La caché del calendario se modifica con mucha frecuencia (checklist,
+        // drag, cambios incrementales). Las escrituras a disco se agrupan para
+        // no serializar el JSON completo decenas de veces seguidas.
+        private static readonly SemaphoreSlim CacheWriteLock =
+            new(1, 1);
+        private static readonly object CacheSaveScheduleLock = new();
+        private static CancellationTokenSource? _cacheSaveDebounceCts;
+
+        // El esquema de Revisiones cambia muy pocas veces. No hace falta pedirlo
+        // otra vez en cada comprobación incremental.
+        private static readonly SemaphoreSlim SchemaCacheLock =
+            new(1, 1);
+        private static SchemaInfo? _cachedSchema;
+        private static DateTimeOffset _schemaCachedAtUtc =
+            DateTimeOffset.MinValue;
+        private static readonly TimeSpan SchemaCacheLifetime =
+            TimeSpan.FromMinutes(20);
 
         private static readonly Dictionary<string, List<NotionCalendarActivity>>
             DayCache =
@@ -206,6 +228,16 @@ namespace Anfeta.UI.Services.Notion
             "Audit FTF",
             "FTF Audit Log"
         };
+
+        private const string WorkLogPrefix =
+            "[ANFETA_WORKLOG_V1]";
+
+        private sealed class StoredActivityWorkLog
+        {
+            public int EstimateMinutes { get; set; }
+            public Dictionary<string, int> MinutesByDate { get; set; } =
+                new(StringComparer.OrdinalIgnoreCase);
+        }
 
         private static readonly string[] AutomationLockAliases =
         {
@@ -412,7 +444,7 @@ namespace Anfeta.UI.Services.Notion
                     1,
                     "Identificando las propiedades de Revisiones..."));
 
-            var schema = await ReadSchemaAsync(
+            var schema = await GetSchemaCachedAsync(
                 http,
                 cancellationToken);
 
@@ -1835,6 +1867,9 @@ namespace Anfeta.UI.Services.Notion
                     StatusColor = activity.StatusColor,
                     UpdateText = activity.UpdateText,
                     Description = activity.Description,
+                    EstimatedWorkMinutes = activity.EstimatedWorkMinutes,
+                    WorkedMinutes = activity.WorkedMinutes,
+                    WorkLogDetail = activity.WorkLogDetail,
                     ActivityCreatedDate = activity.ActivityCreatedDate,
                     InternalDeadlineDate = activity.InternalDeadlineDate,
                     DatePropertyName = propertyName,
@@ -1886,6 +1921,401 @@ namespace Anfeta.UI.Services.Notion
             }
 
             return updated;
+        }
+
+
+        public async Task<NotionActivityWorkUpdateResult>
+            RegisterActivityWorkAsync(
+                string token,
+                NotionCalendarActivity activity,
+                DateTime workDate,
+                int workedMinutes,
+                CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                throw new InvalidOperationException(
+                    "La actividad no contiene un identificador de Notion.");
+            }
+
+            if (workedMinutes <= 0)
+            {
+                throw new InvalidOperationException(
+                    "El tiempo trabajado debe ser mayor a cero.");
+            }
+
+            using var http =
+                CreateClient(token);
+
+            var page =
+                await ReadPageAsync(
+                    http,
+                    activity.PageId,
+                    cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException(
+                    "No se pudieron leer las propiedades actuales de la actividad.");
+            }
+
+            var auditPropertyName = string.Empty;
+            var auditPropertyValue = default(JsonElement);
+
+            foreach (var alias in AuditLogAliases)
+            {
+                var normalizedAlias =
+                    Normalize(alias);
+
+                foreach (var property in properties.EnumerateObject())
+                {
+                    if (Normalize(property.Name) != normalizedAlias)
+                        continue;
+
+                    auditPropertyName = property.Name;
+                    auditPropertyValue = property.Value;
+                    break;
+                }
+
+                if (!string.IsNullOrWhiteSpace(auditPropertyName))
+                    break;
+            }
+
+            if (string.IsNullOrWhiteSpace(auditPropertyName) ||
+                !ReadString(auditPropertyValue, "type")
+                    .Equals(
+                        "rich_text",
+                        StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Para contabilizar horas entre días se necesita la propiedad " +
+                    "rich_text Audit_FTF_Log en la base Revisiones.");
+            }
+
+            var existing =
+                ExtractPropertyText(
+                    auditPropertyValue)
+                    .Trim();
+
+            var fallbackEstimate =
+                activity.EstimatedWorkMinutes > 0
+                    ? activity.EstimatedWorkMinutes
+                    : Math.Max(
+                        1,
+                        (int)Math.Round(
+                            (activity.End > activity.Start
+                                ? activity.End - activity.Start
+                                : TimeSpan.FromHours(1))
+                            .TotalMinutes));
+
+            var state =
+                ReadLatestActivityWorkLog(
+                    existing,
+                    fallbackEstimate)
+                ?? new StoredActivityWorkLog
+                {
+                    EstimateMinutes = fallbackEstimate
+                };
+
+            if (state.EstimateMinutes <= 0)
+                state.EstimateMinutes = fallbackEstimate;
+
+            var key =
+                workDate.Date.ToString(
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture);
+
+            state.MinutesByDate ??=
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            state.MinutesByDate[key] =
+                state.MinutesByDate.TryGetValue(
+                    key,
+                    out var previous)
+                    ? Math.Max(0, previous) + workedMinutes
+                    : workedMinutes;
+
+            var totalWorked =
+                state.MinutesByDate.Values
+                    .Where(value => value > 0)
+                    .Sum();
+
+            // Nunca muestra una estimación inferior al tiempo ya registrado.
+            state.EstimateMinutes =
+                Math.Max(
+                    state.EstimateMinutes,
+                    totalWorked);
+
+            var encoded =
+                WorkLogPrefix +
+                Convert.ToBase64String(
+                    Encoding.UTF8.GetBytes(
+                        JsonSerializer.Serialize(state)));
+
+            var separator =
+                string.IsNullOrWhiteSpace(existing)
+                    ? string.Empty
+                    : "\n";
+
+            var nextLog =
+                existing +
+                separator +
+                encoded;
+
+            if (nextLog.Length > 1900)
+            {
+                // El estado más reciente siempre queda completo al final.
+                var keep =
+                    Math.Max(
+                        0,
+                        1900 - encoded.Length - 1);
+
+                var tail =
+                    keep > 0 && existing.Length > keep
+                        ? existing.Substring(
+                            existing.Length - keep)
+                        : existing;
+
+                nextLog =
+                    string.IsNullOrWhiteSpace(tail)
+                        ? encoded
+                        : tail + "\n" + encoded;
+
+                if (nextLog.Length > 1900)
+                    nextLog = encoded;
+            }
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["properties"] =
+                        new Dictionary<string, object?>
+                        {
+                            [auditPropertyName] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["rich_text"] =
+                                        new object[]
+                                        {
+                                            new Dictionary<string, object?>
+                                            {
+                                                ["type"] = "text",
+                                                ["text"] =
+                                                    new Dictionary<string, object?>
+                                                    {
+                                                        ["content"] = nextLog
+                                                    }
+                                            }
+                                        }
+                                }
+                        }
+                };
+
+            using var response =
+                await SendPatchWithRetryAsync(
+                    http,
+                    $"pages/{activity.PageId}",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
+
+            var responseJson =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "registrar tiempo trabajado",
+                    response,
+                    responseJson);
+            }
+
+            activity.EstimatedWorkMinutes =
+                state.EstimateMinutes;
+            activity.WorkedMinutes =
+                totalWorked;
+            activity.WorkLogDetail =
+                BuildActivityWorkLogDetail(state);
+
+            await EnsureCacheLoadedAsync(
+                cancellationToken);
+
+            await CacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                foreach (var day in DayCache.Values)
+                {
+                    foreach (var cached in day.Where(item =>
+                                 string.Equals(
+                                     item.PageId,
+                                     activity.PageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        cached.EstimatedWorkMinutes =
+                            activity.EstimatedWorkMinutes;
+                        cached.WorkedMinutes =
+                            activity.WorkedMinutes;
+                        cached.WorkLogDetail =
+                            activity.WorkLogDetail;
+                    }
+                }
+
+                await SaveCacheUnsafeAsync(
+                    cancellationToken);
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+
+            return new NotionActivityWorkUpdateResult(
+                activity,
+                true);
+        }
+
+        private static StoredActivityWorkLog?
+            ReadLatestActivityWorkLog(
+                string? auditLog,
+                int fallbackEstimateMinutes)
+        {
+            var raw =
+                auditLog ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            var lines =
+                raw.Split(
+                    new[] { "\r\n", "\n", "\r" },
+                    StringSplitOptions.RemoveEmptyEntries);
+
+            for (var index = lines.Length - 1;
+                 index >= 0;
+                 index--)
+            {
+                var line =
+                    lines[index].Trim();
+
+                var prefixIndex =
+                    line.IndexOf(
+                        WorkLogPrefix,
+                        StringComparison.Ordinal);
+
+                if (prefixIndex < 0)
+                    continue;
+
+                var encoded =
+                    line.Substring(
+                        prefixIndex + WorkLogPrefix.Length)
+                        .Trim();
+
+                try
+                {
+                    var json =
+                        Encoding.UTF8.GetString(
+                            Convert.FromBase64String(encoded));
+
+                    var state =
+                        JsonSerializer.Deserialize<
+                            StoredActivityWorkLog>(json);
+
+                    if (state == null)
+                        continue;
+
+                    state.MinutesByDate =
+                        state.MinutesByDate == null
+                            ? new Dictionary<string, int>(
+                                StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, int>(
+                                state.MinutesByDate,
+                                StringComparer.OrdinalIgnoreCase);
+
+                    if (state.EstimateMinutes <= 0)
+                    {
+                        state.EstimateMinutes =
+                            Math.Max(
+                                1,
+                                fallbackEstimateMinutes);
+                    }
+
+                    return state;
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private static string BuildActivityWorkLogDetail(
+            StoredActivityWorkLog? state)
+        {
+            if (state?.MinutesByDate == null ||
+                state.MinutesByDate.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            return string.Join(
+                " · ",
+                state.MinutesByDate
+                    .Where(item => item.Value > 0)
+                    .OrderBy(item => item.Key)
+                    .Select(item =>
+                    {
+                        var label =
+                            DateTime.TryParseExact(
+                                item.Key,
+                                "yyyy-MM-dd",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
+                                out var date)
+                                ? date.ToString(
+                                    "dd/MM",
+                                    CultureInfo.InvariantCulture)
+                                : item.Key;
+
+                        return $"{label}: " +
+                               FormatWorkMinutes(item.Value);
+                    }));
+        }
+
+        private static string FormatWorkMinutes(
+            int totalMinutes)
+        {
+            totalMinutes =
+                Math.Max(
+                    0,
+                    totalMinutes);
+
+            var hours =
+                totalMinutes / 60;
+
+            var minutes =
+                totalMinutes % 60;
+
+            if (hours > 0 && minutes > 0)
+                return $"{hours}H {minutes}M";
+
+            if (hours > 0)
+                return $"{hours}H";
+
+            return $"{minutes}M";
         }
 
         public async Task<NotionCalendarActivity>
@@ -2174,6 +2604,9 @@ namespace Anfeta.UI.Services.Notion
                     StatusColor = activity.StatusColor,
                     UpdateText = activity.UpdateText,
                     Description = activity.Description,
+                    EstimatedWorkMinutes = activity.EstimatedWorkMinutes,
+                    WorkedMinutes = activity.WorkedMinutes,
+                    WorkLogDetail = activity.WorkLogDetail,
                     ActivityCreatedDate = activity.ActivityCreatedDate,
                     InternalDeadlineDate = activity.InternalDeadlineDate,
                     DatePropertyName = propertyName,
@@ -2297,7 +2730,7 @@ namespace Anfeta.UI.Services.Notion
                     "Verificando las propiedades de Revisiones..."));
 
             var schema =
-                await ReadSchemaAsync(
+                await GetSchemaCachedAsync(
                     http,
                     cancellationToken);
 
@@ -2463,6 +2896,12 @@ namespace Anfeta.UI.Services.Notion
 
         public void ClearCache()
         {
+            lock (CacheSaveScheduleLock)
+            {
+                _cacheSaveDebounceCts?.Cancel();
+                _cacheSaveDebounceCts = null;
+            }
+
             CacheLock.Wait();
 
             try
@@ -2569,10 +3008,15 @@ namespace Anfeta.UI.Services.Notion
                             path,
                             cancellationToken);
 
+                    // La deserialización de varios días ya no ocurre sobre el
+                    // hilo de UI que abrió el calendario.
                     var restored =
-                        JsonSerializer.Deserialize<
-                            Dictionary<string, List<NotionCalendarActivity>>>(
-                                json);
+                        await Task.Run(
+                            () =>
+                                JsonSerializer.Deserialize<
+                                    Dictionary<string, List<NotionCalendarActivity>>>(
+                                    json),
+                            cancellationToken);
 
                     if (restored != null)
                     {
@@ -2602,24 +3046,109 @@ namespace Anfeta.UI.Services.Notion
             }
         }
 
-        private static async Task SaveCacheUnsafeAsync(
+        private static Task SaveCacheUnsafeAsync(
             CancellationToken cancellationToken)
         {
-            var path =
-                GetCachePath();
+            cancellationToken.ThrowIfCancellationRequested();
+            ScheduleCacheSave();
+            return Task.CompletedTask;
+        }
 
-            var json =
-                JsonSerializer.Serialize(
-                    DayCache,
-                    new JsonSerializerOptions
+        private static void ScheduleCacheSave()
+        {
+            CancellationTokenSource next;
+
+            lock (CacheSaveScheduleLock)
+            {
+                _cacheSaveDebounceCts?.Cancel();
+
+                next =
+                    new CancellationTokenSource();
+
+                _cacheSaveDebounceCts = next;
+            }
+
+            _ = PersistCacheAfterDelayAsync(next);
+        }
+
+        private static async Task PersistCacheAfterDelayAsync(
+            CancellationTokenSource owner)
+        {
+            try
+            {
+                // Agrupa cambios cercanos: especialmente los porcentajes de
+                // checklist que antes escribían el archivo completo uno a uno.
+                await Task.Delay(
+                    TimeSpan.FromSeconds(1.5),
+                    owner.Token);
+
+                Dictionary<string, List<NotionCalendarActivity>>
+                    snapshot;
+
+                await CacheLock.WaitAsync(
+                    owner.Token);
+
+                try
+                {
+                    snapshot =
+                        DayCache.ToDictionary(
+                            item => item.Key,
+                            item => item.Value.ToList(),
+                            StringComparer.Ordinal);
+                }
+                finally
+                {
+                    CacheLock.Release();
+                }
+
+                var json =
+                    await Task.Run(
+                        () =>
+                            JsonSerializer.Serialize(
+                                snapshot,
+                                new JsonSerializerOptions
+                                {
+                                    WriteIndented = false
+                                }),
+                        owner.Token);
+
+                await CacheWriteLock.WaitAsync(
+                    owner.Token);
+
+                try
+                {
+                    await File.WriteAllTextAsync(
+                        GetCachePath(),
+                        json,
+                        owner.Token);
+                }
+                finally
+                {
+                    CacheWriteLock.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+                // La caché en RAM sigue siendo válida. Una escritura posterior
+                // volverá a intentar persistirla.
+            }
+            finally
+            {
+                lock (CacheSaveScheduleLock)
+                {
+                    if (ReferenceEquals(
+                            _cacheSaveDebounceCts,
+                            owner))
                     {
-                        WriteIndented = false
-                    });
+                        _cacheSaveDebounceCts = null;
+                    }
+                }
 
-            await File.WriteAllTextAsync(
-                path,
-                json,
-                cancellationToken);
+                owner.Dispose();
+            }
         }
 
         private static string GetCachePath()
@@ -2647,6 +3176,50 @@ namespace Anfeta.UI.Services.Notion
                 NotionVersion);
 
             return http;
+        }
+
+        private static async Task<SchemaInfo> GetSchemaCachedAsync(
+            HttpClient http,
+            CancellationToken cancellationToken)
+        {
+            var now =
+                DateTimeOffset.UtcNow;
+
+            if (_cachedSchema != null &&
+                now - _schemaCachedAtUtc <
+                    SchemaCacheLifetime)
+            {
+                return _cachedSchema;
+            }
+
+            await SchemaCacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                now = DateTimeOffset.UtcNow;
+
+                if (_cachedSchema != null &&
+                    now - _schemaCachedAtUtc <
+                        SchemaCacheLifetime)
+                {
+                    return _cachedSchema;
+                }
+
+                _cachedSchema =
+                    await ReadSchemaAsync(
+                        http,
+                        cancellationToken);
+
+                _schemaCachedAtUtc =
+                    DateTimeOffset.UtcNow;
+
+                return _cachedSchema;
+            }
+            finally
+            {
+                SchemaCacheLock.Release();
+            }
         }
 
         private static async Task<SchemaInfo> ReadSchemaAsync(
@@ -2984,6 +3557,19 @@ namespace Anfeta.UI.Services.Notion
                 props,
                 DescriptionAliases);
 
+            var auditLogText =
+                ReadByAliases(
+                    props,
+                    AuditLogAliases);
+
+            var workLog =
+                ReadLatestActivityWorkLog(
+                    auditLogText,
+                    Math.Max(
+                        1,
+                        (int)Math.Round(
+                            (end - start).TotalMinutes)));
+
             var hasActivityCreatedDate =
                 TryReadControlDateByAliases(
                     props,
@@ -3018,6 +3604,12 @@ namespace Anfeta.UI.Services.Notion
                 StatusColor = statusColor,
                 UpdateText = updateText,
                 Description = description,
+                EstimatedWorkMinutes =
+                    workLog?.EstimateMinutes ?? 0,
+                WorkedMinutes =
+                    workLog?.MinutesByDate?.Values.Sum() ?? 0,
+                WorkLogDetail =
+                    BuildActivityWorkLogDetail(workLog),
                 ActivityCreatedDate = hasActivityCreatedDate
                     ? activityCreatedDate
                     : null,

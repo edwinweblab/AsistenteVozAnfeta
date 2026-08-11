@@ -9,6 +9,12 @@ public sealed class LocalIndexService
 {
     private readonly object _gate = new();
     private List<SearchResultRow> _items = new();
+    private long _version;
+
+    public long Version
+    {
+        get { lock (_gate) return _version; }
+    }
 
     public bool HasData { get { lock (_gate) return _items.Count > 0; } }
     public int Count { get { lock (_gate) return _items.Count; } }
@@ -23,7 +29,11 @@ public sealed class LocalIndexService
         if (items == null || items.Count == 0)
             throw new InvalidOperationException("Refusing to set empty index.");
 
-        lock (_gate) _items = items;
+        lock (_gate)
+        {
+            _items = items;
+            _version++;
+        }
     }
 
     public bool RemoveExact(string fullPath)
@@ -33,7 +43,9 @@ public sealed class LocalIndexService
         {
             var before = _items.Count;
             _items.RemoveAll(x => Norm(x.FullPath) == norm);
-            return _items.Count != before;
+            var changed = _items.Count != before;
+            if (changed) _version++;
+            return changed;
         }
     }
 
@@ -44,7 +56,9 @@ public sealed class LocalIndexService
         {
             var before = _items.Count;
             _items.RemoveAll(x => Norm(x.FullPath).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-            return before - _items.Count;
+            var removed = before - _items.Count;
+            if (removed > 0) _version++;
+            return removed;
         }
     }
 
@@ -61,6 +75,7 @@ public sealed class LocalIndexService
             hit.FullPath = newN;
             hit.Name = Path.GetFileName(newN);
             hit.Type = isFolder ? "FOLDER" : "FILE";
+            _version++;
             return 1;
         }
     }
@@ -103,6 +118,7 @@ public sealed class LocalIndexService
                 changed++;
             }
 
+            if (changed > 0) _version++;
             return changed;
         }
     }
@@ -117,7 +133,14 @@ public sealed class LocalIndexService
     }
     public void Clear()
     {
-        lock (_gate) _items.Clear();
+        lock (_gate)
+        {
+            if (_items.Count == 0)
+                return;
+
+            _items.Clear();
+            _version++;
+        }
     }
 
     public List<SearchResultRow> GetAll()

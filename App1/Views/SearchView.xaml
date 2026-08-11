@@ -813,13 +813,22 @@
                     Tag="Programas y proyectos" />
 
                     <ToggleButton
+                    x:Name="ChipBasePagar"
+                    Height="22"
+                    Padding="10,0"
+                    Click="ChipBaseFilter_Click"
+                    Content="zPAGAR"
+                    CornerRadius="11"
+                    Tag="Cobrar y pagar|PAGAR" />
+
+                    <ToggleButton
                     x:Name="ChipBaseCobrar"
                     Height="22"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
-                    Content="zPAGAR - zCOBRAR"
+                    Content="zCOBRAR"
                     CornerRadius="11"
-                    Tag="Cobrar y pagar" />
+                    Tag="Cobrar y pagar|COBRAR" />
 
                     <ToggleButton
                     x:Name="ChipBaseCorreos"

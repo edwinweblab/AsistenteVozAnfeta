@@ -416,6 +416,14 @@ namespace Anfeta.UI.Views
                 items = items.Where(x =>
                     x.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
                     string.Equals(x.ExternalSourceName, scope.SourceName, StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrWhiteSpace(scope.TitleFilter))
+                {
+                    items = items.Where(x =>
+                        PaymentBaseTitleMatches(
+                            x,
+                            scope.TitleFilter));
+                }
             }
 
             var parsed = AdvancedQueryV3.Parse(queryForSearch);
@@ -516,6 +524,14 @@ namespace Anfeta.UI.Views
                 items = items.Where(x =>
                     x.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
                     string.Equals(x.ExternalSourceName, scope.SourceName, StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrWhiteSpace(scope.TitleFilter))
+                {
+                    items = items.Where(x =>
+                        PaymentBaseTitleMatches(
+                            x,
+                            scope.TitleFilter));
+                }
             }
 
             var parsed = AdvancedQueryV3.Parse(queryForSearch);
@@ -615,13 +631,40 @@ namespace Anfeta.UI.Views
                 return true;
 
             return parts.All(part =>
-                part.IsExact
+            {
+                // Los tags operativos son tokens, no texto libre.
+                // rtuzREVISION no debe coincidir dentro de prtuzREVISION o
+                // sprtuzREVISION. Lo mismo aplica a los estados Pagar/Cobrar.
+                if (IsExactWorkflowSearchToken(part.Value))
+                {
+                    // En Pagar/Cobrar el estado se valida exclusivamente contra
+                    // Nombre/Título. Nunca contra Path, descripción u otros campos.
+                    if (IsPaymentWorkflowSearchToken(part.Value) &&
+                        row.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion)
+                    {
+                        var titleOnly =
+                            row.DisplayName ??
+                            row.Name ??
+                            string.Empty;
+
+                        return ContainsExactSearchPart(
+                            titleOnly,
+                            part.Value);
+                    }
+
+                    return ContainsExactSearchPart(
+                        searchable,
+                        part.Value);
+                }
+
+                return part.IsExact
                     ? ContainsExactSearchPart(
                         searchable,
                         part.Value)
                     : searchable.Contains(
                         part.Value,
-                        StringComparison.OrdinalIgnoreCase));
+                        StringComparison.OrdinalIgnoreCase);
+            });
         }
 
         private sealed record FlexibleSearchPart(
@@ -666,6 +709,39 @@ namespace Anfeta.UI.Views
             }
 
             return result;
+        }
+
+        private static bool IsExactWorkflowSearchToken(
+            string value)
+        {
+            var token =
+                (value ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(token))
+                return false;
+
+            return Regex.IsMatch(
+                token,
+                @"^(?:sprtuz|prtuz|rtuz|z)REVISION$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+                   IsPaymentWorkflowSearchToken(token);
+        }
+
+        private static bool IsPaymentWorkflowSearchToken(
+            string value)
+        {
+            var token =
+                (value ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(token))
+                return false;
+
+            // Incluye variantes observadas como aprtuzCOBRAR/aprtuzPAGAR,
+            // además de prtuz/rtuz/sprtuz/z.
+            return Regex.IsMatch(
+                token,
+                @"^(?:a?prtuz|sprtuz|rtuz|z)(?:PAGAR|COBRAR)$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
         private static bool ContainsExactSearchPart(

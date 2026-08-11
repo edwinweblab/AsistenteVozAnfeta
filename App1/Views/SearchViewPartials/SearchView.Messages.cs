@@ -142,6 +142,15 @@ namespace Anfeta.UI.Views
         private CollectionViewSource?
             _messagesGroupedView;
         private DispatcherTimer? _messagesRefreshTimer;
+
+        // Cache derivada del índice global. Parsear miles de filas de Revisiones
+        // en cada timer era trabajo repetido aunque el índice no hubiera cambiado.
+        private long _messagesParsedIndexVersion = -1;
+        private string _messagesParsedCacheKey = string.Empty;
+        private IReadOnlyList<MessageViewItem> _messagesParsedCache =
+            Array.Empty<MessageViewItem>();
+        private string _messagesLastRefreshFingerprint = string.Empty;
+
         private readonly NotionMessageThreadService
             _messageThreadService = new();
 
@@ -1357,7 +1366,8 @@ namespace Anfeta.UI.Views
             object sender,
             RoutedEventArgs e)
         {
-            RefreshMessagesView();
+            RefreshMessagesView(
+                force: true);
 
             StatusText.Text =
                 "Estado: Mensajes actualizados ✅";
@@ -1911,22 +1921,106 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private void RefreshMessagesView()
+        private IReadOnlyList<MessageViewItem>
+            GetParsedMessagesSnapshot()
         {
             var currentUserTag =
                 GetCurrentMessagesUserTag();
 
-            var parsed = App.LocalIndex
-                .GetAll()
-                .Where(row =>
-                    row.Source == SearchSource.Notion &&
-                    string.Equals(
-                        row.ExternalSourceName,
-                        "Revisiones",
-                        StringComparison.OrdinalIgnoreCase))
-                .Select(TryCreateMessageViewItem)
-                .Where(item => item != null)
-                .Cast<MessageViewItem>();
+            var readStateRaw =
+                ApplicationData.Current.LocalSettings.Values[
+                    MessagesReadStateKey] as string ??
+                string.Empty;
+
+            // El minuto forma parte de la clave porque un recordatorio futuro
+            // puede convertirse en pendiente/vencido sin que cambie el índice.
+            var minuteBucket =
+                DateTime.Now.ToString(
+                    "yyyyMMddHHmm",
+                    CultureInfo.InvariantCulture);
+
+            var indexVersion =
+                App.LocalIndex.Version;
+
+            var cacheKey =
+                $"{indexVersion}|{currentUserTag}|{minuteBucket}|{readStateRaw}";
+
+            if (_messagesParsedIndexVersion == indexVersion &&
+                string.Equals(
+                    _messagesParsedCacheKey,
+                    cacheKey,
+                    StringComparison.Ordinal))
+            {
+                return _messagesParsedCache;
+            }
+
+            // Sincroniza el diccionario en memoria si otra pestaña marcó
+            // un mensaje como leído.
+            LoadMessagesReadState();
+
+            _messagesParsedCache =
+                App.LocalIndex
+                    .GetAll()
+                    .Where(row =>
+                        row.Source == SearchSource.Notion &&
+                        string.Equals(
+                            row.ExternalSourceName,
+                            "Revisiones",
+                            StringComparison.OrdinalIgnoreCase))
+                    .Select(TryCreateMessageViewItem)
+                    .Where(item => item != null)
+                    .Cast<MessageViewItem>()
+                    .ToList();
+
+            _messagesParsedIndexVersion = indexVersion;
+            _messagesParsedCacheKey = cacheKey;
+
+            return _messagesParsedCache;
+        }
+
+        private string BuildMessagesRefreshFingerprint()
+        {
+            return string.Join(
+                "|",
+                App.LocalIndex.Version.ToString(
+                    CultureInfo.InvariantCulture),
+                GetCurrentMessagesUserTag(),
+                _messagesFilter,
+                _messagesTypeFilter,
+                _messagesGroupMode,
+                _messagesSearchQuery,
+                DateTime.Now.ToString(
+                    "yyyyMMddHHmm",
+                    CultureInfo.InvariantCulture),
+                ApplicationData.Current.LocalSettings.Values[
+                    MessagesReadStateKey] as string ??
+                string.Empty);
+        }
+
+        private void RefreshMessagesView(
+            bool force = false)
+        {
+            var refreshFingerprint =
+                BuildMessagesRefreshFingerprint();
+
+            if (!force &&
+                string.Equals(
+                    _messagesLastRefreshFingerprint,
+                    refreshFingerprint,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _messagesLastRefreshFingerprint =
+                refreshFingerprint;
+
+            var currentUserTag =
+                GetCurrentMessagesUserTag();
+
+            var parsed =
+                GetParsedMessagesSnapshot()
+                    .AsEnumerable();
 
             parsed = _messagesFilter switch
             {
@@ -2389,20 +2483,8 @@ namespace Anfeta.UI.Views
             }
 
             var count =
-                App.LocalIndex
-                    .GetAll()
-                    .Where(row =>
-                        row.Source ==
-                            SearchSource.Notion &&
-                        string.Equals(
-                            row.ExternalSourceName,
-                            "Revisiones",
-                            StringComparison.OrdinalIgnoreCase))
-                    .Select(TryCreateMessageViewItem)
-                    .Where(item =>
-                        item != null &&
-                        item.IsUnread)
-                    .Count();
+                GetParsedMessagesSnapshot()
+                    .Count(item => item.IsUnread);
 
             MessagesUnreadBadge.Visibility =
                 count > 0

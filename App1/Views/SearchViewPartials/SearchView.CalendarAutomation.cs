@@ -17,6 +17,10 @@ namespace Anfeta.UI.Views
     {
         private const string LS_DailyCalendarAutomationLastRun =
             "Search.Calendar.DailyAutomation.LastRun";
+        private const string LS_DailyCalendarAutomationVersion =
+            "Search.Calendar.DailyAutomation.Version";
+        private const int DailyCalendarAutomationVersion = 2;
+        private const int DailyCalendarRepairLookbackDays = 14;
         private const string DailyCalendarReportFileName =
             "calendar_daily_report.json";
 
@@ -26,7 +30,8 @@ namespace Anfeta.UI.Views
             string Person,
             string Project,
             DateTime PreviousStart,
-            DateTime NewStart);
+            DateTime NewStart,
+            string SourceState = "");
 
         private sealed record DailyCalendarCompletion(
             string PageId,
@@ -46,7 +51,13 @@ namespace Anfeta.UI.Views
             IReadOnlyList<DailyCalendarMovement> Movements,
             IReadOnlyList<string> Errors,
             IReadOnlyList<DailyCalendarCompletion>? CompletedForReview = null,
-            IReadOnlyList<DailyCalendarCompletion>? Finalized = null);
+            IReadOnlyList<DailyCalendarCompletion>? Finalized = null,
+            int MovedSuspended = 0,
+            int SkippedReview = 0,
+            int SkippedLocked = 0,
+            int DaysScanned = 1,
+            DateTime? ScanStart = null,
+            DateTime? ScanEnd = null);
 
         private async Task RunDailyCalendarAutomationIfNeededAsync()
         {
@@ -61,13 +72,19 @@ namespace Anfeta.UI.Views
             var lastRunRaw =
                 values[LS_DailyCalendarAutomationLastRun] as string;
 
+            var automationVersion =
+                values[LS_DailyCalendarAutomationVersion] is int savedVersion
+                    ? savedVersion
+                    : 0;
+
             if (DateTime.TryParseExact(
                     lastRunRaw,
                     "yyyy-MM-dd",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
                     out var lastRun) &&
-                lastRun.Date == now.Date)
+                lastRun.Date == now.Date &&
+                automationVersion >= DailyCalendarAutomationVersion)
             {
                 return;
             }
@@ -107,11 +124,65 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            var yesterday =
-                DateTime.Today.AddDays(-1);
-
             var today =
                 DateTime.Today;
+
+            var lastRunRaw =
+                values[LS_DailyCalendarAutomationLastRun] as string;
+
+            var savedAutomationVersion =
+                values[LS_DailyCalendarAutomationVersion] is int version
+                    ? version
+                    : 0;
+
+            var hasLastRun =
+                DateTime.TryParseExact(
+                    lastRunRaw,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var lastRun);
+
+            // Primera ejecución de esta corrección o ejecución manual:
+            // revisa 14 días para rescatar pendientes que pudieron quedarse
+            // atrás por fines de semana o porque la versión anterior solo veía ayer.
+            //
+            // Ejecuciones automáticas posteriores:
+            // revisan desde un día antes de la última ejecución hasta ayer.
+            // Así se cubren cambios hechos después de que corrió la automatización
+            // sin volver a consultar dos semanas completas todos los días.
+            var repairMode =
+                showResultDialog ||
+                savedAutomationVersion < DailyCalendarAutomationVersion;
+
+            var scanStart =
+                repairMode
+                    ? today.AddDays(-DailyCalendarRepairLookbackDays)
+                    : hasLastRun
+                        ? lastRun.Date.AddDays(-1)
+                        : today.AddDays(-2);
+
+            var oldestAllowed =
+                today.AddDays(-DailyCalendarRepairLookbackDays);
+
+            if (scanStart < oldestAllowed)
+                scanStart = oldestAllowed;
+
+            if (scanStart >= today)
+                scanStart = today.AddDays(-1);
+
+            var scanEnd =
+                today.AddDays(-1);
+
+            var scanDays =
+                Enumerable.Range(
+                        0,
+                        Math.Max(
+                            0,
+                            (scanEnd - scanStart).Days + 1))
+                    .Select(offset =>
+                        scanStart.AddDays(offset))
+                    .ToList();
 
             var moved =
                 new List<DailyCalendarMovement>();
@@ -125,135 +196,220 @@ namespace Anfeta.UI.Views
             var finalized =
                 new List<DailyCalendarCompletion>();
 
+            var processedPageIds =
+                new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+
             var reviewed = 0;
             var skippedCompleted = 0;
-            var skippedSuspended = 0;
+            var movedSuspended = 0;
+            var skippedReview = 0;
+            var skippedLocked = 0;
             var failed = 0;
 
             try
             {
                 ShowLoadingState(
-                    "Estado: Procesando pendientes de ayer...",
-                    "Se moverán a hoy conservando su horario. " +
-                    "Las terminadas y suspendidas quedan fuera.");
+                    "Estado: Procesando actividades rezagadas...",
+                    $"Revisando {scanDays.Count} día(s): " +
+                    $"{scanStart:dd/MM} → {scanEnd:dd/MM}. " +
+                    "Se moverán prtuzREVISION y sprtuzREVISION a hoy.");
 
                 using var cts =
                     new CancellationTokenSource(
-                        TimeSpan.FromMinutes(15));
+                        TimeSpan.FromMinutes(20));
 
-                var activities =
-                    await _notionCalendarService.GetDayAsync(
-                        token,
-                        yesterday,
-                        progress: null,
-                        cts.Token,
-                        forceRefresh: true);
-
-                foreach (var activity in activities)
+                for (var dayIndex = 0;
+                     dayIndex < scanDays.Count;
+                     dayIndex++)
                 {
                     cts.Token.ThrowIfCancellationRequested();
-                    reviewed++;
 
-                    var searchable =
-                        BuildCalendarActivitySearchableText(
-                            activity);
+                    var sourceDay =
+                        scanDays[dayIndex];
 
-                    var assignedPerson =
-                        !string.IsNullOrWhiteSpace(
-                            activity.OriginalPerson)
-                            ? activity.OriginalPerson
-                            : !string.IsNullOrWhiteSpace(
-                                activity.Person)
-                                ? activity.Person
-                                : "Sin asignar";
+                    StatusText.Text =
+                        $"Estado: Revisando rezagadas " +
+                        $"{dayIndex + 1}/{scanDays.Count} · " +
+                        $"{sourceDay:dd/MM/yyyy}...";
 
-                    var isReadyForReview =
-                        ContainsExactAutomationTag(
-                            searchable,
-                            "rtuzREVISION");
+                    // La comprobación manual / de reparación consulta el día real
+                    // para no mover una página basándonos en una caché antigua.
+                    // En el ciclo automático normal se aprovecha la caché cuando existe.
+                    IReadOnlyList<NotionCalendarActivity> activities;
 
-                    var isFinalized =
-                        ContainsExactAutomationTag(
-                            searchable,
-                            "zREVISION") ||
-                        IsCompletedReviewStatus(
-                            activity.Status) ||
-                        activity.IsCompletedForReview;
-
-                    if (isReadyForReview)
+                    if (!repairMode)
                     {
-                        completedForReview.Add(
-                            new DailyCalendarCompletion(
-                                activity.PageId,
-                                activity.Title,
-                                assignedPerson,
-                                activity.Project,
-                                "Para revisión",
-                                activity.Start));
-                    }
-
-                    if (isFinalized)
-                    {
-                        finalized.Add(
-                            new DailyCalendarCompletion(
-                                activity.PageId,
-                                activity.Title,
-                                assignedPerson,
-                                activity.Project,
-                                "Finalizada",
-                                activity.Start));
-                    }
-
-                    if (ContainsExactAutomationTag(
-                            searchable,
-                            "sprtuzREVISION"))
-                    {
-                        skippedSuspended++;
-                        continue;
-                    }
-
-                    if (isFinalized)
-                    {
-                        skippedCompleted++;
-                        continue;
-                    }
-
-                    var isPending =
-                        ContainsExactAutomationTag(
-                            searchable,
-                            "prtuzREVISION") ||
-                        isReadyForReview;
-
-                    if (!isPending)
-                        continue;
-
-                    try
-                    {
-                        var oldStart =
-                            activity.Start;
-
-                        var updated =
+                        var cached =
                             await _notionCalendarService
-                                .MoveActivityToDateAsync(
-                                    token,
-                                    activity,
-                                    today,
+                                .TryGetCachedDayAsync(
+                                    sourceDay,
                                     cts.Token);
 
-                        moved.Add(
-                            new DailyCalendarMovement(
-                                activity.PageId,
-                                activity.Title,
-                                activity.Person,
-                                activity.Project,
-                                oldStart,
-                                updated.Start));
+                        activities =
+                            cached ??
+                            await _notionCalendarService
+                                .GetDayAsync(
+                                    token,
+                                    sourceDay,
+                                    progress: null,
+                                    cts.Token,
+                                    forceRefresh: true);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        failed++;
-                        errors.Add(
-                            $"{activity.Title}: {ex.Message}");
+                        activities =
+                            await _notionCalendarService
+                                .GetDayAsync(
+                                    token,
+                                    sourceDay,
+                                    progress: null,
+                                    cts.Token,
+                                    forceRefresh: true);
+                    }
+
+                    foreach (var activity in activities)
+                    {
+                        cts.Token.ThrowIfCancellationRequested();
+
+                        if (activity == null ||
+                            string.IsNullOrWhiteSpace(
+                                activity.PageId) ||
+                            !processedPageIds.Add(
+                                activity.PageId))
+                        {
+                            continue;
+                        }
+
+                        reviewed++;
+
+                        var searchable =
+                            BuildCalendarActivitySearchableText(
+                                activity);
+
+                        var assignedPerson =
+                            !string.IsNullOrWhiteSpace(
+                                activity.OriginalPerson)
+                                ? activity.OriginalPerson
+                                : !string.IsNullOrWhiteSpace(
+                                    activity.Person)
+                                    ? activity.Person
+                                    : "Sin asignar";
+
+                        var isPending =
+                            ContainsExactAutomationTag(
+                                searchable,
+                                "prtuzREVISION");
+
+                        var isSuspended =
+                            ContainsExactAutomationTag(
+                                searchable,
+                                "sprtuzREVISION");
+
+                        var isReadyForReview =
+                            ContainsExactAutomationTag(
+                                searchable,
+                                "rtuzREVISION");
+
+                        var isFinalized =
+                            ContainsExactAutomationTag(
+                                searchable,
+                                "zREVISION") ||
+                            IsCompletedReviewStatus(
+                                activity.Status) ||
+                            activity.IsCompletedForReview;
+
+                        if (isReadyForReview)
+                        {
+                            completedForReview.Add(
+                                new DailyCalendarCompletion(
+                                    activity.PageId,
+                                    activity.Title,
+                                    assignedPerson,
+                                    activity.Project,
+                                    "Para revisión",
+                                    activity.Start));
+                        }
+
+                        if (isFinalized)
+                        {
+                            finalized.Add(
+                                new DailyCalendarCompletion(
+                                    activity.PageId,
+                                    activity.Title,
+                                    assignedPerson,
+                                    activity.Project,
+                                    "Finalizada",
+                                    activity.Start));
+                        }
+
+                        if (isFinalized)
+                        {
+                            skippedCompleted++;
+                            continue;
+                        }
+
+                        // rtuzREVISION ya está en la etapa de revisión.
+                        // No debe regresar/moverse por la automatización diaria.
+                        if (isReadyForReview)
+                        {
+                            skippedReview++;
+                            continue;
+                        }
+
+                        if (!isPending &&
+                            !isSuspended)
+                        {
+                            continue;
+                        }
+
+                        if (activity.IsAutomationLocked)
+                        {
+                            skippedLocked++;
+                            continue;
+                        }
+
+                        // Seguridad adicional: solo se procesan fechas anteriores a hoy.
+                        // Si una página aparece duplicada en cachés de varios días,
+                        // processedPageIds impide moverla dos veces.
+                        if (activity.Start.Date >= today)
+                            continue;
+
+                        try
+                        {
+                            var oldStart =
+                                activity.Start;
+
+                            var updated =
+                                await _notionCalendarService
+                                    .MoveActivityToDateAsync(
+                                        token,
+                                        activity,
+                                        today,
+                                        cts.Token);
+
+                            if (isSuspended)
+                                movedSuspended++;
+
+                            moved.Add(
+                                new DailyCalendarMovement(
+                                    activity.PageId,
+                                    activity.Title,
+                                    assignedPerson,
+                                    activity.Project,
+                                    oldStart,
+                                    updated.Start,
+                                    isSuspended
+                                        ? "sprtuzREVISION"
+                                        : "prtuzREVISION"));
+                        }
+                        catch (Exception ex)
+                        {
+                            failed++;
+                            errors.Add(
+                                $"{activity.Title} ({activity.Start:dd/MM}): " +
+                                ex.Message);
+                        }
                     }
                 }
 
@@ -263,17 +419,26 @@ namespace Anfeta.UI.Views
                         reviewed,
                         moved.Count,
                         skippedCompleted,
-                        skippedSuspended,
+                        0,
                         failed,
                         moved,
                         errors,
                         completedForReview,
-                        finalized);
+                        finalized,
+                        MovedSuspended: movedSuspended,
+                        SkippedReview: skippedReview,
+                        SkippedLocked: skippedLocked,
+                        DaysScanned: scanDays.Count,
+                        ScanStart: scanStart,
+                        ScanEnd: scanEnd);
 
                 values[LS_DailyCalendarAutomationLastRun] =
-                    DateTime.Today.ToString(
+                    today.ToString(
                         "yyyy-MM-dd",
                         CultureInfo.InvariantCulture);
+
+                values[LS_DailyCalendarAutomationVersion] =
+                    DailyCalendarAutomationVersion;
 
                 values.Remove(
                     "Search.Calendar.DailyAutomation.LastReport");
@@ -295,14 +460,18 @@ namespace Anfeta.UI.Views
                         todayCache ??
                         Array.Empty<NotionCalendarActivity>();
 
-                    DrawCalendar(_calendarActivities);
+                    DrawCalendarPreservingView(
+                        _calendarActivities,
+                        force: true);
                 }
 
                 StatusText.Text =
-                    $"Estado: Automatización diaria completa ✅ " +
-                    $"Movidas: {moved.Count} · " +
-                    $"Terminadas omitidas: {skippedCompleted} · " +
-                    $"Suspendidas omitidas: {skippedSuspended} · " +
+                    $"Estado: Rezagadas procesadas ✅ " +
+                    $"Movidas: {moved.Count} " +
+                    $"(suspendidas: {movedSuspended}) · " +
+                    $"En revisión omitidas: {skippedReview} · " +
+                    $"Bloqueadas: {skippedLocked} · " +
+                    $"Terminadas: {skippedCompleted} · " +
                     $"Errores: {failed}";
 
                 if (showResultDialog)
@@ -314,12 +483,12 @@ namespace Anfeta.UI.Views
             catch (OperationCanceledException)
             {
                 StatusText.Text =
-                    "Estado: La automatización diaria fue cancelada por tiempo de espera.";
+                    "Estado: El procesamiento de rezagadas fue cancelado por tiempo de espera.";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: Error en automatización diaria → {ex.Message}";
+                    $"Estado: Error procesando rezagadas → {ex.Message}";
             }
             finally
             {
@@ -454,10 +623,16 @@ namespace Anfeta.UI.Views
                 new TextBlock
                 {
                     Text =
-                        $"Revisadas: {report.Reviewed} · " +
+                        $"Periodo: " +
+                        $"{(report.ScanStart ?? report.GeneratedAt.Date.AddDays(-1)):dd/MM} → " +
+                        $"{(report.ScanEnd ?? report.GeneratedAt.Date.AddDays(-1)):dd/MM} · " +
+                        $"Días revisados: {report.DaysScanned} · " +
+                        $"Actividades revisadas: {report.Reviewed}\n" +
                         $"Movidas: {report.Moved} · " +
+                        $"Suspendidas movidas: {report.MovedSuspended} · " +
+                        $"En revisión omitidas: {report.SkippedReview} · " +
+                        $"Bloqueadas: {report.SkippedLocked} · " +
                         $"Terminadas omitidas: {report.SkippedCompleted} · " +
-                        $"Suspendidas omitidas: {report.SkippedSuspended} · " +
                         $"Errores: {report.Failed}",
                     TextWrapping = TextWrapping.Wrap,
                     FontWeight =
@@ -632,7 +807,7 @@ namespace Anfeta.UI.Views
             root.Children.Add(
                 new TextBlock
                 {
-                    Text = "Actividades movidas de ayer a hoy",
+                    Text = "Actividades rezagadas movidas a hoy",
                     FontSize = 15,
                     FontWeight =
                         Microsoft.UI.Text.FontWeights.SemiBold,
@@ -782,9 +957,13 @@ namespace Anfeta.UI.Views
                                 {
                                     Text =
                                         $"{item.Title}\n" +
-                                        $"{item.Person} · {item.Project}\n" +
-                                        $"{item.PreviousStart:dd/MM HH:mm} → " +
-                                        $"{item.NewStart:dd/MM HH:mm}",
+                                        $"{item.Person} · {item.Project}" +
+                                        (string.IsNullOrWhiteSpace(item.SourceState)
+                                            ? string.Empty
+                                            : $" · {item.SourceState}") +
+                                        $"\n{item.PreviousStart:dd/MM HH:mm} → " +
+                                        $"{item.NewStart:dd/MM HH:mm} · " +
+                                        $"{Math.Max(1, (item.NewStart.Date - item.PreviousStart.Date).Days)} día(s) rezagada",
                                     TextWrapping =
                                         TextWrapping.Wrap
                                 }

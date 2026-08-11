@@ -18,6 +18,9 @@ namespace Anfeta.UI.Views
     public sealed partial class SearchView
     {
         private string _activeNotionBaseFilter = "";
+        // zPAGAR y zCOBRAR viven en la misma fuente de Notion, pero se
+        // presentan como filtros independientes por título.
+        private string _activePaymentBaseTitleFilter = "";
         #region ===== Filters / Sort =====
 
         private async void ChipFilter_Click(object sender, RoutedEventArgs e)
@@ -529,6 +532,7 @@ namespace Anfeta.UI.Views
             public string SourceName { get; set; } = "";
             public string PathLabel { get; set; } = "";
             public string DisplayLabel { get; set; } = "";
+            public string TitleFilter { get; set; } = "";
             public string[] Aliases { get; set; } = Array.Empty<string>();
         }
 
@@ -539,6 +543,7 @@ namespace Anfeta.UI.Views
             public string SourceName { get; set; } = "";
             public string PathLabel { get; set; } = "";
             public string DisplayLabel { get; set; } = "";
+            public string TitleFilter { get; set; } = "";
             public string Remainder { get; set; } = "";
         }
 
@@ -648,16 +653,23 @@ namespace Anfeta.UI.Views
 
             if (scope.HasBase)
             {
-                SetNotionBaseChipChecks(scope.SourceName);
+                SetNotionBaseChipChecks(
+                    scope.SourceName,
+                    scope.TitleFilter);
                 return;
             }
 
-            SetNotionBaseChipChecks(_activeNotionBaseFilter ?? string.Empty);
+            SetNotionBaseChipChecks(
+                _activeNotionBaseFilter ?? string.Empty,
+                _activePaymentBaseTitleFilter);
         }
 
-        private void SetNotionBaseChipChecks(string sourceName)
+        private void SetNotionBaseChipChecks(
+            string sourceName,
+            string paymentTitleFilter = "")
         {
             var selected = (sourceName ?? string.Empty).Trim();
+            var payment = (paymentTitleFilter ?? string.Empty).Trim();
 
             if (ChipBaseAll != null)
                 ChipBaseAll.IsChecked = string.IsNullOrWhiteSpace(selected);
@@ -674,8 +686,15 @@ namespace Anfeta.UI.Views
             if (ChipBaseProgramas != null)
                 ChipBaseProgramas.IsChecked = string.Equals(selected, "Programas y proyectos", StringComparison.OrdinalIgnoreCase);
 
+            if (ChipBasePagar != null)
+                ChipBasePagar.IsChecked =
+                    string.Equals(selected, "Cobrar y pagar", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(payment, "PAGAR", StringComparison.OrdinalIgnoreCase);
+
             if (ChipBaseCobrar != null)
-                ChipBaseCobrar.IsChecked = string.Equals(selected, "Cobrar y pagar", StringComparison.OrdinalIgnoreCase);
+                ChipBaseCobrar.IsChecked =
+                    string.Equals(selected, "Cobrar y pagar", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(payment, "COBRAR", StringComparison.OrdinalIgnoreCase);
 
             if (ChipBaseCorreos != null)
                 ChipBaseCorreos.IsChecked = string.Equals(selected, "Correos Contraseñas", StringComparison.OrdinalIgnoreCase);
@@ -1351,6 +1370,7 @@ namespace Anfeta.UI.Views
                             SourceName = shortcut.SourceName,
                             PathLabel = shortcut.PathLabel,
                             DisplayLabel = shortcut.DisplayLabel,
+                            TitleFilter = shortcut.TitleFilter,
                             Remainder = remainder
                         };
                     }
@@ -1366,11 +1386,13 @@ namespace Anfeta.UI.Views
             {
                 new NotionBaseShortcut
                 {
-                    PrimaryAlias = "prtuzREVISION",
+                    // Los estados prtuz/rtuz/sprtuz/zREVISION son búsquedas
+                    // normales y NO activan automáticamente la base.
+                    PrimaryAlias = "revisiones",
                     SourceName = "Revisiones",
                     PathLabel = "Revisiones",
                     DisplayLabel = "Revisiones",
-                    Aliases = new[] { "zrevision", "zrevisiones", "zrev", "revision", "revisiones", "prtuzrevision" }
+                    Aliases = new[] { "revision", "zrevisiones", "zrevbase" }
                 },
                 new NotionBaseShortcut
                 {
@@ -1408,9 +1430,19 @@ namespace Anfeta.UI.Views
                 {
                     PrimaryAlias = "zpagar",
                     SourceName = "Cobrar y pagar",
-                    PathLabel = "zPAGAR - zCOBRAR",
-                    DisplayLabel = "Cobrar y pagar",
-                    Aliases = new[] { "zcobrar", "zpago", "zcobro", "pagar", "cobrar" }
+                    PathLabel = "zPAGAR",
+                    DisplayLabel = "Pagar",
+                    TitleFilter = "PAGAR",
+                    Aliases = new[] { "zpago" }
+                },
+                new NotionBaseShortcut
+                {
+                    PrimaryAlias = "zcobrar",
+                    SourceName = "Cobrar y pagar",
+                    PathLabel = "zCOBRAR",
+                    DisplayLabel = "Cobrar",
+                    TitleFilter = "COBRAR",
+                    Aliases = new[] { "zcobro" }
                 }
             };
         }
@@ -2131,6 +2163,7 @@ namespace Anfeta.UI.Views
             if (_activeSourceScope == SearchSourceScope.Dropbox)
             {
                 _activeNotionBaseFilter = string.Empty;
+                _activePaymentBaseTitleFilter = string.Empty;
                 SetNotionBaseChipChecks(string.Empty);
 
                 var currentQuery =
@@ -2168,6 +2201,31 @@ namespace Anfeta.UI.Views
                 $"Estado: Filtro global → {GetSourceScopeLabel()} ✅";
         }
 
+        private static bool PaymentBaseTitleMatches(
+            Anfeta.UI.Models.Weblab.SearchResultRow row,
+            string paymentToken)
+        {
+            if (row == null)
+                return false;
+
+            var title =
+                row.DisplayName ??
+                row.Name ??
+                string.Empty;
+
+            var token =
+                (paymentToken ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(token))
+                return true;
+
+            return Regex.IsMatch(
+                title,
+                $@"(?<![\p{{L}}\p{{Nd}}_])(?:a?prtuz|sprtuz|rtuz|z)?{Regex.Escape(token)}(?![\p{{L}}\p{{Nd}}_])",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+        }
+
         private List<Anfeta.UI.Models.Weblab.SearchResultRow> ApplyNotionBaseFilter(
             IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> rows)
         {
@@ -2176,33 +2234,63 @@ namespace Anfeta.UI.Views
             if (string.IsNullOrWhiteSpace(_activeNotionBaseFilter))
                 return list;
 
-            return list
+            var filtered = list
                 .Where(x =>
                     x.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
                     string.Equals(
                         x.ExternalSourceName,
                         _activeNotionBaseFilter,
-                        StringComparison.OrdinalIgnoreCase))
-                .ToList();
+                        StringComparison.OrdinalIgnoreCase));
+
+            if (string.Equals(
+                    _activeNotionBaseFilter,
+                    "Cobrar y pagar",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(_activePaymentBaseTitleFilter))
+            {
+                filtered = filtered.Where(x =>
+                    PaymentBaseTitleMatches(
+                        x,
+                        _activePaymentBaseTitleFilter));
+            }
+
+            return filtered.ToList();
         }
         private async void ChipBaseFilter_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not ToggleButton clicked)
                 return;
 
-            var selectedBase =
+            var selectedRaw =
                 (clicked.Tag as string ?? string.Empty).Trim();
+
+            var selectedParts = selectedRaw.Split('|');
+            var selectedBase =
+                selectedParts.Length > 0
+                    ? selectedParts[0].Trim()
+                    : string.Empty;
+            var selectedPayment =
+                selectedParts.Length > 1
+                    ? selectedParts[1].Trim()
+                    : string.Empty;
 
             _activeNotionBaseFilter =
                 clicked == ChipBaseAll
                     ? string.Empty
                     : selectedBase;
 
+            _activePaymentBaseTitleFilter =
+                clicked == ChipBaseAll
+                    ? string.Empty
+                    : selectedPayment;
+
             _activeSourceScope = SearchSourceScope.Notion;
             SetSourceScopeChipChecks();
             SaveSourceScopePreference();
 
-            SetNotionBaseChipChecks(_activeNotionBaseFilter);
+            SetNotionBaseChipChecks(
+                _activeNotionBaseFilter,
+                _activePaymentBaseTitleFilter);
 
             await RunLocalSearchAsync(
                 (SearchBox.Text ?? string.Empty).Trim());

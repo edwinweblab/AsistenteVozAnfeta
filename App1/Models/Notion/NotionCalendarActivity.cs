@@ -128,7 +128,99 @@ namespace Anfeta.UI.Models.Notion
         public DateTime Start { get; set; }
         public DateTime End { get; set; }
 
+        public TimeSpan EstimatedDuration =>
+            End > Start
+                ? End - Start
+                : TimeSpan.Zero;
+
+        // Control de tiempo trabajado persistido por ANFETA en Audit_FTF_Log.
+        // EstimatedWorkMinutes conserva la estimación original aunque la
+        // actividad continúe otro día con un bloque de menor duración.
+        public int EstimatedWorkMinutes { get; set; }
+        public int WorkedMinutes { get; set; }
+        public string WorkLogDetail { get; set; } = "";
+
+        public int RemainingWorkMinutes =>
+            Math.Max(
+                0,
+                Math.Max(
+                    EstimatedWorkMinutes,
+                    WorkedMinutes) -
+                WorkedMinutes);
+
+        public int WorkPercentage =>
+            EstimatedWorkMinutes <= 0
+                ? 0
+                : Math.Clamp(
+                    (int)Math.Round(
+                        WorkedMinutes * 100d /
+                        EstimatedWorkMinutes),
+                    0,
+                    100);
+
+        public bool HasWorkLog =>
+            WorkedMinutes > 0;
+
+        public string WorkProgressLabel
+        {
+            get
+            {
+                if (!HasWorkLog)
+                    return string.Empty;
+
+                var estimated =
+                    EstimatedWorkMinutes > 0
+                        ? EstimatedWorkMinutes
+                        : WorkedMinutes;
+
+                return $"⏱ {FormatMinutes(WorkedMinutes)} / " +
+                       $"{FormatMinutes(estimated)} · " +
+                       $"resta {FormatMinutes(RemainingWorkMinutes)}";
+            }
+        }
+
+        private static string FormatMinutes(
+            int totalMinutes)
+        {
+            totalMinutes = Math.Max(0, totalMinutes);
+
+            var hours = totalMinutes / 60;
+            var minutes = totalMinutes % 60;
+
+            if (hours > 0 && minutes > 0)
+                return $"{hours}H {minutes}M";
+
+            if (hours > 0)
+                return $"{hours}H";
+
+            return $"{minutes}M";
+        }
+
+        public string EstimatedDurationLabel
+        {
+            get
+            {
+                var duration = EstimatedDuration;
+
+                if (duration <= TimeSpan.Zero)
+                    return "0H";
+
+                var totalMinutes =
+                    Math.Max(1, (int)Math.Round(duration.TotalMinutes));
+                var hours = totalMinutes / 60;
+                var minutes = totalMinutes % 60;
+
+                if (hours > 0 && minutes > 0)
+                    return $"{hours}H {minutes}M";
+
+                if (hours > 0)
+                    return $"{hours}H";
+
+                return $"{minutes}M";
+            }
+        }
+
         public string TimeLabel =>
-            $"{Start:HH:mm} – {End:HH:mm}";
+            $"{Start:HH:mm} – {End:HH:mm} · {EstimatedDurationLabel}";
     }
 }

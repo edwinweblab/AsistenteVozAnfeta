@@ -33,6 +33,7 @@ namespace Anfeta.UI
         private GlobalHotkeyService? _hotkeyService;
         private readonly IndexedFileReminderService _indexedReminderService;
         private readonly SemaphoreSlim _reminderDialogLock = new(1, 1);
+        private readonly SemaphoreSlim _reminderSoundLock = new(1, 1);
 
         private sealed class ReminderToastEntry
         {
@@ -606,7 +607,7 @@ namespace Anfeta.UI
             DispatcherQueue.TryEnqueue(
                 () =>
                 {
-                    SignalIncomingReminder();
+                    SignalIncomingReminder(reminder);
 
                     // El aviso inmediato ya no bloquea la aplicación con un
                     // ContentDialog. Se muestra como tarjeta flotante y el
@@ -691,11 +692,17 @@ namespace Anfeta.UI
                 StringComparison.OrdinalIgnoreCase);
         }
 
-        private void SignalIncomingReminder()
+        private void SignalIncomingReminder(
+            IndexedFileReminder reminder)
         {
             try
             {
-                MessageBeep(0x00000040); // MB_ICONASTERISK
+                // Sonido propio de ANFETA. Las alertas de revisión usan un
+                // patrón más insistente; los recordatorios normales uno corto.
+                // Se reproduce en segundo plano para no congelar la interfaz.
+                _ = PlayIncomingReminderSoundAsync(
+                    IsReminderReviewAlert(
+                        reminder?.Message));
 
                 var hwnd = WindowNative.GetWindowHandle(this);
                 if (hwnd == IntPtr.Zero || IsAppForeground(hwnd))
@@ -716,6 +723,75 @@ namespace Anfeta.UI
             {
                 // El aviso visual/sonoro no debe bloquear el recordatorio.
             }
+        }
+
+        private async Task PlayIncomingReminderSoundAsync(
+            bool isReviewAlert)
+        {
+            // Si llegan varias notificaciones al mismo tiempo, no reproducimos
+            // varias secuencias encima. Los popups sí se muestran normalmente.
+            if (!await _reminderSoundLock.WaitAsync(0))
+                return;
+
+            try
+            {
+                await Task.Run(() =>
+                {
+                    if (isReviewAlert)
+                    {
+                        // Alerta importante / revisión: tres llamadas claras.
+                        for (var repeat = 0; repeat < 3; repeat++)
+                        {
+                            PlayAnfetaTone(1047, 140);
+                            Thread.Sleep(55);
+                            PlayAnfetaTone(1319, 140);
+                            Thread.Sleep(55);
+                            PlayAnfetaTone(1568, 220);
+
+                            if (repeat < 2)
+                                Thread.Sleep(260);
+                        }
+                    }
+                    else
+                    {
+                        // Recordatorio normal: distintivo pero más corto.
+                        PlayAnfetaTone(784, 130);
+                        Thread.Sleep(60);
+                        PlayAnfetaTone(988, 180);
+                        Thread.Sleep(90);
+                        PlayAnfetaTone(1319, 230);
+                    }
+                });
+            }
+            catch
+            {
+                // El sonido nunca debe impedir que aparezca la notificación.
+            }
+            finally
+            {
+                _reminderSoundLock.Release();
+            }
+        }
+
+        private static void PlayAnfetaTone(
+            uint frequency,
+            uint durationMilliseconds)
+        {
+            try
+            {
+                if (Beep(
+                        frequency,
+                        durationMilliseconds))
+                {
+                    return;
+                }
+            }
+            catch
+            {
+            }
+
+            // Respaldo únicamente si Windows/equipo no admite Beep().
+            MessageBeep(0x00000030); // MB_ICONEXCLAMATION
         }
 
 
@@ -2071,6 +2147,11 @@ namespace Anfeta.UI
 
         [DllImport("user32.dll")]
         private static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool Beep(
+            uint dwFreq,
+            uint dwDuration);
 
         [DllImport("user32.dll")]
         private static extern bool MessageBeep(uint uType);

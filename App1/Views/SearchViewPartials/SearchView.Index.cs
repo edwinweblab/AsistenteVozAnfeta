@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
 using System.Collections.Generic;
+using System.Diagnostics;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 
 namespace Anfeta.UI.Views
@@ -35,6 +36,80 @@ namespace Anfeta.UI.Views
         private const string LS_DropboxSyncCursor = "Dropbox.SyncCursor";
         private DispatcherQueueTimer? _dropboxChangeTimer;
         private bool _dropboxSyncRunning;
+
+        // ===== Performance Cache v1 =====
+        // El índice es global (App.LocalIndex), por lo que el bootstrap y las
+        // comprobaciones automáticas también deben coordinarse globalmente.
+        private static readonly SemaphoreSlim SharedBootstrapLock = new(1, 1);
+        private static readonly SemaphoreSlim SharedNotionSyncGate = new(1, 1);
+        private static readonly SemaphoreSlim SharedNotionProbeGate = new(1, 1);
+        private static readonly SemaphoreSlim SharedDropboxSyncGate = new(1, 1);
+        private static readonly SemaphoreSlim SharedLocalReindexGate = new(1, 1);
+        private static readonly object SharedRuntimeStateLock = new();
+
+        private static bool SharedBootstrapCompleted;
+        private static string SharedBootstrapRoot = string.Empty;
+        private static DateTimeOffset SharedLastNotionProbeUtc = DateTimeOffset.MinValue;
+        private static DateTimeOffset SharedLastDropboxProbeUtc = DateTimeOffset.MinValue;
+
+        private static string NormalizeSharedRoot(string? root)
+            => (root ?? string.Empty).Trim().TrimEnd('\\', '/');
+
+        private static bool IsSharedBootstrapReady(string? root)
+        {
+            var normalized = NormalizeSharedRoot(root);
+
+            lock (SharedRuntimeStateLock)
+            {
+                return SharedBootstrapCompleted &&
+                       string.Equals(
+                           SharedBootstrapRoot,
+                           normalized,
+                           StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private static void MarkSharedBootstrapReady(string? root)
+        {
+            lock (SharedRuntimeStateLock)
+            {
+                SharedBootstrapRoot = NormalizeSharedRoot(root);
+                SharedBootstrapCompleted = true;
+            }
+        }
+
+        private static bool ReserveSharedProbe(
+            ref DateTimeOffset lastProbeUtc,
+            TimeSpan minimumInterval)
+        {
+            lock (SharedRuntimeStateLock)
+            {
+                var now = DateTimeOffset.UtcNow;
+
+                if (now - lastProbeUtc < minimumInterval)
+                    return false;
+
+                lastProbeUtc = now;
+                return true;
+            }
+        }
+
+        private async Task PaintSharedIndexForThisViewAsync()
+        {
+            _bootstrappedOnce = true;
+
+            if (DeferInitialIndexPaint)
+            {
+                _deferredIndexPaintPending = true;
+                return;
+            }
+
+            if (App.LocalIndex.HasData)
+                await PaintLoadedIndexAsync();
+
+            StartNotionChangeWatcher();
+            StartDropboxChangeWatcher();
+        }
 
         private static string FormatUtcLocal(string utcText)
         {
@@ -134,244 +209,256 @@ namespace Anfeta.UI.Views
         {
             if (DropboxIndexCoordinator.IsIndexing)
             {
-                ResetSearchModuleState();
-                StatusText.Text = "Estado: Ruta nueva detectada, indexando...";
+                if (!App.LocalIndex.HasData)
+                {
+                    ResetSearchModuleState();
+                    StatusText.Text = "Estado: Ruta nueva detectada, indexando...";
+                }
+
                 return;
             }
 
             if (!string.IsNullOrWhiteSpace(DropboxIndexCoordinator.LastError))
             {
-                ResetSearchModuleState();
-                StatusText.Text = $"Estado: Error indexando -> {DropboxIndexCoordinator.LastError}";
+                StatusText.Text =
+                    $"Estado: Error indexando -> {DropboxIndexCoordinator.LastError}";
                 return;
             }
 
-            if (DropboxIndexCoordinator.IsReady && App.LocalIndex.HasData)
+            if (!DropboxIndexCoordinator.IsReady || !App.LocalIndex.HasData)
+                return;
+
+            var root = DropboxIndexCoordinator.RootPath ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
             {
-                var root = DropboxIndexCoordinator.RootPath ?? "";
-
-                if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-                {
-                    ResetSearchModuleState();
-                    StatusText.Text = "Estado: Ruta invalida. Configura de nuevo en Settings.";
-                    return;
-                }
-
-                ResetSearchModuleState();
-
-                DROPBOX_ROOT = root;
-                _currentFolder = "";
-                _currentFolderPath = DROPBOX_ROOT;
-                _backStack.Clear();
-                _forwardStack.Clear();
-
-                LoadFoldersRoot();
-                BuildTreeRoot();
-
-                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
-
-                StatusText.Text = $"Estado: Index local listo ({App.LocalIndex.Count} items)";
+                StatusText.Text =
+                    "Estado: Ruta invalida. Configura de nuevo en Settings.";
+                return;
             }
+
+            // El índice global ya contiene los datos. Un cambio de estado no
+            // vuelve a recorrer la carpeta completa ni destruye la vista actual.
+            DROPBOX_ROOT = root;
+
+            if (string.IsNullOrWhiteSpace(_currentFolderPath))
+                _currentFolderPath = root;
+
+            if (!DeferInitialIndexPaint)
+                await PaintLoadedIndexAsync();
+
+            StatusText.Text =
+                $"Estado: Índice compartido listo ({App.LocalIndex.Count} items)";
         }
 
         private async Task EnsureIndexBootstrappedAsync()
         {
-            ShowLoadingState(
-                "Estado: Cargando archivos y páginas...",
-                "ANFETA está preparando el índice local y las páginas de Notion.");
+            var savedRoot =
+                (ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string
+                 ?? string.Empty).Trim();
 
-            await _bootstrapLock.WaitAsync();
-            try
+            // Fast path: otra pestaña ya dejó el índice listo. No mostramos
+            // overlay, no reindexamos Dropbox y no descargamos Notion otra vez.
+            if (IsSharedBootstrapReady(savedRoot))
             {
-                // Si la vista ya había iniciado y el índice ya tiene datos,
-                // NO salir sin pintar: hay que refrescar la lista visual.
-                if (_bootstrappedOnce && App.LocalIndex.HasData)
-                {
-                    await PaintLoadedIndexAsync();
-                    StartNotionChangeWatcher();
-                    StartDropboxChangeWatcher();
-                    return;
-                }
-
-                var saved = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string;
-                var savedRoot = (saved ?? string.Empty).Trim();
-
-                if (_bootstrappedOnce &&
-                    App.LocalIndex.HasData &&
-                    !string.IsNullOrWhiteSpace(savedRoot) &&
-                    string.Equals(DROPBOX_ROOT, savedRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    await PaintLoadedIndexAsync();
-                    StartNotionChangeWatcher();
-                    StartDropboxChangeWatcher();
-                    return;
-                }
-
-                // ─────────────────────────────────────────────
-                // CASO 1: No hay carpeta local configurada
-                // Intentar cargar Notion solo
-                // ─────────────────────────────────────────────
-                if (string.IsNullOrWhiteSpace(savedRoot))
-                {
-                    ResetSearchModuleState();
-
-                    var notionLoaded = await TryLoadNotionIndexOnStartupAsync(CancellationToken.None);
-
-                    CommandsSidebarList.ItemsSource = _savedSearches;
-                    RefreshCommandsSidebarUi();
-
-                    if (notionLoaded && App.LocalIndex.HasData)
-                    {
-                        await PaintLoadedIndexAsync();
-                        StartNotionChangeWatcher();
-                        StartDropboxChangeWatcher();
-
-                        _bootstrappedOnce = true;
-                        return;
-                    }
-
-                    StatusText.Text = "Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
-                    _bootstrappedOnce = true;
-                    return;
-                }
-
                 DROPBOX_ROOT = savedRoot;
 
-                // ─────────────────────────────────────────────
-                // CASO 2: Hay carpeta configurada, pero no existe
-                // Intentar cargar Notion solo
-                // ─────────────────────────────────────────────
-                if (!Directory.Exists(DROPBOX_ROOT))
+                if (!string.IsNullOrWhiteSpace(savedRoot) &&
+                    Directory.Exists(savedRoot) &&
+                    string.IsNullOrWhiteSpace(_currentFolderPath))
                 {
-                    ResetSearchModuleState();
+                    _currentFolderPath = savedRoot;
+                }
 
-                    var notionLoaded = await TryLoadNotionIndexOnStartupAsync(CancellationToken.None);
+                await PaintSharedIndexForThisViewAsync();
+                return;
+            }
+
+            await _bootstrapLock.WaitAsync();
+
+            try
+            {
+                // Otra llamada de esta misma vista pudo terminar mientras esperaba.
+                if (IsSharedBootstrapReady(savedRoot))
+                {
+                    DROPBOX_ROOT = savedRoot;
+                    await PaintSharedIndexForThisViewAsync();
+                    return;
+                }
+
+                await SharedBootstrapLock.WaitAsync();
+
+                try
+                {
+                    // Revisión después de esperar a la pestaña que estaba haciendo
+                    // el bootstrap global.
+                    if (IsSharedBootstrapReady(savedRoot))
+                    {
+                        DROPBOX_ROOT = savedRoot;
+                        await PaintSharedIndexForThisViewAsync();
+                        return;
+                    }
+
+                    var perf = Stopwatch.StartNew();
+
+                    if (!DeferInitialIndexPaint)
+                    {
+                        ShowLoadingState(
+                            "Estado: Cargando caché de ANFETA...",
+                            "Mostrando primero la información guardada; los cambios se comprobarán en segundo plano.");
+                    }
+
+                    var backgroundLocalReindexNeeded = false;
+
+                    // 1) Cargar el índice persistido UNA SOLA VEZ por proceso.
+                    if (!App.LocalIndex.HasData)
+                    {
+                        var (ok, cachedRoot, cachedItems) =
+                            await LocalIndexPersistence.TryLoadAsync(
+                                CancellationToken.None);
+
+                        if (ok && cachedItems != null && cachedItems.Count > 0)
+                        {
+                            if (!string.IsNullOrWhiteSpace(savedRoot) &&
+                                Directory.Exists(savedRoot) &&
+                                string.Equals(
+                                    NormalizeSharedRoot(cachedRoot),
+                                    NormalizeSharedRoot(savedRoot),
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                App.LocalIndex.Set(cachedItems);
+                                DropboxIndexCoordinator.MarkReady(savedRoot);
+                            }
+                            else
+                            {
+                                // Si la ruta local cambió o no existe, todavía es
+                                // válido reutilizar las páginas Notion del caché.
+                                var notionOnly = cachedItems
+                                    .Where(item => item.Source == SearchSource.Notion)
+                                    .ToList();
+
+                                if (notionOnly.Count > 0)
+                                    App.LocalIndex.Set(notionOnly);
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(savedRoot))
+                    {
+                        DROPBOX_ROOT = savedRoot;
+
+                        if (Directory.Exists(savedRoot))
+                        {
+                            if (string.IsNullOrWhiteSpace(_currentFolderPath))
+                                _currentFolderPath = savedRoot;
+
+                            var hasLocalRows = App.LocalIndex
+                                .GetAll()
+                                .Any(item => item.Source != SearchSource.Notion);
+
+                            // Primera ejecución sin caché local: sí hay que construir
+                            // el índice. Las siguientes ejecuciones usan caché.
+                            if (!hasLocalRows &&
+                                !DropboxIndexCoordinator.IsIndexing)
+                            {
+                                await ReindexCurrentRootAsync(background: false);
+                            }
+                            else if (hasLocalRows &&
+                                     !DropboxIndexCoordinator.IsIndexing)
+                            {
+                                var lastIndexedStr =
+                                    ApplicationData.Current.LocalSettings.Values[
+                                        LS_LastIndexedUtc] as string;
+
+                                DateTimeOffset? lastIndexedUtc = null;
+
+                                if (!string.IsNullOrWhiteSpace(lastIndexedStr) &&
+                                    DateTimeOffset.TryParse(
+                                        lastIndexedStr,
+                                        out var parsed))
+                                {
+                                    lastIndexedUtc = parsed.ToUniversalTime();
+                                }
+
+                                var folderLastWriteUtc =
+                                    Directory.GetLastWriteTimeUtc(savedRoot);
+
+                                backgroundLocalReindexNeeded =
+                                    lastIndexedUtc == null ||
+                                    folderLastWriteUtc >
+                                        lastIndexedUtc.Value.UtcDateTime;
+                            }
+                        }
+                    }
+
+                    // 2) Si el caché ya contiene Notion, NO hacer BuildManyAsync.
+                    // El watcher hará únicamente la actualización incremental.
+                    var hasCachedNotion = App.LocalIndex
+                        .GetAll()
+                        .Any(item => item.Source == SearchSource.Notion);
+
+                    if (!hasCachedNotion)
+                    {
+                        await TryLoadNotionIndexOnStartupAsync(
+                            CancellationToken.None);
+                    }
 
                     CommandsSidebarList.ItemsSource = _savedSearches;
                     RefreshCommandsSidebarUi();
 
-                    if (notionLoaded && App.LocalIndex.HasData)
-                    {
-                        await PaintLoadedIndexAsync();
-                        StartNotionChangeWatcher();
-                        StartDropboxChangeWatcher();
+                    MarkSharedBootstrapReady(savedRoot);
 
-                        _bootstrappedOnce = true;
-                        return;
+                    await PaintSharedIndexForThisViewAsync();
+
+                    perf.Stop();
+                    Debug.WriteLine(
+                        $"[PERF] Shared index bootstrap: {perf.ElapsedMilliseconds} ms · " +
+                        $"items={App.LocalIndex.Count} · cachedNotion={hasCachedNotion}");
+
+                    // El reindex local por cambios del filesystem ya no bloquea
+                    // el arranque. Se conserva el snapshot visible mientras corre.
+                    if (backgroundLocalReindexNeeded)
+                    {
+                        _ = ReindexCurrentRootAsync(background: true);
                     }
 
-                    StatusText.Text = "Estado: La carpeta configurada ya no existe. Ve a Settings y selecciona otra ruta.";
-                    _bootstrappedOnce = true;
-                    return;
-                }
-
-                // ─────────────────────────────────────────────
-                // CASO 3: Intentar cargar índice local desde caché
-                // ─────────────────────────────────────────────
-                if (!App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
-                {
-                    var (ok, cachedRoot, items) = await LocalIndexPersistence.TryLoadAsync(CancellationToken.None);
-
-                    var cacheMatchesRoot =
-                        ok &&
-                        !string.IsNullOrWhiteSpace(cachedRoot) &&
-                        string.Equals(cachedRoot.Trim(), DROPBOX_ROOT, StringComparison.OrdinalIgnoreCase) &&
-                        LocalIndexPersistence.RootExists(DROPBOX_ROOT) &&
-                        items != null &&
-                        items.Count > 0;
-
-                    if (cacheMatchesRoot)
+                    if (!App.LocalIndex.HasData && !DeferInitialIndexPaint)
                     {
-                        App.LocalIndex.Set(items);
-                        DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+                        StatusText.Text =
+                            string.IsNullOrWhiteSpace(savedRoot)
+                                ? "Estado: No hay índice cargado. Configura Dropbox o Notion en Settings."
+                                : "Estado: No hay índice cargado. Revisa la configuración en Settings.";
                     }
                 }
-
-                // ─────────────────────────────────────────────
-                // CASO 4: Si hay índice local, validar si requiere reindexar
-                // ─────────────────────────────────────────────
-                if (App.LocalIndex.HasData && !DropboxIndexCoordinator.IsIndexing)
+                finally
                 {
-                    var lastIndexedStr = ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] as string;
-
-                    DateTimeOffset? lastIndexedUtc = null;
-
-                    if (!string.IsNullOrWhiteSpace(lastIndexedStr) &&
-                        DateTimeOffset.TryParse(lastIndexedStr, out var parsed))
-                    {
-                        lastIndexedUtc = parsed.ToUniversalTime();
-                    }
-
-                    var folderLastWriteUtc = Directory.GetLastWriteTimeUtc(DROPBOX_ROOT);
-
-                    var shouldReindex =
-                        lastIndexedUtc == null ||
-                        folderLastWriteUtc > lastIndexedUtc.Value.UtcDateTime;
-
-                    if (shouldReindex)
-                        await ReindexCurrentRootAsync();
+                    SharedBootstrapLock.Release();
                 }
-
-                // ─────────────────────────────────────────────
-                // CASO 5: Cargar Notion encima del índice local
-                // Esto evita que al recargar se pierdan páginas de Notion
-                // ─────────────────────────────────────────────
-                await TryLoadNotionIndexOnStartupAsync(CancellationToken.None);
-
-                // ─────────────────────────────────────────────
-                // CASO 6: Si no hay nada, mostrar aviso
-                // ─────────────────────────────────────────────
-                if (DropboxIndexCoordinator.IsIndexing || !App.LocalIndex.HasData)
-                {
-                    ResetSearchModuleState();
-
-                    StatusText.Text = DropboxIndexCoordinator.IsIndexing
-                        ? "Estado: Ruta nueva detectada, indexando..."
-                        : "Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
-
-                    _bootstrappedOnce = true;
-                    return;
-                }
-
-                // ─────────────────────────────────────────────
-                // CASO 7: Cargar explorador local
-                // ─────────────────────────────────────────────
-                LoadFoldersRoot();
-                BuildTreeRoot();
-
-                var startFolder =
-                    !string.IsNullOrWhiteSpace(_currentFolderPath) &&
-                    Directory.Exists(_currentFolderPath)
-                        ? _currentFolderPath
-                        : DROPBOX_ROOT;
-
-                await BrowseFolderAsync(startFolder, pushHistory: false);
-
-                CommandsSidebarList.ItemsSource = _savedSearches;
-                RefreshCommandsSidebarUi();
-
-                var hasNotion = App.LocalIndex
-                    .GetAll()
-                    .Any(x => x.Source == SearchSource.Notion);
-
-
-
-                await PaintLoadedIndexAsync();
-                StartNotionChangeWatcher();
-                StartDropboxChangeWatcher();
-
-                _bootstrappedOnce = true;
             }
             finally
             {
+                _bootstrappedOnce = true;
                 _bootstrapLock.Release();
-                HideLoadingState();
+
+                if (!DeferInitialIndexPaint)
+                    HideLoadingState();
             }
         }
 
-        private async Task ReindexCurrentRootAsync()
+        private async Task ReindexCurrentRootAsync(bool background = false)
         {
-            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) || !Directory.Exists(DROPBOX_ROOT))
+            if (string.IsNullOrWhiteSpace(DROPBOX_ROOT) ||
+                !Directory.Exists(DROPBOX_ROOT))
+            {
+                return;
+            }
+
+            var gateTaken = background
+                ? await SharedLocalReindexGate.WaitAsync(0)
+                : await SharedLocalReindexGate.WaitAsync(
+                    TimeSpan.FromMinutes(10));
+
+            if (!gateTaken)
                 return;
 
             try
@@ -380,39 +467,99 @@ namespace Anfeta.UI.Views
                 _autoReindexCts = new CancellationTokenSource();
                 var ct = _autoReindexCts.Token;
 
-                ShowLoadingState(
-                    "Estado: Sincronizando Dropbox...",
-                    "Detecté cambios en la carpeta. Estoy actualizando el índice local.");
-                DropboxIndexCoordinator.StartIndexing(DROPBOX_ROOT);
-                App.LocalIndex.Clear();
-
-                var list = await LocalIndexBuilder.BuildAsync(DROPBOX_ROOT, ct);
-
-                if (list == null || list.Count == 0)
+                if (!background)
                 {
-                    StatusText.Text = "Estado: Reindex produjo 0 items. Conservo el índice anterior.";
-                    DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+                    ShowLoadingState(
+                        "Estado: Sincronizando Dropbox...",
+                        "Construyendo el índice local inicial.");
+
+                    DropboxIndexCoordinator.StartIndexing(DROPBOX_ROOT);
+                }
+
+                var perf = Stopwatch.StartNew();
+                var localRows =
+                    await LocalIndexBuilder.BuildAsync(DROPBOX_ROOT, ct);
+
+                if (localRows == null || localRows.Count == 0)
+                {
+                    if (!background)
+                    {
+                        StatusText.Text =
+                            "Estado: Reindex produjo 0 items. Conservo el índice anterior.";
+                        DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+                    }
+
                     return;
                 }
 
-                App.LocalIndex.Set(list);
-                await LocalIndexPersistence.SaveAsync(DROPBOX_ROOT, list, ct);
+                // Nunca borrar el índice visible mientras se reconstruye Dropbox.
+                // Al terminar mezclamos el local nuevo con el snapshot Notion más
+                // reciente, incluyendo cambios que hayan llegado durante el build.
+                var sharedSnapshot = App.LocalIndex.GetAll();
+
+                var notionRows = sharedSnapshot
+                    .Where(item => item.Source == SearchSource.Notion)
+                    .ToList();
+
+                var localTargets = localRows
+                    .Select(item => NormalizePath(item.Target))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var remoteOnlyDropboxRows = sharedSnapshot
+                    .Where(item =>
+                        item.Source == SearchSource.Dropbox &&
+                        !localTargets.Contains(
+                            NormalizePath(item.Target)))
+                    .ToList();
+
+                localRows.AddRange(remoteOnlyDropboxRows);
+                localRows.AddRange(notionRows);
+                App.LocalIndex.Set(localRows);
+
+                await LocalIndexPersistence.SaveAsync(
+                    DROPBOX_ROOT,
+                    localRows,
+                    ct);
 
                 ApplicationData.Current.LocalSettings.Values[LS_LastIndexedUtc] =
                     DateTimeOffset.UtcNow.ToString("O");
 
-                DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
-                StatusText.Text = $"Estado: Reindex listo ({App.LocalIndex.Count} items)";
+                if (!background)
+                    DropboxIndexCoordinator.MarkReady(DROPBOX_ROOT);
+
+                perf.Stop();
+                Debug.WriteLine(
+                    $"[PERF] Local index rebuild: {perf.ElapsedMilliseconds} ms · " +
+                    $"local={localRows.Count - notionRows.Count - remoteOnlyDropboxRows.Count} · " +
+                    $"remoteOnly={remoteOnlyDropboxRows.Count} · notion={notionRows.Count}");
+
+                if (!DeferInitialIndexPaint)
+                {
+                    await RefreshAfterBackgroundIndexChangeAsync(
+                        SearchSource.Dropbox);
+
+                    StatusText.Text = background
+                        ? $"Estado: Índice local actualizado en segundo plano ✅ ({App.LocalIndex.Count})"
+                        : $"Estado: Reindex listo ({App.LocalIndex.Count} items)";
+                }
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+            }
             catch (Exception ex)
             {
-                DropboxIndexCoordinator.MarkError(DROPBOX_ROOT, ex.Message);
-                StatusText.Text = $"Estado: Error Dropbox → {ex.Message}";
+                if (!background)
+                    DropboxIndexCoordinator.MarkError(DROPBOX_ROOT, ex.Message);
+
+                if (!DeferInitialIndexPaint)
+                    StatusText.Text = $"Estado: Error Dropbox → {ex.Message}";
             }
             finally
             {
-                HideLoadingState();
+                SharedLocalReindexGate.Release();
+
+                if (!background)
+                    HideLoadingState();
             }
         }
 
@@ -674,6 +821,14 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            var sharedSyncTaken = automatic
+                ? await SharedNotionSyncGate.WaitAsync(0)
+                : await SharedNotionSyncGate.WaitAsync(
+                    TimeSpan.FromMinutes(10));
+
+            if (!sharedSyncTaken)
+                return;
+
             _notionSyncRunning = true;
             BtnRefreshNotion.Visibility = Visibility.Collapsed;
 
@@ -842,6 +997,7 @@ namespace Anfeta.UI.Views
                 _notionSyncRunning = false;
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
                 BtnRefreshNotion.IsEnabled = true;
+                SharedNotionSyncGate.Release();
 
                 // No hay overlay central que cerrar para Notion.
             }
@@ -878,6 +1034,11 @@ namespace Anfeta.UI.Views
                 currentWithoutNotion.AddRange(notionItems);
 
                 App.LocalIndex.Set(currentWithoutNotion);
+
+                // La primera descarga completa se guarda para que la siguiente
+                // ejecución arranque desde caché y solo consulte cambios.
+                await PersistCombinedIndexIfPossibleAsync(
+                    currentWithoutNotion);
 
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] =
                     DateTimeOffset.UtcNow.ToString("O");
@@ -943,13 +1104,15 @@ namespace Anfeta.UI.Views
                         : $"Estado: Búsqueda lista ✅ ({Results.Count} resultados)";
                     break;
             }
+
+            _lastPaintedIndexVersion = App.LocalIndex.Version;
         }
         #endregion 
         #region ===== Dropbox incremental sync =====
 
         private void StartDropboxChangeWatcher()
         {
-            if (_dropboxChangeTimer != null)
+            if (DeferInitialIndexPaint || _dropboxChangeTimer != null)
                 return;
 
             _dropboxChangeTimer = DispatcherQueue.CreateTimer();
@@ -982,6 +1145,16 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            if (!ReserveSharedProbe(
+                    ref SharedLastDropboxProbeUtc,
+                    TimeSpan.FromSeconds(30)))
+            {
+                return;
+            }
+
+            if (!await SharedDropboxSyncGate.WaitAsync(0))
+                return;
+
             _dropboxSyncRunning = true;
 
             try
@@ -1004,9 +1177,10 @@ namespace Anfeta.UI.Views
                 if (batch.Changes.Count == 0)
                     return;
 
-                ShowLoadingState(
-                    "Estado: Sincronizando Dropbox...",
-                    $"Aplicando {batch.Changes.Count} cambio(s) externos.");
+                // Sin overlay central: los cambios de Dropbox se aplican en
+                // segundo plano y la interfaz permanece utilizable.
+                StatusText.Text =
+                    $"Estado: Aplicando {batch.Changes.Count} cambio(s) de Dropbox...";
 
                 var summary = await ApplyDropboxRemoteChangesAsync(
                     batch.Changes,
@@ -1030,7 +1204,7 @@ namespace Anfeta.UI.Views
             finally
             {
                 _dropboxSyncRunning = false;
-                HideLoadingState();
+                SharedDropboxSyncGate.Release();
             }
         }
 
@@ -1188,7 +1362,7 @@ namespace Anfeta.UI.Views
 
         private void StartNotionChangeWatcher()
         {
-            if (_notionChangeTimer != null)
+            if (DeferInitialIndexPaint || _notionChangeTimer != null)
                 return;
 
             _notionChangeTimer = DispatcherQueue.CreateTimer();
@@ -1204,38 +1378,68 @@ namespace Anfeta.UI.Views
             _ = CheckNotionChangesAsync();
         }
 
+        private void StopNotionChangeWatcher()
+        {
+            if (_notionChangeTimer == null)
+                return;
+
+            _notionChangeTimer.Stop();
+            _notionChangeTimer = null;
+        }
+
         private async Task CheckNotionChangesAsync()
         {
             if (_notionSyncRunning)
                 return;
 
-            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
-            var dataSourceId = ApplicationData.Current.LocalSettings.Values[LS_NotionDataSourceId] as string;
-            var lastSyncStr = ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] as string;
-
-            BtnRefreshNotion.Visibility = Visibility.Collapsed;
-
-            if (string.IsNullOrWhiteSpace(token) ||
-                string.IsNullOrWhiteSpace(dataSourceId) ||
-                string.IsNullOrWhiteSpace(lastSyncStr) ||
-                !DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
+            if (!ReserveSharedProbe(
+                    ref SharedLastNotionProbeUtc,
+                    TimeSpan.FromSeconds(30)))
             {
-                HideNotionSyncNotice();
                 return;
             }
 
+            if (!await SharedNotionProbeGate.WaitAsync(0))
+                return;
+
             try
             {
+                var token =
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_NotionToken] as string;
+
+                var dataSourceId =
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_NotionDataSourceId] as string;
+
+                var lastSyncStr =
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_NotionLastSyncUtc] as string;
+
+                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+
+                if (string.IsNullOrWhiteSpace(token) ||
+                    string.IsNullOrWhiteSpace(dataSourceId) ||
+                    string.IsNullOrWhiteSpace(lastSyncStr) ||
+                    !DateTimeOffset.TryParse(
+                        lastSyncStr,
+                        out var lastSyncUtc))
+                {
+                    HideNotionSyncNotice();
+                    return;
+                }
+
                 var overlapAnchor =
                     lastSyncUtc
                         .ToUniversalTime()
                         .Subtract(TimeSpan.FromMinutes(3));
 
-                var hasChanges = await NotionIndexBuilder.HasAnyChangesSinceAsync(
-                    token,
-                    NotionDataSources.Default,
-                    overlapAnchor,
-                    CancellationToken.None);
+                var hasChanges =
+                    await NotionIndexBuilder.HasAnyChangesSinceAsync(
+                        token,
+                        NotionDataSources.Default,
+                        overlapAnchor,
+                        CancellationToken.None);
 
                 if (hasChanges)
                 {
@@ -1249,12 +1453,15 @@ namespace Anfeta.UI.Views
             }
             catch
             {
-                // No bloqueamos el buscador si falla una revisión silenciosa.
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
                 ShowNotionSyncNotice(
                     "Error al revisar Notion",
                     isError: true,
                     visibleSeconds: 8);
+            }
+            finally
+            {
+                SharedNotionProbeGate.Release();
             }
         }
         private async void BtnCheckNotionDeleted_Click(object sender, RoutedEventArgs e)

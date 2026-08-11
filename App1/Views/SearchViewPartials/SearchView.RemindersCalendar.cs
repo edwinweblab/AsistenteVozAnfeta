@@ -55,6 +55,21 @@ namespace Anfeta.UI.Views
         private Border? _remindersCalendarHoverSlot;
         private Border? _remindersCalendarHoverBadge;
         private TextBlock? _remindersCalendarHoverBadgeText;
+        private string _remindersCalendarLastDrawFingerprint =
+            string.Empty;
+
+        // Drag & drop de recordatorios. La vista dedicada usa el mismo
+        // redondeo de 15 minutos que la guía y que la creación por doble clic.
+        private Button? _remindersCalendarDraggingButton;
+        private MessageViewItem? _remindersCalendarDraggingMessage;
+        private uint _remindersCalendarDragPointerId;
+        private double _remindersCalendarDragStartPointerY;
+        private double _remindersCalendarDragStartTop;
+        private bool _remindersCalendarDragActive;
+        private DateTimeOffset _remindersCalendarSuppressClickUntil =
+            DateTimeOffset.MinValue;
+        private string _remindersCalendarSuppressedMessageId =
+            string.Empty;
 
 
         // Controles nuevos resueltos desde el NameScope de SearchView.
@@ -458,8 +473,11 @@ namespace Anfeta.UI.Views
                 _remindersCalendarRefreshTimer =
                     new DispatcherTimer
                     {
+                        // La vista ya no reconstruye todo el Canvas cada
+                        // 20 segundos. Un minuto es suficiente para mover la
+                        // línea de hora y los cambios de índice fuerzan antes.
                         Interval =
-                            TimeSpan.FromSeconds(20)
+                            TimeSpan.FromMinutes(1)
                     };
 
                 _remindersCalendarRefreshTimer.Tick +=
@@ -513,7 +531,8 @@ namespace Anfeta.UI.Views
             object sender,
             RoutedEventArgs e)
         {
-            DrawRemindersCalendar();
+            DrawRemindersCalendar(
+                force: true);
             UpdateRemindersCalendarBadge();
 
             StatusText.Text =
@@ -569,16 +588,7 @@ namespace Anfeta.UI.Views
             if (string.IsNullOrWhiteSpace(currentUser))
                 return Array.Empty<MessageViewItem>();
 
-            return App.LocalIndex
-                .GetAll()
-                .Where(row =>
-                    row != null &&
-                    row.Source == SearchSource.Notion &&
-                    string.Equals(
-                        row.ExternalSourceName,
-                        "Revisiones",
-                        StringComparison.OrdinalIgnoreCase))
-                .Select(TryCreateMessageViewItem)
+            return GetParsedMessagesSnapshot()
                 .Where(item =>
                     item != null &&
                     !item.IsReviewAlert &&
@@ -589,7 +599,6 @@ namespace Anfeta.UI.Views
                         currentUser) &&
                     item.ScheduledAt.LocalDateTime.Date ==
                         day.Date)
-                .Cast<MessageViewItem>()
                 .GroupBy(
                     item =>
                         !string.IsNullOrWhiteSpace(
@@ -613,16 +622,7 @@ namespace Anfeta.UI.Views
             if (string.IsNullOrWhiteSpace(currentUser))
                 return Array.Empty<MessageViewItem>();
 
-            return App.LocalIndex
-                .GetAll()
-                .Where(row =>
-                    row != null &&
-                    row.Source == SearchSource.Notion &&
-                    string.Equals(
-                        row.ExternalSourceName,
-                        "Revisiones",
-                        StringComparison.OrdinalIgnoreCase))
-                .Select(TryCreateMessageViewItem)
+            return GetParsedMessagesSnapshot()
                 .Where(item =>
                     item != null &&
                     !item.IsReviewAlert &&
@@ -632,7 +632,6 @@ namespace Anfeta.UI.Views
                         item.SenderTag,
                         item.RecipientTag,
                         currentUser))
-                .Cast<MessageViewItem>()
                 .GroupBy(
                     item =>
                         !string.IsNullOrWhiteSpace(
@@ -772,8 +771,7 @@ namespace Anfeta.UI.Views
 
             if (_calendarViewActive)
             {
-                DrawCalendarPreservingView(
-                    _calendarActivities,
+                RefreshCalendarExternalOverlaysIfNeeded(
                     force: true);
             }
         }
@@ -809,19 +807,64 @@ namespace Anfeta.UI.Views
                 247);
         }
 
-        private void DrawRemindersCalendar()
+        private string BuildRemindersCalendarDrawFingerprint(
+            IReadOnlyList<string> visiblePeople)
+        {
+            var readStateRaw =
+                ApplicationData.Current.LocalSettings.Values[
+                    MessagesReadStateKey] as string ??
+                string.Empty;
+
+            var minuteBucket =
+                _remindersCalendarSelectedDate == DateTime.Today
+                    ? DateTime.Now.ToString(
+                        "yyyyMMddHHmm",
+                        CultureInfo.InvariantCulture)
+                    : string.Empty;
+
+            return string.Join(
+                "|",
+                _remindersCalendarSelectedDate.ToString(
+                    "yyyyMMdd",
+                    CultureInfo.InvariantCulture),
+                App.LocalIndex.Version.ToString(
+                    CultureInfo.InvariantCulture),
+                GetCurrentMessagesUserTag(),
+                string.Join(",", visiblePeople),
+                minuteBucket,
+                readStateRaw);
+        }
+
+        private void DrawRemindersCalendar(
+            bool force = false)
         {
             if (RemindersCalendarCanvasControl == null)
                 return;
+
+            var visiblePeople =
+                GetVisibleRemindersCalendarPeople();
+
+            var drawFingerprint =
+                BuildRemindersCalendarDrawFingerprint(
+                    visiblePeople);
+
+            if (!force &&
+                string.Equals(
+                    _remindersCalendarLastDrawFingerprint,
+                    drawFingerprint,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _remindersCalendarLastDrawFingerprint =
+                drawFingerprint;
 
             RemindersCalendarDateTitleControl.Text =
                 _remindersCalendarSelectedDate
                     .ToString(
                         "dddd, d 'de' MMMM 'de' yyyy",
                         CultureInfo.GetCultureInfo("es-MX"));
-
-            var visiblePeople =
-                GetVisibleRemindersCalendarPeople();
 
             var items =
                 GetReminderCalendarItems(
@@ -1290,9 +1333,56 @@ namespace Anfeta.UI.Views
             button.Click +=
                 async (_, __) =>
                 {
+                    var messageId =
+                        !string.IsNullOrWhiteSpace(
+                            message.Row.ExternalId)
+                            ? message.Row.ExternalId
+                            : message.Row.NodeId;
+
+                    if (DateTimeOffset.UtcNow <
+                            _remindersCalendarSuppressClickUntil &&
+                        string.Equals(
+                            messageId,
+                            _remindersCalendarSuppressedMessageId,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+
                     await ShowReminderCalendarDetailsAsync(
                         message);
                 };
+
+            // En la vista completa los recordatorios se pueden arrastrar
+            // verticalmente. Los overlays compactos del calendario normal
+            // conservan solo clic para no interferir con el drag de actividades.
+            if (!compact &&
+                !message.IsCompleted)
+            {
+                button.AddHandler(
+                    UIElement.PointerPressedEvent,
+                    new PointerEventHandler(
+                        RemindersCalendarCard_PointerPressed),
+                    handledEventsToo: true);
+
+                button.AddHandler(
+                    UIElement.PointerMovedEvent,
+                    new PointerEventHandler(
+                        RemindersCalendarCard_PointerMoved),
+                    handledEventsToo: true);
+
+                button.AddHandler(
+                    UIElement.PointerReleasedEvent,
+                    new PointerEventHandler(
+                        RemindersCalendarCard_PointerReleased),
+                    handledEventsToo: true);
+
+                button.AddHandler(
+                    UIElement.PointerCanceledEvent,
+                    new PointerEventHandler(
+                        RemindersCalendarCard_PointerCanceled),
+                    handledEventsToo: true);
+            }
 
             button.DoubleTapped +=
                 (_, args) =>
@@ -1301,6 +1391,264 @@ namespace Anfeta.UI.Views
                 };
 
             return button;
+        }
+
+
+        private void RemindersCalendarCard_PointerPressed(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (sender is not Button button ||
+                button.Tag is not MessageViewItem message ||
+                message.IsCompleted ||
+                RemindersCalendarCanvasControl == null)
+            {
+                return;
+            }
+
+            var point =
+                e.GetCurrentPoint(
+                    RemindersCalendarCanvasControl);
+
+            if (!point.Properties.IsLeftButtonPressed)
+                return;
+
+            _remindersCalendarDraggingButton =
+                button;
+            _remindersCalendarDraggingMessage =
+                message;
+            _remindersCalendarDragPointerId =
+                e.Pointer.PointerId;
+            _remindersCalendarDragStartPointerY =
+                point.Position.Y;
+            _remindersCalendarDragStartTop =
+                Canvas.GetTop(button);
+            _remindersCalendarDragActive =
+                false;
+
+            HideRemindersCalendarPointerGuide();
+            button.CapturePointer(e.Pointer);
+        }
+
+        private void RemindersCalendarCard_PointerMoved(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (_remindersCalendarDraggingButton == null ||
+                _remindersCalendarDraggingMessage == null ||
+                RemindersCalendarCanvasControl == null ||
+                e.Pointer.PointerId !=
+                    _remindersCalendarDragPointerId)
+            {
+                return;
+            }
+
+            var point =
+                e.GetCurrentPoint(
+                    RemindersCalendarCanvasControl);
+
+            if (!point.Properties.IsLeftButtonPressed)
+                return;
+
+            var delta =
+                point.Position.Y -
+                _remindersCalendarDragStartPointerY;
+
+            if (!_remindersCalendarDragActive &&
+                Math.Abs(delta) < 5)
+            {
+                return;
+            }
+
+            _remindersCalendarDragActive = true;
+            HideRemindersCalendarPointerGuide();
+
+            var minTop =
+                RemindersCalendarHeaderHeight + 2;
+
+            var maxTop =
+                RemindersCalendarHeaderHeight +
+                24 * RemindersCalendarHourHeight -
+                _remindersCalendarDraggingButton.Height -
+                2;
+
+            var top =
+                Math.Clamp(
+                    _remindersCalendarDragStartTop +
+                    delta,
+                    minTop,
+                    Math.Max(
+                        minTop,
+                        maxTop));
+
+            Canvas.SetTop(
+                _remindersCalendarDraggingButton,
+                top);
+
+            _remindersCalendarDraggingButton.Opacity =
+                0.78;
+
+            Canvas.SetZIndex(
+                _remindersCalendarDraggingButton,
+                950);
+
+            var roundedMinutes =
+                GetReminderDragMinutesFromTop(top);
+
+            var preview =
+                _remindersCalendarSelectedDate.Date
+                    .AddMinutes(roundedMinutes);
+
+            StatusText.Text =
+                $"Estado: Reprogramar recordatorio a " +
+                $"{preview:dd/MM HH:mm}";
+
+            e.Handled = true;
+        }
+
+        private async void RemindersCalendarCard_PointerReleased(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (_remindersCalendarDraggingButton == null ||
+                _remindersCalendarDraggingMessage == null ||
+                e.Pointer.PointerId !=
+                    _remindersCalendarDragPointerId)
+            {
+                return;
+            }
+
+            var button =
+                _remindersCalendarDraggingButton;
+
+            var message =
+                _remindersCalendarDraggingMessage;
+
+            button.ReleasePointerCapture(
+                e.Pointer);
+            button.Opacity = 1;
+
+            var wasDragging =
+                _remindersCalendarDragActive;
+
+            var finalTop =
+                Canvas.GetTop(button);
+
+            ResetReminderCalendarDragState();
+
+            if (!wasDragging)
+                return;
+
+            var messageId =
+                !string.IsNullOrWhiteSpace(
+                    message.Row.ExternalId)
+                    ? message.Row.ExternalId
+                    : message.Row.NodeId;
+
+            _remindersCalendarSuppressClickUntil =
+                DateTimeOffset.UtcNow
+                    .AddMilliseconds(900);
+
+            _remindersCalendarSuppressedMessageId =
+                messageId ?? string.Empty;
+
+            var roundedMinutes =
+                GetReminderDragMinutesFromTop(
+                    finalTop);
+
+            var targetLocal =
+                _remindersCalendarSelectedDate.Date
+                    .AddMinutes(
+                        roundedMinutes);
+
+            var target =
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        targetLocal,
+                        DateTimeKind.Local));
+
+            StatusText.Text =
+                $"Estado: Guardando recordatorio " +
+                $"{target:dd/MM HH:mm}...";
+
+            await ApplyMessageChangeAsync(
+                message,
+                message.RecipientTag,
+                target,
+                message.IsCompleted);
+
+            // ApplyMessageChangeAsync actualiza el índice si Notion aceptó
+            // el cambio. Redibujar desde el snapshot también revierte la
+            // tarjeta automáticamente si la operación falló.
+            _remindersCalendarLastDrawFingerprint =
+                string.Empty;
+
+            RefreshReminderCalendarViewsFromIndex();
+
+            e.Handled = true;
+        }
+
+        private void RemindersCalendarCard_PointerCanceled(
+            object sender,
+            PointerRoutedEventArgs e)
+        {
+            if (_remindersCalendarDraggingButton != null)
+            {
+                _remindersCalendarDraggingButton.Opacity =
+                    1;
+
+                _remindersCalendarDraggingButton
+                    .ReleasePointerCapture(
+                        e.Pointer);
+            }
+
+            var shouldRedraw =
+                _remindersCalendarDragActive;
+
+            ResetReminderCalendarDragState();
+
+            if (shouldRedraw)
+            {
+                _remindersCalendarLastDrawFingerprint =
+                    string.Empty;
+
+                DrawRemindersCalendar(
+                    force: true);
+            }
+        }
+
+        private int GetReminderDragMinutesFromTop(
+            double top)
+        {
+            var rawMinutes =
+                (top -
+                 RemindersCalendarHeaderHeight -
+                 2) /
+                RemindersCalendarHourHeight *
+                60d;
+
+            return Math.Clamp(
+                (int)Math.Round(
+                    rawMinutes / 15d) *
+                15,
+                0,
+                23 * 60 + 45);
+        }
+
+        private void ResetReminderCalendarDragState()
+        {
+            _remindersCalendarDraggingButton =
+                null;
+            _remindersCalendarDraggingMessage =
+                null;
+            _remindersCalendarDragPointerId =
+                0;
+            _remindersCalendarDragStartPointerY =
+                0;
+            _remindersCalendarDragStartTop =
+                0;
+            _remindersCalendarDragActive =
+                false;
         }
 
         private async Task ShowReminderCalendarDetailsAsync(
