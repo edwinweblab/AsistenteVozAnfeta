@@ -1,5 +1,6 @@
 ﻿using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Services;
 using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Services.Search;
 using Microsoft.UI;
@@ -29,6 +30,7 @@ using Windows.System;
 using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.UI;
+using static Anfeta.UI.Helpers.AppSettingsKeys;
 
 namespace Anfeta.UI.Views
 {
@@ -202,6 +204,53 @@ namespace Anfeta.UI.Views
             public string Reason { get; set; } = string.Empty;
         }
 
+        // Cronómetro real por actividad.
+        // Se permite un solo cronómetro pendiente a la vez para evitar que
+        // dos actividades acumulen tiempo simultáneamente por accidente.
+        private const string CalendarWorkTimerFileName =
+            "calendar_work_timer_v1.json";
+
+        private sealed class CalendarWorkTimerState
+        {
+            public string PageId { get; set; } = string.Empty;
+            public string Title { get; set; } = string.Empty;
+            public DateTime WorkDate { get; set; }
+            public long AccumulatedSeconds { get; set; }
+            public DateTimeOffset? SegmentStartedAt { get; set; }
+            public DateTimeOffset? LastHeartbeatAt { get; set; }
+            public bool IsRunning { get; set; }
+        }
+
+        private CalendarWorkTimerState? _calendarWorkTimerState;
+        private DispatcherTimer? _calendarWorkTimerUiTimer;
+        private DateTimeOffset _calendarWorkTimerLastPersistence =
+            DateTimeOffset.MinValue;
+        private bool _calendarWorkTimerLoaded;
+        private readonly object _calendarWorkTimerSync = new();
+
+        // Historial de tiempo REAL registrado desde ANFETA.
+        // Permite que el reporte del día sepa cuánto se trabajó HOY sin
+        // confundirlo con WorkedMinutes, que puede ser acumulado de varios días.
+        private const string CalendarWorkSessionHistoryFileName =
+            "calendar_work_sessions_v1.json";
+
+        private sealed class CalendarWorkSessionEntry
+        {
+            public string Id { get; set; } = string.Empty;
+            public string PageId { get; set; } = string.Empty;
+            public string Title { get; set; } = string.Empty;
+            public DateTime WorkDate { get; set; }
+            public int Minutes { get; set; }
+            public string Source { get; set; } = string.Empty;
+            public DateTimeOffset RecordedAt { get; set; }
+        }
+
+        private readonly List<CalendarWorkSessionEntry>
+            _calendarWorkSessions = new();
+
+        private bool _calendarWorkSessionsLoaded;
+        private readonly object _calendarWorkSessionsSync = new();
+
         // Los overlays externos (mensajes/recordatorios y Cobrar) dependen del
         // índice global, no de la consulta de Revisiones del calendario.
         // Se actualizan por separado para evitar reconstruir todo el Canvas.
@@ -217,6 +266,8 @@ namespace Anfeta.UI.Views
             public Border ChecklistBadge { get; init; } = null!;
             public TextBlock ChecklistText { get; init; } = null!;
             public bool CompactChecklistBadge { get; init; }
+            public Border TimerBadge { get; init; } = null!;
+            public TextBlock TimerText { get; init; } = null!;
         }
 
         private readonly Dictionary<string, List<CalendarActivityVisual>>
@@ -239,6 +290,12 @@ namespace Anfeta.UI.Views
         private string _calendarSuppressedActivityPageId = string.Empty;
         private TextBlock? _calendarDragTimeText;
         private string _calendarDragOriginalTimeLabel = string.Empty;
+
+        // En actividades empalmadas, hover muestra temporalmente la tarjeta y
+        // clic la deja al frente hasta seleccionar otra del mismo calendario.
+        private Button? _calendarPinnedOverlapActivityButton;
+        private readonly Dictionary<Button, int>
+            _calendarActivityBaseZIndexes = new();
 
 
         private readonly Dictionary<string, double> _calendarColumnWidths =
@@ -336,6 +393,9 @@ namespace Anfeta.UI.Views
 
             LoadCalendarCobrosPreference();
             LoadCalendarPreferences();
+            EnsureCalendarWorkTimerLoaded();
+            EnsureCalendarWorkSessionHistoryLoaded();
+            EnsureCalendarWorkTimerUiTimer();
 
             await EnsureCalendarReviewFlowLocalCacheLoadedAsync();
 
@@ -343,7 +403,10 @@ namespace Anfeta.UI.Views
             _calendarSelectedDate = date.Date;
             SaveLastSearchSubView("calendar");
 
-            CalendarHost.Visibility = Visibility.Visible;
+            // Evita mostrar por unos segundos el Canvas/caché del día anterior.
+            // Si la automatización diaria está pendiente, primero se procesan
+            // las rezagadas y DESPUÉS se presenta el calendario al usuario.
+            CalendarHost.Visibility = Visibility.Collapsed;
             ToggleCalendarView.IsChecked = true;
             CalendarDateTitle.Text = FormatCalendarDate(_calendarSelectedDate);
 
@@ -364,13 +427,21 @@ namespace Anfeta.UI.Views
 
             if (CalendarPhaseFilterControl != null)
                 CalendarPhaseFilterControl.Visibility = Visibility.Visible;
+
+            // A partir de las 05:00, si la automatización de hoy todavía no
+            // ocurrió, se espera aquí antes de cargar/mostrar el calendario.
+            // Si ya corrió, este await termina inmediatamente.
+            await RunDailyCalendarAutomationIfNeededAsync();
+
+            // Mantener el Canvas oculto hasta terminar la primera carga evita
+            // que se alcance a mostrar una vista parcial mientras Notion termina
+            // de reconstruir el día.
             StartCalendarChangesTimer();
 
-            // LoadCalendarDayAsync aplica la caché una sola vez y después
-            // comprueba cambios en background. Antes esta ruta dibujaba el
-            // calendario hasta tres veces durante una sola apertura.
             await LoadCalendarDayAsync(
                 preferCache: true);
+
+            CalendarHost.Visibility = Visibility.Visible;
         }
 
         private void StartCalendarChangesTimer()
@@ -388,6 +459,11 @@ namespace Anfeta.UI.Views
                 {
                     await RefreshCalendarChangesSilentlyAsync();
                     RefreshCalendarExternalOverlaysIfNeeded();
+
+                    // Comprobación ligera: si ya se ejecutó hoy, sale de inmediato.
+                    // Si ANFETA quedó abierta durante el cambio de día, permite que
+                    // las rezagadas se procesen sin reiniciar la aplicación.
+                    _ = RunDailyCalendarAutomationIfNeededAsync();
                 };
             }
 
@@ -1543,6 +1619,8 @@ namespace Anfeta.UI.Views
 
             CalendarCanvas.Children.Clear();
             _calendarActivityVisuals.Clear();
+            _calendarPinnedOverlapActivityButton = null;
+            _calendarActivityBaseZIndexes.Clear();
             _calendarStickyHeaders.Clear();
             _calendarStickyHours.Clear();
             _calendarStickyCorner = null;
@@ -1695,12 +1773,16 @@ namespace Anfeta.UI.Views
                         MaxLines = 1
                     });
 
+                var realWorkedMinutes =
+                    GetCalendarPersonWorkedMinutesToday(
+                        person);
+
                 headerContent.Children.Add(
                     new TextBlock
                     {
                         Text = _calendarZoom < 0.85
-                            ? $"Cob. {currentCoverage:0}%"
-                            : $"Cobertura {currentCoverage:0}%",
+                            ? $"Cob. {currentCoverage:0}% · ⏱ {FormatCalendarWorkMinutes(realWorkedMinutes)}"
+                            : $"Cobertura {currentCoverage:0}% · Real {FormatCalendarWorkMinutes(realWorkedMinutes)}",
                         FontSize = 8.8 * CalendarFontScale,
                         Foreground =
                             GetOneClickCoverageBrush(currentCoverage),
@@ -2003,7 +2085,7 @@ namespace Anfeta.UI.Views
                     : "Mostrar eventos con Due Fecha Recordatorio de BD COBRAR Y PAGAR");
         }
 
-        private void CalendarCobrosToggle_Click(
+        private async void CalendarCobrosToggle_Click(
             object sender,
             RoutedEventArgs e)
         {
@@ -2020,6 +2102,18 @@ namespace Anfeta.UI.Views
                 App.LocalIndex.Version;
 
             UpdateCalendarCobrosToggleVisual();
+
+            if (_calendarShowCobros)
+            {
+                // Primera activación después de actualizar ANFETA: reconstruye
+                // únicamente la base Cobrar y pagar para corregir filas viejas
+                // que todavía conserven una fecha anterior en el índice.
+                await EnsureCobrosCalendarIndexMappingAsync();
+
+                _calendarCobroOverlayCache.Clear();
+                _calendarCobroCacheIndexVersion =
+                    App.LocalIndex.Version;
+            }
 
             if (_calendarViewActive)
             {
@@ -2043,11 +2137,14 @@ namespace Anfeta.UI.Views
                 NormalizeCalendarSearchText(
                     row.ExternalSourceName);
 
-            if (!source.Contains("cobrar", StringComparison.OrdinalIgnoreCase) ||
-                !source.Contains("pagar", StringComparison.OrdinalIgnoreCase))
-            {
+            var isCobrarPagarSource =
+                source.Contains("cobrar", StringComparison.OrdinalIgnoreCase) ||
+                source.Contains("pagar", StringComparison.OrdinalIgnoreCase) ||
+                source.Contains("cobro", StringComparison.OrdinalIgnoreCase) ||
+                source.Contains("pago", StringComparison.OrdinalIgnoreCase);
+
+            if (!isCobrarPagarSource)
                 return false;
-            }
 
             return Regex.IsMatch(
                 row.DisplayName ?? string.Empty,
@@ -2209,10 +2306,11 @@ namespace Anfeta.UI.Views
 
             var removable =
                 CalendarCanvas.Children
-                    .OfType<Button>()
-                    .Where(button =>
-                        button.Tag is MessageViewItem ||
-                        (button.Tag is SearchResultRow row &&
+                    .OfType<FrameworkElement>()
+                    .Where(element =>
+                        (element is Button button &&
+                         button.Tag is MessageViewItem) ||
+                        (element.Tag is SearchResultRow row &&
                          IsCobrarPagarIndexRow(row)))
                     .ToList();
 
@@ -2342,7 +2440,12 @@ namespace Anfeta.UI.Views
                     MaxLines = 1,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                     Foreground = new SolidColorBrush(
-                        Color.FromArgb(255, 209, 250, 229))
+                        Color.FromArgb(
+                            255,
+                            233,
+                            213,
+                            255)
+                        )
                 });
 
                 if (height >= 34)
@@ -2355,7 +2458,11 @@ namespace Anfeta.UI.Views
                         MaxLines = 1,
                         TextTrimming = TextTrimming.CharacterEllipsis,
                         Foreground = new SolidColorBrush(
-                            Color.FromArgb(255, 236, 253, 245))
+                            Color.FromArgb(
+                                255,
+                                245,
+                                238,
+                                255))
                     });
                 }
 
@@ -2366,15 +2473,66 @@ namespace Anfeta.UI.Views
                     Padding = new Thickness(7, 2, 7, 2),
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     VerticalContentAlignment = VerticalAlignment.Center,
+
+                    // COBROS · violeta eléctrico.
+                    // Se separa visualmente del verde de rtuzREVISION.
                     Background = new SolidColorBrush(
-                        Color.FromArgb(235, 5, 78, 59)),
+                        Color.FromArgb(
+                            246,
+                            49,
+                            20,
+                            82)),
+
                     BorderBrush = new SolidColorBrush(
-                        Color.FromArgb(255, 52, 211, 153)),
-                    BorderThickness = new Thickness(3, 1, 1, 1),
-                    CornerRadius = new CornerRadius(6),
+                        Color.FromArgb(
+                            255,
+                            168,
+                            85,
+                            247)),
+
+                    BorderThickness =
+                        new Thickness(3, 1.35, 1.35, 1.35),
+
+                    CornerRadius =
+                        new CornerRadius(7),
+
                     Content = content,
                     Tag = cobro.Row
                 };
+
+                // Evita que WinUI apague/transparente el morado al pasar
+                // el cursor sobre la tarjeta.
+                button.Resources["ButtonBackgroundPointerOver"] =
+                    new SolidColorBrush(
+                        Color.FromArgb(
+                            255,
+                            58,
+                            25,
+                            96));
+
+                button.Resources["ButtonBorderBrushPointerOver"] =
+                    new SolidColorBrush(
+                        Color.FromArgb(
+                            255,
+                            196,
+                            132,
+                            252));
+
+                button.Resources["ButtonBackgroundPressed"] =
+                    new SolidColorBrush(
+                        Color.FromArgb(
+                            255,
+                            68,
+                            30,
+                            108));
+
+                button.Resources["ButtonBorderBrushPressed"] =
+                    new SolidColorBrush(
+                        Color.FromArgb(
+                            255,
+                            216,
+                            180,
+                            254));
 
                 var statusLine = string.IsNullOrWhiteSpace(cobro.Row.ProjectUpdateStatus)
                     ? string.Empty
@@ -2390,14 +2548,77 @@ namespace Anfeta.UI.Views
                 button.Click += async (_, __) =>
                     await OpenCalendarCobroAsync(cobro.Row);
 
+                var cobroLeft =
+                    columnLeft +
+                    5 +
+                    Math.Min(
+                        16,
+                        stackIndex * 5);
+
+                var cobroTop =
+                    top +
+                    Math.Min(
+                        18,
+                        stackIndex * 4);
+
+                // Halo violeta detrás de la tarjeta.
+                // Es puramente visual y no recibe eventos del mouse.
+                var cobroGlow = new Border
+                {
+                    Width = width + 10,
+                    Height = height + 10,
+                    CornerRadius =
+                        new CornerRadius(11),
+                    Background =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                48,
+                                168,
+                                85,
+                                247)),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                100,
+                                192,
+                                132,
+                                252)),
+                    BorderThickness =
+                        new Thickness(2),
+                    Opacity = 0.90,
+                    IsHitTestVisible = false,
+                    Tag = cobro.Row
+                };
+
+                Canvas.SetLeft(
+                    cobroGlow,
+                    cobroLeft - 5);
+
+                Canvas.SetTop(
+                    cobroGlow,
+                    cobroTop - 5);
+
+                Canvas.SetZIndex(
+                    cobroGlow,
+                    430 + stackIndex);
+
+                CalendarCanvas.Children.Add(
+                    cobroGlow);
+
                 Canvas.SetLeft(
                     button,
-                    columnLeft + 5 + Math.Min(16, stackIndex * 5));
+                    cobroLeft);
+
                 Canvas.SetTop(
                     button,
-                    top + Math.Min(18, stackIndex * 4));
-                Canvas.SetZIndex(button, 440 + stackIndex);
-                CalendarCanvas.Children.Add(button);
+                    cobroTop);
+
+                Canvas.SetZIndex(
+                    button,
+                    440 + stackIndex);
+
+                CalendarCanvas.Children.Add(
+                    button);
             }
         }
 
@@ -3433,18 +3654,16 @@ namespace Anfeta.UI.Views
             var overdueDays =
                 Math.Max(0, elapsed - budget);
 
-            return string.Join(
-                "\n",
-                new[]
-                {
-                    $"Inicio: {start:dd/MM/yyyy}",
-                    $"Hoy: {DateTime.Today:dd/MM/yyyy}",
-                    $"Límite: {deadline:dd/MM/yyyy}",
-                    $"Avance de tiempo: día {elapsed} de {budget}",
-                    overdueDays > 0
-                        ? $"Vencida por {overdueDays} día(s)"
-                        : $"Restan {Math.Max(0, budget - elapsed)} día(s) del presupuesto"
-                });
+            var budgetText =
+                overdueDays > 0
+                    ? $"vencida +{overdueDays}d"
+                    : $"resta {Math.Max(0, budget - elapsed)}d";
+
+            // Tooltip compacto: conserva la información útil sin cubrir
+            // media columna del calendario.
+            return
+                $"📅 {start:dd/MM} → {deadline:dd/MM} · " +
+                $"día {elapsed}/{budget} · {budgetText}";
         }
 
         private FrameworkElement? BuildActivityDayRangeIndicator(
@@ -3507,8 +3726,8 @@ namespace Anfeta.UI.Views
             var root = new Grid
             {
                 Height = compact
-                    ? Math.Max(14, 15 * _calendarZoom)
-                    : Math.Max(17, 19 * _calendarZoom),
+                    ? Math.Max(12, 13 * _calendarZoom)
+                    : Math.Max(14, 16 * _calendarZoom),
                 Margin = new Thickness(
                     0,
                     2,
@@ -3538,8 +3757,8 @@ namespace Anfeta.UI.Views
             var segments = new Grid
             {
                 Height = compact
-                    ? Math.Max(6, 6.5 * _calendarZoom)
-                    : Math.Max(7, 8 * _calendarZoom),
+                    ? Math.Max(5, 5.5 * _calendarZoom)
+                    : Math.Max(6, 6.5 * _calendarZoom),
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 5, 0)
             };
@@ -3613,9 +3832,10 @@ namespace Anfeta.UI.Views
             Grid.SetColumn(label, 1);
             root.Children.Add(label);
 
-            ToolTipService.SetToolTip(
-                root,
-                BuildActivityDayRangeTooltip(activity));
+            // El detalle de días se conserva en el preview/detalle de la
+            // actividad. No se coloca ToolTip sobre este indicador porque en
+            // tarjetas empalmadas tapa justo las tarjetas que el usuario
+            // intenta inspeccionar con el cursor.
 
             return root;
         }
@@ -3630,8 +3850,8 @@ namespace Anfeta.UI.Views
             if (!activity.ChecklistScanned)
             {
                 return compactBadge
-                    ? "…"
-                    : "☑ …";
+                    ? "☑\n…"
+                    : "☑ Calculando…";
             }
 
             if (!stats.HasChecklist)
@@ -3640,9 +3860,22 @@ namespace Anfeta.UI.Views
             var percentage =
                 GetChecklistPercentage(stats);
 
+            // La reunión pidió que el avance real del checklist sea visible
+            // directamente en la tarjeta, sin depender del hover.
+            // En tarjetas normales se muestra 8/10 · 80%.
+            // En tarjetas estrechas se apila en dos líneas para conservar
+            // ambos datos sin tapar el título.
             return compactBadge
-                ? $"{percentage}%"
-                : $"☑ {percentage}%";
+                ? $"{stats.Completed}/{stats.Total}\n{percentage}%"
+                : $"☑ {stats.Completed}/{stats.Total} · {percentage}%";
+        }
+
+        private double GetCalendarChecklistReservedWidth(
+            bool compactBadge)
+        {
+            return compactBadge
+                ? Math.Max(48, 54 * _calendarZoom)
+                : Math.Max(72, 84 * _calendarZoom);
         }
 
         private void UpdateCalendarChecklistVisuals(
@@ -3705,13 +3938,8 @@ namespace Anfeta.UI.Views
                             ? new Thickness(
                                 0,
                                 0,
-                                visual.CompactChecklistBadge
-                                    ? Math.Max(
-                                        28,
-                                        34 * _calendarZoom)
-                                    : Math.Max(
-                                        34,
-                                        43 * _calendarZoom),
+                                GetCalendarChecklistReservedWidth(
+                                    visual.CompactChecklistBadge),
                                 0)
                             : new Thickness(0);
 
@@ -3821,18 +4049,21 @@ namespace Anfeta.UI.Views
             }
             else
             {
+                // Abanico más visible: deja una franja suficiente de cada
+                // tarjeta para poder apuntarla con el cursor aunque otra esté
+                // por encima. Hover la trae al frente y clic la fija.
                 var desiredOffset =
                     Math.Clamp(
-                        14 * _calendarZoom,
-                        9,
-                        16);
+                        20 * _calendarZoom,
+                        14,
+                        24);
 
                 var minimumReadableWidth =
                     Math.Min(
                         Math.Max(
-                            54,
-                            74 * _calendarZoom),
-                        usableWidth * 0.74);
+                            58,
+                            66 * _calendarZoom),
+                        usableWidth * 0.62);
 
                 var maximumOffset =
                     safeLaneCount <= 1
@@ -4000,6 +4231,81 @@ namespace Anfeta.UI.Views
                     });
             }
 
+            var workTimerBadgeText =
+                BuildCalendarWorkTimerBadgeText(
+                    activity);
+
+            var workTimerText =
+                new TextBlock
+                {
+                    Text = workTimerBadgeText,
+                    FontSize = Math.Max(
+                        8.2,
+                        8.8 * CalendarFontScale),
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                255, 224, 242, 254)),
+                    HorizontalAlignment =
+                        HorizontalAlignment.Center,
+                    VerticalAlignment =
+                        VerticalAlignment.Center,
+                    TextAlignment =
+                        TextAlignment.Center,
+                    MaxLines = 1,
+                    IsHitTestVisible = false
+                };
+
+            var workTimerBadge =
+                new Border
+                {
+                    MinWidth =
+                        Math.Max(
+                            54,
+                            62 * _calendarZoom),
+                    Height =
+                        Math.Max(
+                            18,
+                            21 * _calendarZoom),
+                    Padding =
+                        new Thickness(
+                            6,
+                            1,
+                            6,
+                            1),
+                    Margin =
+                        new Thickness(
+                            0,
+                            1,
+                            0,
+                            1),
+                    HorizontalAlignment =
+                        HorizontalAlignment.Left,
+                    VerticalAlignment =
+                        VerticalAlignment.Center,
+                    CornerRadius =
+                        new CornerRadius(9),
+                    Background =
+                        new SolidColorBrush(
+                            GetCalendarWorkBadgeColors(
+                                activity).Background),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            GetCalendarWorkBadgeColors(
+                                activity).Border),
+                    BorderThickness =
+                        new Thickness(1),
+                    Child = workTimerText,
+                    Visibility =
+                        string.IsNullOrWhiteSpace(
+                            workTimerBadgeText)
+                            ? Visibility.Collapsed
+                            : Visibility.Visible,
+                    IsHitTestVisible = false
+                };
+
             var activityDayRange =
                 BuildActivityDayRangeIndicator(
                     activity,
@@ -4007,8 +4313,64 @@ namespace Anfeta.UI.Views
                     height,
                     useStackedLayout || cardWidth < 105);
 
-            if (activityDayRange != null)
-                content.Children.Add(activityDayRange);
+            // Pie compacto: cronómetro a la izquierda + barras de días a la derecha.
+            // Así ambos quedan visibles sin aumentar la altura real de la tarjeta
+            // ni empujar las barras fuera del área recortada por el calendario.
+            if (activityDayRange != null ||
+                workTimerBadge.Visibility == Visibility.Visible)
+            {
+                var progressFooter =
+                    new Grid
+                    {
+                        ColumnSpacing = 6,
+                        Margin = new Thickness(0, 1, 0, 0),
+                        HorizontalAlignment =
+                            HorizontalAlignment.Stretch,
+                        VerticalAlignment =
+                            VerticalAlignment.Bottom,
+                        IsHitTestVisible = false
+                    };
+
+                progressFooter.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = GridLength.Auto
+                    });
+
+                progressFooter.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(
+                            1,
+                            GridUnitType.Star)
+                    });
+
+                Grid.SetColumn(
+                    workTimerBadge,
+                    0);
+
+                progressFooter.Children.Add(
+                    workTimerBadge);
+
+                if (activityDayRange != null)
+                {
+                    activityDayRange.Margin =
+                        new Thickness(0);
+
+                    activityDayRange.VerticalAlignment =
+                        VerticalAlignment.Center;
+
+                    Grid.SetColumn(
+                        activityDayRange,
+                        1);
+
+                    progressFooter.Children.Add(
+                        activityDayRange);
+                }
+
+                content.Children.Add(
+                    progressFooter);
+            }
 
             var calendarChecklist =
                 GetCalendarChecklistStats(activity);
@@ -4017,8 +4379,8 @@ namespace Anfeta.UI.Views
                 useStackedLayout ||
                 cardWidth < 92;
 
-            // En tarjetas estrechas se muestra solo el porcentaje para no
-            // cubrir el título. El detalle completo permanece en el tooltip.
+            // El avance real del checklist se muestra siempre en la tarjeta.
+            // Las tarjetas estrechas usan dos líneas para no cubrir el título.
             var checklistBadgeText =
                 BuildCalendarChecklistBadgeText(
                     activity,
@@ -4029,13 +4391,8 @@ namespace Anfeta.UI.Views
                 titleText.Margin = new Thickness(
                     0,
                     0,
-                    compactBadge
-                        ? Math.Max(
-                            28,
-                            34 * _calendarZoom)
-                        : Math.Max(
-                            34,
-                            43 * _calendarZoom),
+                    GetCalendarChecklistReservedWidth(
+                        compactBadge),
                     0);
             }
 
@@ -4114,22 +4471,83 @@ namespace Anfeta.UI.Views
                     });
             }
 
+            // Visual especial únicamente para rtuzREVISION.
+            // La detección es exacta, por lo que no afecta
+            // prtuzREVISION, sprtuzREVISION ni zREVISION.
+            var isRtuzReviewVisual =
+                HasExactCalendarPhase(
+                    activity,
+                    "rtuzREVISION");
+
             var cardContent = new Grid
             {
                 IsHitTestVisible = false
             };
 
-            cardContent.Children.Add(content);
+            if (isRtuzReviewVisual)
+            {
+                // El verde queda enfocado en el bloque real de contenido/título,
+                // centrado dentro de la tarjeta y con aire respecto al borde de
+                // prioridad. Así conserva el efecto aprobado sin teñir toda la
+                // actividad de verde.
+                cardContent.Children.Add(
+                    new Border
+                    {
+                        Margin = new Thickness(
+                            Math.Max(2, 3 * _calendarZoom),
+                            Math.Max(2, 3 * _calendarZoom),
+                            Math.Max(2, 3 * _calendarZoom),
+                            Math.Max(2, 3 * _calendarZoom)),
+                        Padding = new Thickness(
+                            Math.Max(2, 3 * _calendarZoom),
+                            Math.Max(1, 2 * _calendarZoom),
+                            Math.Max(2, 3 * _calendarZoom),
+                            Math.Max(1, 2 * _calendarZoom)),
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        CornerRadius =
+                            new CornerRadius(
+                                Math.Max(
+                                    4,
+                                    5 * _calendarZoom)),
+                        Background =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    122,
+                                    6,
+                                    78,
+                                    59)),
+                        BorderBrush =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    225,
+                                    52,
+                                    211,
+                                    153)),
+                        BorderThickness =
+                            new Thickness(
+                                Math.Max(
+                                    1,
+                                    1.25 * _calendarZoom)),
+                        Child = content,
+                        IsHitTestVisible = false
+                    });
+            }
+            else
+            {
+                cardContent.Children.Add(content);
+            }
 
             var checklistText =
                 new TextBlock
                 {
                     Text = checklistBadgeText,
                     FontSize = Math.Max(
-                        8,
-                        8.5 * CalendarFontScale),
+                        compactBadge ? 8.3 : 9.2,
+                        (compactBadge ? 8.7 : 9.6) *
+                        CalendarFontScale),
                     FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold,
+                        Microsoft.UI.Text.FontWeights.Bold,
                     Foreground = new SolidColorBrush(
                         activity.ChecklistScanned
                             ? Color.FromArgb(
@@ -4141,9 +4559,19 @@ namespace Anfeta.UI.Views
                     VerticalAlignment =
                         VerticalAlignment.Center,
                     TextAlignment = TextAlignment.Center,
-                    MaxLines = 1,
+                    MaxLines = compactBadge ? 2 : 1,
+                    TextWrapping =
+                        compactBadge
+                            ? TextWrapping.Wrap
+                            : TextWrapping.NoWrap,
                     TextTrimming =
                         TextTrimming.CharacterEllipsis,
+                    LineHeight =
+                        compactBadge
+                            ? Math.Max(
+                                9,
+                                9.5 * CalendarFontScale)
+                            : 0,
                     IsHitTestVisible = false
                 };
 
@@ -4151,30 +4579,51 @@ namespace Anfeta.UI.Views
             {
                 MinWidth =
                     compactBadge
-                        ? 27
-                        : 36,
-                Height = Math.Max(
-                    17,
-                    19 * _calendarZoom),
+                        ? Math.Max(
+                            42,
+                            48 * _calendarZoom)
+                        : Math.Max(
+                            68,
+                            78 * _calendarZoom),
+                Height =
+                    compactBadge
+                        ? Math.Max(
+                            28,
+                            31 * _calendarZoom)
+                        : Math.Max(
+                            21,
+                            24 * _calendarZoom),
                 Padding =
                     compactBadge
-                        ? new Thickness(3, 0, 3, 0)
-                        : new Thickness(4, 0, 4, 0),
+                        ? new Thickness(5, 2, 5, 2)
+                        : new Thickness(7, 1, 7, 1),
                 Margin = new Thickness(0, 2, 2, 0),
                 HorizontalAlignment =
                     HorizontalAlignment.Right,
                 VerticalAlignment =
                     VerticalAlignment.Top,
-                CornerRadius = new CornerRadius(9),
+                CornerRadius =
+                    new CornerRadius(
+                        compactBadge
+                            ? 8
+                            : 11),
                 Background = new SolidColorBrush(
-                    Color.FromArgb(220, 17, 24, 39)),
+                    activity.ChecklistScanned
+                        ? Color.FromArgb(
+                            232, 11, 38, 31)
+                        : Color.FromArgb(
+                            230, 15, 31, 45)),
                 BorderBrush = new SolidColorBrush(
                     activity.ChecklistScanned
                         ? Color.FromArgb(
                             255, 74, 222, 128)
                         : Color.FromArgb(
                             255, 125, 211, 252)),
-                BorderThickness = new Thickness(1),
+                BorderThickness =
+                    new Thickness(
+                        activity.ChecklistScanned
+                            ? 1.25
+                            : 1),
                 Child = checklistText,
                 Visibility =
                     string.IsNullOrWhiteSpace(
@@ -4259,51 +4708,6 @@ namespace Anfeta.UI.Views
                     activity,
                     person);
 
-            // Visual especial únicamente para rtuzREVISION.
-            // La detección es exacta, por lo que no afecta
-            // prtuzREVISION, sprtuzREVISION ni zREVISION.
-            var isRtuzReviewVisual =
-                HasExactCalendarPhase(
-                    activity,
-                    "rtuzREVISION");
-
-            // Capa verde interior suave para destacar revisiones activas
-            // sin reemplazar la franja izquierda de prioridad.
-            if (isRtuzReviewVisual)
-            {
-                cardContent.Children.Insert(
-                    0,
-                    new Border
-                    {
-                        Margin = new Thickness(1.5),
-                        CornerRadius =
-                            new CornerRadius(
-                                Math.Max(
-                                    4,
-                                    5 * _calendarZoom)),
-                        Background =
-                            new SolidColorBrush(
-                                Color.FromArgb(
-                                    38,
-                                    52,
-                                    211,
-                                    153)),
-                        BorderBrush =
-                            new SolidColorBrush(
-                                Color.FromArgb(
-                                    205,
-                                    52,
-                                    211,
-                                    153)),
-                        BorderThickness =
-                            new Thickness(
-                                Math.Max(
-                                    1,
-                                    1.35 * _calendarZoom)),
-                        IsHitTestVisible = false
-                    });
-            }
-
             var baseZIndex =
                 useStackedLayout
                     ? 20 +
@@ -4328,16 +4732,9 @@ namespace Anfeta.UI.Views
                 VerticalContentAlignment =
                     VerticalAlignment.Top,
                 Background =
-                    isRtuzReviewVisual
-                        ? new SolidColorBrush(
-                            Color.FromArgb(
-                                175,
-                                6,
-                                78,
-                                59))
-                        : GetNeutralCalendarActivityBrush(
-                            activity.Status,
-                            activity.StatusColor),
+                    GetNeutralCalendarActivityBrush(
+                        activity.Status,
+                        activity.StatusColor),
                 // El fondo de la tarjeta se mantiene neutro para reducir
                 // ruido visual. La franja izquierda conserva la prioridad
                 // y los recordatorios usan un color fuerte independiente.
@@ -4350,6 +4747,8 @@ namespace Anfeta.UI.Views
                 Tag = activity
             };
 
+            // Tooltip deliberadamente compacto: la información completa
+            // sigue disponible, pero sin ocultar varias tarjetas vecinas.
             var activityTooltipParts =
                 new List<string>();
 
@@ -4362,34 +4761,59 @@ namespace Anfeta.UI.Views
             if (activity.HasWorkLog)
             {
                 activityTooltipParts.Add(
-                    $"Tiempo trabajado: {activity.WorkProgressLabel}" +
+                    $"⏱ {activity.WorkProgressLabel}" +
                     (string.IsNullOrWhiteSpace(activity.WorkLogDetail)
                         ? string.Empty
                         : $"\nSesiones: {activity.WorkLogDetail}"));
             }
 
+            // En un grupo empalmado el hover se usa exclusivamente para
+            // traer tarjetas al frente. Un ToolTip estándar de WinUI tapa el
+            // grupo y hace difícil seleccionar la tarjeta inferior.
             ToolTipService.SetToolTip(
                 button,
-                activityTooltipParts.Count > 0
-                    ? string.Join(
-                        "\n\n",
-                        activityTooltipParts)
-                    : null);
+                overlapCount > 1
+                    ? null
+                    : activityTooltipParts.Count > 0
+                        ? string.Join(
+                            "\n",
+                            activityTooltipParts)
+                        : null);
+
+            // WinUI aplica un visual PointerOver semitransparente a Button.
+            // En tarjetas empalmadas se conserva exactamente el fondo/borde
+            // real para que la tarjeta que sube al frente no parezca apagada.
+            if (overlapCount > 1)
+            {
+                button.Resources["ButtonBackgroundPointerOver"] =
+                    button.Background;
+                button.Resources["ButtonBorderBrushPointerOver"] =
+                    button.BorderBrush;
+                button.Resources["ButtonForegroundPointerOver"] =
+                    button.Foreground;
+            }
 
             button.KeyboardAccelerators.Clear();
             button.KeyboardAcceleratorPlacementMode =
                 KeyboardAcceleratorPlacementMode.Hidden;
 
+            _calendarActivityBaseZIndexes[button] =
+                baseZIndex;
+
             button.PointerEntered +=
                 (sender, args) =>
                 {
-                    // En grupos apilados la tarjeta bajo el cursor sube al
-                    // frente sin alterar su posición ni la de las demás.
-                    if (useStackedLayout)
+                    if (overlapCount > 1)
                     {
+                        // En empalmes, hover = inspección visual inmediata.
+                        // Se cancela cualquier preview/tooltip pendiente para
+                        // no cubrir el grupo y esta tarjeta queda por encima
+                        // de TODAS las demás mientras el cursor esté sobre ella.
+                        HideCalendarActivityPreviewFlyout();
                         Canvas.SetZIndex(
                             button,
-                            650);
+                            1500);
+                        return;
                     }
 
                     CalendarActivity_PointerEntered(
@@ -4400,19 +4824,60 @@ namespace Anfeta.UI.Views
             button.PointerExited +=
                 (sender, args) =>
                 {
-                    if (useStackedLayout &&
-                        !ReferenceEquals(
-                            _calendarDraggingButton,
-                            button))
+                    if (overlapCount > 1)
                     {
-                        Canvas.SetZIndex(
-                            button,
-                            baseZIndex);
+                        if (!ReferenceEquals(
+                                _calendarDraggingButton,
+                                button))
+                        {
+                            Canvas.SetZIndex(
+                                button,
+                                ReferenceEquals(
+                                    _calendarPinnedOverlapActivityButton,
+                                    button)
+                                    ? 1400
+                                    : baseZIndex);
+                        }
+
+                        return;
                     }
 
                     CalendarActivity_PointerExited(
                         sender,
                         args);
+                };
+
+            button.PointerPressed +=
+                (_, args) =>
+                {
+                    if (overlapCount <= 1)
+                        return;
+
+                    var point =
+                        args.GetCurrentPoint(button);
+
+                    if (!point.Properties.IsLeftButtonPressed)
+                        return;
+
+                    if (_calendarPinnedOverlapActivityButton != null &&
+                        !ReferenceEquals(
+                            _calendarPinnedOverlapActivityButton,
+                            button) &&
+                        _calendarActivityBaseZIndexes.TryGetValue(
+                            _calendarPinnedOverlapActivityButton,
+                            out var previousZ))
+                    {
+                        Canvas.SetZIndex(
+                            _calendarPinnedOverlapActivityButton,
+                            previousZ);
+                    }
+
+                    _calendarPinnedOverlapActivityButton =
+                        button;
+
+                    Canvas.SetZIndex(
+                        button,
+                        1400);
                 };
 
             button.AddHandler(
@@ -4475,7 +4940,9 @@ namespace Anfeta.UI.Views
                         ChecklistBadge = checklistBadge,
                         ChecklistText = checklistText,
                         CompactChecklistBadge =
-                            compactBadge
+                            compactBadge,
+                        TimerBadge = workTimerBadge,
+                        TimerText = workTimerText
                     });
             }
         }
@@ -4587,7 +5054,7 @@ namespace Anfeta.UI.Views
             _calendarDraggingButton.Opacity = 0.78;
             Canvas.SetZIndex(
                 _calendarDraggingButton,
-                500);
+                900);
 
             var minutes =
                 Math.Round(
@@ -4843,6 +5310,10 @@ namespace Anfeta.UI.Views
                 CalendarContextSendMessage_Click);
 
             AddItem(
+                "💬 WhatsApp…",
+                CalendarContextWhatsApp_Click);
+
+            AddItem(
                 "Copiar nombre",
                 CalendarContextCopyName_Click);
 
@@ -4877,8 +5348,43 @@ namespace Anfeta.UI.Views
                 "Duplicar actividad…",
                 CalendarContextDuplicate_Click);
 
+            flyout.Items.Add(
+                new MenuFlyoutSeparator());
+
+            if (IsCalendarWorkTimerFor(activity))
+            {
+                if (_calendarWorkTimerState?.IsRunning == true)
+                {
+                    AddItem(
+                        $"⏸ Pausar cronómetro · " +
+                        $"{FormatCalendarWorkTimer(GetCalendarWorkTimerElapsedSeconds())}",
+                        CalendarContextPauseWorkTimer_Click);
+                }
+                else
+                {
+                    AddItem(
+                        $"▶ Continuar cronómetro · " +
+                        $"{FormatCalendarWorkTimer(GetCalendarWorkTimerElapsedSeconds())}",
+                        CalendarContextResumeWorkTimer_Click);
+                }
+
+                AddItem(
+                    "■ Terminar y guardar tiempo",
+                    CalendarContextFinishWorkTimer_Click);
+
+                AddItem(
+                    "✕ Cancelar cronómetro",
+                    CalendarContextCancelWorkTimer_Click);
+            }
+            else
+            {
+                AddItem(
+                    "▶ Iniciar cronómetro",
+                    CalendarContextStartWorkTimer_Click);
+            }
+
             AddItem(
-                "⏱ Registrar tiempo trabajado…",
+                "⏱ Registrar tiempo manualmente…",
                 CalendarContextRegisterWork_Click);
 
             AddItem(
@@ -4944,6 +5450,1565 @@ namespace Anfeta.UI.Views
                 : null;
         }
 
+
+        private static readonly (string Token, string Label)[]
+            WhatsAppCalendarProjectTypes =
+            {
+                ("sseo", "SEO"),
+                ("wwebs", "WEB"),
+                ("aads", "ADS"),
+                ("aapli", "APLICACIÓN"),
+                ("pprog", "PROGRAMACIÓN"),
+                ("ddise", "DISEÑO"),
+                ("rrede", "REDES")
+            };
+
+        private static bool TryGetWhatsAppCalendarProjectType(
+            NotionCalendarActivity activity,
+            out string projectType,
+            out string projectLabel)
+        {
+            projectType = string.Empty;
+            projectLabel = string.Empty;
+
+            if (activity == null)
+                return false;
+
+            var searchable = string.Join(
+                " ",
+                activity.Title ?? string.Empty,
+                activity.Project ?? string.Empty);
+
+            foreach (var candidate in WhatsAppCalendarProjectTypes)
+            {
+                if (!Regex.IsMatch(
+                        searchable,
+                        $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(candidate.Token)}(?![\p{{L}}\p{{Nd}}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant))
+                {
+                    continue;
+                }
+
+                projectType = candidate.Token;
+                projectLabel = candidate.Label;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static readonly string[]
+            WhatsAppCalendarMonthTags =
+            {
+                "jjane",
+                "ffebr",
+                "mmarz",
+                "aabri",
+                "mmayo",
+                "jjuni",
+                "jjuli",
+                "aagos",
+                "ssept",
+                "ooctu",
+                "nnovi",
+                "ddici"
+            };
+
+        private static string GetWhatsAppCalendarMonthTag(
+            DateTime date)
+        {
+            var month =
+                Math.Clamp(
+                    date.Month,
+                    1,
+                    12);
+
+            return WhatsAppCalendarMonthTags[
+                month - 1];
+        }
+
+        private static string BuildWhatsAppDomainStutterTag(
+            string domain)
+        {
+            var clean =
+                (domain ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+
+            if (clean.StartsWith(
+                    "www.",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                clean =
+                    clean.Substring(4);
+            }
+
+            var firstLabel =
+                clean.Split(
+                        '.',
+                        StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault() ??
+                string.Empty;
+
+            firstLabel =
+                Regex.Replace(
+                    firstLabel,
+                    @"[^a-z0-9]",
+                    string.Empty,
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant)
+                .ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(firstLabel))
+                return string.Empty;
+
+            // Tag tartamudo de cinco caracteres:
+            // fortelite -> ffort
+            // gami      -> ggami
+            // abc       -> aaabc
+            var body =
+                firstLabel.Substring(
+                    0,
+                    Math.Min(
+                        4,
+                        firstLabel.Length));
+
+            var result =
+                firstLabel[0] + body;
+
+            while (result.Length < 5)
+                result = firstLabel[0] + result;
+
+            return result.Length > 5
+                ? result.Substring(0, 5)
+                : result;
+        }
+
+        private static string BuildWhatsAppCalendarGroupName(
+            string domain,
+            string projectType,
+            DateTime date)
+        {
+            var domainTag =
+                BuildWhatsAppDomainStutterTag(
+                    domain);
+
+            var monthTag =
+                GetWhatsAppCalendarMonthTag(
+                    date);
+
+            return
+                $"TzPROY [{projectType}] {domain} " +
+                $"[{domainTag}] [{monthTag}] E00F00";
+        }
+
+        private async void CalendarContextWhatsApp_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            HideCalendarActivityPreviewFlyout();
+
+            var domain =
+                TryExtractFirstDomain(
+                    BuildCalendarSearchRow(activity));
+
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                StatusText.Text =
+                    "Estado: No se encontró un dominio para relacionar con WhatsApp.";
+                return;
+            }
+
+            if (!TryGetWhatsAppCalendarProjectType(
+                    activity,
+                    out var projectType,
+                    out var projectLabel))
+            {
+                StatusText.Text =
+                    "Estado: No se detectó el tipo de proyecto (sseo, wwebs, aads, aapli, pprog, ddise o rrede).";
+                return;
+            }
+
+            var bridge =
+                new WhatsAppBridgeService();
+
+            if (!bridge.IsConfigured)
+            {
+                var setupDialog = new ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    Title = "Configurar WhatsApp",
+                    Content =
+                        "Falta configurar la URL o API key del WhatsApp Bridge. " +
+                        "Puedes hacerlo visualmente desde Configuración → WhatsApp Web.",
+                    PrimaryButtonText = "Abrir Configuración",
+                    CloseButtonText = "Cancelar",
+                    DefaultButton = ContentDialogButton.Primary
+                };
+
+                if (await setupDialog.ShowAsync() ==
+                    ContentDialogResult.Primary)
+                {
+                    Frame.Navigate(typeof(SettingsView));
+                }
+
+                return;
+            }
+
+            try
+            {
+                StatusText.Text =
+                    $"Estado: Buscando grupo de {domain} · {projectLabel}…";
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(85));
+
+                var status =
+                    await bridge.GetStatusAsync(cts.Token);
+
+                if (!status.Connected)
+                {
+                    await bridge.StartAsync(cts.Token);
+
+                    for (var attempt = 0;
+                         attempt < 10 && !status.Connected;
+                         attempt++)
+                    {
+                        await Task.Delay(
+                            TimeSpan.FromSeconds(1.5),
+                            cts.Token);
+
+                        status =
+                            await bridge.GetStatusAsync(
+                                cts.Token);
+
+                        if (status.QrAvailable ||
+                            string.Equals(
+                                status.Status,
+                                "QR_REQUIRED",
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if (!status.Connected)
+                {
+                    var connectDialog = new ContentDialog
+                    {
+                        XamlRoot = XamlRoot,
+                        Title = "WhatsApp necesita atención",
+                        Content =
+                            status.QrAvailable ||
+                            string.Equals(
+                                status.Status,
+                                "QR_REQUIRED",
+                                StringComparison.OrdinalIgnoreCase)
+                                ? "La cuenta necesita escanear un QR. Ábrela desde Configuración → WhatsApp Web."
+                                : $"WhatsApp todavía no está conectado ({status.Status}). Puedes revisarlo desde Configuración.",
+                        PrimaryButtonText = "Abrir Configuración",
+                        CloseButtonText = "Cerrar"
+                    };
+
+                    if (await connectDialog.ShowAsync() ==
+                        ContentDialogResult.Primary)
+                    {
+                        Frame.Navigate(typeof(SettingsView));
+                    }
+
+                    return;
+                }
+
+                var resolved =
+                    await bridge.ResolveGroupAsync(
+                        domain,
+                        projectType,
+                        cts.Token);
+
+                if (resolved.Exists &&
+                    resolved.Group != null)
+                {
+                    await ShowExistingWhatsAppGroupAsync(
+                        resolved.Group,
+                        domain,
+                        projectLabel);
+                    return;
+                }
+
+                await CreateWhatsAppGroupFromCalendarAsync(
+                    bridge,
+                    activity,
+                    domain,
+                    projectType,
+                    projectLabel,
+                    cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: WhatsApp tardó demasiado en responder. Intenta nuevamente.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: Error WhatsApp → {ex.Message}";
+            }
+        }
+
+        private async Task ShowExistingWhatsAppGroupAsync(
+            WhatsAppGroupInfo group,
+            string domain,
+            string projectLabel)
+        {
+            var panel = new StackPanel
+            {
+                Width = 430,
+                Spacing = 8
+            };
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text = group.Name,
+                    FontSize = 15,
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap
+                });
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        $"{domain} · {projectLabel}\n" +
+                        $"ID: {group.GroupId}\n\n" +
+                        "ANFETA encontró el grupo guardado. No se creará un duplicado.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.76
+                });
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "💬 Grupo WhatsApp encontrado",
+                Content = panel,
+                PrimaryButtonText = "Abrir grupo",
+                SecondaryButtonText = "Copiar enlace",
+                CloseButtonText = "Cerrar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            var result =
+                await dialog.ShowAsync();
+
+            if (result == ContentDialogResult.Primary)
+            {
+                await OpenWhatsAppInviteLinkAsync(
+                    group.InviteLink,
+                    group.Name);
+            }
+            else if (result == ContentDialogResult.Secondary)
+            {
+                CopyCalendarText(
+                    group.InviteLink,
+                    "Estado: Enlace del grupo WhatsApp copiado ✅");
+            }
+        }
+
+        private async Task CreateWhatsAppGroupFromCalendarAsync(
+            WhatsAppBridgeService bridge,
+            NotionCalendarActivity activity,
+            string domain,
+            string projectType,
+            string projectLabel,
+            CancellationToken cancellationToken)
+        {
+            var defaultName =
+                BuildWhatsAppCalendarGroupName(
+                    domain,
+                    projectType,
+                    activity.Start);
+
+            var nameBox = new TextBox
+            {
+                Header = "Nombre del grupo",
+                Text = defaultName,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var seedBox = new TextBox
+            {
+                Header = "Número interno inicial",
+                Text = WhatsAppBridgeService.GetSavedSeedParticipant(),
+                PlaceholderText = "Ej. 524831191441",
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var panel = new StackPanel
+            {
+                Width = 450,
+                Spacing = 10
+            };
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        $"Servicio: {projectLabel} ({projectType})\n" +
+                        $"Dominio: {domain}\n" +
+                        $"Tag dominio: {BuildWhatsAppDomainStutterTag(domain)}\n" +
+                        $"Mes: {GetWhatsAppCalendarMonthTag(activity.Start)}",
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.78
+                });
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "Estructura automática: " +
+                        "TzPROY [servicio] dominio [tag dominio] [mes] E00F00. " +
+                        "El nombre sigue siendo editable antes de crear.",
+                    FontSize = 10.5,
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.68
+                });
+
+            panel.Children.Add(nameBox);
+            panel.Children.Add(seedBox);
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "El número inicial sirve para que WhatsApp permita crear el grupo. " +
+                        "El cliente NO se agrega automáticamente: ANFETA devolverá un enlace de invitación.",
+                    FontSize = 11,
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.68
+                });
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Crear grupo WhatsApp",
+                Content = panel,
+                PrimaryButtonText = "Crear grupo",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                StatusText.Text =
+                    "Estado: Creación de grupo cancelada.";
+                return;
+            }
+
+            var name =
+                (nameBox.Text ?? string.Empty).Trim();
+
+            var seedParticipant =
+                (seedBox.Text ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                StatusText.Text =
+                    "Estado: Escribe un nombre para el grupo WhatsApp.";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(seedParticipant))
+            {
+                StatusText.Text =
+                    "Estado: Configura un número interno inicial para crear grupos.";
+                return;
+            }
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_WhatsAppSeedParticipant] = seedParticipant;
+
+            StatusText.Text =
+                $"Estado: Creando grupo {name}…";
+
+            var created =
+                await bridge.CreateGroupAsync(
+                    name,
+                    domain,
+                    projectType,
+                    seedParticipant,
+                    cancellationToken);
+
+            if (!created.Created ||
+                created.Group == null)
+            {
+                throw new InvalidOperationException(
+                    "El Bridge no devolvió el grupo creado.");
+            }
+
+            StatusText.Text =
+                $"Estado: Grupo WhatsApp creado ✅ {created.Group.Name}";
+
+            var successDialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Grupo creado ✅",
+                Content =
+                    $"{created.Group.Name}\n\n" +
+                    $"Dominio: {domain}\n" +
+                    $"Servicio: {projectLabel}\n\n" +
+                    "El enlace está listo para compartir con el cliente.",
+                PrimaryButtonText = "Abrir grupo",
+                SecondaryButtonText = "Copiar enlace",
+                CloseButtonText = "Cerrar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            var successResult =
+                await successDialog.ShowAsync();
+
+            if (successResult == ContentDialogResult.Primary)
+            {
+                await OpenWhatsAppInviteLinkAsync(
+                    created.Group.InviteLink,
+                    created.Group.Name);
+            }
+            else if (successResult == ContentDialogResult.Secondary)
+            {
+                CopyCalendarText(
+                    created.Group.InviteLink,
+                    "Estado: Enlace de invitación copiado ✅");
+            }
+        }
+
+        private async Task OpenWhatsAppInviteLinkAsync(
+            string inviteLink,
+            string groupName)
+        {
+            if (!Uri.TryCreate(
+                    inviteLink,
+                    UriKind.Absolute,
+                    out var uri))
+            {
+                StatusText.Text =
+                    "Estado: El grupo no tiene un enlace de invitación válido.";
+                return;
+            }
+
+            var opened =
+                await Launcher.LaunchUriAsync(uri);
+
+            StatusText.Text = opened
+                ? $"Estado: WhatsApp abierto ✅ {groupName}"
+                : "Estado: Windows no pudo abrir el enlace de WhatsApp.";
+        }
+
+        private void EnsureCalendarWorkTimerLoaded()
+        {
+            lock (_calendarWorkTimerSync)
+            {
+                if (_calendarWorkTimerLoaded)
+                    return;
+
+                _calendarWorkTimerLoaded = true;
+
+                try
+                {
+                    var path = Path.Combine(
+                        ApplicationData.Current.LocalFolder.Path,
+                        CalendarWorkTimerFileName);
+
+                    if (!File.Exists(path))
+                        return;
+
+                    var raw = File.ReadAllText(path);
+
+                    if (string.IsNullOrWhiteSpace(raw))
+                        return;
+
+                    var restored =
+                        JsonSerializer.Deserialize<
+                            CalendarWorkTimerState>(raw);
+
+                    if (restored == null ||
+                        string.IsNullOrWhiteSpace(restored.PageId))
+                    {
+                        return;
+                    }
+
+                    // Si ANFETA se cerró mientras corría el cronómetro, solo
+                    // recuperamos hasta el último heartbeat persistido.
+                    // El tiempo con la app cerrada NO se cuenta por seguridad.
+                    if (restored.IsRunning &&
+                        restored.SegmentStartedAt.HasValue)
+                    {
+                        var end =
+                            restored.LastHeartbeatAt ??
+                            restored.SegmentStartedAt.Value;
+
+                        if (end > restored.SegmentStartedAt.Value)
+                        {
+                            restored.AccumulatedSeconds +=
+                                Math.Max(
+                                    0,
+                                    (long)Math.Floor(
+                                        (end -
+                                         restored.SegmentStartedAt.Value)
+                                        .TotalSeconds));
+                        }
+
+                        restored.IsRunning = false;
+                        restored.SegmentStartedAt = null;
+                    }
+
+                    _calendarWorkTimerState = restored;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine(
+                        $"[CALENDAR_WORK_TIMER_LOAD] {ex.Message}");
+                }
+            }
+        }
+
+        private void SaveCalendarWorkTimer()
+        {
+            lock (_calendarWorkTimerSync)
+            {
+                try
+                {
+                    var path = Path.Combine(
+                        ApplicationData.Current.LocalFolder.Path,
+                        CalendarWorkTimerFileName);
+
+                    if (_calendarWorkTimerState == null)
+                    {
+                        if (File.Exists(path))
+                            File.Delete(path);
+
+                        return;
+                    }
+
+                    var snapshot =
+                        new CalendarWorkTimerState
+                        {
+                            PageId =
+                                _calendarWorkTimerState.PageId,
+                            Title =
+                                _calendarWorkTimerState.Title,
+                            WorkDate =
+                                _calendarWorkTimerState.WorkDate,
+                            AccumulatedSeconds =
+                                _calendarWorkTimerState.AccumulatedSeconds,
+                            SegmentStartedAt =
+                                _calendarWorkTimerState.SegmentStartedAt,
+                            LastHeartbeatAt =
+                                _calendarWorkTimerState.IsRunning
+                                    ? DateTimeOffset.Now
+                                    : _calendarWorkTimerState.LastHeartbeatAt,
+                            IsRunning =
+                                _calendarWorkTimerState.IsRunning
+                        };
+
+                    var json =
+                        JsonSerializer.Serialize(
+                            snapshot,
+                            new JsonSerializerOptions
+                            {
+                                WriteIndented = true
+                            });
+
+                    File.WriteAllText(path, json);
+                    _calendarWorkTimerLastPersistence =
+                        DateTimeOffset.Now;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine(
+                        $"[CALENDAR_WORK_TIMER_SAVE] {ex.Message}");
+                }
+            }
+        }
+
+        private void EnsureCalendarWorkSessionHistoryLoaded()
+        {
+            lock (_calendarWorkSessionsSync)
+            {
+                if (_calendarWorkSessionsLoaded)
+                    return;
+
+                _calendarWorkSessionsLoaded = true;
+                _calendarWorkSessions.Clear();
+
+                try
+                {
+                    var path = Path.Combine(
+                        ApplicationData.Current.LocalFolder.Path,
+                        CalendarWorkSessionHistoryFileName);
+
+                    if (!File.Exists(path))
+                        return;
+
+                    var raw = File.ReadAllText(path);
+
+                    if (string.IsNullOrWhiteSpace(raw))
+                        return;
+
+                    var restored =
+                        JsonSerializer.Deserialize<
+                            List<CalendarWorkSessionEntry>>(raw);
+
+                    if (restored == null)
+                        return;
+
+                    foreach (var entry in restored)
+                    {
+                        if (entry == null ||
+                            string.IsNullOrWhiteSpace(entry.PageId) ||
+                            entry.Minutes <= 0)
+                        {
+                            continue;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(entry.Id))
+                            entry.Id = Guid.NewGuid().ToString("N");
+
+                        _calendarWorkSessions.Add(entry);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine(
+                        $"[CALENDAR_WORK_SESSIONS_LOAD] {ex.Message}");
+                }
+            }
+        }
+
+        private void SaveCalendarWorkSessionHistory()
+        {
+            lock (_calendarWorkSessionsSync)
+            {
+                try
+                {
+                    var path = Path.Combine(
+                        ApplicationData.Current.LocalFolder.Path,
+                        CalendarWorkSessionHistoryFileName);
+
+                    // Se conserva un historial amplio, pero acotado, para que
+                    // el archivo local no crezca indefinidamente.
+                    var snapshot =
+                        _calendarWorkSessions
+                            .OrderBy(entry => entry.RecordedAt)
+                            .TakeLast(5000)
+                            .ToList();
+
+                    var json =
+                        JsonSerializer.Serialize(
+                            snapshot,
+                            new JsonSerializerOptions
+                            {
+                                WriteIndented = true
+                            });
+
+                    File.WriteAllText(path, json);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine(
+                        $"[CALENDAR_WORK_SESSIONS_SAVE] {ex.Message}");
+                }
+            }
+        }
+
+        private void RegisterCalendarWorkSession(
+            NotionCalendarActivity activity,
+            DateTime workDate,
+            int minutes,
+            string source)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId) ||
+                minutes <= 0)
+            {
+                return;
+            }
+
+            EnsureCalendarWorkSessionHistoryLoaded();
+
+            lock (_calendarWorkSessionsSync)
+            {
+                _calendarWorkSessions.Add(
+                    new CalendarWorkSessionEntry
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        PageId = activity.PageId,
+                        Title =
+                            string.IsNullOrWhiteSpace(activity.Title)
+                                ? "Actividad"
+                                : activity.Title.Trim(),
+                        WorkDate = workDate.Date,
+                        Minutes = Math.Max(1, minutes),
+                        Source =
+                            string.IsNullOrWhiteSpace(source)
+                                ? "ANFETA"
+                                : source.Trim(),
+                        RecordedAt = DateTimeOffset.Now
+                    });
+            }
+
+            SaveCalendarWorkSessionHistory();
+        }
+
+        private int GetCalendarWorkedMinutesForDay(
+            NotionCalendarActivity activity,
+            DateTime day)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                return 0;
+            }
+
+            EnsureCalendarWorkSessionHistoryLoaded();
+
+            lock (_calendarWorkSessionsSync)
+            {
+                return _calendarWorkSessions
+                    .Where(entry =>
+                        entry.WorkDate.Date == day.Date &&
+                        string.Equals(
+                            entry.PageId,
+                            activity.PageId,
+                            StringComparison.OrdinalIgnoreCase))
+                    .Sum(entry => Math.Max(0, entry.Minutes));
+            }
+        }
+
+        private int GetCalendarWorkedMinutesForDay(
+            IEnumerable<NotionCalendarActivity> activities,
+            DateTime day)
+        {
+            if (activities == null)
+                return 0;
+
+            var pageIds =
+                activities
+                    .Where(activity =>
+                        activity != null &&
+                        !string.IsNullOrWhiteSpace(activity.PageId))
+                    .Select(activity => activity.PageId)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (pageIds.Count == 0)
+                return 0;
+
+            EnsureCalendarWorkSessionHistoryLoaded();
+
+            lock (_calendarWorkSessionsSync)
+            {
+                return _calendarWorkSessions
+                    .Where(entry =>
+                        entry.WorkDate.Date == day.Date &&
+                        pageIds.Contains(entry.PageId))
+                    .Sum(entry => Math.Max(0, entry.Minutes));
+            }
+        }
+
+        private static int GetCalendarScheduledMinutes(
+            IEnumerable<NotionCalendarActivity> activities)
+        {
+            if (activities == null)
+                return 0;
+
+            return activities
+                .Where(activity => activity != null)
+                .GroupBy(
+                    activity => activity.PageId,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Sum(activity =>
+                {
+                    if (activity.End <= activity.Start)
+                        return 0;
+
+                    return Math.Max(
+                        0,
+                        (int)Math.Round(
+                            (activity.End - activity.Start)
+                            .TotalMinutes));
+                });
+        }
+
+        private int GetCalendarPersonWorkedMinutesToday(
+            string person)
+        {
+            var activities =
+                GetCalendarDailySummaryActivities(person);
+
+            return GetCalendarWorkedMinutesForDay(
+                activities,
+                _calendarSelectedDate.Date);
+        }
+
+        private long GetCalendarWorkTimerElapsedSeconds()
+        {
+            EnsureCalendarWorkTimerLoaded();
+
+            var state = _calendarWorkTimerState;
+            if (state == null)
+                return 0;
+
+            var total =
+                Math.Max(
+                    0,
+                    state.AccumulatedSeconds);
+
+            if (state.IsRunning &&
+                state.SegmentStartedAt.HasValue)
+            {
+                total += Math.Max(
+                    0,
+                    (long)Math.Floor(
+                        (DateTimeOffset.Now -
+                         state.SegmentStartedAt.Value)
+                        .TotalSeconds));
+            }
+
+            return total;
+        }
+
+        private static string FormatCalendarWorkTimer(
+            long totalSeconds)
+        {
+            totalSeconds =
+                Math.Max(
+                    0,
+                    totalSeconds);
+
+            var elapsed =
+                TimeSpan.FromSeconds(totalSeconds);
+
+            return elapsed.TotalHours >= 1
+                ? elapsed.ToString(@"hh\:mm\:ss")
+                : elapsed.ToString(@"mm\:ss");
+        }
+
+        private bool IsCalendarWorkTimerFor(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                return false;
+            }
+
+            EnsureCalendarWorkTimerLoaded();
+
+            return _calendarWorkTimerState != null &&
+                   string.Equals(
+                       _calendarWorkTimerState.PageId,
+                       activity.PageId,
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string BuildCalendarWorkTimerBadgeText(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null)
+                return string.Empty;
+
+            if (IsCalendarWorkTimerFor(activity))
+            {
+                var icon =
+                    _calendarWorkTimerState?.IsRunning == true
+                        ? "▶"
+                        : "⏸";
+
+                return
+                    $"{icon} " +
+                    FormatCalendarWorkTimer(
+                        GetCalendarWorkTimerElapsedSeconds());
+            }
+
+            // Aunque el cronómetro ya terminó, el tiempo trabajado queda
+            // visible permanentemente en la tarjeta.
+            if (activity.WorkedMinutes > 0)
+            {
+                return
+                    $"⏱ " +
+                    FormatCalendarWorkMinutes(
+                        activity.WorkedMinutes);
+            }
+
+            return string.Empty;
+        }
+
+        private (Color Background, Color Border)
+            GetCalendarWorkBadgeColors(
+                NotionCalendarActivity activity)
+        {
+            var isCurrent =
+                IsCalendarWorkTimerFor(activity);
+
+            if (isCurrent &&
+                _calendarWorkTimerState?.IsRunning == true)
+            {
+                return (
+                    Color.FromArgb(238, 8, 47, 73),
+                    Color.FromArgb(255, 56, 189, 248));
+            }
+
+            if (isCurrent)
+            {
+                return (
+                    Color.FromArgb(238, 61, 38, 8),
+                    Color.FromArgb(255, 251, 191, 36));
+            }
+
+            // Verde = tiempo ya guardado en Notion.
+            return (
+                Color.FromArgb(238, 6, 55, 45),
+                Color.FromArgb(255, 52, 211, 153));
+        }
+
+        private void EnsureCalendarWorkTimerUiTimer()
+        {
+            if (_calendarWorkTimerUiTimer != null)
+            {
+                if (!_calendarWorkTimerUiTimer.IsEnabled)
+                    _calendarWorkTimerUiTimer.Start();
+
+                return;
+            }
+
+            _calendarWorkTimerUiTimer =
+                new DispatcherTimer
+                {
+                    Interval =
+                        TimeSpan.FromSeconds(1)
+                };
+
+            _calendarWorkTimerUiTimer.Tick +=
+                (_, __) =>
+                {
+                    var state =
+                        _calendarWorkTimerState;
+
+                    if (state == null)
+                        return;
+
+                    UpdateCalendarWorkTimerVisuals(
+                        state.PageId);
+
+                    if (state.IsRunning &&
+                        DateTimeOffset.Now -
+                        _calendarWorkTimerLastPersistence >=
+                        TimeSpan.FromSeconds(15))
+                    {
+                        SaveCalendarWorkTimer();
+                    }
+                };
+
+            _calendarWorkTimerUiTimer.Start();
+        }
+
+        private void UpdateCalendarWorkTimerVisuals(
+            string pageId)
+        {
+            if (string.IsNullOrWhiteSpace(pageId) ||
+                !_calendarActivityVisuals.TryGetValue(
+                    pageId,
+                    out var visuals))
+            {
+                return;
+            }
+
+            var activity =
+                _calendarActivities
+                    .FirstOrDefault(item =>
+                        string.Equals(
+                            item.PageId,
+                            pageId,
+                            StringComparison.OrdinalIgnoreCase));
+
+            if (activity == null)
+                return;
+
+            var timerText =
+                BuildCalendarWorkTimerBadgeText(
+                    activity);
+
+            foreach (var visual in visuals)
+            {
+                visual.TimerText.Text = timerText;
+                visual.TimerBadge.Visibility =
+                    string.IsNullOrWhiteSpace(timerText)
+                        ? Visibility.Collapsed
+                        : Visibility.Visible;
+
+                var colors =
+                    GetCalendarWorkBadgeColors(
+                        activity);
+
+                visual.TimerBadge.Background =
+                    new SolidColorBrush(
+                        colors.Background);
+
+                visual.TimerBadge.BorderBrush =
+                    new SolidColorBrush(
+                        colors.Border);
+            }
+        }
+
+        private void RefreshCalendarWorkTimerUi(
+            string? previousPageId = null)
+        {
+            if (!string.IsNullOrWhiteSpace(previousPageId))
+            {
+                UpdateCalendarWorkTimerVisuals(
+                    previousPageId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(
+                    _calendarWorkTimerState?.PageId))
+            {
+                UpdateCalendarWorkTimerVisuals(
+                    _calendarWorkTimerState.PageId);
+            }
+
+            if (CalendarPersonPreviewPanel?.Visibility ==
+                    Visibility.Visible &&
+                !string.IsNullOrWhiteSpace(
+                    _calendarPersonPreviewPerson))
+            {
+                RenderCalendarPersonPreviewItems(
+                    _calendarPersonPreviewPerson);
+            }
+        }
+
+        private async Task StartCalendarWorkTimerAsync(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                activity.IsReviewMirror ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                return;
+            }
+
+            EnsureCalendarWorkTimerLoaded();
+            EnsureCalendarWorkTimerUiTimer();
+
+            if (_calendarWorkTimerState != null &&
+                !string.Equals(
+                    _calendarWorkTimerState.PageId,
+                    activity.PageId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var dialog =
+                    new ContentDialog
+                    {
+                        XamlRoot = XamlRoot,
+                        Title =
+                            "Ya hay un cronómetro pendiente",
+                        Content =
+                            $"Primero termina o cancela el cronómetro de:\n\n" +
+                            $"{_calendarWorkTimerState.Title}\n\n" +
+                            $"Tiempo actual: " +
+                            $"{FormatCalendarWorkTimer(GetCalendarWorkTimerElapsedSeconds())}",
+                        CloseButtonText = "Entendido"
+                    };
+
+                await dialog.ShowAsync();
+                return;
+            }
+
+            if (_calendarWorkTimerState == null)
+            {
+                _calendarWorkTimerState =
+                    new CalendarWorkTimerState
+                    {
+                        PageId = activity.PageId,
+                        Title =
+                            string.IsNullOrWhiteSpace(
+                                activity.Title)
+                                ? "Actividad"
+                                : activity.Title.Trim(),
+                        WorkDate = DateTime.Today,
+                        AccumulatedSeconds = 0,
+                        SegmentStartedAt =
+                            DateTimeOffset.Now,
+                        LastHeartbeatAt =
+                            DateTimeOffset.Now,
+                        IsRunning = true
+                    };
+            }
+            else
+            {
+                if (_calendarWorkTimerState.IsRunning)
+                {
+                    StatusText.Text =
+                        "Estado: El cronómetro ya está corriendo.";
+                    return;
+                }
+
+                _calendarWorkTimerState.SegmentStartedAt =
+                    DateTimeOffset.Now;
+                _calendarWorkTimerState.LastHeartbeatAt =
+                    DateTimeOffset.Now;
+                _calendarWorkTimerState.IsRunning = true;
+            }
+
+            SaveCalendarWorkTimer();
+            RefreshCalendarWorkTimerUi();
+
+            StatusText.Text =
+                $"Estado: ▶ Cronómetro iniciado · " +
+                $"{activity.Title}";
+        }
+
+        private void PauseCalendarWorkTimer(
+            NotionCalendarActivity activity)
+        {
+            if (!IsCalendarWorkTimerFor(activity) ||
+                _calendarWorkTimerState == null ||
+                !_calendarWorkTimerState.IsRunning)
+            {
+                return;
+            }
+
+            if (_calendarWorkTimerState
+                .SegmentStartedAt.HasValue)
+            {
+                _calendarWorkTimerState
+                    .AccumulatedSeconds +=
+                    Math.Max(
+                        0,
+                        (long)Math.Floor(
+                            (DateTimeOffset.Now -
+                             _calendarWorkTimerState
+                                 .SegmentStartedAt.Value)
+                            .TotalSeconds));
+            }
+
+            _calendarWorkTimerState.IsRunning = false;
+            _calendarWorkTimerState.SegmentStartedAt = null;
+            _calendarWorkTimerState.LastHeartbeatAt =
+                DateTimeOffset.Now;
+
+            SaveCalendarWorkTimer();
+            RefreshCalendarWorkTimerUi();
+
+            StatusText.Text =
+                $"Estado: ⏸ Cronómetro pausado · " +
+                $"{FormatCalendarWorkTimer(GetCalendarWorkTimerElapsedSeconds())}";
+        }
+
+        private async Task FinishCalendarWorkTimerAsync(
+            NotionCalendarActivity activity)
+        {
+            if (!IsCalendarWorkTimerFor(activity) ||
+                _calendarWorkTimerState == null)
+            {
+                return;
+            }
+
+            if (_calendarWorkTimerState.IsRunning &&
+                _calendarWorkTimerState
+                    .SegmentStartedAt.HasValue)
+            {
+                _calendarWorkTimerState
+                    .AccumulatedSeconds +=
+                    Math.Max(
+                        0,
+                        (long)Math.Floor(
+                            (DateTimeOffset.Now -
+                             _calendarWorkTimerState
+                                 .SegmentStartedAt.Value)
+                            .TotalSeconds));
+
+                _calendarWorkTimerState.IsRunning = false;
+                _calendarWorkTimerState.SegmentStartedAt =
+                    null;
+            }
+
+            var totalSeconds =
+                Math.Max(
+                    0,
+                    _calendarWorkTimerState
+                        .AccumulatedSeconds);
+
+            if (totalSeconds <= 0)
+            {
+                StatusText.Text =
+                    "Estado: El cronómetro todavía no tiene tiempo para guardar.";
+                return;
+            }
+
+            var workedMinutes =
+                Math.Max(
+                    1,
+                    (int)Math.Round(
+                        totalSeconds / 60d,
+                        MidpointRounding.AwayFromZero));
+
+            var workDate =
+                _calendarWorkTimerState.WorkDate.Date;
+
+            var confirmation =
+                new ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    Title =
+                        "Guardar tiempo trabajado",
+                    Content =
+                        $"{activity.Title}\n\n" +
+                        $"Cronómetro: " +
+                        $"{FormatCalendarWorkTimer(totalSeconds)}\n" +
+                        $"Se registrará en Notion: " +
+                        $"{FormatCalendarWorkMinutes(workedMinutes)}\n\n" +
+                        "El registro queda acumulado con el tiempo trabajado existente.",
+                    PrimaryButtonText =
+                        "Guardar y terminar",
+                    CloseButtonText =
+                        "Cancelar",
+                    DefaultButton =
+                        ContentDialogButton.Primary
+                };
+
+            if (await confirmation.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                // Permanece pausado para que el usuario pueda continuar.
+                SaveCalendarWorkTimer();
+                RefreshCalendarWorkTimerUi();
+                return;
+            }
+
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    "Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            try
+            {
+                StatusText.Text =
+                    "Estado: Guardando cronómetro en Notion...";
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(2));
+
+                var result =
+                    await _notionCalendarService
+                        .RegisterActivityWorkAsync(
+                            token,
+                            activity,
+                            workDate,
+                            workedMinutes,
+                            cts.Token);
+
+                activity.EstimatedWorkMinutes =
+                    result.Activity.EstimatedWorkMinutes;
+                activity.WorkedMinutes =
+                    result.Activity.WorkedMinutes;
+                activity.WorkLogDetail =
+                    result.Activity.WorkLogDetail;
+
+                RegisterCalendarWorkSession(
+                    activity,
+                    workDate,
+                    workedMinutes,
+                    "Cronómetro");
+
+                var previousPageId =
+                    _calendarWorkTimerState.PageId;
+
+                _calendarWorkTimerState = null;
+                SaveCalendarWorkTimer();
+
+                var currentDay =
+                    await _notionCalendarService
+                        .TryGetCachedDayAsync(
+                            _calendarSelectedDate,
+                            cts.Token);
+
+                _calendarActivities =
+                    currentDay ??
+                    _calendarActivities;
+
+                DrawCalendarPreservingView(
+                    _calendarActivities,
+                    force: true);
+
+                RefreshCalendarWorkTimerUi(
+                    previousPageId);
+
+                StatusText.Text =
+                    $"Estado: ⏱ Tiempo guardado ✅ · " +
+                    $"{FormatCalendarWorkMinutes(workedMinutes)} · " +
+                    $"{activity.WorkProgressLabel}";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: Notion tardó demasiado en guardar el cronómetro.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo guardar el cronómetro → {ex.Message}";
+            }
+        }
+
+        private async Task CancelCalendarWorkTimerAsync(
+            NotionCalendarActivity activity)
+        {
+            if (!IsCalendarWorkTimerFor(activity) ||
+                _calendarWorkTimerState == null)
+            {
+                return;
+            }
+
+            var elapsed =
+                FormatCalendarWorkTimer(
+                    GetCalendarWorkTimerElapsedSeconds());
+
+            var dialog =
+                new ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    Title =
+                        "Cancelar cronómetro",
+                    Content =
+                        $"Se descartarán {elapsed} de esta sesión.\n\n" +
+                        "No se modificará el tiempo ya guardado en Notion.",
+                    PrimaryButtonText =
+                        "Descartar",
+                    CloseButtonText =
+                        "Conservar",
+                    DefaultButton =
+                        ContentDialogButton.Close
+                };
+
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            var previousPageId =
+                _calendarWorkTimerState.PageId;
+
+            _calendarWorkTimerState = null;
+            SaveCalendarWorkTimer();
+            RefreshCalendarWorkTimerUi(
+                previousPageId);
+
+            StatusText.Text =
+                "Estado: Cronómetro descartado.";
+        }
+
+        private async void CalendarContextStartWorkTimer_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            await StartCalendarWorkTimerAsync(
+                activity);
+
+            DrawCalendarPreservingView(
+                _calendarActivities,
+                force: true);
+        }
+
+        private void CalendarContextPauseWorkTimer_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            PauseCalendarWorkTimer(activity);
+
+            DrawCalendarPreservingView(
+                _calendarActivities,
+                force: true);
+        }
+
+        private async void CalendarContextResumeWorkTimer_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            await StartCalendarWorkTimerAsync(
+                activity);
+
+            DrawCalendarPreservingView(
+                _calendarActivities,
+                force: true);
+        }
+
+        private async void CalendarContextFinishWorkTimer_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            await FinishCalendarWorkTimerAsync(
+                activity);
+        }
+
+        private async void CalendarContextCancelWorkTimer_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            await CancelCalendarWorkTimerAsync(
+                activity);
+
+            DrawCalendarPreservingView(
+                _calendarActivities,
+                force: true);
+        }
 
         private async void CalendarContextRegisterWork_Click(
             object sender,
@@ -5167,6 +7232,12 @@ namespace Anfeta.UI.Views
                     result.Activity.WorkedMinutes;
                 activity.WorkLogDetail =
                     result.Activity.WorkLogDetail;
+
+                RegisterCalendarWorkSession(
+                    activity,
+                    workDate.Date.Date,
+                    workedMinutes,
+                    "Manual");
 
                 var continued =
                     continueTomorrow.IsChecked == true &&
@@ -7164,6 +9235,38 @@ namespace Anfeta.UI.Views
                     activity,
                     previewChecklist));
 
+            if (IsCalendarWorkTimerFor(activity))
+            {
+                AddSummary(
+                    _calendarWorkTimerState?.IsRunning == true
+                        ? "Cronómetro activo"
+                        : "Cronómetro pausado",
+                    FormatCalendarWorkTimer(
+                        GetCalendarWorkTimerElapsedSeconds()));
+            }
+
+            var workedTodayInPreview =
+                GetCalendarWorkedMinutesForDay(
+                    activity,
+                    _calendarSelectedDate.Date);
+
+            if (workedTodayInPreview > 0)
+            {
+                AddSummary(
+                    "Tiempo real hoy",
+                    FormatCalendarWorkMinutes(
+                        workedTodayInPreview));
+            }
+
+            if (activity.HasWorkLog &&
+                activity.WorkedMinutes > 0)
+            {
+                AddSummary(
+                    "Tiempo acumulado",
+                    FormatCalendarWorkMinutes(
+                        activity.WorkedMinutes));
+            }
+
             if (activity.HasActivityDayRange)
             {
                 AddSummary(
@@ -7299,6 +9402,52 @@ namespace Anfeta.UI.Views
                     }
                 };
 
+            var timerButton =
+                BuildCardActionButton(
+                    IsCalendarWorkTimerFor(activity)
+                        ? _calendarWorkTimerState?.IsRunning == true
+                            ? "⏸ Pausar"
+                            : "▶ Continuar"
+                        : "▶ Cronómetro");
+
+            timerButton.IsEnabled =
+                !activity.IsReviewMirror;
+
+            timerButton.Click +=
+                async (_, __) =>
+                {
+                    if (IsCalendarWorkTimerFor(activity) &&
+                        _calendarWorkTimerState?.IsRunning == true)
+                    {
+                        PauseCalendarWorkTimer(
+                            activity);
+                    }
+                    else
+                    {
+                        await StartCalendarWorkTimerAsync(
+                            activity);
+                    }
+
+                    DrawCalendarPreservingView(
+                        _calendarActivities,
+                        force: true);
+                };
+
+            var finishTimerButton =
+                BuildCardActionButton(
+                    "■ Guardar tiempo");
+
+            finishTimerButton.IsEnabled =
+                !activity.IsReviewMirror &&
+                IsCalendarWorkTimerFor(activity);
+
+            finishTimerButton.Click +=
+                async (_, __) =>
+                {
+                    await FinishCalendarWorkTimerAsync(
+                        activity);
+                };
+
             var readButton =
                 BuildCardActionButton(
                     "▶ Leer resumen");
@@ -7332,6 +9481,8 @@ namespace Anfeta.UI.Views
             actions.Children.Add(messageButton);
             actions.Children.Add(openButton);
             actions.Children.Add(lockButton);
+            actions.Children.Add(timerButton);
+            actions.Children.Add(finishTimerButton);
             actions.Children.Add(readButton);
             actions.Children.Add(stopSpeechButton);
 
@@ -10982,6 +13133,23 @@ namespace Anfeta.UI.Views
             builder.AppendLine($"Suspendidas: {suspended.Count}");
             builder.AppendLine($"Atrasadas: {overdue.Count}");
 
+            var workedTodayMinutes =
+                GetCalendarWorkedMinutesForDay(
+                    source,
+                    _calendarSelectedDate.Date);
+
+            var scheduledMinutes =
+                GetCalendarScheduledMinutes(
+                    source);
+
+            builder.AppendLine(
+                $"Tiempo real registrado hoy: " +
+                $"{FormatCalendarWorkMinutes(workedTodayMinutes)}");
+
+            builder.AppendLine(
+                $"Tiempo programado visible: " +
+                $"{FormatCalendarWorkMinutes(scheduledMinutes)}");
+
             if (source.Count == 0)
             {
                 builder.AppendLine();
@@ -11007,8 +13175,18 @@ namespace Anfeta.UI.Views
                     : string.Empty;
 
                 var workText = activity.HasWorkLog
-                    ? $" · {activity.WorkProgressLabel}"
+                    ? $" · acumulado {activity.WorkProgressLabel}"
                     : string.Empty;
+
+                var workedToday =
+                    GetCalendarWorkedMinutesForDay(
+                        activity,
+                        _calendarSelectedDate.Date);
+
+                var todayWorkText =
+                    workedToday > 0
+                        ? $" · hoy {FormatCalendarWorkMinutes(workedToday)}"
+                        : string.Empty;
 
                 var delayText = overdueMinutes > 0
                     ? $" · ⚠ retraso {FormatCalendarDelayMinutes(overdueMinutes)}"
@@ -11018,6 +13196,7 @@ namespace Anfeta.UI.Views
                     $"• {activity.Start:HH:mm}–{activity.End:HH:mm} · " +
                     $"{GetCalendarSummaryPhaseLabel(activity)} · {activity.Title}" +
                     checklistText +
+                    todayWorkText +
                     workText +
                     delayText);
             }
@@ -11087,6 +13266,64 @@ namespace Anfeta.UI.Views
                 148,
                 163,
                 184);
+        }
+
+        private Border BuildCalendarSummaryMetricCard(
+            string icon,
+            string label,
+            string value,
+            Color accent)
+        {
+            var panel = new StackPanel
+            {
+                Spacing = 2
+            };
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text = $"{icon} {value}",
+                    FontSize = 18,
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground =
+                        new SolidColorBrush(accent),
+                    MaxLines = 1,
+                    TextTrimming =
+                        TextTrimming.CharacterEllipsis
+                });
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text = label,
+                    FontSize = 10.5,
+                    Opacity = 0.72,
+                    TextWrapping = TextWrapping.Wrap
+                });
+
+            return new Border
+            {
+                Width = 142,
+                MinHeight = 62,
+                Padding = new Thickness(11, 8, 11, 8),
+                Margin = new Thickness(0, 0, 7, 7),
+                CornerRadius = new CornerRadius(8),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(
+                    Color.FromArgb(
+                        70,
+                        accent.R,
+                        accent.G,
+                        accent.B)),
+                Background = new SolidColorBrush(
+                    Color.FromArgb(
+                        22,
+                        accent.R,
+                        accent.G,
+                        accent.B)),
+                Child = panel
+            };
         }
 
         private Border BuildCalendarSummaryMetricCard(
@@ -11255,11 +13492,23 @@ namespace Anfeta.UI.Views
                     $"Checklist {GetChecklistPercentage(stats)}%");
             }
 
+            var workedToday =
+                GetCalendarWorkedMinutesForDay(
+                    activity,
+                    _calendarSelectedDate.Date);
+
+            if (workedToday > 0)
+            {
+                detailParts.Add(
+                    $"⏱ Hoy {FormatCalendarWorkMinutes(workedToday)}");
+            }
+
             if (activity.HasWorkLog &&
                 !string.IsNullOrWhiteSpace(
                     activity.WorkProgressLabel))
             {
-                detailParts.Add(activity.WorkProgressLabel);
+                detailParts.Add(
+                    $"Acumulado {activity.WorkProgressLabel}");
             }
 
             if (detailParts.Count > 0)
@@ -11522,12 +13771,25 @@ namespace Anfeta.UI.Views
                     $"Checklist: {GetChecklistPercentage(stats)} por ciento");
             }
 
+            var workedToday =
+                GetCalendarWorkedMinutesForDay(
+                    activity,
+                    _calendarSelectedDate.Date);
+
+            if (workedToday > 0)
+            {
+                parts.Add(
+                    $"Tiempo real registrado hoy: " +
+                    $"{FormatCalendarWorkMinutes(workedToday)}");
+            }
+
             if (activity.HasWorkLog &&
                 !string.IsNullOrWhiteSpace(
                     activity.WorkProgressLabel))
             {
                 parts.Add(
-                    $"Tiempo trabajado: {CleanSpeechText(activity.WorkProgressLabel)}");
+                    $"Tiempo trabajado acumulado: " +
+                    $"{CleanSpeechText(activity.WorkProgressLabel)}");
             }
 
             var overdueMinutes =
@@ -11746,6 +14008,31 @@ namespace Anfeta.UI.Views
                     "Terminadas",
                     completed.Count,
                     Color.FromArgb(255, 96, 165, 250)));
+
+            var workedTodayMinutes =
+                GetCalendarWorkedMinutesForDay(
+                    activities,
+                    _calendarSelectedDate.Date);
+
+            var scheduledMinutes =
+                GetCalendarScheduledMinutes(
+                    activities);
+
+            metrics.Children.Add(
+                BuildCalendarSummaryMetricCard(
+                    "⏱",
+                    "Tiempo real hoy",
+                    FormatCalendarWorkMinutes(
+                        workedTodayMinutes),
+                    Color.FromArgb(255, 52, 211, 153)));
+
+            metrics.Children.Add(
+                BuildCalendarSummaryMetricCard(
+                    "🗓",
+                    "Programado",
+                    FormatCalendarWorkMinutes(
+                        scheduledMinutes),
+                    Color.FromArgb(255, 56, 189, 248)));
 
             root.Children.Add(metrics);
 

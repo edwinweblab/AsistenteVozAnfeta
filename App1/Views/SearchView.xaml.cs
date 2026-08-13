@@ -769,6 +769,11 @@ namespace Anfeta.UI.Views
         #endregion
         private void RefreshResultsListView()
         {
+            // Prepara únicamente metadatos VISUALES de Dropbox.
+            // Target conserva la ruta local absoluta que usan abrir/renombrar/eliminar.
+            foreach (var row in Results)
+                ApplyDropboxDisplayMetadata(row);
+
             if (_resultGroupingMode == ResultGroupingMode.None)
             {
                 _groupedResultsViewSource = null;
@@ -1255,6 +1260,11 @@ namespace Anfeta.UI.Views
                     "dropbox" => SearchSourceScope.Dropbox,
                     _ => SearchSourceScope.All
                 };
+
+                // Dropbox siempre abre por defecto con los archivos
+                // modificados más recientemente en la parte superior.
+                if (_activeSourceScope == SearchSourceScope.Dropbox)
+                    _sortKey = "mod_desc";
 
                 var savedGroupingMode =
                     (values[LS_ResultGroupingMode] as string ?? "none")

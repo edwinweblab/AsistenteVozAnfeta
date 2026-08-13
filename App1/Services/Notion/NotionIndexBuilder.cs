@@ -306,15 +306,16 @@ namespace Anfeta.UI.Services.Notion
                         "pagar",
                         StringComparison.OrdinalIgnoreCase);
 
-                // BD COBRAR Y PAGAR usa su propia fecha calendarizable.
+                // BD COBRAR Y PAGAR usa EXCLUSIVAMENTE la propiedad
+                // "Due Fecha Recordatorio" para el calendario. Se compara por
+                // nombre normalizado para tolerar el icono/emoji del nombre de
+                // propiedad, pero NO se aceptan "fe", "Fecha de Inicio" ni
+                // otras fechas de la base.
                 scheduledDate =
                     isCobrarPagarSource
-                        ? GetPropTextByFlexibleAliases(
+                        ? GetPropTextByNormalizedExactAlias(
                             props,
-                            "Due Fecha Recordatorio",
-                            "Due Fecha recordatorio",
-                            "Fecha Recordatorio",
-                            "Fecha de Recordatorio")
+                            "Due Fecha Recordatorio")
                         : GetPropTextByFlexibleAliases(
                             props,
                             "Fecha POR Hacer (Trabajando)",
@@ -528,6 +529,33 @@ namespace Anfeta.UI.Services.Notion
                    !string.Equals(clean, "Vacio", StringComparison.OrdinalIgnoreCase) &&
                    !string.Equals(clean, "-", StringComparison.OrdinalIgnoreCase) &&
                    !string.Equals(clean, "—", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetPropTextByNormalizedExactAlias(
+            JsonElement props,
+            string alias)
+        {
+            var normalizedAlias =
+                NormalizePropertyName(alias);
+
+            if (string.IsNullOrWhiteSpace(normalizedAlias))
+                return string.Empty;
+
+            foreach (var property in props.EnumerateObject())
+            {
+                if (!string.Equals(
+                        NormalizePropertyName(property.Name),
+                        normalizedAlias,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                return ExtractPropertyText(
+                    property.Value);
+            }
+
+            return string.Empty;
         }
 
         private static string GetPropTextByFlexibleAliases(

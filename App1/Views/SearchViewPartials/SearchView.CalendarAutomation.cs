@@ -19,8 +19,16 @@ namespace Anfeta.UI.Views
             "Search.Calendar.DailyAutomation.LastRun";
         private const string LS_DailyCalendarAutomationVersion =
             "Search.Calendar.DailyAutomation.Version";
-        private const int DailyCalendarAutomationVersion = 2;
+        private const int DailyCalendarAutomationVersion = 3;
         private const int DailyCalendarRepairLookbackDays = 14;
+
+        // Hora objetivo acordada: dejar las actividades listas antes de que
+        // el equipo empiece a conectarse. Si ANFETA estaba cerrada a esta hora,
+        // la ejecución pendiente se realiza al abrir el calendario después.
+        private const int DailyCalendarAutomationStartHour = 5;
+
+        private bool _dailyCalendarAutomationRunning;
+
         private const string DailyCalendarReportFileName =
             "calendar_daily_report.json";
 
@@ -63,7 +71,10 @@ namespace Anfeta.UI.Views
         {
             var now = DateTime.Now;
 
-            if (now.Hour < 7)
+            // Antes de las 05:00 no se mueve nada automáticamente.
+            // Desde las 05:00 en adelante, la primera oportunidad disponible
+            // procesa el día si todavía no existe una ejecución válida de hoy.
+            if (now.Hour < DailyCalendarAutomationStartHour)
                 return;
 
             var values =
@@ -111,6 +122,22 @@ namespace Anfeta.UI.Views
         private async Task RunDailyCalendarAutomationCoreAsync(
             bool showResultDialog)
         {
+            // El timer, la apertura del calendario y el botón manual pueden
+            // coincidir. Solo permitimos una ejecución a la vez para evitar
+            // mover la misma actividad dos veces o duplicar consultas a Notion.
+            if (_dailyCalendarAutomationRunning)
+            {
+                if (showResultDialog)
+                {
+                    StatusText.Text =
+                        "Estado: La automatización diaria ya se está ejecutando...";
+                }
+
+                return;
+            }
+
+            _dailyCalendarAutomationRunning = true;
+
             var values =
                 ApplicationData.Current.LocalSettings.Values;
 
@@ -119,6 +146,7 @@ namespace Anfeta.UI.Views
 
             if (string.IsNullOrWhiteSpace(token))
             {
+                _dailyCalendarAutomationRunning = false;
                 StatusText.Text =
                     "Estado: Configura primero el token de Notion.";
                 return;
@@ -447,18 +475,47 @@ namespace Anfeta.UI.Views
                     report,
                     cts.Token);
 
-                var todayCache =
-                    await _notionCalendarService
-                        .TryGetCachedDayAsync(
-                            today,
-                            cts.Token);
+                // IMPORTANTE:
+                // MoveActivityToDateAsync puede dejar en la caché de HOY solamente
+                // las actividades que fueron movidas durante esta automatización.
+                // Si dibujamos esa caché directamente, el usuario ve únicamente
+                // esas actividades (por ejemplo 7) hasta pulsar "Actualizar".
+                //
+                // Al terminar la automatización reconstruimos HOY desde Notion
+                // para que la primera vista ya contenga TODAS las actividades.
+                IReadOnlyList<NotionCalendarActivity> refreshedToday;
+
+                try
+                {
+                    StatusText.Text =
+                        "Estado: Actualizando calendario de hoy después de mover rezagadas...";
+
+                    refreshedToday =
+                        await _notionCalendarService
+                            .GetDayAsync(
+                                token,
+                                today,
+                                progress: null,
+                                cts.Token,
+                                forceRefresh: true);
+                }
+                catch
+                {
+                    // Respaldo: si falla la recarga completa, conservamos lo que
+                    // exista en caché en lugar de perder completamente la vista.
+                    refreshedToday =
+                        await _notionCalendarService
+                            .TryGetCachedDayAsync(
+                                today,
+                                cts.Token) ??
+                        Array.Empty<NotionCalendarActivity>();
+                }
 
                 if (_calendarViewActive &&
                     _calendarSelectedDate.Date == today)
                 {
                     _calendarActivities =
-                        todayCache ??
-                        Array.Empty<NotionCalendarActivity>();
+                        refreshedToday;
 
                     DrawCalendarPreservingView(
                         _calendarActivities,
@@ -492,6 +549,7 @@ namespace Anfeta.UI.Views
             }
             finally
             {
+                _dailyCalendarAutomationRunning = false;
                 HideLoadingState();
             }
         }

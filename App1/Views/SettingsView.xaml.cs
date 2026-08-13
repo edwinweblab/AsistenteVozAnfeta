@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using NAudio.CoreAudioApi;
 using System;
 using System.IO;
@@ -14,6 +15,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Capture;
 using Windows.Storage;
+using Windows.Storage.Streams;
 using Windows.UI;
 using WinRT.Interop;
 using Anfeta.UI.Models.Weblab;
@@ -31,7 +33,11 @@ namespace Anfeta.UI.Views
         private readonly SettingsService _settingsService;
         private readonly AppStateService _appState;
         private readonly DropboxAuthService _dropboxAuthService;
+        private readonly WhatsAppBridgeService _whatsAppBridgeService;
         private readonly DispatcherTimer _statusTimer;
+
+        private CancellationTokenSource? _whatsAppConnectionCts;
+        private bool _whatsAppBusy;
 
         // Dropbox
         private CancellationTokenSource? _indexCts;
@@ -46,6 +52,7 @@ namespace Anfeta.UI.Views
             _audioService = new AudioService();
             _appState = App.AppHost.Services.GetRequiredService<AppStateService>();
             _dropboxAuthService = App.AppHost.Services.GetRequiredService<DropboxAuthService>();
+            _whatsAppBridgeService = new WhatsAppBridgeService();
             _settingsService = new SettingsService(_appState);
 
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -69,7 +76,12 @@ namespace Anfeta.UI.Views
             LoadCurrentUserIntoUI();
             LoadDropboxRootIntoUI();
             LoadNotionSettingsIntoUI();
+            LoadWhatsAppSettingsIntoUI();
             await LoadDropboxApiStateAsync();
+
+            // WhatsApp se comprueba en paralelo para no retrasar la apertura
+            // de Configuración si Render estuviera despertando.
+            _ = LoadWhatsAppBridgeStateAsync(silent: true);
 
             _ = Task.Run(async () =>
             {
@@ -86,6 +98,17 @@ namespace Anfeta.UI.Views
 
             _indexCts?.Cancel();
             _indexCts = null;
+
+            try
+            {
+                _whatsAppConnectionCts?.Cancel();
+                _whatsAppConnectionCts?.Dispose();
+            }
+            catch
+            {
+            }
+
+            _whatsAppConnectionCts = null;
         }
 
         private void LoadCurrentUserIntoUI()
@@ -809,6 +832,610 @@ namespace Anfeta.UI.Views
             DropboxPathBox.Text = string.Empty;
             ShowStatus("Ruta reiniciada. Configura una nueva carpeta.", InfoBarSeverity.Informational);
         }
+        // ─────────────────────────────────────────────────────────
+        // WHATSAPP WEB — BRIDGE RENDER + BAILEYS
+        // ─────────────────────────────────────────────────────────
+
+        private void LoadWhatsAppSettingsIntoUI()
+        {
+            WhatsAppBridgeUrlBox.Text =
+                WhatsAppBridgeService.GetSavedBridgeUrl();
+
+            WhatsAppApiKeyBox.Password =
+                WhatsAppBridgeService.GetSavedApiKey();
+
+            WhatsAppSeedParticipantBox.Text =
+                WhatsAppBridgeService.GetSavedSeedParticipant();
+
+            _whatsAppBridgeService.ReloadConfiguration();
+
+            if (!_whatsAppBridgeService.IsConfigured)
+            {
+                SetWhatsAppDisconnectedUi(
+                    "Falta configurar URL o API key.");
+            }
+        }
+
+        private bool SaveWhatsAppConfigurationFromUI(
+            bool showSuccess)
+        {
+            try
+            {
+                WhatsAppBridgeService.SaveConfiguration(
+                    WhatsAppBridgeUrlBox.Text,
+                    WhatsAppApiKeyBox.Password,
+                    WhatsAppSeedParticipantBox.Text);
+
+                _whatsAppBridgeService.ReloadConfiguration();
+
+                if (showSuccess)
+                {
+                    ShowStatus(
+                        "Configuración del WhatsApp Bridge guardada ✅",
+                        InfoBarSeverity.Success);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowStatus(
+                    $"WhatsApp Bridge → {ex.Message}",
+                    InfoBarSeverity.Warning);
+                return false;
+            }
+        }
+
+        private void BtnSaveWhatsAppBridge_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            SaveWhatsAppConfigurationFromUI(
+                showSuccess: true);
+        }
+
+        private async void BtnTestWhatsAppBridge_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!SaveWhatsAppConfigurationFromUI(
+                    showSuccess: false))
+            {
+                return;
+            }
+
+            await LoadWhatsAppBridgeStateAsync(
+                silent: false);
+        }
+
+        private async void BtnConnectWhatsApp_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!SaveWhatsAppConfigurationFromUI(
+                    showSuccess: false))
+            {
+                return;
+            }
+
+            await StartAndMonitorWhatsAppAsync();
+        }
+
+        private async void BtnShowWhatsAppQr_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!SaveWhatsAppConfigurationFromUI(
+                    showSuccess: false))
+            {
+                return;
+            }
+
+            using var cts =
+                new CancellationTokenSource(
+                    TimeSpan.FromSeconds(45));
+
+            try
+            {
+                await ShowWhatsAppQrAsync(
+                    cts.Token);
+            }
+            catch (Exception ex)
+            {
+                ShowStatus(
+                    $"No se pudo obtener el QR → {ex.Message}",
+                    InfoBarSeverity.Warning);
+            }
+        }
+
+        private void BtnCloseWhatsAppQr_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            WhatsAppQrPanel.Visibility =
+                Visibility.Collapsed;
+        }
+
+        private async void BtnChangeWhatsAppAccount_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!SaveWhatsAppConfigurationFromUI(
+                    showSuccess: false))
+            {
+                return;
+            }
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Cambiar cuenta de WhatsApp",
+                Content =
+                    "Se desvinculará la cuenta actual de la sesión anfeta-main " +
+                    "y se eliminarán sus credenciales persistidas.\n\n" +
+                    "Los grupos guardados por dominio + proyecto NO se borrarán. " +
+                    "Después ANFETA mostrará un QR para vincular la nueva cuenta.",
+                PrimaryButtonText = "Cambiar cuenta",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() !=
+                ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            try
+            {
+                CancelWhatsAppMonitor();
+                SetWhatsAppBusy(
+                    true,
+                    "Desvinculando cuenta…");
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(60));
+
+                await _whatsAppBridgeService.UnlinkAsync(
+                    cts.Token);
+
+                SetWhatsAppDisconnectedUi(
+                    "Cuenta desvinculada. Preparando QR nuevo…");
+
+                WhatsAppQrPanel.Visibility =
+                    Visibility.Collapsed;
+            }
+            catch (OperationCanceledException)
+            {
+                SetWhatsAppBusy(false, "Tiempo agotado");
+                ShowStatus(
+                    "El servidor tardó demasiado en desvincular la cuenta.",
+                    InfoBarSeverity.Warning);
+                return;
+            }
+            catch (Exception ex)
+            {
+                SetWhatsAppBusy(false, "Error");
+                ShowStatus(
+                    $"No se pudo cambiar la cuenta → {ex.Message}",
+                    InfoBarSeverity.Error);
+                return;
+            }
+            finally
+            {
+                SetWhatsAppBusy(false, "Listo");
+            }
+
+            await StartAndMonitorWhatsAppAsync();
+        }
+
+        private async Task LoadWhatsAppBridgeStateAsync(
+            bool silent)
+        {
+            _whatsAppBridgeService.ReloadConfiguration();
+
+            if (!_whatsAppBridgeService.IsConfigured)
+            {
+                SetWhatsAppDisconnectedUi(
+                    "Configura URL y API key para comenzar.");
+                return;
+            }
+
+            try
+            {
+                if (!silent)
+                {
+                    SetWhatsAppBusy(
+                        true,
+                        "Verificando servidor…");
+                }
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(80));
+
+                var health =
+                    await _whatsAppBridgeService.GetHealthAsync(
+                        cts.Token);
+
+                if (!silent)
+                {
+                    WhatsAppOperationText.Text =
+                        $"Bridge v{health.Version} disponible";
+                }
+
+                var status =
+                    await _whatsAppBridgeService.GetStatusAsync(
+                        cts.Token);
+
+                UpdateWhatsAppStatusUi(status);
+
+                try
+                {
+                    var persistence =
+                        await _whatsAppBridgeService
+                            .GetPersistenceStatusAsync(
+                                cts.Token);
+
+                    WhatsAppPersistenceText.Text =
+                        persistence.Reachable
+                            ? $"{persistence.Mode} ✓ · " +
+                              $"sesión {(persistence.SessionStored ? "guardada" : "pendiente")} · " +
+                              $"{persistence.GroupsStored} grupo(s)"
+                            : $"{persistence.Mode} · sin respuesta";
+                }
+                catch
+                {
+                    // El estado de WhatsApp sigue siendo útil incluso si la
+                    // consulta informativa de persistencia falla.
+                }
+
+                if (!silent)
+                {
+                    ShowStatus(
+                        status.Connected
+                            ? "WhatsApp Bridge conectado ✅"
+                            : $"WhatsApp Bridge disponible · {status.Status}",
+                        status.Connected
+                            ? InfoBarSeverity.Success
+                            : InfoBarSeverity.Informational);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!silent)
+                {
+                    ShowStatus(
+                        "Tiempo agotado verificando WhatsApp Bridge.",
+                        InfoBarSeverity.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetWhatsAppErrorUi(ex.Message);
+
+                if (!silent)
+                {
+                    ShowStatus(
+                        $"WhatsApp Bridge → {ex.Message}",
+                        InfoBarSeverity.Error);
+                }
+            }
+            finally
+            {
+                if (!silent)
+                    SetWhatsAppBusy(false, "Listo");
+            }
+        }
+
+        private async Task StartAndMonitorWhatsAppAsync()
+        {
+            CancelWhatsAppMonitor();
+
+            _whatsAppConnectionCts =
+                new CancellationTokenSource(
+                    TimeSpan.FromSeconds(110));
+
+            var token =
+                _whatsAppConnectionCts.Token;
+
+            var startedAt =
+                DateTimeOffset.Now;
+
+            try
+            {
+                SetWhatsAppBusy(
+                    true,
+                    "Despertando servidor…");
+
+                await _whatsAppBridgeService.StartAsync(token);
+
+                while (!token.IsCancellationRequested)
+                {
+                    var status =
+                        await _whatsAppBridgeService.GetStatusAsync(
+                            token);
+
+                    UpdateWhatsAppStatusUi(status);
+
+                    var elapsed =
+                        DateTimeOffset.Now - startedAt;
+
+                    WhatsAppOperationText.Text =
+                        $"{GetWhatsAppFriendlyStatus(status.Status)} · " +
+                        $"{elapsed:mm\\:ss}";
+
+                    if (status.Connected)
+                    {
+                        WhatsAppQrPanel.Visibility =
+                            Visibility.Collapsed;
+
+                        ShowStatus(
+                            "WhatsApp conectado correctamente ✅",
+                            InfoBarSeverity.Success);
+
+                        return;
+                    }
+
+                    if (status.QrAvailable ||
+                        string.Equals(
+                            status.Status,
+                            "QR_REQUIRED",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (WhatsAppQrPanel.Visibility !=
+                                Visibility.Visible ||
+                            WhatsAppQrImage.Source == null)
+                        {
+                            await ShowWhatsAppQrAsync(token);
+                        }
+
+                        WhatsAppQrWaitText.Text =
+                            $"Esperando escaneo… {elapsed:mm\\:ss}";
+                    }
+
+                    if (string.Equals(
+                            status.Status,
+                            "ERROR",
+                            StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(
+                            status.Status,
+                            "LOGGED_OUT",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            string.IsNullOrWhiteSpace(status.LastError)
+                                ? $"WhatsApp quedó en estado {status.Status}."
+                                : status.LastError);
+                    }
+
+                    await Task.Delay(
+                        TimeSpan.FromSeconds(2),
+                        token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Una cancelación temprana corresponde a navegación, cambio
+                // de cuenta u otra operación iniciada por el usuario. El timeout
+                // real del monitor ocurre después de ~110 segundos.
+                if (DateTimeOffset.Now - startedAt < TimeSpan.FromSeconds(100))
+                    return;
+
+                ShowStatus(
+                    "La conexión de WhatsApp excedió el tiempo de espera. Puedes volver a intentar.",
+                    InfoBarSeverity.Warning);
+            }
+            catch (Exception ex)
+            {
+                SetWhatsAppErrorUi(ex.Message);
+                ShowStatus(
+                    $"No se pudo conectar WhatsApp → {ex.Message}",
+                    InfoBarSeverity.Error);
+            }
+            finally
+            {
+                SetWhatsAppBusy(false, "Listo");
+            }
+        }
+
+        private async Task ShowWhatsAppQrAsync(
+            CancellationToken cancellationToken)
+        {
+            WhatsAppQrPanel.Visibility =
+                Visibility.Visible;
+            WhatsAppQrLoadingRing.Visibility =
+                Visibility.Visible;
+            WhatsAppQrLoadingRing.IsActive = true;
+            WhatsAppQrWaitText.Text =
+                "Obteniendo código QR…";
+
+            try
+            {
+                var bytes =
+                    await _whatsAppBridgeService.GetQrImageAsync(
+                        cancellationToken);
+
+                using var stream =
+                    new InMemoryRandomAccessStream();
+
+                var output = stream.GetOutputStreamAt(0);
+
+                using (var writer = new DataWriter(output))
+                {
+                    writer.WriteBytes(bytes);
+                    await writer.StoreAsync();
+                    writer.DetachStream();
+                }
+
+                stream.Seek(0);
+
+                var image = new BitmapImage();
+                await image.SetSourceAsync(stream);
+
+                WhatsAppQrImage.Source = image;
+                WhatsAppQrWaitText.Text =
+                    "Esperando escaneo…";
+            }
+            finally
+            {
+                WhatsAppQrLoadingRing.IsActive = false;
+                WhatsAppQrLoadingRing.Visibility =
+                    Visibility.Collapsed;
+            }
+        }
+
+        private void UpdateWhatsAppStatusUi(
+            WhatsAppBridgeStatus status)
+        {
+            var state =
+                (status?.Status ?? string.Empty)
+                .Trim()
+                .ToUpperInvariant();
+
+            WhatsAppStatusText.Text =
+                GetWhatsAppFriendlyStatus(state);
+
+            WhatsAppSessionText.Text =
+                string.IsNullOrWhiteSpace(status?.Session)
+                    ? "anfeta-main"
+                    : status.Session;
+
+            WhatsAppPersistenceText.Text =
+                string.Equals(
+                    status?.Persistence,
+                    "supabase",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "Supabase ✓"
+                    : string.IsNullOrWhiteSpace(status?.Persistence)
+                        ? "Sin comprobar"
+                        : status.Persistence;
+
+            WhatsAppConnectedAtText.Text =
+                status?.ConnectedAt == null
+                    ? "—"
+                    : status.ConnectedAt.Value
+                        .ToLocalTime()
+                        .ToString("dd/MM/yyyy HH:mm:ss");
+
+            WhatsAppStatusDetailText.Text =
+                status?.Connected == true
+                    ? "La cuenta está lista para crear y localizar grupos desde ANFETA."
+                    : !string.IsNullOrWhiteSpace(status?.LastError)
+                        ? status.LastError
+                        : state == "QR_REQUIRED"
+                            ? "Escanea el QR para vincular la cuenta de WhatsApp."
+                            : state == "RECONNECTING"
+                                ? "Baileys está recuperando la sesión guardada."
+                                : "El Bridge está disponible, pero WhatsApp todavía no está conectado.";
+
+            var color = state switch
+            {
+                "CONNECTED" => Color.FromArgb(255, 34, 197, 94),
+                "QR_REQUIRED" => Color.FromArgb(255, 56, 189, 248),
+                "STARTING" or "CONNECTING" or "RECONNECTING" =>
+                    Color.FromArgb(255, 250, 204, 21),
+                "ERROR" or "LOGGED_OUT" =>
+                    Color.FromArgb(255, 248, 113, 113),
+                _ => Color.FromArgb(255, 100, 116, 139)
+            };
+
+            WhatsAppStatusDot.Background =
+                new SolidColorBrush(color);
+
+            BtnShowWhatsAppQr.IsEnabled =
+                !_whatsAppBusy && status?.QrAvailable == true;
+
+            BtnChangeWhatsAppAccount.IsEnabled =
+                !_whatsAppBusy &&
+                _whatsAppBridgeService.IsConfigured;
+        }
+
+        private void SetWhatsAppDisconnectedUi(
+            string detail)
+        {
+            WhatsAppStatusDot.Background =
+                new SolidColorBrush(
+                    Color.FromArgb(255, 100, 116, 139));
+            WhatsAppStatusText.Text = "Sin vincular";
+            WhatsAppStatusDetailText.Text = detail;
+            WhatsAppSessionText.Text = "anfeta-main";
+            WhatsAppPersistenceText.Text = "Sin comprobar";
+            WhatsAppConnectedAtText.Text = "—";
+            BtnShowWhatsAppQr.IsEnabled = false;
+        }
+
+        private void SetWhatsAppErrorUi(
+            string error)
+        {
+            WhatsAppStatusDot.Background =
+                new SolidColorBrush(
+                    Color.FromArgb(255, 248, 113, 113));
+            WhatsAppStatusText.Text = "Error";
+            WhatsAppStatusDetailText.Text =
+                string.IsNullOrWhiteSpace(error)
+                    ? "No se pudo comunicar con el WhatsApp Bridge."
+                    : error;
+            BtnShowWhatsAppQr.IsEnabled = false;
+        }
+
+        private void SetWhatsAppBusy(
+            bool busy,
+            string operation)
+        {
+            _whatsAppBusy = busy;
+
+            WhatsAppOperationRing.IsActive = busy;
+            WhatsAppOperationRing.Visibility =
+                busy
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            WhatsAppOperationText.Text = operation;
+
+            BtnSaveWhatsAppBridge.IsEnabled = !busy;
+            BtnTestWhatsAppBridge.IsEnabled = !busy;
+            BtnConnectWhatsApp.IsEnabled = !busy;
+            BtnChangeWhatsAppAccount.IsEnabled =
+                !busy && _whatsAppBridgeService.IsConfigured;
+
+            if (busy)
+                BtnShowWhatsAppQr.IsEnabled = false;
+        }
+
+        private void CancelWhatsAppMonitor()
+        {
+            try
+            {
+                _whatsAppConnectionCts?.Cancel();
+                _whatsAppConnectionCts?.Dispose();
+            }
+            catch
+            {
+            }
+
+            _whatsAppConnectionCts = null;
+        }
+
+        private static string GetWhatsAppFriendlyStatus(
+            string status)
+        {
+            return (status ?? string.Empty)
+                .Trim()
+                .ToUpperInvariant() switch
+            {
+                "CONNECTED" => "Conectado",
+                "QR_REQUIRED" => "Esperando QR",
+                "STARTING" => "Iniciando",
+                "CONNECTING" => "Conectando",
+                "RECONNECTING" => "Reconectando",
+                "LOGGED_OUT" => "Sesión cerrada",
+                "ERROR" => "Error",
+                "STOPPED" => "Detenido",
+                _ => "Sin comprobar"
+            };
+        }
+
         // ─────────────────────────────────────────────────────────
         // NOTION
         // ─────────────────────────────────────────────────────────

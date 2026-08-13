@@ -333,6 +333,373 @@
                         </Grid>
                     </Border>
                 </StackPanel>
+                <!--  ═══ WHATSAPP WEB ═══  -->
+                <StackPanel Spacing="14">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border
+                            Width="3"
+                            Height="18"
+                            Background="#22C55E"
+                            CornerRadius="2" />
+                        <FontIcon
+                            FontSize="14"
+                            Foreground="#22C55E"
+                            Glyph="&#xE8BD;" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            CharacterSpacing="100"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="#FFFFFF"
+                            Text="WHATSAPP WEB" />
+                    </StackPanel>
+
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border
+                                Grid.Column="0"
+                                Background="#22C55E"
+                                CornerRadius="12,0,0,12"
+                                Opacity="0.78" />
+
+                            <StackPanel
+                                Grid.Column="1"
+                                Padding="18,16"
+                                Spacing="14">
+
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Spacing="4">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Border
+                                                x:Name="WhatsAppStatusDot"
+                                                Width="10"
+                                                Height="10"
+                                                VerticalAlignment="Center"
+                                                Background="#64748B"
+                                                CornerRadius="5" />
+                                            <TextBlock
+                                                x:Name="WhatsAppStatusText"
+                                                FontSize="13"
+                                                FontWeight="SemiBold"
+                                                Foreground="#FFFFFF"
+                                                Text="Sin comprobar" />
+                                        </StackPanel>
+
+                                        <TextBlock
+                                            x:Name="WhatsAppStatusDetailText"
+                                            FontSize="11"
+                                            Foreground="#D4C9C0"
+                                            Text="Configura el Bridge y verifica la conexión."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <StackPanel
+                                        Grid.Column="1"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="8">
+                                        <ProgressRing
+                                            x:Name="WhatsAppOperationRing"
+                                            Width="18"
+                                            Height="18"
+                                            IsActive="False"
+                                            Visibility="Collapsed" />
+                                        <TextBlock
+                                            x:Name="WhatsAppOperationText"
+                                            VerticalAlignment="Center"
+                                            FontSize="10.5"
+                                            Foreground="#86EFAC"
+                                            Text="Listo" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid ColumnSpacing="12" RowSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Spacing="3">
+                                        <TextBlock
+                                            FontSize="10.5"
+                                            Foreground="#9CA3AF"
+                                            Text="Sesión" />
+                                        <TextBlock
+                                            x:Name="WhatsAppSessionText"
+                                            FontSize="11"
+                                            Foreground="#E5E7EB"
+                                            Text="anfeta-main" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="0" Grid.Column="1" Spacing="3">
+                                        <TextBlock
+                                            FontSize="10.5"
+                                            Foreground="#9CA3AF"
+                                            Text="Persistencia" />
+                                        <TextBlock
+                                            x:Name="WhatsAppPersistenceText"
+                                            FontSize="11"
+                                            Foreground="#E5E7EB"
+                                            Text="Sin comprobar" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Spacing="3">
+                                        <TextBlock
+                                            FontSize="10.5"
+                                            Foreground="#9CA3AF"
+                                            Text="Última conexión" />
+                                        <TextBlock
+                                            x:Name="WhatsAppConnectedAtText"
+                                            FontSize="11"
+                                            Foreground="#E5E7EB"
+                                            Text="—" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Border
+                                    Padding="12"
+                                    Background="#141E1A"
+                                    BorderBrush="#284A37"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="#BBF7D0"
+                                            Text="Configuración del Bridge" />
+
+                                        <!--
+                                            Los labels van separados del control.
+                                            No usamos Header + Height fijo porque WinUI incluye
+                                            el Header dentro de esa altura y termina aplastando
+                                            visualmente el área editable.
+                                        -->
+                                        <StackPanel Spacing="5">
+                                            <TextBlock
+                                                FontSize="11"
+                                                FontWeight="SemiBold"
+                                                Foreground="#E5E7EB"
+                                                Text="URL del servidor" />
+                                            <TextBox
+                                                x:Name="WhatsAppBridgeUrlBox"
+                                                MinHeight="42"
+                                                Padding="11,7"
+                                                Background="#0B1411"
+                                                BorderBrush="#3C6E50"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Foreground="#F3F4F6"
+                                                PlaceholderText="https://anfeta-whatsapp-bridge.onrender.com" />
+                                        </StackPanel>
+
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel
+                                                Grid.Column="0"
+                                                Spacing="5">
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="#E5E7EB"
+                                                    Text="API key" />
+                                                <PasswordBox
+                                                    x:Name="WhatsAppApiKeyBox"
+                                                    MinHeight="42"
+                                                    Padding="11,7"
+                                                    Background="#0B1411"
+                                                    BorderBrush="#3C6E50"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Foreground="#F3F4F6"
+                                                    PasswordRevealMode="Peek"
+                                                    PlaceholderText="Clave privada del Bridge" />
+                                            </StackPanel>
+
+                                            <StackPanel
+                                                Grid.Column="1"
+                                                Spacing="5">
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="#E5E7EB"
+                                                    Text="Número interno inicial" />
+                                                <TextBox
+                                                    x:Name="WhatsAppSeedParticipantBox"
+                                                    MinHeight="42"
+                                                    Padding="11,7"
+                                                    Background="#0B1411"
+                                                    BorderBrush="#3C6E50"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Foreground="#F3F4F6"
+                                                    PlaceholderText="Ej. 524831191441" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <TextBlock
+                                            Margin="0,-2,0,0"
+                                            FontSize="10.5"
+                                            Foreground="#9CA3AF"
+                                            Text="El número interno solo se utiliza al crear un grupo. El cliente entra mediante el enlace de invitación."
+                                            TextWrapping="Wrap" />
+
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Button
+                                                x:Name="BtnSaveWhatsAppBridge"
+                                                Click="BtnSaveWhatsAppBridge_Click"
+                                                Style="{StaticResource SecondaryButtonStyle}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <FontIcon FontSize="14" Glyph="&#xE74E;" />
+                                                    <TextBlock Text="Guardar" />
+                                                </StackPanel>
+                                            </Button>
+
+                                            <Button
+                                                x:Name="BtnTestWhatsAppBridge"
+                                                Click="BtnTestWhatsAppBridge_Click"
+                                                Style="{StaticResource SecondaryButtonStyle}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <FontIcon FontSize="14" Glyph="&#xE73E;" />
+                                                    <TextBlock Text="Verificar conexión" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button
+                                        x:Name="BtnConnectWhatsApp"
+                                        Grid.Column="0"
+                                        HorizontalAlignment="Stretch"
+                                        Click="BtnConnectWhatsApp_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <FontIcon FontSize="14" Glyph="&#xE768;" />
+                                            <TextBlock Text="Conectar" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button
+                                        x:Name="BtnShowWhatsAppQr"
+                                        Grid.Column="1"
+                                        HorizontalAlignment="Stretch"
+                                        Click="BtnShowWhatsAppQr_Click"
+                                        IsEnabled="False"
+                                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <FontIcon FontSize="14" Glyph="&#xED14;" />
+                                            <TextBlock Text="Mostrar QR" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button
+                                        x:Name="BtnChangeWhatsAppAccount"
+                                        Grid.Column="2"
+                                        HorizontalAlignment="Stretch"
+                                        Click="BtnChangeWhatsAppAccount_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="7">
+                                            <FontIcon FontSize="14" Glyph="&#xE8D7;" />
+                                            <TextBlock Text="Cambiar cuenta" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <Border
+                                    x:Name="WhatsAppQrPanel"
+                                    Padding="16"
+                                    Background="#101815"
+                                    BorderBrush="#365C46"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Visibility="Collapsed">
+                                    <Grid ColumnSpacing="18">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border
+                                            Width="240"
+                                            Height="240"
+                                            Padding="8"
+                                            Background="White"
+                                            CornerRadius="8">
+                                            <Grid>
+                                                <Image
+                                                    x:Name="WhatsAppQrImage"
+                                                    Stretch="Uniform" />
+                                                <ProgressRing
+                                                    x:Name="WhatsAppQrLoadingRing"
+                                                    Width="38"
+                                                    Height="38"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    IsActive="False"
+                                                    Visibility="Collapsed" />
+                                            </Grid>
+                                        </Border>
+
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Spacing="8">
+                                            <TextBlock
+                                                FontSize="15"
+                                                FontWeight="SemiBold"
+                                                Foreground="#FFFFFF"
+                                                Text="Vincular WhatsApp" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="#D4C9C0"
+                                                Text="En el teléfono abre WhatsApp → Dispositivos vinculados → Vincular dispositivo y escanea este código. ANFETA detectará la conexión automáticamente."
+                                                TextWrapping="Wrap" />
+                                            <TextBlock
+                                                x:Name="WhatsAppQrWaitText"
+                                                FontSize="11"
+                                                Foreground="#86EFAC"
+                                                Text="Esperando escaneo…" />
+                                            <Button
+                                                x:Name="BtnCloseWhatsAppQr"
+                                                HorizontalAlignment="Left"
+                                                Click="BtnCloseWhatsAppQr_Click"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Content="Ocultar QR" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
                 <!--  ═══ SECCIÓN NOTION ═══  -->
                 <StackPanel Spacing="14">
                     <StackPanel Orientation="Horizontal" Spacing="10">

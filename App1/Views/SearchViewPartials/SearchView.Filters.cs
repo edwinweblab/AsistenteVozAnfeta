@@ -2162,6 +2162,11 @@ namespace Anfeta.UI.Views
 
             if (_activeSourceScope == SearchSourceScope.Dropbox)
             {
+                // Al entrar a Dropbox se restablece el orden predeterminado:
+                // Fecha modificada, de más reciente a más antiguo.
+                _sortKey = "mod_desc";
+                UpdateColumnSortIndicators();
+
                 _activeNotionBaseFilter = string.Empty;
                 _activePaymentBaseTitleFilter = string.Empty;
                 SetNotionBaseChipChecks(string.Empty);

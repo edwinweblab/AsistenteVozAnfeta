@@ -8,5 +8,9 @@
         public const string LS_DropboxAccountName = "Dropbox.AccountName";
         public const string LS_DropboxAccountEmail = "Dropbox.AccountEmail";
         public const string LS_DropboxAccountId = "Dropbox.AccountId";
+
+        // WhatsApp Bridge
+        public const string LS_WhatsAppBridgeUrl = "WhatsApp.BridgeUrl";
+        public const string LS_WhatsAppSeedParticipant = "WhatsApp.SeedParticipant";
     }
 }

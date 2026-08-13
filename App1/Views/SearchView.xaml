@@ -8,24 +8,50 @@
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
+    <!-- UX REDESIGN V3: Neon Focus. SOLO diseño; conserva nombres, eventos y lógica. -->
+    <Page.Resources>
+        <!-- Base: negro azulado muy oscuro. -->
+        <LinearGradientBrush x:Key="AnfetaBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#080B0F" Offset="0" />
+            <GradientStop Color="#0A1118" Offset="0.55" />
+            <GradientStop Color="#081019" Offset="1" />
+        </LinearGradientBrush>
+        <SolidColorBrush x:Key="AnfetaSurfaceBrush" Color="#0F141A" />
+        <SolidColorBrush x:Key="AnfetaSurfaceElevatedBrush" Color="#131A22" />
+        <SolidColorBrush x:Key="AnfetaSurfaceSoftBrush" Color="#18212B" />
+        <SolidColorBrush x:Key="AnfetaBorderBrush" Color="#26323E" />
+        <SolidColorBrush x:Key="AnfetaPanelBorderBrush" Color="#2A3E50" />
+        <SolidColorBrush x:Key="AnfetaAccentBrush" Color="#00A8FF" />
+        <SolidColorBrush x:Key="AnfetaNeonBrush" Color="#1FB6FF" />
+        <SolidColorBrush x:Key="AnfetaNeonSoftBrush" Color="#3820AFFF" />
+        <SolidColorBrush x:Key="AnfetaMutedTextBrush" Color="#97A6B5" />
+
+        <!-- Estados activos: azul eléctrico contenido, no pinta toda la interfaz. -->
+        <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#0B3858" />
+        <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#10496F" />
+        <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#092E49" />
+        <SolidColorBrush x:Key="ToggleButtonBorderBrushChecked" Color="#00A8FF" />
+        <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#FFFFFF" />
+    </Page.Resources>
+
     <Grid
         x:Name="RootLayout"
         AllowDrop="True"
-        Background="#151515"
+        Background="{StaticResource AnfetaBackgroundBrush}"
         DragEnter="ResultsDropSurface_DragEnter"
         DragLeave="ResultsDropSurface_DragLeave"
         DragOver="ResultsDropSurface_DragOver"
         Drop="ResultsDropSurface_Drop">
         <Grid.RowDefinitions>
-            <RowDefinition Height="42" />
+            <RowDefinition Height="58" />
             <!--  Row 0 TopBar  -->
             <RowDefinition Height="0" />
             <!--  Row 1 reservado para compatibilidad; sin contenido fijo  -->
-            <RowDefinition Height="62" />
+            <RowDefinition Height="72" />
             <!--  Row 2 Chips + configuración en dos filas  -->
             <RowDefinition Height="*" />
             <!--  Row 3 Body  -->
-            <RowDefinition Height="34" />
+            <RowDefinition Height="38" />
             <!--  Row 4 StatusBar  -->
         </Grid.RowDefinitions>
 
@@ -34,13 +60,21 @@
             ROW 0 · TOP BAR
             ═══════════════════════════════════════════════════════
         -->
+        <Border
+            Grid.Row="0"
+            Margin="10,6,10,2"
+            Background="#0D131A"
+            BorderBrush="#253B4D"
+            BorderThickness="1"
+            CornerRadius="12" />
+
         <Grid
             Grid.Row="0"
-            Padding="8,0"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-            BorderThickness="0,0,0,1"
-            ColumnSpacing="6">
+            Margin="10,6,10,2"
+            Padding="12,0"
+            Background="Transparent"
+            BorderThickness="0"
+            ColumnSpacing="7">
 
             <Grid.ColumnDefinitions>
                 <!--  0 · Buscador flexible  -->
@@ -86,11 +120,29 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
+            <!--  Búsqueda · halo visual detrás del control (no intercepta clics)  -->
+            <Border
+                Grid.Column="0"
+                Height="42"
+                Margin="-4,0,0,0"
+                VerticalAlignment="Center"
+                Background="#1200A8FF"
+                BorderBrush="#4D00A8FF"
+                BorderThickness="3"
+                CornerRadius="12"
+                IsHitTestVisible="False" />
+
             <!--  Búsqueda  -->
             <AutoSuggestBox
                 x:Name="SearchBox"
                 Grid.Column="0"
+                Height="38"
+                Margin="0,0,4,0"
                 VerticalAlignment="Center"
+                Background="#101A24"
+                BorderBrush="{StaticResource AnfetaNeonBrush}"
+                BorderThickness="1"
+                CornerRadius="9"
                 GotFocus="SearchBox_GotFocus"
                 PlaceholderText="Buscar en archivos o Notion... (AND / OR / NOT, ext:pdf)"
                 QueryIcon="Find"
@@ -121,8 +173,8 @@
                             Width="760"
                             MaxHeight="360"
                             Padding="10"
-                            Background="#1F1F1F"
-                            BorderBrush="#3B3B3B"
+                            Background="#0F151C"
+                            BorderBrush="#2A526B"
                             BorderThickness="1"
                             CornerRadius="12">
 
@@ -172,8 +224,8 @@
                                                     <Border
                                                         Width="152"
                                                         Padding="8,5"
-                                                        Background="#243242"
-                                                        BorderBrush="#3E5268"
+                                                        Background="#12202B"
+                                                        BorderBrush="#2B526A"
                                                         BorderThickness="1"
                                                         CornerRadius="10">
 
@@ -303,10 +355,10 @@
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
                 VerticalAlignment="Center"
-                Background="#2F2F2F"
-                BorderBrush="#3A3A3A"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="{StaticResource AnfetaBorderBrush}"
                 Click="BtnSaveSearch_Click"
-                CornerRadius="7"
+                CornerRadius="9"
                 Foreground="White"
                 ToolTipService.ToolTip="Guardar búsqueda como chip rápido">
                 <FontIcon
@@ -359,15 +411,18 @@
             <!--  Ayuda  -->
             <Button
                 x:Name="BtnHelp"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
                 Grid.Column="3"
                 Width="32"
                 Height="32"
                 VerticalAlignment="Center"
-                Click="MenuHelp_Click"
+                Click="MenuHelpV2_Click"
                 Content="?"
                 CornerRadius="6"
                 FontWeight="SemiBold"
-                ToolTipService.ToolTip="Ayuda de comandos de búsqueda" />
+                ToolTipService.ToolTip="Ayuda: comandos, carpetas, archivos y filtros" />
 
             <!--  Separador  -->
             <Border
@@ -380,6 +435,9 @@
             <!--  Toggle Filtros  -->
             <ToggleButton
                 x:Name="ToggleFoldersPane"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
                 Grid.Column="5"
                 MinWidth="70"
                 Height="32"
@@ -394,6 +452,9 @@
             <!--  Toggle Detalles  -->
             <ToggleButton
                 x:Name="ToggleDetailsPane"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
                 Grid.Column="6"
                 MinWidth="76"
                 Height="32"
@@ -428,6 +489,9 @@
             <!--  Calendario comparativo de Revisiones  -->
             <ToggleButton
                 x:Name="ToggleCalendarView"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
                 Grid.Column="8"
                 Width="38"
                 Height="32"
@@ -484,6 +548,9 @@
             <!--  Mensajes / recordatorios  -->
             <ToggleButton
                 x:Name="ToggleMessagesView"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
                 Grid.Column="9"
                 Width="44"
                 Height="32"
@@ -527,6 +594,9 @@
             <!--  Calendario exclusivo de recordatorios  -->
             <ToggleButton
                 x:Name="ToggleRemindersCalendarView"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
                 Grid.Column="10"
                 Width="44"
                 Height="32"
@@ -570,6 +640,9 @@
             <!--  Pantallazo de resultados  -->
             <Button
                 x:Name="BtnCaptureResults"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
                 Grid.Column="11"
                 Width="38"
                 Height="32"
@@ -670,8 +743,8 @@
                 Visibility="Collapsed">
                 <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
                 <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
-                <ComboBoxItem Content="Modificado (nuevo)" Tag="mod_desc" />
-                <ComboBoxItem Content="Modificado (antiguo)" Tag="mod_asc" />
+                <ComboBoxItem Content="Fecha modificada (más reciente)" Tag="mod_desc" />
+                <ComboBoxItem Content="Fecha modificada (más antiguo)" Tag="mod_asc" />
             </ComboBox>
         </Grid>
 
@@ -691,16 +764,24 @@
             como fallback para el code-behind si los necesita.
             ═══════════════════════════════════════════════════════
         -->
+        <Border
+            Grid.Row="2"
+            Margin="10,4,10,4"
+            Background="#0D1319"
+            BorderBrush="#223848"
+            BorderThickness="1"
+            CornerRadius="12" />
+
         <Grid
             Grid.Row="2"
-            Padding="8,3"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-            BorderThickness="0,0,0,1"
-            RowSpacing="3">
+            Margin="10,4,10,4"
+            Padding="12,5"
+            Background="Transparent"
+            BorderThickness="0"
+            RowSpacing="5">
             <Grid.RowDefinitions>
-                <RowDefinition Height="26" />
                 <RowDefinition Height="27" />
+                <RowDefinition Height="29" />
             </Grid.RowDefinitions>
 
             <!-- Primera fila: chips. Se desplaza horizontalmente si no caben. -->
@@ -718,11 +799,11 @@
                     <!--  Favoritos se queda  -->
                     <ToggleButton
                     x:Name="ChipBookmarks"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipFilter_Click"
                     Content="⭐ Favoritos"
-                    CornerRadius="11" />
+                    CornerRadius="13" />
 
                     <Border
                     Width="1"
@@ -734,30 +815,39 @@
                     <!--  Filtro global por origen  -->
                     <ToggleButton
                     x:Name="ChipSourceAll"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipSourceFilter_Click"
                     Content="Todo"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="all" />
 
                     <ToggleButton
                     x:Name="ChipSourceNotion"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipSourceFilter_Click"
                     Content="Notion"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="notion" />
 
                     <ToggleButton
                     x:Name="ChipSourceDropbox"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipSourceFilter_Click"
                     Content="Dropbox"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="dropbox" />
+
+                    <ToggleButton
+                    x:Name="ChipFolders"
+                    Height="25"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="📁 Carpetas"
+                    CornerRadius="13"
+                    ToolTipService.ToolTip="Solo carpetas · type:folder · .folder" />
 
                     <Border
                     Width="1"
@@ -769,74 +859,74 @@
                     <!--  Filtros por base Notion  -->
                     <ToggleButton
                     x:Name="ChipBaseAll"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="Todas bases"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="" />
 
                     <ToggleButton
                     x:Name="ChipBaseRevisiones"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="Revisiones"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="Revisiones" />
 
                     <ToggleButton
                     x:Name="ChipBaseClientes"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zClientes"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="Clientes" />
 
                     <ToggleButton
                     x:Name="ChipBaseDominios"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zDominios"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="Dominios" />
 
                     <ToggleButton
                     x:Name="ChipBaseProgramas"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zProyectos"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="Programas y proyectos" />
 
                     <ToggleButton
                     x:Name="ChipBasePagar"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zPAGAR"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="Cobrar y pagar|PAGAR" />
 
                     <ToggleButton
                     x:Name="ChipBaseCobrar"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zCOBRAR"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="Cobrar y pagar|COBRAR" />
 
                     <ToggleButton
                     x:Name="ChipBaseCorreos"
-                    Height="22"
+                    Height="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zCorreos"
-                    CornerRadius="11"
+                    CornerRadius="13"
                     Tag="Correos Contraseñas" />
                 </StackPanel>
             </ScrollViewer>
@@ -962,7 +1052,6 @@
                 <ToggleButton x:Name="ChipImg" />
                 <ToggleButton x:Name="ChipUrl" />
                 <ToggleButton x:Name="ChipRecent" />
-                <ToggleButton x:Name="ChipFolders" />
             </StackPanel>
 
             <!--
@@ -996,7 +1085,7 @@
         -->
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="FoldersPaneCol" Width="220" />
+                <ColumnDefinition x:Name="FoldersPaneCol" Width="230" />
                 <ColumnDefinition Width="1" />
                 <!--  div izq-centro  -->
                 <ColumnDefinition Width="*" MinWidth="320" />
@@ -1007,9 +1096,9 @@
                 <!--  divisor ajustable centro-derecha  -->
                 <ColumnDefinition
                     x:Name="DetailsCol"
-                    Width="380"
-                    MinWidth="260"
-                    MaxWidth="750" />
+                    Width="340"
+                    MinWidth="280"
+                    MaxWidth="680" />
             </Grid.ColumnDefinitions>
 
             <!--  Vista de mensajes y recordatorios; lógica en SearchView.Messages.cs  -->
@@ -1018,7 +1107,7 @@
                 Grid.Column="0"
                 Grid.ColumnSpan="5"
                 Canvas.ZIndex="510"
-                Background="#111820"
+                Background="#111418"
                 Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -1027,9 +1116,9 @@
 
                 <Border
                     Grid.Row="0"
-                    Padding="12,9"
-                    Background="#191F28"
-                    BorderBrush="#34404D"
+                    Padding="14,10"
+                    Background="#171B20"
+                    BorderBrush="#2B3138"
                     BorderThickness="0,0,0,1">
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
@@ -1132,7 +1221,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="1" Background="#0B1118">
+                <Grid Grid.Row="1" Background="#0D0F12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="390" MinWidth="320" MaxWidth="480" />
                         <ColumnDefinition Width="1" />
@@ -1140,7 +1229,7 @@
                     </Grid.ColumnDefinitions>
 
                     <!--  Bandeja compacta de conversaciones  -->
-                    <Grid Grid.Column="0" Background="#111820">
+                    <Grid Grid.Column="0" Background="#111418">
                         <ListView
                             x:Name="MessagesList"
                             Margin="6"
@@ -1163,7 +1252,7 @@
                                             <Border
                                                 Margin="6,8,6,3"
                                                 Padding="8,4"
-                                                Background="#202A35"
+                                                Background="#20262C"
                                                 CornerRadius="6">
                                                 <TextBlock
                                                     FontSize="11.5"
@@ -1290,10 +1379,10 @@
                         </StackPanel>
                     </Grid>
 
-                    <Border Grid.Column="1" Background="#34404D" />
+                    <Border Grid.Column="1" Background="#2B3138" />
 
                     <!--  Historial de la conversación seleccionada  -->
-                    <Grid Grid.Column="2" Background="#0D141C">
+                    <Grid Grid.Column="2" Background="#121519">
                         <StackPanel
                             x:Name="MessagesConversationEmptyState"
                             HorizontalAlignment="Center"
@@ -1303,7 +1392,7 @@
                                 Width="68"
                                 Height="68"
                                 HorizontalAlignment="Center"
-                                Background="#1D2A36"
+                                Background="#242A31"
                                 CornerRadius="34">
                                 <FontIcon
                                     HorizontalAlignment="Center"
@@ -1336,8 +1425,8 @@
                             <Border
                                 Grid.Row="0"
                                 Padding="14,10"
-                                Background="#151E27"
-                                BorderBrush="#34404D"
+                                Background="#181C21"
+                                BorderBrush="#2B3138"
                                 BorderThickness="0,0,0,1">
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
@@ -1437,8 +1526,8 @@
                             <Border
                                 Grid.Row="2"
                                 Padding="12,9"
-                                Background="#151E27"
-                                BorderBrush="#34404D"
+                                Background="#181C21"
+                                BorderBrush="#2B3138"
                                 BorderThickness="0,1,0,0">
                                 <Grid RowSpacing="6">
                                     <Grid.RowDefinitions>
@@ -1530,7 +1619,7 @@
                 Grid.Column="0"
                 Grid.ColumnSpan="5"
                 Canvas.ZIndex="520"
-                Background="#10151C"
+                Background="#111418"
                 Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -1540,8 +1629,8 @@
 
                 <Border
                     Grid.Row="0"
-                    Padding="12,9"
-                    Background="#191F28"
+                    Padding="14,10"
+                    Background="#171B20"
                     BorderBrush="#4C3A63"
                     BorderThickness="0,0,0,1">
                     <Grid ColumnSpacing="8">
@@ -1644,8 +1733,8 @@
                 <Border
                     Grid.Row="1"
                     Padding="12,7"
-                    Background="#151A22"
-                    BorderBrush="#2F3845"
+                    Background="#11151A"
+                    BorderBrush="#29333D"
                     BorderThickness="0,0,0,1">
                     <Grid>
                         <TextBlock
@@ -1668,7 +1757,7 @@
                             x:Name="RemindersCalendarCanvas"
                             MinWidth="0"
                             MinHeight="1260"
-                            Background="#0F141A"
+                            Background="#0D0F12"
                             DoubleTapped="RemindersCalendarCanvas_DoubleTapped" />
                     </ScrollViewer>
 
@@ -1677,7 +1766,7 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Padding="22,16"
-                        Background="#E61B1F23"
+                        Background="#E615181C"
                         BorderBrush="#6B4C86"
                         BorderThickness="1"
                         CornerRadius="10"
@@ -1707,189 +1796,251 @@
 
             <!--  Vista calendario; se construye desde SearchView.Calendar.cs  -->
             <Grid
-        x:Name="CalendarHost"
-        Grid.Column="0"
-        Grid.ColumnSpan="5"
-        Canvas.ZIndex="500"
-        Background="#111820"
-        Visibility="Collapsed">
+                x:Name="CalendarHost"
+                Grid.Column="0"
+                Grid.ColumnSpan="5"
+                Canvas.ZIndex="500"
+                Background="#0D1014"
+                Visibility="Collapsed">
+
+                <Grid.Resources>
+                    <!--  V4 Calendar UX: solo apariencia, mismos controles y handlers.  -->
+                    <Style x:Key="CalendarNavButtonStyle" TargetType="Button">
+                        <Setter Property="Height" Value="30" />
+                        <Setter Property="MinWidth" Value="30" />
+                        <Setter Property="Padding" Value="10,0" />
+                        <Setter Property="Background" Value="#171C22" />
+                        <Setter Property="BorderBrush" Value="#2A3541" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="CornerRadius" Value="7" />
+                        <Setter Property="Foreground" Value="#F1F5F9" />
+                    </Style>
+
+                    <Style x:Key="CalendarIconButtonStyle" TargetType="Button">
+                        <Setter Property="Width" Value="30" />
+                        <Setter Property="Height" Value="30" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Background" Value="#171C22" />
+                        <Setter Property="BorderBrush" Value="#2A3541" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="CornerRadius" Value="7" />
+                        <Setter Property="Foreground" Value="#E7EEF6" />
+                    </Style>
+
+                    <Style x:Key="CalendarActionButtonStyle" TargetType="Button">
+                        <Setter Property="Height" Value="30" />
+                        <Setter Property="Padding" Value="10,0" />
+                        <Setter Property="Background" Value="#151B21" />
+                        <Setter Property="BorderBrush" Value="#2A3642" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="CornerRadius" Value="7" />
+                        <Setter Property="Foreground" Value="#F1F5F9" />
+                    </Style>
+
+                    <Style x:Key="CalendarActionToggleStyle" TargetType="ToggleButton">
+                        <Setter Property="Height" Value="30" />
+                        <Setter Property="Padding" Value="10,0" />
+                        <Setter Property="Background" Value="#151B21" />
+                        <Setter Property="BorderBrush" Value="#2A3642" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="CornerRadius" Value="7" />
+                        <Setter Property="Foreground" Value="#F1F5F9" />
+                    </Style>
+                </Grid.Resources>
+
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
+                <!--  Barra del calendario: navegación, fecha, zoom y acciones existentes.  -->
                 <Border
                     Grid.Row="0"
-                    Padding="12,9"
-                    Background="#191F28"
-                    BorderBrush="#34404D"
-                    BorderThickness="0,0,0,1">
-                    <Grid ColumnSpacing="8">
+                    Margin="10,8,10,6"
+                    Padding="8"
+                    Background="#11161C"
+                    BorderBrush="#26394B"
+                    BorderThickness="1"
+                    CornerRadius="11">
+                    <Grid ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <Button
+                        <!--  Navegación del día  -->
+                        <Border
                             Grid.Column="0"
-                            Height="30"
-                            Padding="10,0"
-                            Click="CalendarYesterday_Click"
-                            Content="Ayer"
-                            CornerRadius="6" />
+                            Padding="4"
+                            Background="#0D1116"
+                            BorderBrush="#222D37"
+                            BorderThickness="1"
+                            CornerRadius="9">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <Button
+                                    Style="{StaticResource CalendarNavButtonStyle}"
+                                    Click="CalendarYesterday_Click"
+                                    Content="Ayer" />
 
-                        <Button
+                                <Button
+                                    Style="{StaticResource CalendarNavButtonStyle}"
+                                    Click="CalendarToday_Click"
+                                    Content="Hoy"
+                                    BorderBrush="#0EA5E9" />
+
+                                <Button
+                                    Style="{StaticResource CalendarNavButtonStyle}"
+                                    Click="CalendarTomorrow_Click"
+                                    Content="Mañana" />
+
+                                <Button
+                                    Style="{StaticResource CalendarIconButtonStyle}"
+                                    Click="CalendarPreviousDay_Click"
+                                    Content="‹"
+                                    ToolTipService.ToolTip="Día anterior" />
+
+                                <Button
+                                    x:Name="CalendarPeopleButton"
+                                    Style="{StaticResource CalendarNavButtonStyle}"
+                                    Click="CalendarPeopleButton_Click"
+                                    Content="Personas"
+                                    ToolTipService.ToolTip="Elegir las personas visibles" />
+                            </StackPanel>
+                        </Border>
+
+                        <!--  Fecha central: misma información, con mayor jerarquía.  -->
+                        <StackPanel
                             Grid.Column="1"
-                            Height="30"
-                            Padding="10,0"
-                            Click="CalendarToday_Click"
-                            Content="Hoy"
-                            CornerRadius="6" />
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="9">
+                            <Border
+                                Width="28"
+                                Height="28"
+                                Background="#102A3C"
+                                BorderBrush="#0EA5E9"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <FontIcon
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="13"
+                                    Foreground="#7DD3FC"
+                                    Glyph="&#xE787;" />
+                            </Border>
 
-                        <Button
+                            <StackPanel VerticalAlignment="Center" Spacing="0">
+                                <TextBlock
+                                    x:Name="CalendarDateTitle"
+                                    HorizontalAlignment="Center"
+                                    FontSize="15.5"
+                                    FontWeight="SemiBold"
+                                    Foreground="#F8FAFC"
+                                    Text="Calendario" />
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    FontSize="10"
+                                    Foreground="#94A3B8"
+                                    Text="Vista general" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!--  Zoom y acciones existentes, agrupados visualmente.  -->
+                        <StackPanel
                             Grid.Column="2"
-                            Height="30"
-                            Padding="10,0"
-                            Click="CalendarTomorrow_Click"
-                            Content="Mañana"
-                            CornerRadius="6" />
+                            HorizontalAlignment="Right"
+                            Orientation="Horizontal"
+                            Spacing="7">
 
-                        <Button
-                            Grid.Column="3"
-                            Width="32"
-                            Height="30"
-                            Padding="0"
-                            Click="CalendarPreviousDay_Click"
-                            Content="‹"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Día anterior" />
+                            <Button
+                                Style="{StaticResource CalendarIconButtonStyle}"
+                                Click="CalendarNextDay_Click"
+                                Content="›"
+                                ToolTipService.ToolTip="Día siguiente" />
 
-                        <Button
-                            x:Name="CalendarPeopleButton"
-                            Grid.Column="4"
-                            Height="30"
-                            Padding="10,0"
-                            Click="CalendarPeopleButton_Click"
-                            Content="Personas"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Elegir las personas visibles" />
+                            <Border
+                                Padding="4"
+                                Background="#0D1116"
+                                BorderBrush="#222D37"
+                                BorderThickness="1"
+                                CornerRadius="9">
+                                <StackPanel Orientation="Horizontal" Spacing="3">
+                                    <Button
+                                        x:Name="CalendarZoomOutButton"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
+                                        Click="CalendarZoomOut_Click"
+                                        Content="−"
+                                        ToolTipService.ToolTip="Reducir zoom" />
 
-                        <TextBlock
-                            x:Name="CalendarDateTitle"
-                            Grid.Column="5"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            FontSize="16"
-                            FontWeight="SemiBold"
-                            Text="Calendario" />
+                                    <Border
+                                        MinWidth="48"
+                                        Height="30"
+                                        Padding="8,0"
+                                        Background="#101821"
+                                        BorderBrush="#243647"
+                                        BorderThickness="1"
+                                        CornerRadius="7">
+                                        <TextBlock
+                                            x:Name="CalendarZoomText"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            FontWeight="SemiBold"
+                                            Foreground="#BAE6FD"
+                                            Text="100%"
+                                            TextAlignment="Center" />
+                                    </Border>
 
-                        <TextBlock
-                            Grid.Column="6"
-                            VerticalAlignment="Center"
-                            FontSize="11"
-                            Opacity="0.68"
-                            Text="Vista general" />
+                                    <Button
+                                        x:Name="CalendarZoomInButton"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
+                                        Click="CalendarZoomIn_Click"
+                                        Content="+"
+                                        ToolTipService.ToolTip="Aumentar zoom" />
+                                </StackPanel>
+                            </Border>
 
-                        <Button
-                            Grid.Column="7"
-                            Width="32"
-                            Height="30"
-                            Padding="0"
-                            Click="CalendarNextDay_Click"
-                            Content="›"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Día siguiente" />
+                            <Border
+                                Padding="4"
+                                Background="#0D1116"
+                                BorderBrush="#24425A"
+                                BorderThickness="1"
+                                CornerRadius="9">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <Button
+                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Click="CalendarRunDailyAutomation_Click"
+                                        Content="Procesar ayer"
+                                        ToolTipService.ToolTip="Mover pendientes de ayer a hoy y guardar reporte" />
 
-                        <Button
-                            x:Name="CalendarZoomOutButton"
-                            Grid.Column="8"
-                            Width="30"
-                            Height="30"
-                            Padding="0"
-                            Click="CalendarZoomOut_Click"
-                            Content="−"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Reducir zoom" />
+                                    <Button
+                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Click="CalendarDailyReport_Click"
+                                        Content="Reporte"
+                                        ToolTipService.ToolTip="Abrir el último reporte diario" />
 
-                        <TextBlock
-                            x:Name="CalendarZoomText"
-                            Grid.Column="9"
-                            MinWidth="46"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Text="100%"
-                            TextAlignment="Center" />
+                                    <ToggleButton
+                                        x:Name="CalendarCobrosToggle"
+                                        Style="{StaticResource CalendarActionToggleStyle}"
+                                        Click="CalendarCobrosToggle_Click"
+                                        Content="💰 Cobros"
+                                        ToolTipService.ToolTip="Mostrar u ocultar eventos de BD COBRAR Y PAGAR" />
 
-                        <Button
-                            x:Name="CalendarZoomInButton"
-                            Grid.Column="10"
-                            Width="30"
-                            Height="30"
-                            Padding="0"
-                            Click="CalendarZoomIn_Click"
-                            Content="+"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Aumentar zoom" />
+                                    <Button
+                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Click="CalendarRefresh_Click"
+                                        Content="Actualizar"
+                                        ToolTipService.ToolTip="Actualización rápida incremental · Ctrl + clic para recarga completa" />
 
-                        <Button
-                            Grid.Column="11"
-                            Height="30"
-                            Padding="9,0"
-                            Click="CalendarRunDailyAutomation_Click"
-                            Content="Procesar ayer"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Mover pendientes de ayer a hoy y guardar reporte" />
-
-                        <Button
-                            Grid.Column="12"
-                            Height="30"
-                            Padding="9,0"
-                            Click="CalendarDailyReport_Click"
-                            Content="Reporte"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Abrir el último reporte diario" />
-
-                        <ToggleButton
-                            x:Name="CalendarCobrosToggle"
-                            Grid.Column="13"
-                            Height="30"
-                            Padding="10,0"
-                            Click="CalendarCobrosToggle_Click"
-                            Content="💰 Cobros"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Mostrar u ocultar eventos de BD COBRAR Y PAGAR" />
-
-                        <Button
-                            Grid.Column="14"
-                            Height="30"
-                            Padding="10,0"
-                            Click="CalendarRefresh_Click"
-                            Content="Actualizar"
-                            CornerRadius="6"
-                            ToolTipService.ToolTip="Actualización rápida incremental · Ctrl + clic para recarga completa" />
-
-                        <Button
-                            Grid.Column="15"
-                            Height="30"
-                            Padding="10,0"
-                            Click="CalendarClose_Click"
-                            Content="Resultados"
-                            CornerRadius="6" />
+                                    <Button
+                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Click="CalendarClose_Click"
+                                        Content="Resultados" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
                     </Grid>
                 </Border>
 
@@ -1900,12 +2051,14 @@
                 <Border
                     x:Name="CalendarProcessPanel"
                     Grid.Row="1"
-                    Padding="12,7"
-                    Background="#151B22"
-                    BorderBrush="#34404D"
-                    BorderThickness="0,0,0,1"
+                    Margin="10,0,10,6"
+                    Padding="12,8"
+                    Background="#10161C"
+                    BorderBrush="#24425A"
+                    BorderThickness="1"
+                    CornerRadius="9"
                     Visibility="Collapsed">
-                    <Grid RowSpacing="5">
+                    <Grid RowSpacing="6">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -1924,6 +2077,7 @@
                                 Grid.Column="0"
                                 Width="16"
                                 Height="16"
+                                Foreground="#38BDF8"
                                 IsActive="True" />
 
                             <TextBlock
@@ -1932,6 +2086,7 @@
                                 VerticalAlignment="Center"
                                 FontSize="11"
                                 FontWeight="SemiBold"
+                                Foreground="#E2E8F0"
                                 Text="Preparando calendario..." />
 
                             <TextBlock
@@ -1939,7 +2094,7 @@
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
                                 FontSize="10.5"
-                                Opacity="0.72"
+                                Foreground="#94A3B8"
                                 Text=""
                                 TextTrimming="CharacterEllipsis" />
 
@@ -1950,7 +2105,7 @@
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
                                 FontSize="10.5"
-                                Opacity="0.65"
+                                Foreground="#64748B"
                                 Text="00:00" />
                         </Grid>
 
@@ -1960,66 +2115,77 @@
                             Height="4"
                             Minimum="0"
                             Maximum="100"
+                            Foreground="#0EA5E9"
                             IsIndeterminate="True"
                             Value="0" />
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="2">
+                <Grid
+                    Grid.Row="2"
+                    Margin="10,0,10,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <Grid Grid.Column="0">
-                        <ScrollViewer
-                            x:Name="CalendarScrollViewer"
-                            HorizontalScrollBarVisibility="Auto"
-                            HorizontalScrollMode="Enabled"
-                            VerticalScrollBarVisibility="Auto"
-                            VerticalScrollMode="Enabled"
-                            PointerWheelChanged="CalendarScrollViewer_PointerWheelChanged"
-                            ViewChanged="CalendarScrollViewer_ViewChanged">
-                            <Canvas
-                                x:Name="CalendarCanvas"
-                                MinWidth="900"
-                                MinHeight="820"
-                                Background="#10161E" />
-                        </ScrollViewer>
+                    <Border
+                        Grid.Column="0"
+                        Background="#0C1014"
+                        BorderBrush="#26323D"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <Grid>
+                            <ScrollViewer
+                                x:Name="CalendarScrollViewer"
+                                HorizontalScrollBarVisibility="Auto"
+                                HorizontalScrollMode="Enabled"
+                                VerticalScrollBarVisibility="Auto"
+                                VerticalScrollMode="Enabled"
+                                PointerWheelChanged="CalendarScrollViewer_PointerWheelChanged"
+                                ViewChanged="CalendarScrollViewer_ViewChanged">
+                                <Canvas
+                                    x:Name="CalendarCanvas"
+                                    MinWidth="900"
+                                    MinHeight="820"
+                                    Background="#0C1014" />
+                            </ScrollViewer>
 
-                        <Border
-                            x:Name="CalendarEmptyState"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Padding="22,16"
-                            Background="#E61B1F23"
-                            BorderBrush="#465566"
-                            BorderThickness="1"
-                            CornerRadius="10"
-                            Visibility="Collapsed">
-                            <TextBlock
-                                x:Name="CalendarEmptyText"
-                                MaxWidth="520"
-                                Text="No hay actividades para este día."
-                                TextAlignment="Center"
-                                TextWrapping="Wrap" />
-                        </Border>
-                    </Grid>
+                            <Border
+                                x:Name="CalendarEmptyState"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Padding="24,18"
+                                Background="#F012171C"
+                                BorderBrush="#35536B"
+                                BorderThickness="1"
+                                CornerRadius="11"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="CalendarEmptyText"
+                                    MaxWidth="520"
+                                    Foreground="#CBD5E1"
+                                    Text="No hay actividades para este día."
+                                    TextAlignment="Center"
+                                    TextWrapping="Wrap" />
+                            </Border>
+                        </Grid>
+                    </Border>
 
                     <!--
-                        Panel solicitado para revisar rápidamente todas las
-                        actividades de una persona. Los resúmenes usan la carga
-                        existente del calendario; el contenido de Notion solo se
-                        consulta cuando se pulsa "Ver contenido" en una tarjeta.
+                        Panel existente para revisar rápidamente las actividades
+                        de una persona. Solo cambia la presentación visual.
                     -->
                     <Border
                         x:Name="CalendarPersonPreviewPanel"
                         Grid.Column="1"
                         Width="420"
+                        Margin="8,0,0,0"
                         Padding="14"
-                        Background="#171B21"
-                        BorderBrush="#34404D"
-                        BorderThickness="1,0,0,0"
+                        Background="#11171D"
+                        BorderBrush="#2B3D4D"
+                        BorderThickness="1"
+                        CornerRadius="10"
                         Visibility="Collapsed">
                         <Grid RowSpacing="10">
                             <Grid.RowDefinitions>
@@ -2039,22 +2205,20 @@
                                         x:Name="CalendarPersonPreviewTitle"
                                         FontSize="16"
                                         FontWeight="SemiBold"
+                                        Foreground="#F8FAFC"
                                         Text="Actividades" />
                                     <TextBlock
                                         x:Name="CalendarPersonPreviewDate"
                                         FontSize="11"
-                                        Opacity="0.66"
+                                        Foreground="#94A3B8"
                                         Text="Día seleccionado" />
                                 </StackPanel>
 
                                 <Button
                                     Grid.Column="1"
-                                    Width="32"
-                                    Height="30"
-                                    Padding="0"
+                                    Style="{StaticResource CalendarIconButtonStyle}"
                                     Click="CalendarPersonPreviewClose_Click"
                                     Content="✕"
-                                    CornerRadius="6"
                                     ToolTipService.ToolTip="Cerrar vista previa por persona" />
                             </Grid>
 
@@ -2062,8 +2226,8 @@
                                 x:Name="CalendarPersonPreviewSummary"
                                 Grid.Row="1"
                                 FontSize="11"
-                                Opacity="0.72"
-                                Text="Selecciona el ojo de una persona para ver sus actividades."
+                                Foreground="#94A3B8"
+                                Text="Selecciona una persona para ver sus actividades."
                                 TextWrapping="Wrap" />
 
                             <ScrollViewer
@@ -2135,7 +2299,11 @@
             <Border
                 x:Name="FoldersPane"
                 Grid.Column="0"
-                Background="{ThemeResource LayerFillColorDefaultBrush}">
+                Margin="10,8,6,8"
+                Background="{StaticResource AnfetaSurfaceBrush}"
+                BorderBrush="{StaticResource AnfetaPanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12">
 
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
@@ -2509,16 +2677,24 @@
             </Border>
 
             <!--  ── CENTER PANEL ──────────────────────────────────  -->
-            <Grid Grid.Column="2">
+            <Border
+                Grid.Column="2"
+                Margin="0,8,0,8"
+                Background="{StaticResource AnfetaSurfaceBrush}"
+                BorderBrush="{StaticResource AnfetaPanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12" />
+
+            <Grid Grid.Column="2" Margin="0,8,0,8">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="30" />
+                    <RowDefinition Height="34" />
                     <!--  Cabecera: breadcrumb + voz  -->
-                    <RowDefinition Height="28" />
+                    <RowDefinition Height="30" />
                     <!--  Encabezado de columnas estilo Everything  -->
                     <RowDefinition Height="*" />
                     <!--  Lista de resultados  -->
-                    <RowDefinition Height="30" />
-                    <!--  Paginación  -->
+                    <RowDefinition Height="40" />
+                    <!--  Paginación: 40 px para que ComboBox Tamaño no se recorte  -->
                 </Grid.RowDefinitions>
 
 
@@ -2528,8 +2704,8 @@
                 <Grid
                     Grid.Row="0"
                     Padding="10,0"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Background="#111820"
+                    BorderBrush="#26343F"
                     BorderThickness="0,0,0,1"
                     ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
@@ -2565,7 +2741,7 @@
                         <Button
                             x:Name="BtnSpeechPrev"
                             Width="24"
-                            Height="24"
+                            Height="28"
                             Padding="0"
                             Click="BtnDictPrev_Click"
                             CornerRadius="5"
@@ -2575,7 +2751,7 @@
                         <ToggleButton
                             x:Name="BtnSpeechPlay"
                             Width="24"
-                            Height="24"
+                            Height="28"
                             Padding="0"
                             Click="BtnDictPlayPause_Click"
                             CornerRadius="5"
@@ -2599,9 +2775,9 @@
                 <Grid
                     x:Name="ResultsHeaderGrid"
                     Grid.Row="1"
-                    Padding="8,0"
-                    Background="#202020"
-                    BorderBrush="#3A3A3A"
+                    Padding="10,0"
+                    Background="#111820"
+                    BorderBrush="#26343F"
                     BorderThickness="0,0,0,1"
                     ColumnSpacing="0">
                     <Grid.ColumnDefinitions>
@@ -2730,7 +2906,7 @@
                         Background="Transparent"
                         DragCompleted="ColumnSplitter_DragCompleted"
                         DragDelta="ScheduledDateDateSplitter_DragDelta"
-                        ToolTipService.ToolTip="Arrastra para ajustar Fecha por hacer y Date Modified" />
+                        ToolTipService.ToolTip="Arrastra para ajustar Fecha por hacer y Fecha modificada" />
 
                     <!--  Ordenar por fecha reciente / antigua  -->
                     <Button
@@ -2752,7 +2928,7 @@
                                 FontSize="11"
                                 FontWeight="SemiBold"
                                 Foreground="#D6D6D6"
-                                Text="Date Modified" />
+                                Text="Fecha modificada" />
                             <TextBlock
                                 x:Name="ModifiedSortArrow"
                                 FontSize="10"
@@ -2775,7 +2951,7 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Padding="22,16"
-                        Background="#E61B1F23"
+                        Background="#E615181C"
                         BorderBrush="#5B8DEF"
                         BorderThickness="1"
                         CornerRadius="12"
@@ -2930,10 +3106,17 @@
                                         VerticalAlignment="Center"
                                         ColumnSpacing="7">
                                         <Grid.ColumnDefinitions>
+                                            <!-- Igual que en el diseño anterior que se veía bien -->
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
 
+                                        <!--
+                                            WEB / NOTION:
+                                            recupera EXACTAMENTE el icono del XAML anterior.
+                                            E774 + 14x14 + FontSize 12.
+                                        -->
                                         <FontIcon
                                             Grid.Column="0"
                                             Width="14"
@@ -2942,7 +3125,22 @@
                                             FontFamily="Segoe MDL2 Assets"
                                             FontSize="12"
                                             Foreground="#B8B8B8"
-                                            Glyph="&#xE774;" />
+                                            Glyph="&#xE774;"
+                                            Visibility="{x:Bind ClassicWebIconVisibility, Mode=OneWay}" />
+
+                                        <!--
+                                            DROPBOX / ARCHIVOS:
+                                            conserva los símbolos y colores nuevos por tipo.
+                                        -->
+                                        <SymbolIcon
+                                            Grid.Column="0"
+                                            Width="{x:Bind ResultIconSize, Mode=OneWay}"
+                                            Height="{x:Bind ResultIconSize, Mode=OneWay}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Foreground="{x:Bind ResultAccentBrush, Mode=OneWay}"
+                                            Symbol="{x:Bind ResultSymbol, Mode=OneWay}"
+                                            Visibility="{x:Bind NativeResultIconVisibility, Mode=OneWay}" />
 
                                         <TextBlock
                                             x:Name="NameText"
@@ -2956,6 +3154,23 @@
                                             MaxLines="1"
                                             TextTrimming="CharacterEllipsis"
                                             TextWrapping="NoWrap" />
+
+                                        <Border
+                                            Grid.Column="2"
+                                            Margin="5,0,0,0"
+                                            Padding="6,1"
+                                            VerticalAlignment="Center"
+                                            Background="#1AFFFFFF"
+                                            BorderBrush="{x:Bind ResultAccentBrush, Mode=OneWay}"
+                                            BorderThickness="1"
+                                            CornerRadius="7"
+                                            Visibility="{x:Bind ResultKindBadgeVisibility, Mode=OneWay}">
+                                            <TextBlock
+                                                FontSize="8"
+                                                FontWeight="SemiBold"
+                                                Foreground="{x:Bind ResultAccentBrush, Mode=OneWay}"
+                                                Text="{x:Bind ResultKindBadgeText, Mode=OneWay}" />
+                                        </Border>
                                     </Grid>
 
                                     <!--  Estado texto actualización proyecto  -->
@@ -2984,7 +3199,7 @@
                                         TextWrapping="NoWrap"
                                         ToolTipService.ToolTip="{x:Bind ScheduledDate, Mode=OneWay}" />
 
-                                    <!--  Date Modified  -->
+                                    <!--  Fecha modificada  -->
                                     <TextBlock
                                         Grid.Column="8"
                                         VerticalAlignment="Center"
@@ -3010,8 +3225,8 @@
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuOpenExplorerItem"
-                                    Click="CtxOpenPath_Click"
-                                    Text="Abrir en Explorador Local" />
+                                    Click="CtxOpenPathReliable_Click"
+                                    Text="Abrir en Explorador" />
 
                                 <MenuFlyoutSeparator />
 
@@ -3144,18 +3359,39 @@
                                         Background="#25000000"
                                         CornerRadius="6">
                                         <Grid>
-                                            <IconSourceElement
-                                                Width="52"
-                                                Height="52"
+                                            <Viewbox
+                                                Width="42"
+                                                Height="42"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"
-                                                IconSource="{x:Bind Icon, Mode=OneWay}" />
+                                                Stretch="Uniform">
+                                                <SymbolIcon
+                                                    Foreground="{x:Bind ResultAccentBrush, Mode=OneWay}"
+                                                    Symbol="{x:Bind ResultSymbol, Mode=OneWay}" />
+                                            </Viewbox>
 
                                             <Image
                                                 HorizontalAlignment="Stretch"
                                                 VerticalAlignment="Stretch"
                                                 Source="{x:Bind Thumbnail, Mode=OneWay}"
                                                 Stretch="Uniform" />
+
+                                            <Border
+                                                Margin="7"
+                                                Padding="6,2"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Top"
+                                                Background="#D91A2028"
+                                                BorderBrush="{x:Bind ResultAccentBrush, Mode=OneWay}"
+                                                BorderThickness="1"
+                                                CornerRadius="7"
+                                                Visibility="{x:Bind ResultKindBadgeVisibility, Mode=OneWay}">
+                                                <TextBlock
+                                                    FontSize="8"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{x:Bind ResultAccentBrush, Mode=OneWay}"
+                                                    Text="{x:Bind ResultKindBadgeText, Mode=OneWay}" />
+                                            </Border>
                                         </Grid>
                                     </Border>
 
@@ -3169,7 +3405,7 @@
                                         Text="{x:Bind DisplayName, Mode=OneWay}"
                                         TextAlignment="Center"
                                         TextTrimming="CharacterEllipsis"
-                                        TextWrapping="WrapWholeWords"
+                                        TextWrapping="WrapWholeWords" 
                                         ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}" />
                                 </Grid>
                             </DataTemplate>
@@ -3189,9 +3425,9 @@
                 <!--  Paginación — altura fija 30px para que nunca se corte  -->
                 <Grid
                     Grid.Row="3"
-                    Padding="8,0"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Padding="10,0"
+                    Background="#111820"
+                    BorderBrush="#26343F"
                     BorderThickness="0,1,0,0"
                     ColumnSpacing="6">
                     <Grid.ColumnDefinitions>
@@ -3239,7 +3475,9 @@
                     <ComboBox
                         x:Name="PageSizeCombo"
                         Grid.Column="4"
-                        Height="24"
+                        MinWidth="112"
+                        Height="30"
+                        Margin="2,0,0,0"
                         VerticalAlignment="Center"
                         PlaceholderText="Tamaño"
                         SelectionChanged="PageSizeCombo_SelectionChanged">
@@ -3256,7 +3494,11 @@
             <Border
                 x:Name="DetailsPane"
                 Grid.Column="4"
-                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                Margin="6,8,10,8"
+                Background="{StaticResource AnfetaSurfaceBrush}"
+                BorderBrush="{StaticResource AnfetaBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
                 Visibility="Visible">
 
                 <Grid>
@@ -3272,10 +3514,10 @@
                     <!--  Header Detalles  -->
                     <Grid
                         Grid.Row="0"
-                        Padding="10,0"
-                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                        BorderThickness="0,1,0,1">
+                        Padding="12,0"
+                        Background="{StaticResource AnfetaSurfaceElevatedBrush}"
+                        BorderBrush="{StaticResource AnfetaBorderBrush}"
+                        BorderThickness="0,0,0,1">
                         <TextBlock
                             VerticalAlignment="Center"
                             FontSize="11"
@@ -3297,17 +3539,29 @@
                                     FontWeight="SemiBold"
                                     Text="Selecciona un elemento"
                                     TextWrapping="Wrap" />
+                                <!-- Se conserva para compatibilidad con el code-behind antiguo,
+                                     pero la ruta visible ya no expone C:\... -->
                                 <TextBlock
                                     x:Name="DetailsPath"
                                     FontSize="11"
                                     Opacity="0.6"
                                     Text="—"
+                                    Visibility="Collapsed"
+                                    TextWrapping="Wrap" />
+
+                                <TextBlock
+                                    x:Name="DetailsDisplayPath"
+                                    FontSize="11"
+                                    Opacity="0.72"
+                                    Text="{Binding ElementName=ResultsList, Path=SelectedItem.DisplayLocation, FallbackValue='—'}"
                                     TextWrapping="Wrap" />
                             </StackPanel>
                             <Border
-                                Padding="8"
-                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                CornerRadius="6">
+                                Padding="10"
+                                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                                BorderBrush="{StaticResource AnfetaBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10">
                                 <StackPanel Spacing="4">
                                     <TextBlock
                                         FontSize="11"
@@ -3326,8 +3580,10 @@
                             <Border
                                 x:Name="LocalImagePreviewCard"
                                 Padding="10"
-                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                CornerRadius="6"
+                                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                                BorderBrush="{StaticResource AnfetaBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
                                 Visibility="Collapsed">
                                 <StackPanel Spacing="8">
                                     <Grid ColumnSpacing="6">
@@ -3434,8 +3690,10 @@
                             <Border
                                 x:Name="NotionPreviewCard"
                                 Padding="12"
-                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                CornerRadius="6"
+                                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                                BorderBrush="{StaticResource AnfetaBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="10"
                                 Visibility="Collapsed">
                                 <StackPanel Spacing="8">
                                     <Grid ColumnSpacing="8">
@@ -3501,8 +3759,9 @@
                     <!--  Acciones — altura fija 38px, nunca se corta  -->
                     <Grid
                         Grid.Row="2"
-                        Padding="8,0"
-                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        Padding="10,0"
+                        Background="{StaticResource AnfetaSurfaceElevatedBrush}"
+                        BorderBrush="{StaticResource AnfetaBorderBrush}"
                         BorderThickness="0,1,0,0"
                         ColumnSpacing="4">
                         <Grid.ColumnDefinitions>
@@ -3591,12 +3850,20 @@
             ROW 4 · STATUS BAR  — altura fija 22px, siempre visible
             ═══════════════════════════════════════════════════════
         -->
+        <Border
+            Grid.Row="4"
+            Margin="10,2,10,5"
+            Background="#0D1318"
+            BorderBrush="#244155"
+            BorderThickness="1"
+            CornerRadius="10" />
+
         <Grid
             Grid.Row="4"
-            Padding="10,0"
-            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-            BorderThickness="0,1,0,0"
+            Margin="10,2,10,5"
+            Padding="12,0"
+            Background="Transparent"
+            BorderThickness="0"
             ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -3667,8 +3934,8 @@
                 Height="26"
                 Padding="8,0"
                 VerticalAlignment="Center"
-                Background="#263F8CFF"
-                BorderBrush="#665EA7FF"
+                Background="#17334C"
+                BorderBrush="#2E6288"
                 BorderThickness="1"
                 CornerRadius="7"
                 ToolTipService.ToolTip="Abrir un enlace frecuente de Google Meet">
@@ -3677,7 +3944,7 @@
                     Spacing="5">
                     <FontIcon
                         FontSize="12"
-                        Foreground="#8DC6FF"
+                        Foreground="#76C5FF"
                         Glyph="&#xE714;" />
                     <TextBlock
                         VerticalAlignment="Center"
@@ -3762,9 +4029,9 @@
                 Height="{Binding ElementName=RootLayout, Path=ActualHeight}"
                 Background="#90000000">
                 <Border
-                    Width="600"
-                    MaxWidth="650"
-                    MaxHeight="520"
+                    Width="720"
+                    MaxWidth="760"
+                    MaxHeight="620"
                     Padding="16"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -3781,7 +4048,7 @@
                             HorizontalAlignment="Center"
                             FontSize="18"
                             FontWeight="SemiBold"
-                            Text="Ayuda · Comandos de búsqueda" />
+                            Text="Ayuda · búsqueda, Dropbox y comandos" />
                         <ScrollViewer
                             Grid.Row="1"
                             HorizontalScrollBarVisibility="Disabled"
@@ -3791,7 +4058,7 @@
                         <Button
                             Grid.Row="2"
                             HorizontalAlignment="Right"
-                            Click="HelpPopupClose_Click"
+                            Click="HelpPopupV2Close_Click"
                             Content="Cerrar" />
                     </Grid>
                 </Border>

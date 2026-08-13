@@ -1,4 +1,5 @@
-﻿using Microsoft.UI.Xaml.Controls;
+﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.ComponentModel;
@@ -115,6 +116,15 @@ namespace Anfeta.UI.Models.Weblab
                 OnPropertyChanged(nameof(FullPath));
                 OnPropertyChanged(nameof(TargetNorm));
                 OnPropertyChanged(nameof(ResultSummary));
+                OnPropertyChanged(nameof(DisplayLocation));
+                OnPropertyChanged(nameof(ResultSymbol));
+                OnPropertyChanged(nameof(ResultKindBadgeText));
+                OnPropertyChanged(nameof(ResultKindBadgeVisibility));
+                OnPropertyChanged(nameof(ResultAccentBrush));
+                OnPropertyChanged(nameof(ResultIconSize));
+                OnPropertyChanged(nameof(UsesClassicWebIcon));
+                OnPropertyChanged(nameof(ClassicWebIconVisibility));
+                OnPropertyChanged(nameof(NativeResultIconVisibility));
             }
         }
         public string FullPath
@@ -133,6 +143,17 @@ namespace Anfeta.UI.Models.Weblab
                 _type = normalized;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsFolder));
+                OnPropertyChanged(nameof(ResultGlyph));
+                OnPropertyChanged(nameof(FolderBadgeText));
+                OnPropertyChanged(nameof(FolderBadgeVisibility));
+                OnPropertyChanged(nameof(ResultSymbol));
+                OnPropertyChanged(nameof(ResultKindBadgeText));
+                OnPropertyChanged(nameof(ResultKindBadgeVisibility));
+                OnPropertyChanged(nameof(ResultAccentBrush));
+                OnPropertyChanged(nameof(ResultIconSize));
+                OnPropertyChanged(nameof(UsesClassicWebIcon));
+                OnPropertyChanged(nameof(ClassicWebIconVisibility));
+                OnPropertyChanged(nameof(NativeResultIconVisibility));
             }
         }
 
@@ -149,6 +170,305 @@ namespace Anfeta.UI.Models.Weblab
 
         [JsonIgnore]
         public string ResultSummary => BuildResultSummary();
+
+        // Ruta visual relativa a la raíz de Dropbox.
+        // Target conserva SIEMPRE la ruta local absoluta para operaciones reales.
+        private string _dropboxRelativePath = string.Empty;
+        [JsonIgnore]
+        public string DropboxRelativePath
+        {
+            get => _dropboxRelativePath;
+            set
+            {
+                var clean = value ?? string.Empty;
+                if (string.Equals(_dropboxRelativePath, clean, StringComparison.Ordinal))
+                    return;
+
+                _dropboxRelativePath = clean;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ResultSummary));
+                OnPropertyChanged(nameof(DisplayLocation));
+            }
+        }
+
+        private string _dropboxPathColumn = string.Empty;
+        [JsonIgnore]
+        public string DropboxPathColumn
+        {
+            get => _dropboxPathColumn;
+            set
+            {
+                var clean = value ?? string.Empty;
+                if (string.Equals(_dropboxPathColumn, clean, StringComparison.Ordinal))
+                    return;
+
+                _dropboxPathColumn = clean;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(PathColumn));
+            }
+        }
+
+        [JsonIgnore]
+        public string DisplayLocation
+        {
+            get
+            {
+                if (Source == SearchSource.Notion)
+                {
+                    if (!string.IsNullOrWhiteSpace(ExternalUrl))
+                        return ExternalUrl.Trim();
+
+                    return (Target ?? string.Empty).Trim();
+                }
+
+                if (!string.IsNullOrWhiteSpace(DropboxRelativePath))
+                    return DropboxRelativePath.Trim();
+
+                return (Target ?? string.Empty).Trim();
+            }
+        }
+
+        // Compatibilidad:
+        // Evitamos depender de codepoints crudos de Segoe MDL2 Assets.
+        // SymbolIcon usa símbolos nativos de WinUI y no aparece como "□"
+        // cuando cambia la versión de la fuente instalada.
+        [JsonIgnore]
+        public bool UsesClassicWebIcon
+        {
+            get
+            {
+                if (Source == SearchSource.Notion)
+                    return true;
+
+                var extension = GetResultExtension();
+
+                return extension is "url" or "website" or "webloc";
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility ClassicWebIconVisibility =>
+            UsesClassicWebIcon
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility NativeResultIconVisibility =>
+            UsesClassicWebIcon
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
+        [JsonIgnore]
+        public Symbol ResultSymbol
+        {
+            get
+            {
+                if (IsFolder)
+                    return Symbol.Folder;
+
+                // Las páginas de Notion son recursos web.
+                // Usamos Link para evitar codepoints/fuentes no compatibles.
+                if (Source == SearchSource.Notion)
+                    return Symbol.Globe;
+
+                var extension = GetResultExtension();
+
+                if (extension is "url" or "website" or "webloc")
+                    return Symbol.Globe;
+
+                if (IsImageExtension(extension))
+                    return Symbol.Pictures;
+
+                if (IsVideoExtension(extension))
+                    return Symbol.Video;
+
+                return Symbol.Document;
+            }
+        }
+
+        [JsonIgnore]
+        public double ResultIconSize
+        {
+            get
+            {
+                // El globo se percibe visualmente más grande que los demás
+                // SymbolIcon aunque tenga el mismo Width/Height.
+                // Lo reducimos SOLO para Notion y accesos web.
+                if (Source == SearchSource.Notion)
+                    return 11;
+
+                var extension = GetResultExtension();
+
+                if (extension is "url" or "website" or "webloc")
+                    return 11;
+
+                return 16;
+            }
+        }
+
+        [JsonIgnore]
+        public string ResultKindBadgeText
+        {
+            get
+            {
+                if (IsFolder)
+                    return "CARPETA";
+
+                // En Notion dejamos solo el icono web, sin marcador/pastilla.
+                if (Source == SearchSource.Notion)
+                    return string.Empty;
+
+                var extension = GetResultExtension();
+
+                if (string.IsNullOrWhiteSpace(extension))
+                    return "FILE";
+
+                if (extension is "url" or "website" or "webloc")
+                    return "WEB";
+
+                if (extension == "pdf")
+                    return "PDF";
+
+                if (extension is "doc" or "docx" or "odt")
+                    return "DOC";
+
+                if (extension is "xls" or "xlsx" or "xlsm" or "csv" or "ods")
+                    return "XLS";
+
+                if (extension is "ppt" or "pptx" or "odp")
+                    return "PPT";
+
+                if (IsImageExtension(extension))
+                    return "IMG";
+
+                if (IsVideoExtension(extension))
+                    return "VID";
+
+                if (extension is "mp3" or "wav" or "m4a" or "aac" or "flac" or "ogg")
+                    return "AUD";
+
+                if (extension is "zip" or "rar" or "7z" or "tar" or "gz")
+                    return "ZIP";
+
+                if (extension is "txt" or "md" or "rtf" or "log")
+                    return "TXT";
+
+                if (extension is "cs" or "xaml" or "json" or "xml" or
+                    "js" or "ts" or "tsx" or "jsx" or "html" or "css" or
+                    "php" or "py" or "sql")
+                {
+                    return "CODE";
+                }
+
+                // Para otras extensiones cortas, la propia extensión es más
+                // útil que un icono genérico.
+                return extension.Length <= 5
+                    ? extension.ToUpperInvariant()
+                    : "FILE";
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility ResultKindBadgeVisibility =>
+            string.IsNullOrWhiteSpace(ResultKindBadgeText)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
+        [JsonIgnore]
+        public Brush ResultAccentBrush
+        {
+            get
+            {
+                var extension = GetResultExtension();
+
+                if (IsFolder)
+                    return BuildResultBrush(245, 194, 66);   // carpeta
+
+                if (Source == SearchSource.Notion)
+                    return BuildResultBrush(226, 232, 240); // Notion
+
+                if (extension is "url" or "website" or "webloc")
+                    return BuildResultBrush(56, 189, 248);  // web / enlace
+
+                if (extension == "pdf")
+                    return BuildResultBrush(248, 113, 113); // PDF
+
+                if (extension is "doc" or "docx" or "odt")
+                    return BuildResultBrush(96, 165, 250);  // Word
+
+                if (extension is "xls" or "xlsx" or "xlsm" or "csv" or "ods")
+                    return BuildResultBrush(52, 211, 153);  // Excel
+
+                if (extension is "ppt" or "pptx" or "odp")
+                    return BuildResultBrush(251, 146, 60);  // PowerPoint
+
+                if (IsImageExtension(extension))
+                    return BuildResultBrush(192, 132, 252); // imagen
+
+                if (IsVideoExtension(extension))
+                    return BuildResultBrush(244, 114, 182); // video
+
+                if (extension is "mp3" or "wav" or "m4a" or "aac" or "flac" or "ogg")
+                    return BuildResultBrush(167, 139, 250); // audio
+
+                if (extension is "zip" or "rar" or "7z" or "tar" or "gz")
+                    return BuildResultBrush(251, 191, 36);  // comprimido
+
+                if (extension is "cs" or "xaml" or "json" or "xml" or
+                    "js" or "ts" or "tsx" or "jsx" or "html" or "css" or
+                    "php" or "py" or "sql")
+                {
+                    return BuildResultBrush(103, 232, 249); // código
+                }
+
+                return BuildResultBrush(184, 184, 184);
+            }
+        }
+
+        // Se mantiene por compatibilidad con cualquier vista vieja que todavía
+        // lo enlace, pero las vistas nuevas usan ResultSymbol.
+        [JsonIgnore]
+        public string ResultGlyph => IsFolder ? "\uE8B7" : "\uE8A5";
+
+        private string GetResultExtension()
+        {
+            var candidate =
+                !string.IsNullOrWhiteSpace(Target)
+                    ? Target
+                    : Name;
+
+            return System.IO.Path
+                .GetExtension(candidate ?? string.Empty)
+                .TrimStart('.')
+                .Trim()
+                .ToLowerInvariant();
+        }
+
+        private static bool IsImageExtension(string extension)
+            => extension is "png" or "jpg" or "jpeg" or "webp" or
+                "gif" or "bmp" or "tif" or "tiff" or "svg" or "ico";
+
+        private static bool IsVideoExtension(string extension)
+            => extension is "mp4" or "mov" or "avi" or "mkv" or
+                "webm" or "wmv" or "m4v" or "mpeg" or "mpg";
+
+        private static Brush BuildResultBrush(
+            byte red,
+            byte green,
+            byte blue)
+            => new SolidColorBrush(
+                Windows.UI.Color.FromArgb(
+                    255,
+                    red,
+                    green,
+                    blue));
+
+        [JsonIgnore]
+        public string FolderBadgeText => IsFolder ? "CARPETA" : string.Empty;
+
+        [JsonIgnore]
+        public Visibility FolderBadgeVisibility =>
+            IsFolder ? Visibility.Visible : Visibility.Collapsed;
 
         [JsonIgnore]
         public string ModifiedLabel
@@ -182,7 +502,12 @@ namespace Anfeta.UI.Models.Weblab
                     };
                 }
 
-                return "Local";
+                if (!string.IsNullOrWhiteSpace(DropboxPathColumn))
+                    return DropboxPathColumn;
+
+                return Source == SearchSource.Dropbox
+                    ? "Dropbox"
+                    : "Local";
             }
         }
 
@@ -346,6 +671,9 @@ namespace Anfeta.UI.Models.Weblab
 
                 return "Página de Notion";
             }
+
+            if (!string.IsNullOrWhiteSpace(DropboxRelativePath))
+                return DropboxRelativePath.Trim();
 
             if (!string.IsNullOrWhiteSpace(Target))
                 return Target.Trim();

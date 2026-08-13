@@ -407,6 +407,7 @@ namespace Anfeta.UI.Views
 
             var scope = ResolveNotionBaseScope(rawQuery);
             var queryForSearch = scope.HasBase ? scope.Remainder : rawQuery;
+            var executionQuery = NormalizeConvenienceSearchQuery(queryForSearch);
 
             SyncBaseChipsFromQuery(rawQuery);
             UpdateSearchBreadcrumb(rawQuery, scope, queryForSearch);
@@ -426,20 +427,20 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            var parsed = AdvancedQueryV3.Parse(queryForSearch);
+            var parsed = AdvancedQueryV3.Parse(executionQuery);
 
             if (HasQuotedSearchParts(queryForSearch) ||
-                !LooksAdvanced(queryForSearch))
+                !LooksAdvanced(executionQuery))
                 UpdateHighlightTermsForAutoAnd(queryForSearch);
             else
-                UpdateHighlightTerms(queryForSearch, parsed);
+                UpdateHighlightTerms(executionQuery, parsed);
 
-            if (!string.IsNullOrWhiteSpace(queryForSearch))
+            if (!string.IsNullOrWhiteSpace(executionQuery))
             {
-                if (queryForSearch == "-") return;
+                if (executionQuery == "-") return;
 
                 if (HasQuotedSearchParts(queryForSearch) ||
-                    !LooksAdvanced(queryForSearch))
+                    !LooksAdvanced(executionQuery))
                 {
                     items = items.Where(x => MatchesFlexibleOrQuotedQuery(x, queryForSearch));
                 }
@@ -515,6 +516,7 @@ namespace Anfeta.UI.Views
 
             var scope = ResolveNotionBaseScope(rawQuery);
             var queryForSearch = scope.HasBase ? scope.Remainder : rawQuery;
+            var executionQuery = NormalizeConvenienceSearchQuery(queryForSearch);
 
             SyncBaseChipsFromQuery(rawQuery);
             UpdateSearchBreadcrumb(rawQuery, scope, queryForSearch);
@@ -534,20 +536,20 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            var parsed = AdvancedQueryV3.Parse(queryForSearch);
+            var parsed = AdvancedQueryV3.Parse(executionQuery);
 
             if (HasQuotedSearchParts(queryForSearch) ||
-                !LooksAdvanced(queryForSearch))
+                !LooksAdvanced(executionQuery))
                 UpdateHighlightTermsForAutoAnd(queryForSearch);
             else
-                UpdateHighlightTerms(queryForSearch, parsed);
+                UpdateHighlightTerms(executionQuery, parsed);
 
-            if (!string.IsNullOrWhiteSpace(queryForSearch))
+            if (!string.IsNullOrWhiteSpace(executionQuery))
             {
-                if (queryForSearch == "-") return;
+                if (executionQuery == "-") return;
 
                 if (HasQuotedSearchParts(queryForSearch) ||
-                    !LooksAdvanced(queryForSearch))
+                    !LooksAdvanced(executionQuery))
                 {
                     items = items.Where(x => MatchesFlexibleOrQuotedQuery(x, queryForSearch));
                 }
@@ -594,6 +596,31 @@ namespace Anfeta.UI.Views
             _voicePost.NotifySearchResults(Results);
             Dictation_SetResults(BuildSpeechResults(Results));
             await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Alias rápidos pensados para Dropbox. Se traducen internamente a los
+        /// operadores avanzados que ANFETA ya entiende, por lo que no duplicamos
+        /// el motor de búsqueda.
+        /// </summary>
+        private static string NormalizeConvenienceSearchQuery(
+            string query)
+        {
+            var normalized = query ?? string.Empty;
+
+            normalized = Regex.Replace(
+                normalized,
+                @"(?<!\S)\.(?:folder|folders|carpeta|carpetas)(?!\S)",
+                "type:folder",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            normalized = Regex.Replace(
+                normalized,
+                @"(?<!\S)\.(?:file|files|archivo|archivos)(?!\S)",
+                "type:file",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            return normalized.Trim();
         }
 
         private static bool HasQuotedSearchParts(
