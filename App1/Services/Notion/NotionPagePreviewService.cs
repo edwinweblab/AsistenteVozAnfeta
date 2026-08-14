@@ -19,6 +19,10 @@ namespace Anfeta.UI.Services.Notion
         private const int MaxDepth = 3;
         private const int MaxRetryAttempts = 4;
 
+        // Body bajo demanda: una vez descargado se reutiliza durante 20 min.
+        private static readonly TimeSpan PreviewCacheLifetime =
+            TimeSpan.FromMinutes(20);
+
         private const string HiddenMetadataLabel =
             "Datos internos de ANFETA";
 
@@ -59,7 +63,7 @@ namespace Anfeta.UI.Services.Notion
                     "La página de Notion no tiene identificador.");
 
             if (Cache.TryGetValue(normalizedPageId, out var cached) &&
-                DateTimeOffset.UtcNow - cached.StoredAt < TimeSpan.FromMinutes(5))
+                DateTimeOffset.UtcNow - cached.StoredAt < PreviewCacheLifetime)
             {
                 return Task.FromResult(cached.Blocks);
             }

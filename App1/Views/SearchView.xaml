@@ -985,13 +985,19 @@
 
                     <ComboBox
                     x:Name="TextScaleCombo"
-                    Width="92"
+                    Width="78"
                     Height="26"
                     FontSize="11"
                     SelectionChanged="TextScaleCombo_SelectionChanged">
-                        <ComboBoxItem Content="Pequeño" Tag="small" />
-                        <ComboBoxItem Content="Normal" Tag="normal" />
-                        <ComboBoxItem Content="Grande" Tag="large" />
+                        <ComboBoxItem Content="70%" Tag="70" />
+                        <ComboBoxItem Content="80%" Tag="80" />
+                        <ComboBoxItem Content="90%" Tag="90" />
+                        <ComboBoxItem Content="100%" Tag="normal" />
+                        <ComboBoxItem Content="110%" Tag="110" />
+                        <ComboBoxItem Content="120%" Tag="120" />
+                        <ComboBoxItem Content="130%" Tag="130" />
+                        <ComboBoxItem Content="140%" Tag="140" />
+                        <ComboBoxItem Content="150%" Tag="150" />
                     </ComboBox>
 
                     <TextBlock
@@ -1801,6 +1807,7 @@
                 Grid.ColumnSpan="5"
                 Canvas.ZIndex="500"
                 Background="#0D1014"
+                SizeChanged="CalendarHost_SizeChanged"
                 Visibility="Collapsed">
 
                 <Grid.Resources>
@@ -1949,33 +1956,40 @@
                         </StackPanel>
 
                         <!--  Zoom y acciones existentes, agrupados visualmente.  -->
-                        <StackPanel
+                        <ScrollViewer
+                            x:Name="CalendarActionsScrollViewer"
                             Grid.Column="2"
                             HorizontalAlignment="Right"
-                            Orientation="Horizontal"
-                            Spacing="7">
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Auto"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                            <StackPanel
+                                HorizontalAlignment="Right"
+                                Orientation="Horizontal"
+                                Spacing="7">
 
-                            <Button
+                                <Button
                                 Style="{StaticResource CalendarIconButtonStyle}"
                                 Click="CalendarNextDay_Click"
                                 Content="›"
                                 ToolTipService.ToolTip="Día siguiente" />
 
-                            <Border
+                                <Border
                                 Padding="4"
                                 Background="#0D1116"
                                 BorderBrush="#222D37"
                                 BorderThickness="1"
                                 CornerRadius="9">
-                                <StackPanel Orientation="Horizontal" Spacing="3">
-                                    <Button
+                                    <StackPanel Orientation="Horizontal" Spacing="3">
+                                        <Button
                                         x:Name="CalendarZoomOutButton"
                                         Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarZoomOut_Click"
                                         Content="−"
                                         ToolTipService.ToolTip="Reducir zoom" />
 
-                                    <Border
+                                        <Border
                                         MinWidth="48"
                                         Height="30"
                                         Padding="8,0"
@@ -1983,7 +1997,7 @@
                                         BorderBrush="#243647"
                                         BorderThickness="1"
                                         CornerRadius="7">
-                                        <TextBlock
+                                            <TextBlock
                                             x:Name="CalendarZoomText"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center"
@@ -1991,56 +2005,57 @@
                                             Foreground="#BAE6FD"
                                             Text="100%"
                                             TextAlignment="Center" />
-                                    </Border>
+                                        </Border>
 
-                                    <Button
+                                        <Button
                                         x:Name="CalendarZoomInButton"
                                         Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarZoomIn_Click"
                                         Content="+"
                                         ToolTipService.ToolTip="Aumentar zoom" />
-                                </StackPanel>
-                            </Border>
+                                    </StackPanel>
+                                </Border>
 
-                            <Border
+                                <Border
                                 Padding="4"
                                 Background="#0D1116"
                                 BorderBrush="#24425A"
                                 BorderThickness="1"
                                 CornerRadius="9">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <Button
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <Button
                                         Style="{StaticResource CalendarActionButtonStyle}"
                                         Click="CalendarRunDailyAutomation_Click"
                                         Content="Procesar ayer"
                                         ToolTipService.ToolTip="Mover pendientes de ayer a hoy y guardar reporte" />
 
-                                    <Button
+                                        <Button
                                         Style="{StaticResource CalendarActionButtonStyle}"
                                         Click="CalendarDailyReport_Click"
                                         Content="Reporte"
                                         ToolTipService.ToolTip="Abrir el último reporte diario" />
 
-                                    <ToggleButton
+                                        <ToggleButton
                                         x:Name="CalendarCobrosToggle"
                                         Style="{StaticResource CalendarActionToggleStyle}"
                                         Click="CalendarCobrosToggle_Click"
                                         Content="💰 Cobros"
                                         ToolTipService.ToolTip="Mostrar u ocultar eventos de BD COBRAR Y PAGAR" />
 
-                                    <Button
+                                        <Button
                                         Style="{StaticResource CalendarActionButtonStyle}"
                                         Click="CalendarRefresh_Click"
                                         Content="Actualizar"
                                         ToolTipService.ToolTip="Actualización rápida incremental · Ctrl + clic para recarga completa" />
 
-                                    <Button
+                                        <Button
                                         Style="{StaticResource CalendarActionButtonStyle}"
                                         Click="CalendarClose_Click"
                                         Content="Resultados" />
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
                     </Grid>
                 </Border>
 
@@ -3041,6 +3056,7 @@
                             <Style TargetType="ListViewItem">
                                 <Setter Property="Padding" Value="0" />
                                 <Setter Property="MinHeight" Value="28" />
+                                <Setter Property="VerticalContentAlignment" Value="Stretch" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                 <Setter Property="BorderThickness" Value="0" />
                             </Style>
@@ -3072,8 +3088,8 @@
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchResultRow">
                                 <Grid
-                                    Height="22"
-                                    Padding="8,0"
+                                    MinHeight="22"
+                                    Padding="8,2"
                                     ColumnSpacing="0"
                                     Tag="ResultColumns">
                                     <Grid.ColumnDefinitions>

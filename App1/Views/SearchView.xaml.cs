@@ -1242,9 +1242,17 @@ namespace Anfeta.UI.Views
                 var scaleKey = values[LS_SearchTextScale] as string ?? "normal";
                 _textScale = scaleKey switch
                 {
+                    "70" => 0.70,
+                    "80" => 0.80,
+                    "90" => 0.90,
+                    "110" => 1.10,
+                    "120" => 1.20,
+                    "130" => 1.30,
+                    "140" => 1.40,
+                    "150" => 1.50,
                     "small" => 0.90,
                     "large" => 1.20,
-                    _ => 1.0
+                    _ => 1.00
                 };
 
                 SelectComboItemByTag(TextScaleCombo, scaleKey);
@@ -1515,9 +1523,17 @@ namespace Anfeta.UI.Views
             var key = item.Tag?.ToString() ?? "normal";
             _textScale = key switch
             {
+                "70" => 0.70,
+                "80" => 0.80,
+                "90" => 0.90,
+                "110" => 1.10,
+                "120" => 1.20,
+                "130" => 1.30,
+                "140" => 1.40,
+                "150" => 1.50,
                 "small" => 0.90,
                 "large" => 1.20,
-                _ => 1.0
+                _ => 1.00
             };
 
             ApplicationData.Current.LocalSettings.Values[LS_SearchTextScale] = key;

@@ -255,6 +255,21 @@ namespace Anfeta.UI.Services.Notion
             _checklistStatsCache =
                 new(StringComparer.OrdinalIgnoreCase);
 
+        // Candidatos de proyecto por tipo + mes lógico.
+        // Se cachean unos minutos para que abrir varias tarjetas del mismo
+        // proyecto no vuelva a consultar Notion cada vez.
+        private sealed record ProjectCandidateCacheEntry(
+            DateTimeOffset StoredAt,
+            IReadOnlyList<NotionCalendarActivity> Activities);
+
+        private static readonly ConcurrentDictionary<
+            string,
+            ProjectCandidateCacheEntry> ProjectCandidateCache =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly TimeSpan ProjectCandidateCacheLifetime =
+            TimeSpan.FromMinutes(15);
+
         private sealed record SchemaInfo(
             IReadOnlyList<string> DateProperties,
             string TitleProperty);
@@ -698,6 +713,152 @@ namespace Anfeta.UI.Services.Notion
                 progress: null,
                 cancellationToken,
                 forceRefresh: true);
+        }
+
+        /// <summary>
+        /// Obtiene un conjunto reducido de páginas candidatas para construir
+        /// la vista "Proyecto relacionado" de ANFETA.
+        ///
+        /// Primero intenta filtrar por título usando tipo de proyecto + token
+        /// de mes (ej. 2608AGOS). Si la base no acepta ese filtro, usa un rango
+        /// de fechas amplio alrededor del mes como respaldo. El filtro final
+        /// por tipo + dominio + mes se realiza en SearchView.Calendar.
+        /// </summary>
+        public async Task<IReadOnlyList<NotionCalendarActivity>>
+            GetProjectCandidateActivitiesAsync(
+                string token,
+                string projectTypeToken,
+                string monthTag,
+                DateTime projectMonth,
+                CancellationToken cancellationToken = default,
+                bool forceRefresh = false)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            projectTypeToken =
+                (projectTypeToken ?? string.Empty)
+                .Trim()
+                .ToLowerInvariant();
+
+            monthTag =
+                (monthTag ?? string.Empty)
+                .Trim()
+                .ToUpperInvariant();
+
+            if (string.IsNullOrWhiteSpace(projectTypeToken))
+                return Array.Empty<NotionCalendarActivity>();
+
+            var monthStart =
+                new DateTime(
+                    projectMonth.Year,
+                    projectMonth.Month,
+                    1);
+
+            var cacheKey =
+                $"{monthStart:yyyy-MM}|{projectTypeToken}|{monthTag}";
+
+            if (!forceRefresh &&
+                ProjectCandidateCache.TryGetValue(
+                    cacheKey,
+                    out var cached) &&
+                DateTimeOffset.UtcNow - cached.StoredAt <
+                    ProjectCandidateCacheLifetime)
+            {
+                return cached.Activities
+                    .ToList();
+            }
+
+            using var fullSyncLease =
+                await NotionRequestCoordinator.EnterFullSyncAsync(
+                    cancellationToken);
+
+            using var http =
+                CreateClient(token);
+
+            var schema =
+                await GetSchemaCachedAsync(
+                    http,
+                    cancellationToken);
+
+            if (schema.DateProperties.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "No se encontró la propiedad Fecha POR Hacer para buscar actividades relacionadas.");
+            }
+
+            List<JsonElement>? pages = null;
+
+            // Ruta preferida: filtra por el título, que representa el proyecto
+            // lógico y no depende de que una actividad haya sido movida de día.
+            if (!string.IsNullOrWhiteSpace(schema.TitleProperty))
+            {
+                pages =
+                    await TryQueryProjectTitleCandidatesAsync(
+                        http,
+                        schema.TitleProperty,
+                        projectTypeToken,
+                        monthTag,
+                        cancellationToken);
+            }
+
+            if (pages == null ||
+                pages.Count == 0)
+            {
+                // Respaldo conservador: mes anterior + mes objetivo + dos meses
+                // posteriores. Esto cubre actividades arrastradas a días futuros
+                // sin descargar las miles de páginas completas de Revisiones.
+                pages =
+                    await QueryDateRangePagesAsync(
+                        http,
+                        monthStart.AddMonths(-1),
+                        monthStart.AddMonths(3),
+                        schema.DateProperties[0],
+                        cancellationToken);
+            }
+
+            var mapped =
+                new List<NotionCalendarActivity>();
+
+            foreach (var page in pages)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var activity =
+                    await MapPageAsync(
+                        http,
+                        page,
+                        schema,
+                        cancellationToken);
+
+                if (activity == null ||
+                    string.IsNullOrWhiteSpace(activity.PageId))
+                {
+                    continue;
+                }
+
+                mapped.Add(activity);
+            }
+
+            var ordered =
+                mapped
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderBy(activity => activity.Start)
+                    .ThenBy(activity => activity.Title)
+                    .ToList();
+
+            ProjectCandidateCache[cacheKey] =
+                new ProjectCandidateCacheEntry(
+                    DateTimeOffset.UtcNow,
+                    ordered);
+
+            return ordered;
         }
 
 
@@ -1920,6 +2081,12 @@ namespace Anfeta.UI.Services.Notion
                 }
             }
 
+            // Una fecha/hora modificada puede cambiar el orden visible de
+            // cualquier proyecto relacionado. El cache local de candidatos se
+            // invalida; SearchView conserva su cache de checklist actual y no
+            // necesita volver a descargarlo inmediatamente.
+            ProjectCandidateCache.Clear();
+
             return updated;
         }
 
@@ -2657,6 +2824,12 @@ namespace Anfeta.UI.Services.Notion
                 }
             }
 
+            // Una modificación de horario puede afectar la posición de
+            // actividades dentro de cualquier proyecto relacionado. Invalida
+            // únicamente candidatos de proyecto; la caché diaria ya quedó
+            // actualizada arriba.
+            ProjectCandidateCache.Clear();
+
             return new NotionCalendarScheduleUpdateResult(
                 updated,
                 auditLogWritten);
@@ -2879,6 +3052,11 @@ namespace Anfeta.UI.Services.Notion
                 CacheLock.Release();
             }
 
+            // Un cambio en título, fecha, persona o proyecto puede mover una
+            // página de un grupo lógico a otro. La siguiente apertura del
+            // proyecto vuelve a resolver sus candidatos.
+            ProjectCandidateCache.Clear();
+
             LastChangedPageIds =
                 changedIds
                     .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
@@ -2896,6 +3074,8 @@ namespace Anfeta.UI.Services.Notion
 
         public void ClearCache()
         {
+            ProjectCandidateCache.Clear();
+
             lock (CacheSaveScheduleLock)
             {
                 _cacheSaveDebounceCts?.Cancel();
@@ -3365,6 +3545,261 @@ namespace Anfeta.UI.Services.Notion
                         "next_cursor",
                         out var nextCursor) &&
                     nextCursor.ValueKind == JsonValueKind.String
+                        ? nextCursor.GetString()
+                        : null;
+
+                if (string.IsNullOrWhiteSpace(cursor))
+                    hasMore = false;
+            }
+
+            return results;
+        }
+
+        private static async Task<List<JsonElement>?>
+            TryQueryProjectTitleCandidatesAsync(
+                HttpClient http,
+                string titlePropertyName,
+                string projectTypeToken,
+                string monthTag,
+                CancellationToken cancellationToken)
+        {
+            try
+            {
+                var results =
+                    new List<JsonElement>();
+
+                string? cursor = null;
+                var hasMore = true;
+
+                while (hasMore)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var filters =
+                        new List<object>
+                        {
+                            new Dictionary<string, object?>
+                            {
+                                ["property"] = titlePropertyName,
+                                ["title"] =
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["contains"] =
+                                            projectTypeToken
+                                    }
+                            }
+                        };
+
+                    if (!string.IsNullOrWhiteSpace(monthTag))
+                    {
+                        filters.Add(
+                            new Dictionary<string, object?>
+                            {
+                                ["property"] = titlePropertyName,
+                                ["title"] =
+                                    new Dictionary<string, object?>
+                                    {
+                                        ["contains"] =
+                                            monthTag
+                                    }
+                            });
+                    }
+
+                    var payload =
+                        new Dictionary<string, object?>
+                        {
+                            ["page_size"] = 100,
+                            ["filter"] =
+                                filters.Count == 1
+                                    ? filters[0]
+                                    : new Dictionary<string, object?>
+                                    {
+                                        ["and"] =
+                                            filters.ToArray()
+                                    }
+                        };
+
+                    if (!string.IsNullOrWhiteSpace(cursor))
+                        payload["start_cursor"] = cursor;
+
+                    using var response =
+                        await SendPostWithRetryAsync(
+                            http,
+                            $"data_sources/{RevisionesDataSourceId}/query",
+                            JsonSerializer.Serialize(payload),
+                            cancellationToken);
+
+                    var json =
+                        await response.Content.ReadAsStringAsync(
+                            cancellationToken);
+
+                    // Algunas configuraciones antiguas de la base pueden no
+                    // aceptar el filtro de title. En ese caso se activa el
+                    // respaldo por rango de fechas, sin convertirlo en error.
+                    if (!response.IsSuccessStatusCode)
+                        return null;
+
+                    using var document =
+                        JsonDocument.Parse(json);
+
+                    var root =
+                        document.RootElement;
+
+                    if (root.TryGetProperty(
+                            "results",
+                            out var pages) &&
+                        pages.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var page in pages.EnumerateArray())
+                            results.Add(page.Clone());
+                    }
+
+                    hasMore =
+                        root.TryGetProperty(
+                            "has_more",
+                            out var more) &&
+                        more.ValueKind == JsonValueKind.True;
+
+                    cursor =
+                        root.TryGetProperty(
+                            "next_cursor",
+                            out var nextCursor) &&
+                        nextCursor.ValueKind ==
+                            JsonValueKind.String
+                            ? nextCursor.GetString()
+                            : null;
+
+                    if (string.IsNullOrWhiteSpace(cursor))
+                        hasMore = false;
+                }
+
+                return results;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static async Task<List<JsonElement>>
+            QueryDateRangePagesAsync(
+                HttpClient http,
+                DateTime localStartDate,
+                DateTime localEndDateExclusive,
+                string datePropertyName,
+                CancellationToken cancellationToken)
+        {
+            var results =
+                new List<JsonElement>();
+
+            string? cursor = null;
+            var hasMore = true;
+
+            var localStart =
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        localStartDate.Date,
+                        DateTimeKind.Local));
+
+            var localEnd =
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        localEndDateExclusive.Date,
+                        DateTimeKind.Local));
+
+            while (hasMore)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var payload =
+                    new Dictionary<string, object?>
+                    {
+                        ["page_size"] = 100,
+                        ["filter"] =
+                            new Dictionary<string, object?>
+                            {
+                                ["and"] =
+                                    new object[]
+                                    {
+                                        new Dictionary<string, object?>
+                                        {
+                                            ["property"] =
+                                                datePropertyName,
+                                            ["date"] =
+                                                new Dictionary<string, object?>
+                                                {
+                                                    ["on_or_after"] =
+                                                        localStart.ToString("O")
+                                                }
+                                        },
+                                        new Dictionary<string, object?>
+                                        {
+                                            ["property"] =
+                                                datePropertyName,
+                                            ["date"] =
+                                                new Dictionary<string, object?>
+                                                {
+                                                    ["before"] =
+                                                        localEnd.ToString("O")
+                                                }
+                                        }
+                                    }
+                            }
+                    };
+
+                if (!string.IsNullOrWhiteSpace(cursor))
+                    payload["start_cursor"] = cursor;
+
+                using var response =
+                    await SendPostWithRetryAsync(
+                        http,
+                        $"data_sources/{RevisionesDataSourceId}/query",
+                        JsonSerializer.Serialize(payload),
+                        cancellationToken);
+
+                var json =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw CreateNotionException(
+                        "consultar actividades relacionadas del proyecto",
+                        response,
+                        json);
+                }
+
+                using var document =
+                    JsonDocument.Parse(json);
+
+                var root =
+                    document.RootElement;
+
+                if (root.TryGetProperty(
+                        "results",
+                        out var pages) &&
+                    pages.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var page in pages.EnumerateArray())
+                        results.Add(page.Clone());
+                }
+
+                hasMore =
+                    root.TryGetProperty(
+                        "has_more",
+                        out var more) &&
+                    more.ValueKind == JsonValueKind.True;
+
+                cursor =
+                    root.TryGetProperty(
+                        "next_cursor",
+                        out var nextCursor) &&
+                    nextCursor.ValueKind ==
+                        JsonValueKind.String
                         ? nextCursor.GetString()
                         : null;
 

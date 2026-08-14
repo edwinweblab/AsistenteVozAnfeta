@@ -2954,6 +2954,535 @@ namespace Anfeta.UI.Views
                     !string.IsNullOrWhiteSpace(value)));
         }
 
+        /// <summary>
+        /// Crea un recordatorio/notificación ANFETA vinculado a una actividad
+        /// real del calendario. Reutiliza exactamente el mismo formato de
+        /// Mensajes/Revisiones que ya consume IndexedFileReminderService.
+        /// </summary>
+        private async Task ShowCalendarActivityReminderDialogAsync(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                StatusText.Text =
+                    "Estado: La actividad no tiene identificador de Notion.";
+                return;
+            }
+
+            var token =
+                GetSavedNotionToken();
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            var currentUserTag =
+                GetCurrentMessagesUserTag();
+
+            if (string.IsNullOrWhiteSpace(currentUserTag) ||
+                !MessagesPeople.ContainsKey(currentUserTag))
+            {
+                StatusText.Text =
+                    "Estado: Configura correctamente tu usuario en Ajustes antes de crear el recordatorio.";
+                return;
+            }
+
+            var defaultPerson =
+                SplitPersons(activity.Person)
+                    .Select(NormalizeCalendarPerson)
+                    .FirstOrDefault(person =>
+                        !string.IsNullOrWhiteSpace(
+                            GetCalendarMessageRecipientTag(person)))
+                ?? string.Empty;
+
+            var defaultRecipientTag =
+                GetCalendarMessageRecipientTag(
+                    defaultPerson);
+
+            var recipientCombo =
+                BuildMessagesPersonCombo(
+                    defaultRecipientTag,
+                    includeAll: false);
+
+            recipientCombo.Header =
+                "Destinatario del recordatorio";
+
+            var now =
+                DateTimeOffset.Now;
+
+            var activityStart =
+                new DateTimeOffset(
+                    activity.Start.Year,
+                    activity.Start.Month,
+                    activity.Start.Day,
+                    activity.Start.Hour,
+                    activity.Start.Minute,
+                    0,
+                    now.Offset);
+
+            var suggested =
+                activityStart > now
+                    ? activityStart
+                    : new DateTimeOffset(
+                        now.Year,
+                        now.Month,
+                        now.Day,
+                        now.Hour,
+                        now.Minute,
+                        0,
+                        now.Offset);
+
+            var datePicker =
+                new DatePicker
+                {
+                    Date = suggested,
+                    MinYear =
+                        new DateTimeOffset(
+                            DateTime.Today.Year,
+                            1,
+                            1,
+                            0,
+                            0,
+                            0,
+                            now.Offset),
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch
+                };
+
+            var timePicker =
+                new TimePicker
+                {
+                    Time = suggested.TimeOfDay,
+                    // Recordatorios de actividad: selección exacta minuto a minuto.
+                    MinuteIncrement = 1,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch
+                };
+
+            var noteBox =
+                new TextBox
+                {
+                    Header = "Nota opcional",
+                    PlaceholderText =
+                        "Ej. Revisar antes de la reunión / validar cambios...",
+                    AcceptsReturn = true,
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    MinHeight = 70
+                };
+
+            var activitySummary =
+                new Border
+                {
+                    Padding =
+                        new Thickness(10),
+                    CornerRadius =
+                        new CornerRadius(7),
+                    Background =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                24,
+                                255,
+                                255,
+                                255)),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                55,
+                                255,
+                                255,
+                                255)),
+                    BorderThickness =
+                        new Thickness(1),
+                    Child =
+                        new StackPanel
+                        {
+                            Spacing = 4,
+                            Children =
+                            {
+                                new TextBlock
+                                {
+                                    Text =
+                                        activity.Title,
+                                    FontWeight =
+                                        Microsoft.UI.Text.FontWeights.SemiBold,
+                                    TextWrapping =
+                                        TextWrapping.Wrap,
+                                    MaxLines = 3
+                                },
+                                new TextBlock
+                                {
+                                    Text =
+                                        $"Actividad: {activity.Start:dd/MM/yyyy HH:mm}–{activity.End:HH:mm} · " +
+                                        $"{activity.EstimatedDurationLabel}",
+                                    FontSize = 10.5,
+                                    Opacity = 0.72
+                                }
+                            }
+                        }
+                };
+
+            var status =
+                new TextBlock
+                {
+                    FontSize = 11,
+                    TextWrapping =
+                        TextWrapping.Wrap,
+                    Opacity = 0.82
+                };
+
+            var panel =
+                new StackPanel
+                {
+                    Width = 430,
+                    Spacing = 10
+                };
+
+            panel.Children.Add(
+                activitySummary);
+
+            panel.Children.Add(
+                recipientCombo);
+
+            var scheduleRow =
+                new Grid
+                {
+                    ColumnSpacing = 8
+                };
+
+            scheduleRow.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
+            scheduleRow.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
+            Grid.SetColumn(
+                datePicker,
+                0);
+
+            Grid.SetColumn(
+                timePicker,
+                1);
+
+            scheduleRow.Children.Add(
+                datePicker);
+
+            scheduleRow.Children.Add(
+                timePicker);
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Fecha y hora del aviso",
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.SemiBold
+                });
+
+            panel.Children.Add(
+                scheduleRow);
+
+            panel.Children.Add(
+                noteBox);
+
+            panel.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        "El recordatorio quedará vinculado a esta actividad. " +
+                        "Desde la notificación podrás abrir la actividad original en Notion.",
+                    FontSize = 10.5,
+                    Opacity = 0.68,
+                    TextWrapping =
+                        TextWrapping.Wrap
+                });
+
+            panel.Children.Add(
+                status);
+
+            var dialog =
+                new ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    Title = "🔔 Recordatorio de actividad",
+                    Content = panel,
+                    PrimaryButtonText =
+                        "Crear recordatorio",
+                    CloseButtonText =
+                        "Cancelar",
+                    DefaultButton =
+                        ContentDialogButton.Primary
+                };
+
+            var result =
+                await dialog.ShowAsync();
+
+            if (result !=
+                ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            if (recipientCombo.SelectedItem is not
+                ComboBoxItem selectedRecipient)
+            {
+                StatusText.Text =
+                    "Estado: Selecciona un destinatario.";
+                return;
+            }
+
+            var recipientTag =
+                selectedRecipient.Tag?
+                    .ToString() ??
+                string.Empty;
+
+            if (string.IsNullOrWhiteSpace(recipientTag) ||
+                !MessagesPeople.ContainsKey(recipientTag))
+            {
+                StatusText.Text =
+                    "Estado: El destinatario seleccionado no es válido.";
+                return;
+            }
+
+            var scheduled =
+                new DateTimeOffset(
+                    datePicker.Date.Year,
+                    datePicker.Date.Month,
+                    datePicker.Date.Day,
+                    timePicker.Time.Hours,
+                    timePicker.Time.Minutes,
+                    0,
+                    DateTimeOffset.Now.Offset);
+
+            if (scheduled <
+                DateTimeOffset.Now.AddMinutes(-1))
+            {
+                StatusText.Text =
+                    "Estado: Selecciona una fecha y hora actual o futura.";
+                return;
+            }
+
+            var searchable =
+                string.Join(
+                    " ",
+                    new[]
+                    {
+                        activity.Title,
+                        activity.Project,
+                        activity.Status,
+                        activity.Description
+                    }.Where(value =>
+                        !string.IsNullOrWhiteSpace(value)));
+
+            var domain =
+                ExtractMessageDomain(
+                    searchable);
+
+            if (string.Equals(
+                    domain,
+                    "Sin dominio",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                domain =
+                    string.Empty;
+            }
+
+            var project =
+                DetectCalendarMessageProjectType(
+                    searchable);
+
+            var subject =
+                BuildStructuredCalendarMessageSubject(
+                    domain,
+                    project,
+                    $"🔔 {activity.Title}");
+
+            if (string.IsNullOrWhiteSpace(subject))
+            {
+                subject =
+                    $"🔔 {activity.Title}";
+            }
+
+            var authorName =
+                MessagesPeople.TryGetValue(
+                    currentUserTag,
+                    out var mappedAuthor)
+                    ? mappedAuthor
+                    : currentUserTag;
+
+            var recipientName =
+                MessagesPeople.TryGetValue(
+                    recipientTag,
+                    out var mappedRecipient)
+                    ? mappedRecipient
+                    : recipientTag;
+
+            var title =
+                $"{scheduled:yyyy-MM-dd HH:mm} " +
+                $"{recipientTag} de:{currentUserTag} " +
+                $"{subject}";
+
+            var note =
+                (noteBox.Text ??
+                 string.Empty).Trim();
+
+            var context =
+                new NewMessageComposerContext
+                {
+                    RecipientTag =
+                        recipientTag,
+                    RecipientName =
+                        recipientName,
+                    Domain =
+                        domain,
+                    ProjectType =
+                        project,
+                    ActivityTitle =
+                        (activity.Title ??
+                         string.Empty).Trim(),
+                    ActivityUrl =
+                        (activity.PageUrl ??
+                         string.Empty).Trim(),
+                    SuggestedAt =
+                        scheduled
+                };
+
+            var initialText =
+                BuildCalendarMessageBody(
+                    string.IsNullOrWhiteSpace(note)
+                        ? "Recordatorio de actividad."
+                        : note,
+                    context);
+
+            try
+            {
+                ShowLoadingState(
+                    "Estado: Creando recordatorio…",
+                    activity.Title);
+
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromMinutes(3));
+
+                var service =
+                    new NotionFilePageService();
+
+                var created =
+                    await service
+                        .CreateRevisionMessageAsync(
+                            token,
+                            title,
+                            new List<string>(),
+                            progress: null,
+                            cts.Token);
+
+                await _messageThreadService
+                    .AppendEntryAsync(
+                        token,
+                        created.PageId,
+                        new MessageThreadEntry
+                        {
+                            Kind =
+                                MessageThreadKind.Message,
+                            AuthorTag =
+                                currentUserTag,
+                            AuthorName =
+                                authorName,
+                            RecipientTag =
+                                recipientTag,
+                            RecipientName =
+                                recipientName,
+                            CreatedAt =
+                                DateTimeOffset.Now,
+                            Text =
+                                initialText,
+                            Attachments =
+                                new List<MessageThreadAttachment>()
+                        },
+                        cts.Token);
+
+                var row =
+                    new SearchResultRow
+                    {
+                        ExternalId =
+                            created.PageId,
+                        NodeId =
+                            created.PageId,
+                        ExternalUrl =
+                            created.PageUrl,
+                        ExternalSourceName =
+                            "Revisiones",
+                        Source =
+                            SearchSource.Notion,
+                        Name =
+                            title,
+                        Target =
+                            created.PageUrl,
+                        Type =
+                            "NOTION_PAGE",
+                        SearchText =
+                            $"Revisiones {title}",
+                        ServerModified =
+                            DateTime.Now.ToString(
+                                "yyyy-MM-dd HH:mm",
+                                CultureInfo.InvariantCulture)
+                    };
+
+                await UpsertCreatedMessageInLocalIndexAsync(
+                    row);
+
+                if (_messagesViewActive)
+                {
+                    RefreshMessagesView(
+                        force: true);
+                }
+
+                try
+                {
+                    App.AppHost.Services
+                        .GetService<IndexedFileReminderService>()
+                        ?.ScanNow();
+                }
+                catch
+                {
+                    // La página ya quedó creada e indexada.
+                }
+
+                StatusText.Text =
+                    $"Estado: Recordatorio creado ✅ · " +
+                    $"{recipientName} · {scheduled:dd/MM/yyyy HH:mm}";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: Notion tardó demasiado en crear el recordatorio.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo crear el recordatorio → {ex.Message}";
+            }
+            finally
+            {
+                HideLoadingState();
+            }
+        }
+
         private async Task ShowNewMessageDialogAsync(
             NewMessageComposerContext? context)
         {
