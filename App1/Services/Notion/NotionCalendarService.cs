@@ -105,6 +105,27 @@ namespace Anfeta.UI.Services.Notion
             Task<IReadOnlyList<NotionCalendarActivity>>> ActiveDayLoads =
                 new(StringComparer.Ordinal);
 
+        // Varias pestañas/temporizadores pueden pedir la misma comprobación
+        // incremental casi al mismo tiempo. El coordinador global serializa,
+        // pero serializar no evita repetir la misma consulta. Este gate reutiliza
+        // el resultado reciente cuando el anchor es prácticamente el mismo.
+        private static readonly SemaphoreSlim IncrementalRefreshGate =
+            new(1, 1);
+
+        private static DateTimeOffset _lastIncrementalRefreshCompletedUtc =
+            DateTimeOffset.MinValue;
+
+        private static DateTimeOffset _lastIncrementalRefreshAnchorUtc =
+            DateTimeOffset.MinValue;
+
+        private static IReadOnlyList<string> _lastIncrementalRefreshPageIds =
+            Array.Empty<string>();
+
+        private static bool _lastIncrementalRefreshChanged;
+
+        private static readonly TimeSpan IncrementalRefreshReuseWindow =
+            TimeSpan.FromSeconds(15);
+
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";
         private const string RevisionesDataSourceId =
@@ -255,6 +276,48 @@ namespace Anfeta.UI.Services.Notion
             _checklistStatsCache =
                 new(StringComparer.OrdinalIgnoreCase);
 
+        // Cache global/persistente de checklist por PageId. A diferencia de la
+        // cache diaria, sobrevive aunque una actividad cambie de fecha o no este
+        // visible hoy. Esto permite que las tarjetas y el popup muestren el ultimo
+        // porcentaje conocido de inmediato al abrir ANFETA. Los cambios reales
+        // siguen refrescandose con forceRefresh cuando Notion reporta la pagina
+        // como modificada.
+        private const string ChecklistStatsCacheFileName =
+            "notion_checklist_stats_cache_v2.json";
+
+        private sealed class StoredChecklistStats
+        {
+            public int Total { get; set; }
+            public int Completed { get; set; }
+            public DateTimeOffset StoredAtUtc { get; set; }
+        }
+
+        private static readonly ConcurrentDictionary<
+            string,
+            StoredChecklistStats> PersistentChecklistStats =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly SemaphoreSlim ChecklistStatsLoadLock =
+            new(1, 1);
+
+        private static readonly SemaphoreSlim ChecklistStatsWriteLock =
+            new(1, 1);
+
+        // Maximo dos lecturas de bodies simultaneas. Antes distintos procesos
+        // (cards, hover, One Click, proyecto) podian pedir el mismo body a la vez.
+        // ActiveChecklistLoads deduplica por PageId y este gate evita saturar Notion.
+        private static readonly SemaphoreSlim ChecklistNetworkGate =
+            new(2, 2);
+
+        private static readonly ConcurrentDictionary<
+            string,
+            Task<NotionChecklistStats>> ActiveChecklistLoads =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly object ChecklistSaveScheduleLock = new();
+        private static CancellationTokenSource? _checklistSaveDebounceCts;
+        private static bool _persistentChecklistStatsLoaded;
+
         // Candidatos de proyecto por tipo + mes lógico.
         // Se cachean unos minutos para que abrir varias tarjetas del mismo
         // proyecto no vuelva a consultar Notion cada vez.
@@ -268,7 +331,7 @@ namespace Anfeta.UI.Services.Notion
                 new(StringComparer.OrdinalIgnoreCase);
 
         private static readonly TimeSpan ProjectCandidateCacheLifetime =
-            TimeSpan.FromMinutes(15);
+            TimeSpan.FromMinutes(60);
 
         private sealed record SchemaInfo(
             IReadOnlyList<string> DateProperties,
@@ -277,7 +340,8 @@ namespace Anfeta.UI.Services.Notion
         public Task<NotionCalendarWarmupResult> StartStartupWarmupAsync(
             string token,
             DateTimeOffset? changedAfterUtc,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            IProgress<NotionCalendarProgress>? progress = null)
         {
             lock (StartupWarmupLock)
             {
@@ -289,7 +353,8 @@ namespace Anfeta.UI.Services.Notion
                         WarmupStartupCoreAsync(
                             token,
                             changedAfterUtc,
-                            cancellationToken);
+                            cancellationToken,
+                            progress);
                 }
 
                 return _startupWarmupTask;
@@ -299,7 +364,8 @@ namespace Anfeta.UI.Services.Notion
         private async Task<NotionCalendarWarmupResult> WarmupStartupCoreAsync(
             string token,
             DateTimeOffset? changedAfterUtc,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IProgress<NotionCalendarProgress>? progress)
         {
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -331,7 +397,8 @@ namespace Anfeta.UI.Services.Notion
                         changedAfterUtc.Value
                             .ToUniversalTime()
                             .Subtract(TimeSpan.FromMinutes(3)),
-                        cancellationToken);
+                        cancellationToken,
+                        progress);
             }
             else
             {
@@ -354,6 +421,19 @@ namespace Anfeta.UI.Services.Notion
                 await TryGetCachedDayAsync(
                     DateTime.Today,
                     cancellationToken);
+
+            if (currentToday != null &&
+                currentToday.Count > 0)
+            {
+                // Si el arranque ya tiene cache del dia, aprovecha ese tiempo
+                // para restaurar/precargar checklist. En aperturas posteriores
+                // la mayoria sale del archivo persistente y no toca la red.
+                await WarmChecklistStatsForActivitiesAsync(
+                    token,
+                    currentToday,
+                    cancellationToken,
+                    progress);
+            }
 
             return new NotionCalendarWarmupResult(
                 hadSavedToday,
@@ -749,8 +829,11 @@ namespace Anfeta.UI.Services.Notion
                 .Trim()
                 .ToUpperInvariant();
 
-            if (string.IsNullOrWhiteSpace(projectTypeToken))
-                return Array.Empty<NotionCalendarActivity>();
+            // projectTypeToken vacío significa "Todas las áreas". En ese
+            // modo la consulta se limita por el token lógico de mes y el
+            // filtrado final por dominio se realiza en SearchView.Calendar.
+            var includeAllProjectTypes =
+                string.IsNullOrWhiteSpace(projectTypeToken);
 
             var monthStart =
                 new DateTime(
@@ -759,7 +842,7 @@ namespace Anfeta.UI.Services.Notion
                     1);
 
             var cacheKey =
-                $"{monthStart:yyyy-MM}|{projectTypeToken}|{monthTag}";
+                $"{monthStart:yyyy-MM}|{(includeAllProjectTypes ? "*" : projectTypeToken)}|{monthTag}";
 
             if (!forceRefresh &&
                 ProjectCandidateCache.TryGetValue(
@@ -861,6 +944,172 @@ namespace Anfeta.UI.Services.Notion
             return ordered;
         }
 
+        private static bool ProjectCandidateCacheEntryMatchesActivity(
+            string cacheKey,
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId) ||
+                string.IsNullOrWhiteSpace(cacheKey))
+            {
+                return false;
+            }
+
+            var parts =
+                cacheKey.Split('|');
+
+            if (parts.Length < 3)
+                return false;
+
+            var monthKey =
+                parts[0].Trim();
+
+            var projectType =
+                parts[1].Trim();
+
+            var monthTag =
+                parts[2].Trim();
+
+            var searchable =
+                $"{activity.Title} {activity.Project}";
+
+            if (!string.Equals(
+                    projectType,
+                    "*",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !Regex.IsMatch(
+                    searchable,
+                    $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(projectType)}(?![\p{{L}}\p{{Nd}}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(monthTag) &&
+                Regex.IsMatch(
+                    searchable,
+                    $@"(?<![\p{{L}}\p{{Nd}}_]){Regex.Escape(monthTag)}(?![\p{{L}}\p{{Nd}}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant))
+            {
+                return true;
+            }
+
+            // Respaldo para títulos antiguos sin token 2608AGOS. Replica el
+            // mismo rango conservador usado por QueryDateRangePagesAsync para
+            // que una actividad movida no desaparezca de una cache ya caliente.
+            if (DateTime.TryParseExact(
+                    monthKey,
+                    "yyyy-MM",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var monthStart))
+            {
+                var start =
+                    new DateTime(
+                        monthStart.Year,
+                        monthStart.Month,
+                        1)
+                    .AddMonths(-1);
+
+                var end =
+                    new DateTime(
+                        monthStart.Year,
+                        monthStart.Month,
+                        1)
+                    .AddMonths(3);
+
+                return activity.Start >= start &&
+                       activity.Start < end;
+            }
+
+            return string.IsNullOrWhiteSpace(monthTag);
+        }
+
+        private static void UpdateProjectCandidateCachesFromChanges(
+            IEnumerable<string> changedPageIds,
+            IEnumerable<NotionCalendarActivity> changedActivities)
+        {
+            var changedIds =
+                new HashSet<string>(
+                    (changedPageIds ?? Enumerable.Empty<string>())
+                        .Where(id =>
+                            !string.IsNullOrWhiteSpace(id)),
+                    StringComparer.OrdinalIgnoreCase);
+
+            if (changedIds.Count == 0 ||
+                ProjectCandidateCache.IsEmpty)
+            {
+                return;
+            }
+
+            var changed =
+                (changedActivities ??
+                 Enumerable.Empty<NotionCalendarActivity>())
+                    .Where(activity =>
+                        activity != null &&
+                        !string.IsNullOrWhiteSpace(activity.PageId))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.Last())
+                    .ToList();
+
+            foreach (var item in
+                     ProjectCandidateCache.ToArray())
+            {
+                var next =
+                    item.Value.Activities
+                        .Where(activity =>
+                            activity != null &&
+                            !changedIds.Contains(
+                                activity.PageId))
+                        .ToList();
+
+                foreach (var activity in changed)
+                {
+                    if (!ProjectCandidateCacheEntryMatchesActivity(
+                            item.Key,
+                            activity))
+                    {
+                        continue;
+                    }
+
+                    next.Add(activity);
+                }
+
+                var ordered =
+                    next
+                        .GroupBy(
+                            activity => activity.PageId,
+                            StringComparer.OrdinalIgnoreCase)
+                        .Select(group => group.Last())
+                        .OrderBy(activity => activity.Start)
+                        .ThenBy(activity => activity.Title)
+                        .ToList();
+
+                ProjectCandidateCache[item.Key] =
+                    new ProjectCandidateCacheEntry(
+                        DateTimeOffset.UtcNow,
+                        ordered);
+            }
+        }
+
+        private static void UpdateProjectCandidateCachesForActivity(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                return;
+            }
+
+            UpdateProjectCandidateCachesFromChanges(
+                new[] { activity.PageId },
+                new[] { activity });
+        }
+
 
         public async Task<NotionChecklistStats> GetChecklistStatsAsync(
             string token,
@@ -874,36 +1123,405 @@ namespace Anfeta.UI.Services.Notion
                 return new NotionChecklistStats(0, 0);
             }
 
-            if (!forceRefresh &&
-                _checklistStatsCache.TryGetValue(
-                    pageId,
-                    out var cached))
-            {
-                await ApplyChecklistStatsToCacheAsync(
-                    pageId,
-                    cached,
-                    cancellationToken);
-
-                return cached;
-            }
-
-            using var http = CreateClient(token);
-
-            var stats =
-                await ReadChecklistStatsRecursiveAsync(
-                    http,
-                    pageId,
-                    depth: 0,
-                    cancellationToken);
-
-            _checklistStatsCache[pageId] = stats;
-
-            await ApplyChecklistStatsToCacheAsync(
-                pageId,
-                stats,
+            await EnsurePersistentChecklistStatsLoadedAsync(
                 cancellationToken);
 
-            return stats;
+            if (!forceRefresh)
+            {
+                if (_checklistStatsCache.TryGetValue(
+                        pageId,
+                        out var memoryCached))
+                {
+                    await ApplyChecklistStatsToCacheAsync(
+                        pageId,
+                        memoryCached,
+                        cancellationToken);
+
+                    return memoryCached;
+                }
+
+                if (PersistentChecklistStats.TryGetValue(
+                        pageId,
+                        out var persisted))
+                {
+                    var persistedStats =
+                        new NotionChecklistStats(
+                            Math.Max(0, persisted.Total),
+                            Math.Clamp(
+                                persisted.Completed,
+                                0,
+                                Math.Max(0, persisted.Total)));
+
+                    _checklistStatsCache[pageId] =
+                        persistedStats;
+
+                    await ApplyChecklistStatsToCacheAsync(
+                        pageId,
+                        persistedStats,
+                        cancellationToken);
+
+                    return persistedStats;
+                }
+            }
+
+            // Todos los consumidores de una misma pagina comparten la misma
+            // lectura activa. forceRefresh usa una clave distinta para que una
+            // comprobacion explicita no herede un resultado viejo.
+            var loadKey =
+                forceRefresh
+                    ? $"{pageId}|force"
+                    : pageId;
+
+            var shared = ActiveChecklistLoads.GetOrAdd(
+                loadKey,
+                _ => LoadChecklistStatsCoreAsync(
+                    token,
+                    pageId,
+                    cancellationToken));
+
+            try
+            {
+                return await shared;
+            }
+            finally
+            {
+                if (shared.IsCompleted &&
+                    ActiveChecklistLoads.TryGetValue(
+                        loadKey,
+                        out var current) &&
+                    ReferenceEquals(current, shared))
+                {
+                    ActiveChecklistLoads.TryRemove(
+                        loadKey,
+                        out _);
+                }
+            }
+        }
+
+        private async Task<NotionChecklistStats> LoadChecklistStatsCoreAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken)
+        {
+            await ChecklistNetworkGate.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                using var http = CreateClient(token);
+
+                var stats =
+                    await ReadChecklistStatsRecursiveAsync(
+                        http,
+                        pageId,
+                        depth: 0,
+                        cancellationToken);
+
+                _checklistStatsCache[pageId] = stats;
+
+                PersistentChecklistStats[pageId] =
+                    new StoredChecklistStats
+                    {
+                        Total = stats.Total,
+                        Completed = stats.Completed,
+                        StoredAtUtc = DateTimeOffset.UtcNow
+                    };
+
+                SchedulePersistentChecklistStatsSave();
+
+                await ApplyChecklistStatsToCacheAsync(
+                    pageId,
+                    stats,
+                    cancellationToken);
+
+                return stats;
+            }
+            finally
+            {
+                ChecklistNetworkGate.Release();
+            }
+        }
+
+        public async Task WarmChecklistStatsForActivitiesAsync(
+            string token,
+            IEnumerable<NotionCalendarActivity> activities,
+            CancellationToken cancellationToken = default,
+            IProgress<NotionCalendarProgress>? progress = null)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                return;
+
+            var unique =
+                (activities ?? Enumerable.Empty<NotionCalendarActivity>())
+                    .Where(activity =>
+                        activity != null &&
+                        !activity.IsReviewMirror &&
+                        !string.IsNullOrWhiteSpace(activity.PageId))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+
+            if (unique.Count == 0)
+                return;
+
+            await EnsurePersistentChecklistStatsLoadedAsync(
+                cancellationToken);
+
+            // Primero aplica todo lo que ya existe en disco/memoria. Esta fase
+            // no hace red y permite que el UI muestre porcentajes al instante.
+            foreach (var activity in unique)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (_checklistStatsCache.TryGetValue(
+                        activity.PageId,
+                        out var memory))
+                {
+                    ApplyChecklistStatsToActivity(
+                        activity,
+                        memory);
+                    continue;
+                }
+
+                if (PersistentChecklistStats.TryGetValue(
+                        activity.PageId,
+                        out var stored))
+                {
+                    var stats =
+                        new NotionChecklistStats(
+                            Math.Max(0, stored.Total),
+                            Math.Clamp(
+                                stored.Completed,
+                                0,
+                                Math.Max(0, stored.Total)));
+
+                    _checklistStatsCache[activity.PageId] = stats;
+                    ApplyChecklistStatsToActivity(activity, stats);
+                }
+            }
+
+            var missing =
+                unique
+                    .Where(activity =>
+                        !activity.ChecklistScanned)
+                    .ToList();
+
+            var alreadyReady =
+                Math.Max(0, unique.Count - missing.Count);
+
+            progress?.Report(
+                new NotionCalendarProgress(
+                    "Precargando checklist",
+                    alreadyReady,
+                    unique.Count,
+                    missing.Count == 0
+                        ? "Checklist restaurado desde cache local."
+                        : $"{alreadyReady} en cache · {missing.Count} por preparar en segundo plano."));
+
+            if (missing.Count == 0)
+                return;
+
+            var completedWarmup = alreadyReady;
+
+            // Se crean tareas para los faltantes, pero ChecklistNetworkGate
+            // garantiza que como maximo dos bodies se lean al mismo tiempo.
+            // ActiveChecklistLoads evita duplicar una pagina que ya este siendo
+            // solicitada por cards, hover u otro proyecto.
+            var tasks = missing.Select(
+                async activity =>
+                {
+                    try
+                    {
+                        var stats =
+                            await GetChecklistStatsAsync(
+                                token,
+                                activity.PageId,
+                                cancellationToken,
+                                forceRefresh: false);
+
+                        ApplyChecklistStatsToActivity(
+                            activity,
+                            stats);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // El warmup es best-effort. El clic manual puede volver
+                        // a intentar esta pagina sin bloquear el resto.
+                    }
+                    finally
+                    {
+                        var current =
+                            Interlocked.Increment(
+                                ref completedWarmup);
+
+                        progress?.Report(
+                            new NotionCalendarProgress(
+                                "Precargando checklist",
+                                Math.Min(current, unique.Count),
+                                unique.Count,
+                                $"Preparando porcentajes del calendario · {Math.Min(current, unique.Count)}/{unique.Count}."));
+                    }
+                });
+
+            await Task.WhenAll(tasks);
+        }
+
+        private static void ApplyChecklistStatsToActivity(
+            NotionCalendarActivity activity,
+            NotionChecklistStats stats)
+        {
+            if (activity == null)
+                return;
+
+            activity.ChecklistScanned = true;
+            activity.ChecklistTotal = stats.Total;
+            activity.ChecklistCompleted = stats.Completed;
+        }
+
+        private static async Task EnsurePersistentChecklistStatsLoadedAsync(
+            CancellationToken cancellationToken)
+        {
+            if (_persistentChecklistStatsLoaded)
+                return;
+
+            await ChecklistStatsLoadLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                if (_persistentChecklistStatsLoaded)
+                    return;
+
+                var path = Path.Combine(
+                    ApplicationData.Current.LocalFolder.Path,
+                    ChecklistStatsCacheFileName);
+
+                if (File.Exists(path))
+                {
+                    try
+                    {
+                        var json =
+                            await File.ReadAllTextAsync(
+                                path,
+                                cancellationToken);
+
+                        var restored =
+                            await Task.Run(
+                                () => JsonSerializer.Deserialize<
+                                    Dictionary<string, StoredChecklistStats>>(json),
+                                cancellationToken);
+
+                        if (restored != null)
+                        {
+                            foreach (var item in restored)
+                            {
+                                if (string.IsNullOrWhiteSpace(item.Key) ||
+                                    item.Value == null)
+                                {
+                                    continue;
+                                }
+
+                                PersistentChecklistStats[item.Key] =
+                                    item.Value;
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // Una cache dañada nunca debe impedir abrir ANFETA.
+                    }
+                }
+
+                _persistentChecklistStatsLoaded = true;
+            }
+            finally
+            {
+                ChecklistStatsLoadLock.Release();
+            }
+        }
+
+        private static void SchedulePersistentChecklistStatsSave()
+        {
+            CancellationTokenSource owner;
+
+            lock (ChecklistSaveScheduleLock)
+            {
+                _checklistSaveDebounceCts?.Cancel();
+                owner = new CancellationTokenSource();
+                _checklistSaveDebounceCts = owner;
+            }
+
+            _ = PersistChecklistStatsAfterDelayAsync(owner);
+        }
+
+        private static async Task PersistChecklistStatsAfterDelayAsync(
+            CancellationTokenSource owner)
+        {
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(1.25),
+                    owner.Token);
+
+                var snapshot =
+                    PersistentChecklistStats.ToDictionary(
+                        item => item.Key,
+                        item => item.Value,
+                        StringComparer.OrdinalIgnoreCase);
+
+                var json =
+                    await Task.Run(
+                        () => JsonSerializer.Serialize(snapshot),
+                        owner.Token);
+
+                await ChecklistStatsWriteLock.WaitAsync(
+                    owner.Token);
+
+                try
+                {
+                    await File.WriteAllTextAsync(
+                        Path.Combine(
+                            ApplicationData.Current.LocalFolder.Path,
+                            ChecklistStatsCacheFileName),
+                        json,
+                        owner.Token);
+                }
+                finally
+                {
+                    ChecklistStatsWriteLock.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+                // La cache en memoria sigue siendo util.
+            }
+            finally
+            {
+                lock (ChecklistSaveScheduleLock)
+                {
+                    if (ReferenceEquals(
+                            _checklistSaveDebounceCts,
+                            owner))
+                    {
+                        _checklistSaveDebounceCts = null;
+                    }
+                }
+
+                owner.Dispose();
+            }
         }
 
         private static async Task ApplyChecklistStatsToCacheAsync(
@@ -2081,11 +2699,11 @@ namespace Anfeta.UI.Services.Notion
                 }
             }
 
-            // Una fecha/hora modificada puede cambiar el orden visible de
-            // cualquier proyecto relacionado. El cache local de candidatos se
-            // invalida; SearchView conserva su cache de checklist actual y no
-            // necesita volver a descargarlo inmediatamente.
-            ProjectCandidateCache.Clear();
+            // La actividad ya fue movida. Actualiza en memoria SOLO las
+            // caches de proyecto existentes en vez de vaciarlas todas y
+            // obligar a Notion a reconstruirlas en el siguiente clic.
+            UpdateProjectCandidateCachesForActivity(
+                updated);
 
             return updated;
         }
@@ -2824,11 +3442,10 @@ namespace Anfeta.UI.Services.Notion
                 }
             }
 
-            // Una modificación de horario puede afectar la posición de
-            // actividades dentro de cualquier proyecto relacionado. Invalida
-            // únicamente candidatos de proyecto; la caché diaria ya quedó
-            // actualizada arriba.
-            ProjectCandidateCache.Clear();
+            // Conserva calientes los candidatos ya resueltos. Solo se
+            // sustituye esta PageId dentro de las caches donde corresponda.
+            UpdateProjectCandidateCachesForActivity(
+                updated);
 
             return new NotionCalendarScheduleUpdateResult(
                 updated,
@@ -2866,6 +3483,79 @@ namespace Anfeta.UI.Services.Notion
         }
 
         public async Task<bool> RefreshChangedSinceAsync(
+            string token,
+            DateTimeOffset changedAfterUtc,
+            CancellationToken cancellationToken = default,
+            IProgress<NotionCalendarProgress>? progress = null)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                LastChangedPageIds = Array.Empty<string>();
+                return false;
+            }
+
+            await IncrementalRefreshGate.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                var now =
+                    DateTimeOffset.UtcNow;
+
+                var anchorDistance =
+                    Math.Abs(
+                        (changedAfterUtc.ToUniversalTime() -
+                         _lastIncrementalRefreshAnchorUtc)
+                        .TotalSeconds);
+
+                if (_lastIncrementalRefreshCompletedUtc !=
+                        DateTimeOffset.MinValue &&
+                    now - _lastIncrementalRefreshCompletedUtc <=
+                        IncrementalRefreshReuseWindow &&
+                    anchorDistance <= 60)
+                {
+                    LastChangedPageIds =
+                        _lastIncrementalRefreshPageIds
+                            .ToList();
+
+                    progress?.Report(
+                        new NotionCalendarProgress(
+                            "Comprobación reutilizada",
+                            1,
+                            1,
+                            "Otra pestaña ya comprobó estos cambios hace unos segundos."));
+
+                    return _lastIncrementalRefreshChanged;
+                }
+
+                var changed =
+                    await RefreshChangedSinceCoreAsync(
+                        token,
+                        changedAfterUtc,
+                        cancellationToken,
+                        progress);
+
+                _lastIncrementalRefreshAnchorUtc =
+                    changedAfterUtc.ToUniversalTime();
+
+                _lastIncrementalRefreshCompletedUtc =
+                    DateTimeOffset.UtcNow;
+
+                _lastIncrementalRefreshChanged =
+                    changed;
+
+                _lastIncrementalRefreshPageIds =
+                    LastChangedPageIds.ToList();
+
+                return changed;
+            }
+            finally
+            {
+                IncrementalRefreshGate.Release();
+            }
+        }
+
+        private async Task<bool> RefreshChangedSinceCoreAsync(
             string token,
             DateTimeOffset changedAfterUtc,
             CancellationToken cancellationToken = default,
@@ -2952,7 +3642,19 @@ namespace Anfeta.UI.Services.Notion
                     ReadString(page, "id");
 
                 if (!string.IsNullOrWhiteSpace(pageId))
+                {
                     changedIds.Add(pageId);
+
+                    // last_edited_time también cambia por horario, responsable,
+                    // estado, título, etc. Invalidar aquí el checklist de TODAS
+                    // las páginas modificadas provocaba que un refresh grande
+                    // volviera a descargar decenas de bodies y terminara en
+                    // rate-limit/cooldown.
+                    //
+                    // Conservamos el último porcentaje conocido para que la UI
+                    // siga completa e inmediata. SearchView refresca estas PageId
+                    // después en segundo plano, de una en una.
+                }
 
                 var activity =
                     await MapPageAsync(
@@ -2977,29 +3679,6 @@ namespace Anfeta.UI.Services.Notion
 
             try
             {
-                // Mantiene el último porcentaje visible mientras se relee
-                // únicamente el body de las páginas modificadas.
-                var previousChecklist =
-                    DayCache.Values
-                        .SelectMany(day => day)
-                        .Where(activity =>
-                            activity != null &&
-                            changedIds.Contains(activity.PageId) &&
-                            activity.ChecklistScanned)
-                        .GroupBy(
-                            activity => activity.PageId,
-                            StringComparer.OrdinalIgnoreCase)
-                        .ToDictionary(
-                            group => group.Key,
-                            group =>
-                            {
-                                var item = group.First();
-                                return new NotionChecklistStats(
-                                    item.ChecklistTotal,
-                                    item.ChecklistCompleted);
-                            },
-                            StringComparer.OrdinalIgnoreCase);
-
                 foreach (var key in DayCache.Keys.ToList())
                 {
                     DayCache[key].RemoveAll(activity =>
@@ -3008,15 +3687,6 @@ namespace Anfeta.UI.Services.Notion
 
                 foreach (var activity in mapped)
                 {
-                    if (previousChecklist.TryGetValue(
-                            activity.PageId,
-                            out var priorStats))
-                    {
-                        activity.ChecklistScanned = true;
-                        activity.ChecklistTotal = priorStats.Total;
-                        activity.ChecklistCompleted = priorStats.Completed;
-                    }
-
                     foreach (var day in EnumerateActivityDays(activity))
                     {
                         var key =
@@ -3052,10 +3722,13 @@ namespace Anfeta.UI.Services.Notion
                 CacheLock.Release();
             }
 
-            // Un cambio en título, fecha, persona o proyecto puede mover una
-            // página de un grupo lógico a otro. La siguiente apertura del
-            // proyecto vuelve a resolver sus candidatos.
-            ProjectCandidateCache.Clear();
+            // Antes cualquier cambio vaciaba TODAS las caches de proyectos.
+            // Con el timer incremental eso podía provocar nuevas consultas
+            // completas cada pocos minutos. Ahora retiramos/reinsertamos SOLO
+            // las PageId cambiadas dentro de las caches que ya existen.
+            UpdateProjectCandidateCachesFromChanges(
+                changedIds,
+                mapped);
 
             LastChangedPageIds =
                 changedIds
@@ -3075,6 +3748,36 @@ namespace Anfeta.UI.Services.Notion
         public void ClearCache()
         {
             ProjectCandidateCache.Clear();
+
+            _lastIncrementalRefreshCompletedUtc =
+                DateTimeOffset.MinValue;
+            _lastIncrementalRefreshAnchorUtc =
+                DateTimeOffset.MinValue;
+            _lastIncrementalRefreshPageIds =
+                Array.Empty<string>();
+            _lastIncrementalRefreshChanged = false;
+
+            _checklistStatsCache.Clear();
+            PersistentChecklistStats.Clear();
+
+            lock (ChecklistSaveScheduleLock)
+            {
+                _checklistSaveDebounceCts?.Cancel();
+                _checklistSaveDebounceCts = null;
+            }
+
+            try
+            {
+                var checklistPath = Path.Combine(
+                    ApplicationData.Current.LocalFolder.Path,
+                    ChecklistStatsCacheFileName);
+
+                if (File.Exists(checklistPath))
+                    File.Delete(checklistPath);
+            }
+            catch
+            {
+            }
 
             lock (CacheSaveScheduleLock)
             {
@@ -3576,8 +4279,11 @@ namespace Anfeta.UI.Services.Notion
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var filters =
-                        new List<object>
-                        {
+                        new List<object>();
+
+                    if (!string.IsNullOrWhiteSpace(projectTypeToken))
+                    {
+                        filters.Add(
                             new Dictionary<string, object?>
                             {
                                 ["property"] = titlePropertyName,
@@ -3587,8 +4293,8 @@ namespace Anfeta.UI.Services.Notion
                                         ["contains"] =
                                             projectTypeToken
                                     }
-                            }
-                        };
+                            });
+                    }
 
                     if (!string.IsNullOrWhiteSpace(monthTag))
                     {
@@ -3608,16 +4314,23 @@ namespace Anfeta.UI.Services.Notion
                     var payload =
                         new Dictionary<string, object?>
                         {
-                            ["page_size"] = 100,
-                            ["filter"] =
-                                filters.Count == 1
-                                    ? filters[0]
-                                    : new Dictionary<string, object?>
-                                    {
-                                        ["and"] =
-                                            filters.ToArray()
-                                    }
+                            ["page_size"] = 100
                         };
+
+                    if (filters.Count == 1)
+                    {
+                        payload["filter"] =
+                            filters[0];
+                    }
+                    else if (filters.Count > 1)
+                    {
+                        payload["filter"] =
+                            new Dictionary<string, object?>
+                            {
+                                ["and"] =
+                                    filters.ToArray()
+                            };
+                    }
 
                     if (!string.IsNullOrWhiteSpace(cursor))
                         payload["start_cursor"] = cursor;
@@ -4025,10 +4738,43 @@ namespace Anfeta.UI.Services.Notion
             var pageId = ReadString(page, "id");
             var pageUrl = ReadString(page, "url");
 
+            await EnsurePersistentChecklistStatsLoadedAsync(
+                cancellationToken);
+
+            NotionChecklistStats? cachedChecklist = null;
+
+            if (!string.IsNullOrWhiteSpace(pageId))
+            {
+                if (_checklistStatsCache.TryGetValue(
+                        pageId,
+                        out var memoryStats))
+                {
+                    cachedChecklist = memoryStats;
+                }
+                else if (PersistentChecklistStats.TryGetValue(
+                             pageId,
+                             out var storedStats))
+                {
+                    cachedChecklist =
+                        new NotionChecklistStats(
+                            Math.Max(0, storedStats.Total),
+                            Math.Clamp(
+                                storedStats.Completed,
+                                0,
+                                Math.Max(0, storedStats.Total)));
+
+                    _checklistStatsCache[pageId] =
+                        cachedChecklist;
+                }
+            }
+
             return new NotionCalendarActivity
             {
                 PageId = pageId,
                 PageUrl = pageUrl,
+                ChecklistScanned = cachedChecklist != null,
+                ChecklistTotal = cachedChecklist?.Total ?? 0,
+                ChecklistCompleted = cachedChecklist?.Completed ?? 0,
                 Title = title,
                 Person = people,
                 OriginalPerson = people,

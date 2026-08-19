@@ -20,6 +20,7 @@
     <None Remove="Resources\Styles.xaml" />
     <None Remove="Views\AllowedAppsView.xaml" />
     <None Remove="Views\ApiKeysView.xaml" />
+    <None Remove="Views\DailyProgress\DailyProgressView.xaml" />
     <None Remove="Views\Dialogs\ImportVoiceCommandsDialog.xaml" />
     <None Remove="Views\Dialogs\SavedSearchFilterDialog.xaml" />
     <None Remove="Views\Dialogs\VoiceCommandEditDialog.xaml" />
@@ -171,5 +172,10 @@
   <!-- Mantener soporte de COM integrado (NAudio, AudioSwitcher, MMDeviceEnumerator) -->
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.Runtime.InteropServices.BuiltInComInterop.IsSupported" Value="true" Trim="true" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Update="Views\DailyProgress\DailyProgressView.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
 </Project>

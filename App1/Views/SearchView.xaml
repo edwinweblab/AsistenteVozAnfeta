@@ -5,10 +5,12 @@
     xmlns:models="using:Anfeta.UI.Models.Weblab"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     xmlns:searchModels="using:Anfeta.UI.Models.Search"
+    xmlns:daily="using:Anfeta.UI.Views.DailyProgress"
     Loaded="SearchView_Loaded"
     NavigationCacheMode="Enabled">
 
     <!-- UX REDESIGN V3: Neon Focus. SOLO diseño; conserva nombres, eventos y lógica. -->
+    <!-- RESPONSIVE 18/08: barras superiores crecen con Texto 70–150% y acciones usan scroll horizontal sin ocultar el buscador. -->
     <Page.Resources>
         <!-- Base: negro azulado muy oscuro. -->
         <LinearGradientBrush x:Key="AnfetaBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
@@ -43,11 +45,11 @@
         DragOver="ResultsDropSurface_DragOver"
         Drop="ResultsDropSurface_Drop">
         <Grid.RowDefinitions>
-            <RowDefinition Height="58" />
+            <RowDefinition Height="Auto" />
             <!--  Row 0 TopBar  -->
             <RowDefinition Height="0" />
             <!--  Row 1 reservado para compatibilidad; sin contenido fijo  -->
-            <RowDefinition Height="72" />
+            <RowDefinition Height="Auto" />
             <!--  Row 2 Chips + configuración en dos filas  -->
             <RowDefinition Height="*" />
             <!--  Row 3 Body  -->
@@ -77,46 +79,9 @@
             ColumnSpacing="7">
 
             <Grid.ColumnDefinitions>
-                <!--  0 · Buscador flexible  -->
-                <ColumnDefinition Width="*" />
-
-                <!--  1 · Guardar búsqueda  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  2 · Micrófono  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  3 · Ayuda  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  4 · Separador  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  5 · Filtros  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  6 · Detalles  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  7 · Actualizar Notion oculto  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  8 · Calendario de actividades  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  9 · Mensajes  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  10 · Calendario de recordatorios  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  11 · Pantallazo  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  12 · Vistas de Notion  -->
-                <ColumnDefinition Width="Auto" />
-
-                <!--  13 · Menú adicional  -->
+                <!-- Buscador siempre conserva espacio útil. -->
+                <ColumnDefinition Width="*" MinWidth="280" />
+                <!-- Acciones: área acotada y desplazable, nunca aplasta el buscador. -->
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
@@ -136,7 +101,8 @@
             <AutoSuggestBox
                 x:Name="SearchBox"
                 Grid.Column="0"
-                Height="38"
+                MinHeight="38"
+                MinWidth="280"
                 Margin="0,0,4,0"
                 VerticalAlignment="Center"
                 Background="#101A24"
@@ -345,12 +311,26 @@
                 </FlyoutBase.AttachedFlyout>
             </AutoSuggestBox>
 
-            <!--  Guardar búsqueda como chip rápido  -->
-            <Button
+            <ScrollViewer
+                Grid.Column="1"
+                MinWidth="300"
+                MaxWidth="650"
+                HorizontalAlignment="Right"
+                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Enabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalScrollMode="Disabled"
+                ZoomMode="Disabled">
+                <StackPanel
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="7">
+                    <!--  Guardar búsqueda como chip rápido  -->
+                    <Button
                 x:Name="BtnSaveCurrentSearchTop"
                 Grid.Column="1"
                 Width="34"
-                Height="32"
+                MinHeight="32"
                 Padding="0"
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
@@ -361,44 +341,44 @@
                 CornerRadius="9"
                 Foreground="White"
                 ToolTipService.ToolTip="Guardar búsqueda como chip rápido">
-                <FontIcon
+                        <FontIcon
                     Width="16"
                     Height="16"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     FontSize="14"
                     Glyph="&#xE74E;" />
-            </Button>
+                    </Button>
 
-            <!--  Micrófono  -->
-            <Grid
+                    <!--  Micrófono  -->
+                    <Grid
                 Grid.Column="2"
                 Width="70"
-                Height="32"
+                MinHeight="32"
                 VerticalAlignment="Center">
 
-                <muxc:SplitButton
+                        <muxc:SplitButton
                     x:Name="VoiceSplit"
-                    Height="32"
+                    MinHeight="32"
                     Padding="6,0"
                     HorizontalContentAlignment="Center"
                     Click="VoiceSplit_Click"
                     CornerRadius="7"
                     ToolTipService.ToolTip="Voz">
 
-                    <muxc:SplitButton.Content>
-                        <SymbolIcon Symbol="Microphone" />
-                    </muxc:SplitButton.Content>
+                            <muxc:SplitButton.Content>
+                                <SymbolIcon Symbol="Microphone" />
+                            </muxc:SplitButton.Content>
 
-                    <muxc:SplitButton.Flyout>
-                        <MenuFlyout>
-                            <MenuFlyoutItem Click="VoiceMenu_Listen_Click" Text="Escuchar ahora" />
-                            <MenuFlyoutItem Click="VoiceMenu_Config_Click" Text="Configurar comandos de voz..." />
-                        </MenuFlyout>
-                    </muxc:SplitButton.Flyout>
-                </muxc:SplitButton>
+                            <muxc:SplitButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Click="VoiceMenu_Listen_Click" Text="Escuchar ahora" />
+                                    <MenuFlyoutItem Click="VoiceMenu_Config_Click" Text="Configurar comandos de voz..." />
+                                </MenuFlyout>
+                            </muxc:SplitButton.Flyout>
+                        </muxc:SplitButton>
 
-                <ProgressRing
+                        <ProgressRing
                     x:Name="VoiceRing"
                     Width="14"
                     Height="14"
@@ -406,17 +386,17 @@
                     VerticalAlignment="Center"
                     IsActive="False"
                     Visibility="Collapsed" />
-            </Grid>
+                    </Grid>
 
-            <!--  Ayuda  -->
-            <Button
+                    <!--  Ayuda  -->
+                    <Button
                 x:Name="BtnHelp"
                 Background="{StaticResource AnfetaSurfaceSoftBrush}"
                 BorderBrush="#2A3947"
                 BorderThickness="1"
                 Grid.Column="3"
                 Width="32"
-                Height="32"
+                MinHeight="32"
                 VerticalAlignment="Center"
                 Click="MenuHelpV2_Click"
                 Content="?"
@@ -424,23 +404,23 @@
                 FontWeight="SemiBold"
                 ToolTipService.ToolTip="Ayuda: comandos, carpetas, archivos y filtros" />
 
-            <!--  Separador  -->
-            <Border
+                    <!--  Separador  -->
+                    <Border
                 Grid.Column="4"
                 Width="1"
                 Height="18"
                 VerticalAlignment="Center"
                 Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-            <!--  Toggle Filtros  -->
-            <ToggleButton
+                    <!--  Toggle Filtros  -->
+                    <ToggleButton
                 x:Name="ToggleFoldersPane"
                 Background="{StaticResource AnfetaSurfaceSoftBrush}"
                 BorderBrush="#2A3947"
                 BorderThickness="1"
                 Grid.Column="5"
                 MinWidth="70"
-                Height="32"
+                MinHeight="32"
                 Padding="12,0"
                 VerticalAlignment="Center"
                 Click="ToggleFoldersPane_Click"
@@ -449,15 +429,15 @@
                 IsChecked="True"
                 ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
 
-            <!--  Toggle Detalles  -->
-            <ToggleButton
+                    <!--  Toggle Detalles  -->
+                    <ToggleButton
                 x:Name="ToggleDetailsPane"
                 Background="{StaticResource AnfetaSurfaceSoftBrush}"
                 BorderBrush="#2A3947"
                 BorderThickness="1"
                 Grid.Column="6"
                 MinWidth="76"
-                Height="32"
+                MinHeight="32"
                 Padding="12,0"
                 VerticalAlignment="Center"
                 Click="ToggleDetailsPane_Click"
@@ -466,11 +446,11 @@
                 IsChecked="True"
                 ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
 
-            <!--  Actualizar Notion  -->
-            <Button
+                    <!--  Actualizar Notion  -->
+                    <Button
                 x:Name="BtnRefreshNotion"
                 Grid.Column="7"
-                Height="32"
+                MinHeight="32"
                 Padding="12,0"
                 VerticalAlignment="Center"
                 Background="#FFB020"
@@ -479,22 +459,22 @@
                 Foreground="Black"
                 Visibility="Collapsed">
 
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon FontSize="14" Glyph="&#xE895;" />
-                    <TextBlock x:Name="BtnRefreshNotionText" Text="Notion" />
-                </StackPanel>
-            </Button>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="14" Glyph="&#xE895;" />
+                            <TextBlock x:Name="BtnRefreshNotionText" Text="Notion" />
+                        </StackPanel>
+                    </Button>
 
 
-            <!--  Calendario comparativo de Revisiones  -->
-            <ToggleButton
+                    <!--  Calendario comparativo de Revisiones  -->
+                    <ToggleButton
                 x:Name="ToggleCalendarView"
                 Background="{StaticResource AnfetaSurfaceSoftBrush}"
                 BorderBrush="#2A3947"
                 BorderThickness="1"
                 Grid.Column="8"
                 Width="38"
-                Height="32"
+                MinHeight="32"
                 Padding="0"
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
@@ -502,58 +482,58 @@
                 Click="ToggleCalendarView_Click"
                 CornerRadius="6"
                 ToolTipService.ToolTip="Abrir calendario de Revisiones">
-                <FontIcon
+                        <FontIcon
                     FontSize="14"
                     Glyph="&#xE787;" />
-            </ToggleButton>
+                    </ToggleButton>
 
-            <!--  Vistas rápidas de Notion  -->
-            <Button
+                    <!--  Vistas rápidas de Notion  -->
+                    <Button
                 x:Name="BtnNotionViews"
                 Grid.Column="12"
                 MinWidth="86"
-                Height="32"
+                MinHeight="32"
                 Padding="10,0"
                 VerticalAlignment="Center"
                 CornerRadius="6"
                 ToolTipService.ToolTip="Abrir vistas frecuentes de Notion">
-                <StackPanel
+                        <StackPanel
                     Orientation="Horizontal"
                     Spacing="6">
-                    <FontIcon
+                            <FontIcon
                         FontSize="13"
                         Glyph="&#xE8A5;" />
-                    <TextBlock Text="Vistas" />
-                    <FontIcon
+                            <TextBlock Text="Vistas" />
+                            <FontIcon
                         FontSize="10"
                         Glyph="&#xE70D;" />
-                </StackPanel>
+                        </StackPanel>
 
-                <Button.Flyout>
-                    <MenuFlyout Placement="BottomEdgeAlignedRight">
-                        <MenuFlyoutSubItem Text="Revisiones">
-                            <MenuFlyoutItem
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuFlyoutSubItem Text="Revisiones">
+                                    <MenuFlyoutItem
                                 Click="OpenSavedNotionView_Click"
                                 Tag="https://app.notion.com/p/2eeabd7d91b781348ed5c537ec14962e?v=3a5abd7d91b78097ac57000cd9017ac3&amp;source=copy_link"
                                 Text="Seguimiento HOY Proyectos — Tabla" />
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="OpenSavedNotionView_Click"
                                 Tag="https://app.notion.com/p/2eeabd7d91b781348ed5c537ec14962e?v=3a1abd7d91b7809d9351000c725547e4&amp;source=copy_link"
                                 Text="Seguimiento HOY Proyectos — Tablero" />
-                        </MenuFlyoutSubItem>
-                    </MenuFlyout>
-                </Button.Flyout>
-            </Button>
+                                </MenuFlyoutSubItem>
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
 
-            <!--  Mensajes / recordatorios  -->
-            <ToggleButton
+                    <!--  Mensajes / recordatorios  -->
+                    <ToggleButton
                 x:Name="ToggleMessagesView"
                 Background="{StaticResource AnfetaSurfaceSoftBrush}"
                 BorderBrush="#2A3947"
                 BorderThickness="1"
                 Grid.Column="9"
                 Width="44"
-                Height="32"
+                MinHeight="32"
                 Padding="0"
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
@@ -561,14 +541,14 @@
                 Click="ToggleMessagesView_Click"
                 CornerRadius="6"
                 ToolTipService.ToolTip="Abrir mensajes y recordatorios">
-                <Grid>
-                    <FontIcon
+                        <Grid>
+                            <FontIcon
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         FontSize="14"
                         Glyph="&#xE8BD;" />
 
-                    <Border
+                            <Border
                         x:Name="MessagesUnreadBadge"
                         MinWidth="16"
                         Height="16"
@@ -579,7 +559,7 @@
                         Background="#E5484D"
                         CornerRadius="8"
                         Visibility="Collapsed">
-                        <TextBlock
+                                <TextBlock
                             x:Name="MessagesUnreadBadgeText"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
@@ -587,19 +567,19 @@
                             FontWeight="SemiBold"
                             Foreground="White"
                             Text="0" />
-                    </Border>
-                </Grid>
-            </ToggleButton>
+                            </Border>
+                        </Grid>
+                    </ToggleButton>
 
-            <!--  Calendario exclusivo de recordatorios  -->
-            <ToggleButton
+                    <!--  Calendario exclusivo de recordatorios  -->
+                    <ToggleButton
                 x:Name="ToggleRemindersCalendarView"
                 Background="{StaticResource AnfetaSurfaceSoftBrush}"
                 BorderBrush="#2A3947"
                 BorderThickness="1"
                 Grid.Column="10"
                 Width="44"
-                Height="32"
+                MinHeight="32"
                 Padding="0"
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
@@ -607,14 +587,14 @@
                 Click="ToggleRemindersCalendarView_Click"
                 CornerRadius="6"
                 ToolTipService.ToolTip="Abrir calendario de recordatorios">
-                <Grid>
-                    <TextBlock
+                        <Grid>
+                            <TextBlock
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         FontSize="15"
                         Text="🔔" />
 
-                    <Border
+                            <Border
                         x:Name="RemindersCalendarBadge"
                         MinWidth="16"
                         Height="16"
@@ -625,7 +605,7 @@
                         Background="#A855F7"
                         CornerRadius="8"
                         Visibility="Collapsed">
-                        <TextBlock
+                                <TextBlock
                             x:Name="RemindersCalendarBadgeText"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
@@ -633,19 +613,19 @@
                             FontWeight="SemiBold"
                             Foreground="White"
                             Text="0" />
-                    </Border>
-                </Grid>
-            </ToggleButton>
+                            </Border>
+                        </Grid>
+                    </ToggleButton>
 
-            <!--  Pantallazo de resultados  -->
-            <Button
+                    <!--  Pantallazo de resultados  -->
+                    <Button
                 x:Name="BtnCaptureResults"
                 Background="{StaticResource AnfetaSurfaceSoftBrush}"
                 BorderBrush="#2A3947"
                 BorderThickness="1"
                 Grid.Column="11"
                 Width="38"
-                Height="32"
+                MinHeight="32"
                 Padding="0"
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
@@ -653,16 +633,16 @@
                 Click="BtnCaptureResults_Click"
                 CornerRadius="6"
                 ToolTipService.ToolTip="Capturar los resultados visibles y subirlos a Notion">
-                <FontIcon
+                        <FontIcon
                     FontSize="14"
                     Glyph="&#xE722;" />
-            </Button>
+                    </Button>
 
-            <!--  Menú ⋯  -->
-            <Button
+                    <!--  Menú ⋯  -->
+                    <Button
                 Grid.Column="13"
                 Width="36"
-                Height="32"
+                MinHeight="32"
                 Padding="0"
                 HorizontalContentAlignment="Center"
                 VerticalContentAlignment="Center"
@@ -670,82 +650,84 @@
                 Content="⋯"
                 CornerRadius="6">
 
-                <Button.Flyout>
-                    <MenuFlyout>
-                        <MenuFlyoutItem Click="NewSavedFilter_Click" Text="Nuevo filtro" />
-                        <MenuFlyoutSeparator />
-                        <MenuFlyoutItem Click="ImportFiltersCsv_Click" Text="Importar CSV" />
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Click="NewSavedFilter_Click" Text="Nuevo filtro" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Click="ImportFiltersCsv_Click" Text="Importar CSV" />
 
-                        <MenuFlyoutSeparator />
-                        <MenuFlyoutItem Click="BtnCheckNotionDeleted_Click" Text="Revisar páginas eliminadas" />
-                        <MenuFlyoutItem Click="BtnFullResyncNotion_Click" Text="Resync completo Notion" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Click="BtnCheckNotionDeleted_Click" Text="Revisar páginas eliminadas" />
+                                <MenuFlyoutItem Click="BtnFullResyncNotion_Click" Text="Resync completo Notion" />
 
-                        <MenuFlyoutSeparator />
+                                <MenuFlyoutSeparator />
 
-                        <MenuFlyoutSubItem Text="Color de fondo">
-                            <MenuFlyoutItem
+                                <MenuFlyoutSubItem Text="Color de fondo">
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="gray"
                                 Text="Gris oscuro" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="blue"
                                 Text="Azul noche" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="purple"
                                 Text="Morado oscuro" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="green"
                                 Text="Verde oscuro" />
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="navy"
                                 Text="Azul profundo" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="midnight"
                                 Text="Azul medianoche" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="violet"
                                 Text="Violeta oscuro" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="wine"
                                 Text="Vino oscuro" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="slate"
                                 Text="Pizarra oscuro" />
 
-                            <MenuFlyoutItem
+                                    <MenuFlyoutItem
                                 Click="ThemePreset_Click"
                                 Tag="coffee"
                                 Text="Café oscuro" />
-                        </MenuFlyoutSubItem>
-                    </MenuFlyout>
-                </Button.Flyout>
-            </Button>
+                                </MenuFlyoutSubItem>
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
 
-            <!--  SortCombo oculto: se conserva solo para compatibilidad con el code-behind.  -->
-            <ComboBox
+                    <!--  SortCombo oculto: se conserva solo para compatibilidad con el code-behind.  -->
+                    <ComboBox
                 x:Name="SortCombo"
                 SelectionChanged="SortCombo_SelectionChanged"
                 Visibility="Collapsed">
-                <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
-                <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
-                <ComboBoxItem Content="Fecha modificada (más reciente)" Tag="mod_desc" />
-                <ComboBoxItem Content="Fecha modificada (más antiguo)" Tag="mod_asc" />
-            </ComboBox>
+                        <ComboBoxItem Content="Nombre (A–Z)" Tag="name_asc" />
+                        <ComboBoxItem Content="Nombre (Z–A)" Tag="name_desc" />
+                        <ComboBoxItem Content="Fecha modificada (más reciente)" Tag="mod_desc" />
+                        <ComboBoxItem Content="Fecha modificada (más antiguo)" Tag="mod_asc" />
+                    </ComboBox>
+                </StackPanel>
+            </ScrollViewer>
         </Grid>
 
 
@@ -780,8 +762,8 @@
             BorderThickness="0"
             RowSpacing="5">
             <Grid.RowDefinitions>
-                <RowDefinition Height="27" />
-                <RowDefinition Height="29" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Primera fila: chips. Se desplaza horizontalmente si no caben. -->
@@ -799,7 +781,7 @@
                     <!--  Favoritos se queda  -->
                     <ToggleButton
                     x:Name="ChipBookmarks"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipFilter_Click"
                     Content="⭐ Favoritos"
@@ -815,7 +797,7 @@
                     <!--  Filtro global por origen  -->
                     <ToggleButton
                     x:Name="ChipSourceAll"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipSourceFilter_Click"
                     Content="Todo"
@@ -824,7 +806,7 @@
 
                     <ToggleButton
                     x:Name="ChipSourceNotion"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipSourceFilter_Click"
                     Content="Notion"
@@ -833,7 +815,7 @@
 
                     <ToggleButton
                     x:Name="ChipSourceDropbox"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipSourceFilter_Click"
                     Content="Dropbox"
@@ -842,7 +824,7 @@
 
                     <ToggleButton
                     x:Name="ChipFolders"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipFilter_Click"
                     Content="📁 Carpetas"
@@ -859,7 +841,7 @@
                     <!--  Filtros por base Notion  -->
                     <ToggleButton
                     x:Name="ChipBaseAll"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="Todas bases"
@@ -868,7 +850,7 @@
 
                     <ToggleButton
                     x:Name="ChipBaseRevisiones"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="Revisiones"
@@ -877,7 +859,7 @@
 
                     <ToggleButton
                     x:Name="ChipBaseClientes"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zClientes"
@@ -886,7 +868,7 @@
 
                     <ToggleButton
                     x:Name="ChipBaseDominios"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zDominios"
@@ -895,7 +877,7 @@
 
                     <ToggleButton
                     x:Name="ChipBaseProgramas"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zProyectos"
@@ -904,7 +886,7 @@
 
                     <ToggleButton
                     x:Name="ChipBasePagar"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zPAGAR"
@@ -913,7 +895,7 @@
 
                     <ToggleButton
                     x:Name="ChipBaseCobrar"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zCOBRAR"
@@ -922,7 +904,7 @@
 
                     <ToggleButton
                     x:Name="ChipBaseCorreos"
-                    Height="25"
+                    MinHeight="25"
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zCorreos"
@@ -954,7 +936,7 @@
                     <ComboBox
                     x:Name="DefaultTagCombo"
                     Width="150"
-                    Height="26"
+                    MinHeight="26"
                     FontSize="11"
                     SelectionChanged="DefaultTagCombo_SelectionChanged">
                         <ComboBoxItem Content="Ninguno" Tag="" />
@@ -970,7 +952,7 @@
                     <TextBox
                     x:Name="CustomDefaultTagBox"
                     Width="125"
-                    Height="26"
+                    MinHeight="26"
                     FontSize="11"
                     PlaceholderText="Tag personalizado"
                     TextChanged="CustomDefaultTagBox_TextChanged"
@@ -986,7 +968,7 @@
                     <ComboBox
                     x:Name="TextScaleCombo"
                     Width="78"
-                    Height="26"
+                    MinHeight="26"
                     FontSize="11"
                     SelectionChanged="TextScaleCombo_SelectionChanged">
                         <ComboBoxItem Content="70%" Tag="70" />
@@ -1010,7 +992,7 @@
                     <ComboBox
                     x:Name="GroupResultsCombo"
                     Width="125"
-                    Height="26"
+                    MinHeight="26"
                     FontSize="11"
                     SelectionChanged="GroupResultsCombo_SelectionChanged">
                         <ComboBoxItem Content="Ninguno" Tag="none" />
@@ -1027,7 +1009,7 @@
 
                     <Button
                     Width="28"
-                    Height="26"
+                    MinHeight="26"
                     Padding="0"
                     Click="ResultsViewZoomOut_Click"
                     Content="−"
@@ -1043,7 +1025,7 @@
 
                     <Button
                     Width="28"
-                    Height="26"
+                    MinHeight="26"
                     Padding="0"
                     Click="ResultsViewZoomIn_Click"
                     Content="+"
@@ -1807,13 +1789,12 @@
                 Grid.ColumnSpan="5"
                 Canvas.ZIndex="500"
                 Background="#0D1014"
-                SizeChanged="CalendarHost_SizeChanged"
                 Visibility="Collapsed">
 
                 <Grid.Resources>
                     <!--  V4 Calendar UX: solo apariencia, mismos controles y handlers.  -->
                     <Style x:Key="CalendarNavButtonStyle" TargetType="Button">
-                        <Setter Property="Height" Value="30" />
+                        <Setter Property="MinHeight" Value="30" />
                         <Setter Property="MinWidth" Value="30" />
                         <Setter Property="Padding" Value="10,0" />
                         <Setter Property="Background" Value="#171C22" />
@@ -1825,7 +1806,7 @@
 
                     <Style x:Key="CalendarIconButtonStyle" TargetType="Button">
                         <Setter Property="Width" Value="30" />
-                        <Setter Property="Height" Value="30" />
+                        <Setter Property="MinHeight" Value="30" />
                         <Setter Property="Padding" Value="0" />
                         <Setter Property="Background" Value="#171C22" />
                         <Setter Property="BorderBrush" Value="#2A3541" />
@@ -1835,7 +1816,7 @@
                     </Style>
 
                     <Style x:Key="CalendarActionButtonStyle" TargetType="Button">
-                        <Setter Property="Height" Value="30" />
+                        <Setter Property="MinHeight" Value="30" />
                         <Setter Property="Padding" Value="10,0" />
                         <Setter Property="Background" Value="#151B21" />
                         <Setter Property="BorderBrush" Value="#2A3642" />
@@ -1845,7 +1826,7 @@
                     </Style>
 
                     <Style x:Key="CalendarActionToggleStyle" TargetType="ToggleButton">
-                        <Setter Property="Height" Value="30" />
+                        <Setter Property="MinHeight" Value="30" />
                         <Setter Property="Padding" Value="10,0" />
                         <Setter Property="Background" Value="#151B21" />
                         <Setter Property="BorderBrush" Value="#2A3642" />
@@ -1957,17 +1938,19 @@
 
                         <!--  Zoom y acciones existentes, agrupados visualmente.  -->
                         <ScrollViewer
-                            x:Name="CalendarActionsScrollViewer"
                             Grid.Column="2"
+                            MinWidth="360"
+                            MaxWidth="640"
                             HorizontalAlignment="Right"
                             HorizontalScrollBarVisibility="Auto"
-                            HorizontalScrollMode="Auto"
+                            HorizontalScrollMode="Enabled"
                             VerticalScrollBarVisibility="Disabled"
-                            VerticalScrollMode="Disabled">
+                            VerticalScrollMode="Disabled"
+                            ZoomMode="Disabled">
                             <StackPanel
                                 HorizontalAlignment="Right"
-                                Orientation="Horizontal"
-                                Spacing="7">
+                            Orientation="Horizontal"
+                            Spacing="7">
 
                                 <Button
                                 Style="{StaticResource CalendarIconButtonStyle}"
@@ -2034,6 +2017,27 @@
                                         Click="CalendarDailyReport_Click"
                                         Content="Reporte"
                                         ToolTipService.ToolTip="Abrir el último reporte diario" />
+
+                                        <Button
+                                        x:Name="CalendarDailyProgressButton"
+                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Click="CalendarDailyProgress_Click"
+                                        ToolTipService.ToolTip="Abrir Feed de Avance Diario">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <FontIcon
+                                                FontSize="12"
+                                                Foreground="#7DD3FC"
+                                                Glyph="&#xE9D2;" />
+                                                <TextBlock Text="Avance" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button
+                                        x:Name="CalendarQuickTemplateButton"
+                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Click="CalendarQuickTemplate_Click"
+                                        Content="⚡ Plantillas ▾"
+                                        ToolTipService.ToolTip="Crear actividad rápida desde WEB, SEO, ADS, Cobros o Bibliotecas" />
 
                                         <ToggleButton
                                         x:Name="CalendarCobrosToggle"
@@ -2258,6 +2262,14 @@
                         </Grid>
                     </Border>
                 </Grid>
+
+                <!-- Feed de Avance Diario: subvista completa dentro del calendario. -->
+                <daily:DailyProgressView
+                    x:Name="DailyProgressPanel"
+                    Grid.Row="0"
+                    Grid.RowSpan="3"
+                    Canvas.ZIndex="950"
+                    Visibility="Collapsed" />
             </Grid>
 
             <!--  Divisor izquierdo  -->

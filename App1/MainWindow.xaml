@@ -313,6 +313,7 @@
 
                 <NavigationViewItem
                     Content="Centro de ayuda"
+                    Visibility="Collapsed"
                     Tag="Commands"
                     ToolTipService.ToolTip="Guía de uso y catálogo de comandos">
                     <NavigationViewItem.Icon>
@@ -322,6 +323,7 @@
 
                 <NavigationViewItem
                     Content="Aplicaciones Permitidas"
+                    Visibility="Collapsed"
                     Tag="AllowedApps"
                     ToolTipService.ToolTip="Gestionar apps locales permitidas y sinónimos">
                     <NavigationViewItem.Icon>
@@ -378,6 +380,7 @@
 
                 <NavigationViewItem
                     Content="Pruebas de Sistema"
+                    Visibility="Collapsed"
                     Tag="Tests"
                     ToolTipService.ToolTip="Ejecutar pruebas de diagnóstico">
                     <NavigationViewItem.Icon>
@@ -392,46 +395,69 @@
                 Solo se muestra cuando el panel está expandido.
             -->
             <NavigationView.PaneFooter>
-                <Border
-                    x:Name="VersionFooter"
-                    Padding="16,12"
-                    BorderBrush="#10FFFFFF"
-                    BorderThickness="0,1,0,0"
-                    Visibility="Collapsed">
-                    <StackPanel Spacing="6">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse
-                                x:Name="UpdateStatusDot"
-                                Width="5"
-                                Height="5"
-                                VerticalAlignment="Center"
-                                Fill="#F97316" />
+                <!--
+                    El botón de actualización es SIEMPRE visible incluso con el
+                    panel compacto. VersionFooter conserva el x:Name histórico:
+                    el code-behind puede ocultarlo al cerrar el panel sin ocultar
+                    el botón/icono de actualización.
+                -->
+                <Grid Padding="4,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        x:Name="CheckUpdatesButton"
+                        Grid.Column="0"
+                        Width="36"
+                        Height="36"
+                        Padding="0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Click="CheckUpdatesButton_Click"
+                        CornerRadius="8"
+                        ToolTipService.ToolTip="Buscar actualizaciones de ANFETA">
+                        <FontIcon
+                            FontFamily="Segoe MDL2 Assets"
+                            FontSize="16"
+                            Glyph="&#xE72C;" />
+                    </Button>
+
+                    <Border
+                        x:Name="VersionFooter"
+                        Grid.Column="1"
+                        Margin="4,0,0,0"
+                        Padding="4,0"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Ellipse
+                                    x:Name="UpdateStatusDot"
+                                    Width="5"
+                                    Height="5"
+                                    VerticalAlignment="Center"
+                                    Fill="#F97316" />
+                                <TextBlock
+                                    x:Name="VersionTextBlock"
+                                    FontSize="11"
+                                    Foreground="#8C8075"
+                                    MaxLines="1"
+                                    Text="ANFETA" />
+                            </StackPanel>
+
                             <TextBlock
-                                x:Name="VersionTextBlock"
-                                FontSize="11"
-                                Foreground="#8C8075"
-                                Text="ANFETA" />
+                                x:Name="UpdateStatusText"
+                                FontSize="9.5"
+                                Foreground="#6B5F56"
+                                MaxLines="2"
+                                Text="Actualizaciones automáticas activas"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="Wrap" />
                         </StackPanel>
-
-                        <TextBlock
-                            x:Name="UpdateStatusText"
-                            Margin="11,0,0,0"
-                            FontSize="10"
-                            Foreground="#6B5F56"
-                            Text="Actualizaciones automáticas activas"
-                            TextWrapping="Wrap" />
-
-                        <Button
-                            x:Name="CheckUpdatesButton"
-                            Margin="11,3,0,0"
-                            Padding="10,5"
-                            HorizontalAlignment="Left"
-                            Click="CheckUpdatesButton_Click"
-                            Content="Buscar actualizaciones"
-                            FontSize="10"
-                            ToolTipService.ToolTip="Comprobar si existe una nueva versión de ANFETA" />
-                    </StackPanel>
-                </Border>
+                    </Border>
+                </Grid>
             </NavigationView.PaneFooter>
 
             <Frame x:Name="ContentFrame" />

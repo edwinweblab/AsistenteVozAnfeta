@@ -1,0 +1,117 @@
+﻿using Anfeta.UI.Models.Notion;
+using System;
+using System.Collections.Generic;
+
+namespace Anfeta.UI.Models.DailyProgress
+{
+    public sealed class DailyProgressActivityItem
+    {
+        public NotionCalendarActivity Source { get; init; } = new();
+
+        public string PageId => Source.PageId;
+        public string PageUrl => Source.PageUrl;
+
+        public string FullTitle { get; init; } = "";
+        public string ShortTitle { get; init; } = "";
+        public string Domain { get; init; } = "";
+        public string Person { get; init; } = "";
+
+        public string StateCode { get; init; } = "P";
+        public string StateLabel { get; init; } = "Pendiente";
+
+        public DateTime Start => Source.Start;
+        public DateTime End => Source.End;
+
+        public bool ChecklistScanned => Source.ChecklistScanned;
+        public int ChecklistTotal => Source.ChecklistTotal;
+        public int ChecklistCompleted => Source.ChecklistCompleted;
+        public int ChecklistPercentage => Source.ChecklistPercentage;
+
+        public string ChecklistLabel =>
+            ChecklistScanned
+                ? $"{ChecklistCompleted}/{ChecklistTotal}"
+                : "…";
+
+        // Reglas del Feed V2.
+        public bool IsLagging { get; init; }
+        public bool NeedsChecklistData { get; init; }
+        public bool HasVisibleProgress { get; init; }
+        public bool HasTodayMovement { get; init; }
+        public bool IsReviewMovement { get; init; }
+        public bool IsCompletedMovement { get; init; }
+
+        public bool IsReview { get; init; }
+        public bool IsCompleted { get; init; }
+        public bool IsSuspended { get; init; }
+
+        // Deltas detectados desde el baseline persistente del día.
+        public int ChecklistDeltaToday { get; init; }
+        public int WorkedMinutesDeltaToday { get; init; }
+        public string MovementLabel { get; init; } = "";
+
+        // Cobertura ponderada por tiempo.
+        public int ScheduledMinutes { get; init; }
+        public int ProgressMinutes { get; init; }
+        public int ProgressPercentage { get; init; }
+
+        public string TimeLabel =>
+            $"{Start:HH:mm}–{End:HH:mm}";
+    }
+
+    public sealed class DailyProgressPersonSnapshot
+    {
+        public string Name { get; init; } = "";
+        public string Initial { get; init; } = "?";
+
+        public int CoveragePercentage { get; init; }
+        public int ScheduledMinutes { get; init; }
+        public int ProgressMinutes { get; init; }
+
+        public IReadOnlyList<DailyProgressActivityItem> Lagging { get; init; } =
+            Array.Empty<DailyProgressActivityItem>();
+
+        // En V2 esta lista ya significa movimiento detectado HOY,
+        // no simplemente "estado actual con algún avance".
+        public IReadOnlyList<DailyProgressActivityItem> Progress { get; init; } =
+            Array.Empty<DailyProgressActivityItem>();
+
+        public IReadOnlyList<DailyProgressActivityItem> AllActivities { get; init; } =
+            Array.Empty<DailyProgressActivityItem>();
+
+        public int ReviewCount { get; init; }
+        public int CompletedCount { get; init; }
+        public int PendingCount { get; init; }
+        public int MissingChecklistCount { get; init; }
+    }
+
+    public sealed class DailyProgressSnapshot
+    {
+        public DateTime Date { get; init; }
+
+        public IReadOnlyList<DailyProgressPersonSnapshot> People { get; init; } =
+            Array.Empty<DailyProgressPersonSnapshot>();
+
+        public int CoveragePercentage { get; init; }
+        public int TotalActivities { get; init; }
+        public int LaggingCount { get; init; }
+
+        // Transiciones/movimientos detectados en la ventana del Feed.
+        public int ReviewCount { get; init; }
+        public int CompletedCount { get; init; }
+        public int ProgressCount { get; init; }
+
+        public int ScheduledMinutes { get; init; }
+        public int ProgressMinutes { get; init; }
+
+        public int MissingChecklistCount { get; init; }
+        public int UnassignedCount { get; init; }
+
+        public bool LoadedFromCalendarCache { get; init; }
+
+        // Primer baseline del día para comparar checklists/estado.
+        public bool HadTrackingBaseline { get; init; }
+        public DateTimeOffset TrackingStartedAt { get; init; }
+
+        public string DataNote { get; init; } = "";
+    }
+}

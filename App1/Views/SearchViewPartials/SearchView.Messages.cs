@@ -109,8 +109,41 @@ namespace Anfeta.UI.Views
             return clean switch
             {
                 // Compatibilidad con títulos y versiones anteriores.
-                "iisai" or "iisiaia" or "isaias" => "iisaia",
+                "john" => "jjohn",
+                "karla" or "karl" => "kkarl",
+                "iisai" or "iisiaia" or "isaias" or "isai" => "iisaia",
+                "sotelo" or "eduardo" => "eedua",
+                "acalli" => "aacal",
+                "andrade" => "aandr",
+                "emmanuel" or "emanuel" => "eemma",
+                "brian" => "bbria",
+                "genaro" => "ggena",
+                "neftali" => "nneft",
                 _ => clean
+            };
+        }
+
+        // El destinatario sí conserva el tag corto al inicio del título para
+        // que las vistas personales de Notion sigan funcionando. El remitente
+        // usa un alias legible distinto (de:neftali, de:genaro, etc.) para no
+        // provocar que una respuesta dirigida a John aparezca también en la
+        // vista NNEFT solo por contener "de:nneft".
+        private static string GetMessagesSenderTitleToken(
+            string? value)
+        {
+            return NormalizeMessagesPersonTag(value) switch
+            {
+                "jjohn" => "john",
+                "kkarl" => "karla",
+                "iisaia" => "isaias",
+                "eedua" => "sotelo",
+                "aacal" => "acalli",
+                "aandr" => "andrade",
+                "eemma" => "emmanuel",
+                "bbria" => "brian",
+                "ggena" => "genaro",
+                "nneft" => "neftali",
+                var clean => clean
             };
         }
 
@@ -3334,7 +3367,7 @@ namespace Anfeta.UI.Views
 
             var title =
                 $"{scheduled:yyyy-MM-dd HH:mm} " +
-                $"{recipientTag} de:{currentUserTag} " +
+                $"{recipientTag} de:{GetMessagesSenderTitleToken(currentUserTag)} " +
                 $"{subject}";
 
             var note =
@@ -4275,7 +4308,7 @@ namespace Anfeta.UI.Views
 
                             var title =
                                 $"{scheduled:yyyy-MM-dd HH:mm} " +
-                                $"{recipientTag} de:{authorTag} " +
+                                $"{recipientTag} de:{GetMessagesSenderTitleToken(authorTag)} " +
                                 $"{tutorialToken}{subject}";
 
                             status.Text =
@@ -6070,7 +6103,7 @@ namespace Anfeta.UI.Views
             var senderToken =
                 string.IsNullOrWhiteSpace(authorTag)
                     ? string.Empty
-                    : $" de:{authorTag}";
+                    : $" de:{GetMessagesSenderTitleToken(authorTag)}";
 
             var newTitle =
                 $"{repliedAt:yyyy-MM-dd HH:mm} " +
@@ -6573,7 +6606,7 @@ namespace Anfeta.UI.Views
                     string.IsNullOrWhiteSpace(
                         message.SenderTag)
                         ? string.Empty
-                        : $" de:{message.SenderTag}";
+                        : $" de:{GetMessagesSenderTitleToken(message.SenderTag)}";
 
                 var newTitle =
                     $"{target:yyyy-MM-dd HH:mm} " +
@@ -7050,7 +7083,7 @@ namespace Anfeta.UI.Views
                     var senderToken =
                         string.IsNullOrWhiteSpace(senderTag)
                             ? string.Empty
-                            : $" de:{senderTag}";
+                            : $" de:{GetMessagesSenderTitleToken(senderTag)}";
 
                     var statusToken =
                         completed
@@ -7293,7 +7326,7 @@ namespace Anfeta.UI.Views
             var senderToken =
                 string.IsNullOrWhiteSpace(senderTag)
                     ? string.Empty
-                    : $" de:{senderTag}";
+                    : $" de:{GetMessagesSenderTitleToken(senderTag)}";
 
             var statusToken =
                 completed

@@ -78,7 +78,9 @@ namespace Anfeta.UI.Views
         private bool _onlyBookmarks = false;
         private bool _onlyFolders = false;
         private string? _extFilter = null;
-        private string _sortKey = "name_asc";
+        // Resultados abren siempre con lo más reciente arriba.
+        // El usuario todavía puede cambiar el orden manualmente durante la sesión.
+        private string _sortKey = "mod_desc";
 
         // debounce / tokens
         private DispatcherTimer? _searchDebounceTimer;
@@ -143,6 +145,12 @@ namespace Anfeta.UI.Views
         private readonly SemaphoreSlim _bootstrapLock = new(1, 1);
         private bool _bootstrappedOnce = false;
 
+        // Inicialización visual/pesada por pestaña. Las pestañas ocultas se crean
+        // prácticamente vacías y difieren filtros, watchers y pintado hasta que
+        // el usuario realmente las selecciona.
+        private readonly SemaphoreSlim _runtimeInitializationLock = new(1, 1);
+        private bool _runtimeInitializationCompleted;
+
         // Las pestañas restauradas que no están visibles pueden diferir su
         // pintado inicial. Así no construimos miles de filas XAML para cada
         // pestaña durante el arranque. SearchTabsView las activa al seleccionarlas.
@@ -150,13 +158,34 @@ namespace Anfeta.UI.Views
         private bool _deferredIndexPaintPending;
         private long _lastPaintedIndexVersion = -1;
 
+        // Refresco ligero de Resultados. No reemplaza el watcher existente:
+        // solo lo despierta con más frecuencia. CheckNotionChangesAsync ya
+        // tiene gate global y mínimo de 30 s, por lo que no multiplica probes.
+        private Microsoft.UI.Dispatching.DispatcherQueueTimer?
+            _fastNotionResultsRefreshTimer;
+
         private readonly SemaphoreSlim _mutLock = new(1, 1);
         private CancellationTokenSource? _refreshCts;
         private string? _currentFolderPath;
 
         // pestañas
         public event EventHandler<string>? TabTitleChanged;
+        public event EventHandler<string>? TabModeChanged;
         public event EventHandler? WorkspaceChanged;
+
+        // Modo visual actual de ESTA pestaña. SearchTabsView lo usa únicamente
+        // para mostrar el icono 🔎/calendario; no dispara cargas adicionales.
+        public string CurrentTabMode =>
+            _calendarViewActive ? "calendar" : "results";
+
+        private void NotifyTabModeChanged(string mode)
+        {
+            TabModeChanged?.Invoke(
+                this,
+                string.Equals(mode, "calendar", StringComparison.OrdinalIgnoreCase)
+                    ? "calendar"
+                    : "results");
+        }
 
         // dictado
         private readonly SpeechSynthesizer _dictSynth = new();
@@ -392,37 +421,22 @@ namespace Anfeta.UI.Views
 
         private async void SearchView_Loaded(object sender, RoutedEventArgs e)
         {
-            LoadSearchBackgroundTheme();
-            LoadModulePreferences();
-            LoadResultColumnWidths();
-            LoadDetailsPaneWidth();
-            LoadResultsViewMode();
-            EnsureResultsWheelHandler();
-            InitializeMessagesView();
-            AttachMessagesNavigationBridge();
-            UpdateColumnSortIndicators();
-            // Suscripción única controlada por flag — evita duplicados si Loaded se dispara más de una vez
-            if (!_isIndexStateHooked)
-            {
-                DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
-                SearchFocusBridge.FocusRequested += OnSearchFocusRequested;
-                _isIndexStateHooked = true;
-            }
-
             Unloaded -= SearchView_Unloaded;
             Unloaded += SearchView_Unloaded;
 
-            LoadExcludedFolders();
-            RefreshExcludedFoldersUi();
-            LoadSavedSearches();
-            RefreshSavedSearchesUi();
-            CommandsSidebarList.ItemsSource = _savedSearches;
-            RefreshCommandsSidebarUi();
-            LoadSidebarExpandedStates();
-            await LoadSavedFiltersAsync();
+            // Una pestaña restaurada/recién creada que todavía no está activa no
+            // inicializa filtros, watchers, mensajes ni pinta miles de filas.
+            // SearchTabsView la materializa al seleccionarla.
+            if (DeferInitialIndexPaint)
+            {
+                _deferredIndexPaintPending = true;
+                ForceHideLoadingState();
+                return;
+            }
 
-            if (!DeferInitialIndexPaint &&
-                Interlocked.CompareExchange(
+            await EnsureSearchViewRuntimeInitializedAsync();
+
+            if (Interlocked.CompareExchange(
                     ref _sharedVoiceInitStarted,
                     1,
                     0) == 0)
@@ -430,41 +444,80 @@ namespace Anfeta.UI.Views
                 await _voiceEngine.ReloadAsync();
             }
 
-            _ = LoadBookmarksAsync();
+            await EnsureIndexBootstrappedAsync();
+            await ApplyDefaultTagIfEmptyAsync();
 
-            // Los tabs ocultos restaurados no hacen bootstrap ni pintan miles
-            // de filas. El tab visible hace la carga global y los demás reutilizan
-            // App.LocalIndex cuando el usuario realmente los selecciona.
-            if (!DeferInitialIndexPaint)
-            {
-                await EnsureIndexBootstrappedAsync();
-                await ApplyDefaultTagIfEmptyAsync();
-            }
-            else
-            {
-                _deferredIndexPaintPending = true;
-            }
+            // Resultados de Notion se comprueban con mayor frecuencia que el
+            // watcher histórico de 2 min. El gate compartido evita duplicados.
+            StartFastNotionResultsRefreshWatcher();
 
-            // El calendario permanece inactivo durante el arranque.
-            // Solo se carga cuando el usuario abre la vista Calendario.
+            // Pipeline unico de arranque del calendario: primero mantenimiento
+            // diario en background y despues precarga de Hoy/checklist/proyectos.
+            // Asi no compiten varios procesos pesados de Notion al mismo tiempo.
+            StartCalendarStartupPipeline();
 
-            // Esta automatización es global: varias pestañas no deben intentar
-            // ejecutarla simultáneamente al iniciar.
-            if (!DeferInitialIndexPaint &&
-                Interlocked.CompareExchange(
-                    ref _sharedDailyCalendarAutomationStarted,
-                    1,
-                    0) == 0)
-            {
-                _ = RunDailyCalendarAutomationIfNeededAsync();
-            }
-
-            ApplyTextScaleToVisualTree();
-
-            // Seguridad final del arranque:
-            // algunas operaciones iniciales pueden anidarse y dejar pendiente
-            // el contador visual aunque la carga ya haya terminado.
+            NotifyTabModeChanged(CurrentTabMode);
             ForceHideLoadingState();
+        }
+
+        private async Task EnsureSearchViewRuntimeInitializedAsync()
+        {
+            if (_runtimeInitializationCompleted)
+            {
+                EnsureSearchViewRuntimeSubscriptions();
+                return;
+            }
+
+            await _runtimeInitializationLock.WaitAsync();
+
+            try
+            {
+                if (_runtimeInitializationCompleted)
+                {
+                    EnsureSearchViewRuntimeSubscriptions();
+                    return;
+                }
+
+                LoadSearchBackgroundTheme();
+                LoadModulePreferences();
+                LoadResultColumnWidths();
+                LoadDetailsPaneWidth();
+                LoadResultsViewMode();
+                EnsureResultsWheelHandler();
+                InitializeMessagesView();
+                UpdateColumnSortIndicators();
+                EnsureSearchViewRuntimeSubscriptions();
+
+                LoadExcludedFolders();
+                RefreshExcludedFoldersUi();
+                LoadSavedSearches();
+                RefreshSavedSearchesUi();
+                CommandsSidebarList.ItemsSource = _savedSearches;
+                RefreshCommandsSidebarUi();
+                LoadSidebarExpandedStates();
+                await LoadSavedFiltersAsync();
+
+                // No bloquea la creación/selección de la pestaña.
+                _ = LoadBookmarksAsync();
+
+                ApplyTextScaleToVisualTree();
+                _runtimeInitializationCompleted = true;
+            }
+            finally
+            {
+                _runtimeInitializationLock.Release();
+            }
+        }
+
+        private void EnsureSearchViewRuntimeSubscriptions()
+        {
+            if (_isIndexStateHooked)
+                return;
+
+            DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
+            SearchFocusBridge.FocusRequested += OnSearchFocusRequested;
+            _isIndexStateHooked = true;
+            AttachMessagesNavigationBridge();
         }
 
         private void SearchView_Unloaded(object sender, RoutedEventArgs e)
@@ -478,6 +531,7 @@ namespace Anfeta.UI.Views
 
             DetachMessagesNavigationBridge();
             CloseMessagesView();
+            StopFastNotionResultsRefreshWatcher();
             StopNotionChangeWatcher();
             StopDropboxChangeWatcher();
 
@@ -559,6 +613,10 @@ namespace Anfeta.UI.Views
         {
             DeferInitialIndexPaint = false;
 
+            // La pestaña ya se mostró visualmente antes de ejecutar este bloque.
+            // Aquí se materializa solo cuando realmente queda seleccionada.
+            await EnsureSearchViewRuntimeInitializedAsync();
+
             if (Interlocked.CompareExchange(
                     ref _sharedVoiceInitStarted,
                     1,
@@ -572,30 +630,59 @@ namespace Anfeta.UI.Views
 
             StartNotionChangeWatcher();
             StartDropboxChangeWatcher();
+            StartFastNotionResultsRefreshWatcher();
 
-            if (Interlocked.CompareExchange(
-                    ref _sharedDailyCalendarAutomationStarted,
-                    1,
-                    0) == 0)
-            {
-                _ = RunDailyCalendarAutomationIfNeededAsync();
-            }
+            if (_calendarViewActive)
+                StartCalendarChangesTimer();
+
+            StartCalendarStartupPipeline();
 
             if (state != null)
             {
                 _deferredIndexPaintPending = false;
                 await RestoreTabStateAsync(state);
                 await ApplyDefaultTagIfEmptyAsync();
+                NotifyTabModeChanged(CurrentTabMode);
                 return;
             }
 
             if (_deferredIndexPaintPending && App.LocalIndex.HasData)
             {
                 _deferredIndexPaintPending = false;
-                await PaintLoadedIndexAsync();
+
+                // Volver a una pestaña NO repinta miles de resultados si el
+                // índice compartido no cambió desde la última vez que se vio.
+                if (_lastPaintedIndexVersion != App.LocalIndex.Version)
+                    await PaintLoadedIndexAsync();
             }
 
             await ApplyDefaultTagIfEmptyAsync();
+            NotifyTabModeChanged(CurrentTabMode);
+        }
+
+        /// <summary>
+        /// Pone una pestaña en modo de fondo. No destruye su estado: solo evita
+        /// repintados y timers/watchers mientras otra pestaña está seleccionada.
+        /// </summary>
+        public void SuspendAsBackgroundTab()
+        {
+            DeferInitialIndexPaint = true;
+            _deferredIndexPaintPending = true;
+
+            StopFastNotionResultsRefreshWatcher();
+            StopNotionChangeWatcher();
+            StopDropboxChangeWatcher();
+            StopCalendarChangesTimer();
+
+            // Una pestaña de fondo tampoco recibe cambios globales ni el hotkey
+            // de foco. Al seleccionarla se vuelve a enganchar sin reindexar.
+            if (_isIndexStateHooked)
+            {
+                DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
+                SearchFocusBridge.FocusRequested -= OnSearchFocusRequested;
+                _isIndexStateHooked = false;
+                DetachMessagesNavigationBridge();
+            }
         }
 
         public async Task RefreshFromSharedIndexIfChangedAsync()
@@ -607,6 +694,76 @@ namespace Anfeta.UI.Views
                 return;
 
             await PaintLoadedIndexAsync();
+        }
+
+        private void StartFastNotionResultsRefreshWatcher()
+        {
+            if (DeferInitialIndexPaint ||
+                _fastNotionResultsRefreshTimer != null)
+            {
+                return;
+            }
+
+            _fastNotionResultsRefreshTimer =
+                DispatcherQueue.CreateTimer();
+
+            _fastNotionResultsRefreshTimer.Interval =
+                TimeSpan.FromSeconds(30);
+
+            _fastNotionResultsRefreshTimer.Tick +=
+                async (_, __) =>
+                {
+                    await RefreshNotionResultsFastAsync();
+                };
+
+            _fastNotionResultsRefreshTimer.Start();
+
+            // Primera comprobación sin esperar 30 segundos.
+            _ = RefreshNotionResultsFastAsync();
+        }
+
+        private void StopFastNotionResultsRefreshWatcher()
+        {
+            if (_fastNotionResultsRefreshTimer == null)
+                return;
+
+            try
+            {
+                _fastNotionResultsRefreshTimer.Stop();
+            }
+            catch
+            {
+            }
+
+            _fastNotionResultsRefreshTimer = null;
+        }
+
+        private async Task RefreshNotionResultsFastAsync()
+        {
+            // No competir con el calendario cuando está visible.
+            if (DeferInitialIndexPaint ||
+                _calendarViewActive)
+            {
+                return;
+            }
+
+            try
+            {
+                // Este método ya tiene:
+                // - SharedNotionProbeGate
+                // - ReserveSharedProbe(..., 30 s)
+                // - sync incremental
+                // Por eso este timer NO genera una sincronización completa.
+                await CheckNotionChangesAsync();
+
+                // Si otra pestaña hizo el cambio sobre el índice global,
+                // repinta esta vista inmediatamente conservando su búsqueda.
+                await RefreshFromSharedIndexIfChangedAsync();
+            }
+            catch
+            {
+                // Es un watcher silencioso: nunca bloquear Resultados.
+            }
         }
 
         private void OnSearchFocusRequested()
@@ -1269,10 +1426,9 @@ namespace Anfeta.UI.Views
                     _ => SearchSourceScope.All
                 };
 
-                // Dropbox siempre abre por defecto con los archivos
-                // modificados más recientemente en la parte superior.
-                if (_activeSourceScope == SearchSourceScope.Dropbox)
-                    _sortKey = "mod_desc";
+                // Regla global de apertura de Resultados:
+                // Date Modified descendente para Notion, Dropbox y Todo.
+                _sortKey = "mod_desc";
 
                 var savedGroupingMode =
                     (values[LS_ResultGroupingMode] as string ?? "none")

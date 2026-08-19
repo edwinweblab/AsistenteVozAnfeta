@@ -23,6 +23,16 @@ namespace Anfeta.UI.Views
         private readonly Dictionary<SearchView, SearchTabState>
             _pendingTabStates = new();
 
+        private sealed class TabHeaderVisual
+        {
+            public StackPanel Root { get; init; } = null!;
+            public FontIcon Icon { get; init; } = null!;
+            public TextBlock Title { get; init; } = null!;
+        }
+
+        private readonly Dictionary<SearchView, TabHeaderVisual>
+            _tabHeaderVisuals = new();
+
 
         public SearchTabsView()
         {
@@ -53,10 +63,14 @@ namespace Anfeta.UI.Views
         {
             _tabCounter++;
 
+            // La nueva pestaña aparece primero y se materializa después de que
+            // WinUI pinte el cambio de selección. Evita el tirón de construir
+            // filtros/resultados en el mismo frame del clic en + / Ctrl+T.
             var view = new SearchView
             {
-                DeferInitialIndexPaint = false
+                DeferInitialIndexPaint = true
             };
+
             var tab = new TabViewItem
             {
                 Header = $"Buscar {_tabCounter}",
@@ -69,21 +83,22 @@ namespace Anfeta.UI.Views
             Tabs.SelectedItem = tab;
             SaveWorkspace();
 
-            DispatcherQueue.TryEnqueue(async () =>
-            {
-                await WaitForLoadedAsync(view);
-                await view.ApplyDefaultTagIfEmptyAsync();
-            });
-
             return view;
         }
 
-        private void Tabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
+        private void Tabs_TabCloseRequested(
+            TabView sender,
+            TabViewTabCloseRequestedEventArgs args)
         {
-            if (sender.TabItems.Count <= 1) return; // no cerrar el último
+            if (sender.TabItems.Count <= 1)
+                return; // no cerrar el último
 
             if (args.Tab?.Content is SearchView closingView)
+            {
+                closingView.SuspendAsBackgroundTab();
                 _pendingTabStates.Remove(closingView);
+                _tabHeaderVisuals.Remove(closingView);
+            }
 
             sender.TabItems.Remove(args.Tab);
             SaveWorkspace();
@@ -91,11 +106,91 @@ namespace Anfeta.UI.Views
 
         private void HookTabTitle(TabViewItem tab, SearchView view)
         {
-            view.TabTitleChanged += (_, title) => tab.Header = title;
+            var initialTitle =
+                tab.Header?.ToString() ?? "Buscar";
 
-            // 🔥 nuevo: cuando el SearchView cambie estado, guardamos workspace
+            var header = CreateTabHeader(
+                initialTitle,
+                view.CurrentTabMode);
+
+            _tabHeaderVisuals[view] = header;
+            tab.Header = header.Root;
+
+            view.TabTitleChanged += (_, title) =>
+            {
+                if (_tabHeaderVisuals.TryGetValue(view, out var current))
+                    current.Title.Text = title;
+            };
+
+            view.TabModeChanged += (_, mode) =>
+            {
+                if (_tabHeaderVisuals.TryGetValue(view, out var current))
+                    ApplyTabModeVisual(current, mode);
+            };
+
             view.WorkspaceChanged += (_, __) => SaveWorkspace();
         }
+
+        private static TabHeaderVisual CreateTabHeader(
+            string title,
+            string mode)
+        {
+            var icon = new FontIcon
+            {
+                FontSize = 12
+            };
+
+            var titleText = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(title)
+                    ? "Buscar"
+                    : title,
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 190,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+
+            var root = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            root.Children.Add(icon);
+            root.Children.Add(titleText);
+
+            var visual = new TabHeaderVisual
+            {
+                Root = root,
+                Icon = icon,
+                Title = titleText
+            };
+
+            ApplyTabModeVisual(visual, mode);
+            return visual;
+        }
+
+        private static void ApplyTabModeVisual(
+            TabHeaderVisual visual,
+            string mode)
+        {
+            var isCalendar = string.Equals(
+                mode,
+                "calendar",
+                StringComparison.OrdinalIgnoreCase);
+
+            visual.Icon.Glyph = isCalendar
+                ? "\uE787"   // Calendar
+                : "\uE721";  // Search
+
+            ToolTipService.SetToolTip(
+                visual.Root,
+                isCalendar
+                    ? "Esta pestaña está en Calendario"
+                    : "Esta pestaña está en Resultados / Buscador");
+        }
+
         private void SaveWorkspace()
         {
             if (_restoring) return;
@@ -179,19 +274,19 @@ namespace Anfeta.UI.Views
 
                 Tabs.TabItems.Clear();
                 _pendingTabStates.Clear();
+                _tabHeaderVisuals.Clear();
                 _tabCounter = 0;
 
-                // 5) Crear tabs
+                // 5) Crear TODOS los tabs en modo diferido. Incluso el que estaba
+                // seleccionado al cerrar ANFETA aparece primero y se materializa
+                // después; así restaurar varias pestañas no congela el arranque.
                 for (int i = 0; i < ws.Tabs.Count; i++)
                 {
                     _tabCounter++;
 
-                    var isSelectedTab =
-                        i == ws.SelectedIndex;
-
                     var view = new SearchView
                     {
-                        DeferInitialIndexPaint = !isSelectedTab
+                        DeferInitialIndexPaint = true
                     };
 
                     var tab = new TabViewItem
@@ -204,33 +299,32 @@ namespace Anfeta.UI.Views
                     HookTabTitle(tab, view);
                     Tabs.TabItems.Add(tab);
 
-                    if (!isSelectedTab)
-                    {
-                        view.StageDeferredTabState(ws.Tabs[i]);
-                        _pendingTabStates[view] = ws.Tabs[i];
-                    }
+                    view.StageDeferredTabState(ws.Tabs[i]);
+                    _pendingTabStates[view] = ws.Tabs[i];
                 }
 
-                // 6) Deja que WinUI “monte” los contenidos antes de seleccionar
+                // 6) Deja que WinUI monte primero encabezados/contenidos ligeros.
                 Tabs.UpdateLayout();
                 await Task.Yield();
                 await Task.Yield();
 
-                // 7) Seleccionar tab activo
+                // 7) Seleccionar tab activo y darle un frame para que el usuario
+                // vea la pestaña antes de cargar filtros/resultados.
                 if (Tabs.TabItems.Count > 0)
                     Tabs.SelectedIndex = Math.Clamp(ws.SelectedIndex, 0, Tabs.TabItems.Count - 1);
 
                 Tabs.UpdateLayout();
                 await Task.Yield();
 
-                // 8) Restaurar estado del tab seleccionado primero
-                await WaitForIndexReadyAsync();
-                await RestoreSelectedTabStateAsync(ws);
+                // 8) Materializar SOLO el tab activo. Los demás quedan staged.
+                if (Tabs.SelectedItem is TabViewItem selectedTab &&
+                    selectedTab.Content is SearchView selectedView)
+                {
+                    await WaitForLoadedAsync(selectedView);
+                    await ActivateSelectedDeferredTabAsync();
+                }
 
-                // 9) Los demás tabs ya quedaron staged en memoria y se
-                // materializan solo cuando el usuario los selecciona.
-
-                // 10) Ya puedes permitir guardados
+                // 9) Ya puedes permitir guardados.
                 _workspaceRestored = true;
             }
             finally
@@ -253,6 +347,9 @@ namespace Anfeta.UI.Views
             if (_restoreOnce) return;
             _restoreOnce = true;
 
+            // Permite que primero aparezcan shell + tabs y después materializa
+            // el contenido pesado del tab activo.
+            await Task.Yield();
             await RestoreWorkspaceAsync();
         }
 
@@ -261,8 +358,31 @@ namespace Anfeta.UI.Views
             if (_restoring) return;
             if (!_workspaceRestored) return;
 
+            SuspendBackgroundTabs();
             SaveWorkspace();
+
+            // Da un frame a WinUI para pintar la pestaña/indicador antes de
+            // materializar resultados, filtros o watchers de la nueva vista.
+            await Task.Yield();
             await ActivateSelectedDeferredTabAsync();
+        }
+
+        private void SuspendBackgroundTabs()
+        {
+            var selected =
+                (Tabs.SelectedItem as TabViewItem)?.Content as SearchView;
+
+            foreach (var item in Tabs.TabItems)
+            {
+                if (item is not TabViewItem tab ||
+                    tab.Content is not SearchView view ||
+                    ReferenceEquals(view, selected))
+                {
+                    continue;
+                }
+
+                view.SuspendAsBackgroundTab();
+            }
         }
 
         private async Task ActivateSelectedDeferredTabAsync()
@@ -273,22 +393,49 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            // La pestaña ya está seleccionada/visible. Esperamos únicamente a que
+            // WinUI termine su Loaded antes de tocar filtros, watchers o XamlRoot.
+            await WaitForLoadedAsync(view);
+
+            // Si el usuario cambió otra vez de pestaña mientras terminaba Loaded,
+            // no iniciamos trabajo para una vista que ya quedó en segundo plano.
+            if (!IsSelectedView(view))
+            {
+                view.SuspendAsBackgroundTab();
+                return;
+            }
+
             if (_pendingTabStates.TryGetValue(view, out var pendingState))
             {
                 _pendingTabStates.Remove(view);
                 await view.ActivateDeferredTabAsync(pendingState);
+                SuspendIfNoLongerSelected(view);
                 return;
             }
 
             if (view.DeferInitialIndexPaint)
             {
                 await view.ActivateDeferredTabAsync();
+                SuspendIfNoLongerSelected(view);
                 return;
             }
 
             // Si otra pestaña sincronizó el índice, esta vista se actualiza desde
             // memoria al seleccionarla. No realiza ninguna petición externa.
             await view.RefreshFromSharedIndexIfChangedAsync();
+            SuspendIfNoLongerSelected(view);
+        }
+
+        private bool IsSelectedView(SearchView view)
+        {
+            return Tabs.SelectedItem is TabViewItem selectedTab &&
+                   ReferenceEquals(selectedTab.Content, view);
+        }
+
+        private void SuspendIfNoLongerSelected(SearchView view)
+        {
+            if (!IsSelectedView(view))
+                view.SuspendAsBackgroundTab();
         }
         private static Task WaitForLoadedAsync(FrameworkElement element)
         {
