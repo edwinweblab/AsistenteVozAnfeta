@@ -73,6 +73,37 @@ namespace Anfeta.UI.Views
                     IsGroupMessageRecipient(recipientTag));
         }
 
+        private static bool MessageShouldAppearForCurrentUser(
+            MessageViewItem item,
+            string currentUserTag)
+        {
+            if (item == null ||
+                string.IsNullOrWhiteSpace(currentUserTag))
+            {
+                return false;
+            }
+
+            // Las alertas automáticas de revisión pertenecen al REVISOR
+            // destinatario. Si Neftali envió una actividad a John, la alerta
+            // "Para John" no debe aparecer en "Todos" de Neftali solo porque
+            // Neftali figure como remitente.
+            if (item.IsReviewAlert)
+            {
+                return AreSameMessagesPersonTag(
+                           item.RecipientTag,
+                           currentUserTag) ||
+                       IsGroupMessageRecipient(
+                           item.RecipientTag);
+            }
+
+            // Mensajes/recordatorios normales sí pueden verse en "Todos"
+            // cuando el usuario participa como remitente o destinatario.
+            return MessageBelongsToCurrentUser(
+                item.SenderTag,
+                item.RecipientTag,
+                currentUserTag);
+        }
+
         private readonly HashSet<string> _recentBroadcastFingerprints =
             new(StringComparer.OrdinalIgnoreCase);
 
@@ -2076,10 +2107,8 @@ namespace Anfeta.UI.Views
 
                 "conversations" =>
                     parsed.Where(item =>
-                        !string.IsNullOrWhiteSpace(currentUserTag) &&
-                        MessageBelongsToCurrentUser(
-                            item.SenderTag,
-                            item.RecipientTag,
+                        MessageShouldAppearForCurrentUser(
+                            item,
                             currentUserTag)),
 
                 "overdue" =>
@@ -2095,18 +2124,14 @@ namespace Anfeta.UI.Views
                 "completed" =>
                     parsed.Where(item =>
                         item.IsCompleted &&
-                        !string.IsNullOrWhiteSpace(currentUserTag) &&
-                        MessageBelongsToCurrentUser(
-                            item.SenderTag,
-                            item.RecipientTag,
+                        MessageShouldAppearForCurrentUser(
+                            item,
                             currentUserTag)),
 
                 _ =>
                     parsed.Where(item =>
-                        !string.IsNullOrWhiteSpace(currentUserTag) &&
-                        MessageBelongsToCurrentUser(
-                            item.SenderTag,
-                            item.RecipientTag,
+                        MessageShouldAppearForCurrentUser(
+                            item,
                             currentUserTag))
             };
 
@@ -2156,6 +2181,19 @@ namespace Anfeta.UI.Views
                 .OrderBy(item => item.IsCompleted)
                 .ThenBy(item => item.ScheduledAt)
                 .ToList();
+
+            // Si cambió el usuario/filtro y la conversación seleccionada ya no
+            // pertenece a esta vista, no dejamos el panel derecho mostrando
+            // información de otra persona.
+            if (_messagesSelectedItem != null &&
+                !finalItems.Any(item =>
+                    string.Equals(
+                        item.Row.ExternalId,
+                        _messagesSelectedItem.Row.ExternalId,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                ClearMessagesConversationSelection();
+            }
 
             _messageItems.Clear();
 
@@ -2399,12 +2437,12 @@ namespace Anfeta.UI.Views
             string pageId,
             string recipientTag,
             DateTime localDate,
-            bool isReplyNotification)
+            bool isCompleted)
         {
             var currentUser =
                 GetCurrentMessagesUserTag();
 
-            if (!isReplyNotification ||
+            if (isCompleted ||
                 string.IsNullOrWhiteSpace(pageId) ||
                 (!AreSameMessagesPersonTag(
                      recipientTag,
@@ -2420,6 +2458,12 @@ namespace Anfeta.UI.Views
                     DateTime.SpecifyKind(
                         localDate,
                         DateTimeKind.Local));
+
+            // Los mensajes programados para después no cuentan como no leídos
+            // hasta que llegue su hora. Iniciales y alertas de revisión sí deben
+            // sumar al badge; antes solo [RESPUESTA] podía hacerlo.
+            if (messageDate > DateTimeOffset.Now)
+                return false;
 
             return !_messagesReadState.TryGetValue(
                        pageId,
@@ -2729,7 +2773,7 @@ namespace Anfeta.UI.Views
                         row.ExternalId,
                         recipientTag,
                         localDate,
-                        isReplyNotification)
+                        completed)
             };
         }
 
@@ -6906,23 +6950,45 @@ namespace Anfeta.UI.Views
                         ? mapped
                         : currentUser;
 
-                await _messageThreadService.AppendEntryAsync(
-                    token,
-                    message.Row.ExternalId,
-                    new MessageThreadEntry
-                    {
-                        Kind = MessageThreadKind.System,
-                        AuthorTag = currentUser,
-                        AuthorName = currentName,
-                        RecipientTag = message.RecipientTag,
-                        RecipientName = message.RecipientName,
-                        CreatedAt = DateTimeOffset.Now,
-                        Text =
-                            $"Recordatorio terminado por {currentName} " +
-                            $"el {DateTimeOffset.Now:dd/MM/yyyy HH:mm}. " +
-                            "La página fue enviada a la papelera."
-                    },
-                    cts.Token);
+                try
+                {
+                    await _messageThreadService.AppendEntryAsync(
+                        token,
+                        message.Row.ExternalId,
+                        new MessageThreadEntry
+                        {
+                            Kind = MessageThreadKind.System,
+                            AuthorTag = currentUser,
+                            AuthorName = currentName,
+                            RecipientTag = message.RecipientTag,
+                            RecipientName = message.RecipientName,
+                            CreatedAt = DateTimeOffset.Now,
+                            Text =
+                                $"Recordatorio terminado por {currentName} " +
+                                $"el {DateTimeOffset.Now:dd/MM/yyyy HH:mm}. " +
+                                "La página fue enviada a la papelera."
+                        },
+                        cts.Token);
+                }
+                catch (Exception ex) when (
+                    NotionPageActionsService.IsMissingPageError(ex))
+                {
+                    await RemoveNotionRowsFromIndexAsync(
+                        new HashSet<string>(
+                            StringComparer.OrdinalIgnoreCase)
+                        {
+                            message.Row.ExternalId
+                        });
+
+                    ClearMessagesConversationSelection();
+                    RefreshMessagesView(force: true);
+
+                    StatusText.Text =
+                        "Estado: La página ya no existía en Notion; " +
+                        "se limpió el recordatorio atascado de ANFETA ✅";
+
+                    return;
+                }
 
                 var pageActions = new NotionPageActionsService();
 
@@ -7095,53 +7161,67 @@ namespace Anfeta.UI.Views
                         $"{alert.RecipientTag}{senderToken}{statusToken} " +
                         $"{alert.Message}";
 
-                    await pageActions.RenamePageAsync(
-                        token,
-                        alert.Row.ExternalId,
-                        NotionFilePageService
-                            .RevisionesDataSourceId,
-                        newTitle.Trim(),
-                        cts.Token);
-
-                    await UpdateNotionRowTitleAsync(
-                        alert.Row.ExternalId,
-                        "Revisiones",
-                        newTitle.Trim());
-
-                    await _messageThreadService
-                        .AppendEntryAsync(
-                            token,
-                            alert.Row.ExternalId,
-                            new MessageThreadEntry
-                            {
-                                Kind =
-                                    MessageThreadKind.System,
-                                AuthorTag = currentUser,
-                                AuthorName = reviewerName,
-                                RecipientTag =
-                                    alert.RecipientTag,
-                                RecipientName =
-                                    alert.RecipientName,
-                                CreatedAt =
-                                    DateTimeOffset.Now,
-                                Text = actionText
-                            },
-                            cts.Token);
-
-                    MarkMessageAsRead(alert);
-
-                    if (completed)
+                    try
                     {
-                        // Una alerta atendida se elimina para no acumular
-                        // notificaciones. Si la actividad vuelve a revisión,
-                        // el calendario detectará que este PageId ya no está
-                        // activo y creará una notificación nueva.
-                        await pageActions.MovePageToTrashAsync(
+                        await pageActions.RenamePageAsync(
                             token,
                             alert.Row.ExternalId,
+                            NotionFilePageService
+                                .RevisionesDataSourceId,
+                            newTitle.Trim(),
                             cts.Token);
 
+                        await UpdateNotionRowTitleAsync(
+                            alert.Row.ExternalId,
+                            "Revisiones",
+                            newTitle.Trim());
+
+                        await _messageThreadService
+                            .AppendEntryAsync(
+                                token,
+                                alert.Row.ExternalId,
+                                new MessageThreadEntry
+                                {
+                                    Kind =
+                                        MessageThreadKind.System,
+                                    AuthorTag = currentUser,
+                                    AuthorName = reviewerName,
+                                    RecipientTag =
+                                        alert.RecipientTag,
+                                    RecipientName =
+                                        alert.RecipientName,
+                                    CreatedAt =
+                                        DateTimeOffset.Now,
+                                    Text = actionText
+                                },
+                                cts.Token);
+
+                        MarkMessageAsRead(alert);
+
+                        if (completed)
+                        {
+                            // Una alerta atendida se elimina para no acumular
+                            // notificaciones. Si la actividad vuelve a revisión,
+                            // el calendario detectará que este PageId ya no está
+                            // activo y creará una notificación nueva.
+                            await pageActions.MovePageToTrashAsync(
+                                token,
+                                alert.Row.ExternalId,
+                                cts.Token);
+
+                            removedIds.Add(alert.Row.ExternalId);
+                        }
+                    }
+                    catch (Exception ex) when (
+                        NotionPageActionsService.IsMissingPageError(ex))
+                    {
+                        // Fantasma local: la página ya no existe en Notion.
+                        // Para "Atendida" o "Eliminar" el resultado deseado
+                        // es que deje de verse, así que se limpia del índice y
+                        // se continúa con las demás alertas vinculadas.
                         removedIds.Add(alert.Row.ExternalId);
+                        MarkMessageAsRead(alert);
+                        continue;
                     }
                 }
 
@@ -7263,17 +7343,54 @@ namespace Anfeta.UI.Views
                         message.Row.ExternalId
                     });
 
-                RefreshMessagesView();
+                if (string.Equals(
+                        _messagesSelectedPageId,
+                        message.Row.ExternalId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    ClearMessagesConversationSelection();
+                }
+
+                RefreshMessagesView(
+                    force: true);
 
                 StatusText.Text =
                     message.IsReviewAlert
-                        ? "Estado: Notificación eliminada. La actividad original permanece intacta ✅"
-                        : "Estado: Recordatorio enviado a la papelera ✅";
+                        ? "Estado: Notificación eliminada/limpiada. La actividad original permanece intacta ✅"
+                        : "Estado: Recordatorio eliminado/limpiado ✅";
             }
             catch (OperationCanceledException)
             {
                 StatusText.Text =
                     "Estado: Notion tardó demasiado en responder.";
+            }
+            catch (Exception ex)
+                when (NotionPageActionsService.IsMissingPageError(ex))
+            {
+                // La página ya no existe o ya estaba archivada. Para el usuario,
+                // eliminar significa limpiar la referencia local y continuar.
+                await RemoveNotionRowsFromIndexAsync(
+                    new HashSet<string>(
+                        StringComparer.OrdinalIgnoreCase)
+                    {
+                        message.Row.ExternalId
+                    });
+
+                if (string.Equals(
+                        _messagesSelectedPageId,
+                        message.Row.ExternalId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    ClearMessagesConversationSelection();
+                }
+
+                RefreshMessagesView(
+                    force: true);
+
+                StatusText.Text =
+                    message.IsReviewAlert
+                        ? "Estado: La notificación ya no existía en Notion; se limpió de ANFETA ✅"
+                        : "Estado: El recordatorio ya no existía en Notion; se limpió de ANFETA ✅";
             }
             catch (Exception ex)
             {

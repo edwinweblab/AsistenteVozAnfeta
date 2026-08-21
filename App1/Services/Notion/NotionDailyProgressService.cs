@@ -20,7 +20,8 @@ namespace Anfeta.UI.Services.Notion
     /// Reglas acordadas:
     /// - Rezago: P/PRTUZ + terminó su bloque + checklist REAL < 50%.
     ///   Sin checklist NO se acusa como rezago; queda como dato faltante.
-    /// - Cobertura: avance ponderado por minutos agendados.
+    /// - Cobertura: SOLO avance observado hoy, ponderado por minutos agendados.
+    ///   El progreso histórico que ya existía al iniciar el seguimiento no suma.
     /// - R/Z del Feed: movimientos del día, no simplemente estados históricos.
     /// - Checklist "hecho hoy": delta contra un baseline persistente.
     /// - Cache-first: abrir el Feed no descarga bodies.
@@ -30,8 +31,40 @@ namespace Anfeta.UI.Services.Notion
         private const string TrackingFileName =
             "daily_progress_tracking_v2.json";
 
+        // Jornada operativa de Avance Diario.
+        // Lo ocurrido antes de las 06:00 no se arrastra como avance del día
+        // y el corte termina exactamente a medianoche (00:00 del día siguiente).
+        private const int DailyProgressStartHour = 6;
+
         private static readonly SemaphoreSlim TrackingGate =
             new(1, 1);
+
+        private static DateTime GetDailyProgressWindowStart(
+            DateTime day) =>
+            day.Date.AddHours(DailyProgressStartHour);
+
+        private static DateTime GetDailyProgressWindowEnd(
+            DateTime day) =>
+            day.Date.AddDays(1);
+
+        // Comparte el mismo historial que SearchView.Calendar.
+        private const string CalendarMoveHistoryFileName =
+            "calendar_move_history_v1.json";
+
+        private static readonly SemaphoreSlim CalendarMoveHistoryGate =
+            new(1, 1);
+
+        private sealed class PersistedCalendarMoveHistoryEntry
+        {
+            public string PageId { get; set; } = string.Empty;
+            public DateTime SourceDate { get; set; }
+            public DateTime LastSourceDate { get; set; }
+            public DateTime TargetDate { get; set; }
+            public DateTimeOffset MovedAt { get; set; }
+            public string Reason { get; set; } = string.Empty;
+            public int MoveCount { get; set; }
+            public List<DateTime> RouteDates { get; set; } = new();
+        }
 
         private static readonly string[] KnownPersonOrder =
         {
@@ -141,6 +174,474 @@ namespace Anfeta.UI.Services.Notion
                 new(StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Baseline local usado por las cards del calendario para calcular
+        /// únicamente el avance observado dentro del día seleccionado.
+        ///
+        /// NO consulta Notion ni bodies. Reutiliza daily_progress_tracking_v2.json.
+        /// </summary>
+        public sealed record CalendarCardChecklistBaseline(
+            int Completed,
+            int Total,
+            bool EstablishedBeforeThisRead,
+            DateTimeOffset TrackingStartedAt);
+
+        public static async Task<IReadOnlyDictionary<
+            string,
+            CalendarCardChecklistBaseline>>
+            GetCalendarCardChecklistBaselinesAsync(
+                DateTime day,
+                IEnumerable<NotionCalendarActivity> activities,
+                CancellationToken cancellationToken = default)
+        {
+            var unique =
+                (activities ??
+                 Enumerable.Empty<NotionCalendarActivity>())
+                    .Where(activity =>
+                        activity != null &&
+                        !activity.IsReviewMirror &&
+                        !string.IsNullOrWhiteSpace(
+                            activity.PageId))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+
+            if (unique.Count == 0)
+            {
+                return new Dictionary<
+                    string,
+                    CalendarCardChecklistBaseline>(
+                        StringComparer.OrdinalIgnoreCase);
+            }
+
+            var tracking =
+                await PrepareTrackingContextAsync(
+                    day.Date,
+                    unique,
+                    cancellationToken);
+
+            var result =
+                new Dictionary<
+                    string,
+                    CalendarCardChecklistBaseline>(
+                        StringComparer.OrdinalIgnoreCase);
+
+            foreach (var activity in unique)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!tracking.Baselines.TryGetValue(
+                        activity.PageId,
+                        out var baseline) ||
+                    baseline == null)
+                {
+                    continue;
+                }
+
+                result[activity.PageId] =
+                    new CalendarCardChecklistBaseline(
+                        Math.Max(
+                            0,
+                            baseline.ChecklistCompleted),
+                        Math.Max(
+                            0,
+                            baseline.ChecklistTotal),
+                        tracking.HadExistingDay &&
+                        !tracking.NewlyAddedPageIds.Contains(
+                            activity.PageId),
+                        tracking.FirstCapturedAtUtc
+                            .ToLocalTime());
+            }
+
+            return result;
+        }
+
+        private static List<DateTime> NormalizeMovementRoute(
+            PersistedCalendarMoveHistoryEntry entry)
+        {
+            var route =
+                (entry.RouteDates ??
+                 new List<DateTime>())
+                    .Where(date =>
+                        date != default)
+                    .Select(date =>
+                        date.Date)
+                    .ToList();
+
+            if (route.Count == 0)
+            {
+                if (entry.SourceDate != default)
+                    route.Add(entry.SourceDate.Date);
+
+                if (entry.TargetDate != default &&
+                    (route.Count == 0 ||
+                     route[^1] != entry.TargetDate.Date))
+                {
+                    route.Add(entry.TargetDate.Date);
+                }
+            }
+
+            if (entry.SourceDate != default &&
+                (route.Count == 0 ||
+                 route[0] != entry.SourceDate.Date))
+            {
+                route.Insert(
+                    0,
+                    entry.SourceDate.Date);
+            }
+
+            if (entry.TargetDate != default &&
+                (route.Count == 0 ||
+                 route[^1] != entry.TargetDate.Date))
+            {
+                route.Add(
+                    entry.TargetDate.Date);
+            }
+
+            var normalized =
+                new List<DateTime>();
+
+            foreach (var date in route)
+            {
+                if (normalized.Count == 0 ||
+                    normalized[^1] != date.Date)
+                {
+                    normalized.Add(
+                        date.Date);
+                }
+            }
+
+            return normalized;
+        }
+
+        private static async Task<Dictionary<
+            string,
+            PersistedCalendarMoveHistoryEntry>>
+            ReadCalendarMoveHistoryAsync(
+                CancellationToken cancellationToken)
+        {
+            try
+            {
+                var path =
+                    Path.Combine(
+                        ApplicationData.Current.LocalFolder.Path,
+                        CalendarMoveHistoryFileName);
+
+                if (!File.Exists(path))
+                {
+                    return new Dictionary<
+                        string,
+                        PersistedCalendarMoveHistoryEntry>(
+                            StringComparer.OrdinalIgnoreCase);
+                }
+
+                var json =
+                    await File.ReadAllTextAsync(
+                        path,
+                        cancellationToken);
+
+                var restored =
+                    JsonSerializer.Deserialize<
+                        Dictionary<
+                            string,
+                            PersistedCalendarMoveHistoryEntry>>(
+                                json);
+
+                var result =
+                    new Dictionary<
+                        string,
+                        PersistedCalendarMoveHistoryEntry>(
+                            StringComparer.OrdinalIgnoreCase);
+
+                if (restored == null)
+                    return result;
+
+                foreach (var pair in restored)
+                {
+                    if (string.IsNullOrWhiteSpace(
+                            pair.Key) ||
+                        pair.Value == null)
+                    {
+                        continue;
+                    }
+
+                    var entry =
+                        pair.Value;
+
+                    entry.PageId =
+                        pair.Key;
+
+                    entry.SourceDate =
+                        entry.SourceDate.Date;
+
+                    entry.TargetDate =
+                        entry.TargetDate.Date;
+
+                    entry.LastSourceDate =
+                        entry.LastSourceDate == default
+                            ? entry.SourceDate
+                            : entry.LastSourceDate.Date;
+
+                    entry.RouteDates =
+                        NormalizeMovementRoute(
+                            entry);
+
+                    if (entry.MoveCount <= 0)
+                    {
+                        entry.MoveCount =
+                            Math.Max(
+                                1,
+                                entry.RouteDates.Count - 1);
+                    }
+
+                    result[pair.Key] =
+                        entry;
+                }
+
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return new Dictionary<
+                    string,
+                    PersistedCalendarMoveHistoryEntry>(
+                        StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private static async Task SaveCalendarMoveHistoryAsync(
+            IReadOnlyDictionary<
+                string,
+                PersistedCalendarMoveHistoryEntry> history,
+            CancellationToken cancellationToken)
+        {
+            var path =
+                Path.Combine(
+                    ApplicationData.Current.LocalFolder.Path,
+                    CalendarMoveHistoryFileName);
+
+            var json =
+                JsonSerializer.Serialize(
+                    history,
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    });
+
+            await File.WriteAllTextAsync(
+                path,
+                json,
+                cancellationToken);
+        }
+
+        public static async Task RegisterCalendarMovementAsync(
+            string pageId,
+            DateTime sourceDate,
+            DateTime targetDate,
+            string reason,
+            CancellationToken cancellationToken = default)
+        {
+            pageId =
+                (pageId ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(pageId))
+                return;
+
+            var source =
+                sourceDate.Date;
+
+            var target =
+                targetDate.Date;
+
+            await CalendarMoveHistoryGate.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                var history =
+                    await ReadCalendarMoveHistoryAsync(
+                        cancellationToken);
+
+                if (target <= source)
+                {
+                    if (history.Remove(pageId))
+                    {
+                        await SaveCalendarMoveHistoryAsync(
+                            history,
+                            CancellationToken.None);
+                    }
+
+                    return;
+                }
+
+                history.TryGetValue(
+                    pageId,
+                    out var previous);
+
+                var continuesExistingRoute =
+                    previous != null &&
+                    previous.TargetDate.Date == source &&
+                    previous.SourceDate.Date < source;
+
+                if (continuesExistingRoute)
+                {
+                    var route =
+                        NormalizeMovementRoute(
+                            previous!);
+
+                    if (route.Count == 0 ||
+                        route[^1] != source)
+                    {
+                        route.Add(
+                            source);
+                    }
+
+                    if (route[^1] != target)
+                    {
+                        route.Add(
+                            target);
+                    }
+
+                    previous!.LastSourceDate =
+                        source;
+
+                    previous.TargetDate =
+                        target;
+
+                    previous.MovedAt =
+                        DateTimeOffset.Now;
+
+                    previous.Reason =
+                        (reason ?? string.Empty).Trim();
+
+                    previous.RouteDates =
+                        route;
+
+                    previous.MoveCount =
+                        Math.Max(
+                            previous.MoveCount + 1,
+                            route.Count - 1);
+
+                    history[pageId] =
+                        previous;
+                }
+                else
+                {
+                    history[pageId] =
+                        new PersistedCalendarMoveHistoryEntry
+                        {
+                            PageId =
+                                pageId,
+                            SourceDate =
+                                source,
+                            LastSourceDate =
+                                source,
+                            TargetDate =
+                                target,
+                            MovedAt =
+                                DateTimeOffset.Now,
+                            Reason =
+                                (reason ?? string.Empty).Trim(),
+                            MoveCount =
+                                1,
+                            RouteDates =
+                                new List<DateTime>
+                                {
+                                    source,
+                                    target
+                                }
+                        };
+                }
+
+                await SaveCalendarMoveHistoryAsync(
+                    history,
+                    CancellationToken.None);
+            }
+            finally
+            {
+                CalendarMoveHistoryGate.Release();
+            }
+        }
+
+        private static PersistedCalendarMoveHistoryEntry?
+            GetValidCarryOverMovement(
+                NotionCalendarActivity activity,
+                IReadOnlyDictionary<
+                    string,
+                    PersistedCalendarMoveHistoryEntry> history)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(
+                    activity.PageId) ||
+                history == null ||
+                !history.TryGetValue(
+                    activity.PageId,
+                    out var movement) ||
+                movement == null)
+            {
+                return null;
+            }
+
+            if (movement.TargetDate.Date !=
+                    activity.Start.Date ||
+                movement.TargetDate.Date <=
+                    movement.SourceDate.Date)
+            {
+                return null;
+            }
+
+            movement.RouteDates =
+                NormalizeMovementRoute(
+                    movement);
+
+            return movement;
+        }
+
+        private static string BuildCarryOverMovementLabel(
+            PersistedCalendarMoveHistoryEntry? movement)
+        {
+            if (movement == null)
+                return string.Empty;
+
+            var days =
+                Math.Max(
+                    1,
+                    (movement.TargetDate.Date -
+                     movement.SourceDate.Date).Days);
+
+            var label =
+                days == 1
+                    ? "↪ De ayer"
+                    : $"↪ De hace {days} días";
+
+            var route =
+                NormalizeMovementRoute(
+                    movement);
+
+            var moveCount =
+                Math.Max(
+                    movement.MoveCount,
+                    route.Count - 1);
+
+            if (moveCount > 1)
+            {
+                label +=
+                    $" · {moveCount} movimientos";
+            }
+
+            label +=
+                $" · {movement.SourceDate:dd/MM}→" +
+                $"{movement.TargetDate:dd/MM}";
+
+            return label;
+        }
+
         public async Task<DailyProgressSnapshot> BuildAsync(
             NotionCalendarService calendarService,
             string token,
@@ -209,12 +710,15 @@ namespace Anfeta.UI.Services.Notion
                     .ThenBy(activity => activity.Title)
                     .ToList();
 
+            // Avance Diario trabaja con una ventana fija 06:00 → 00:00.
+            // Para días pasados el corte es medianoche; para hoy se usa la
+            // hora real. Antes de las 06:00 todavía no existe avance del día.
             var referenceTime =
                 day == DateTime.Today
                     ? DateTime.Now
                     : day < DateTime.Today
-                        ? day.AddDays(1).AddTicks(-1)
-                        : day;
+                        ? GetDailyProgressWindowEnd(day).AddTicks(-1)
+                        : GetDailyProgressWindowStart(day);
 
             progress?.Report(
                 "Preparando seguimiento de cambios del día…");
@@ -223,6 +727,13 @@ namespace Anfeta.UI.Services.Notion
                 await PrepareTrackingContextAsync(
                     day,
                     operational,
+                    cancellationToken);
+
+            progress?.Report(
+                "Leyendo movimientos reales hechos por ANFETA…");
+
+            var movementHistory =
+                await ReadCalendarMoveHistoryAsync(
                     cancellationToken);
 
             progress?.Report(
@@ -236,13 +747,19 @@ namespace Anfeta.UI.Services.Notion
                             activity.PageId,
                             out var baseline);
 
+                        var carryOver =
+                            GetValidCarryOverMovement(
+                                activity,
+                                movementHistory);
+
                         return CreateActivityItem(
                             activity,
                             baseline,
                             tracking.NewlyAddedPageIds.Contains(
                                 activity.PageId),
                             referenceTime,
-                            day);
+                            day,
+                            carryOver);
                     })
                     .ToList();
 
@@ -347,7 +864,8 @@ namespace Anfeta.UI.Services.Notion
             PersistedActivityBaseline? baseline,
             bool baselineWasCreatedNow,
             DateTime referenceTime,
-            DateTime selectedDay)
+            DateTime selectedDay,
+            PersistedCalendarMoveHistoryEntry? carryOverMovement)
         {
             var state =
                 ClassifyState(
@@ -362,9 +880,13 @@ namespace Anfeta.UI.Services.Notion
             var isReview =
                 state.Code == "R";
 
+            var operationalWindowStart =
+                GetDailyProgressWindowStart(selectedDay);
+
             var deadlineReached =
                 selectedDay < DateTime.Today ||
                 (selectedDay == DateTime.Today &&
+                 referenceTime >= operationalWindowStart &&
                  activity.End <= referenceTime);
 
             // REGLA GENARO:
@@ -443,23 +965,15 @@ namespace Anfeta.UI.Services.Notion
                 isReviewMovement ||
                 isCompletedMovement;
 
-            // Regla operativa de Genaro:
-            // - P con menos de 50% => rezagada.
-            // - P con al menos 50% => sí tuvo avance suficiente.
-            // - R/Z => actividad con avance.
-            //
-            // Esto permite que el Feed sea útil incluso en la PRIMERA apertura
-            // del día, cuando todavía no existe un delta histórico.
-            var currentProgressQualifies =
-                isReview ||
-                isCompleted ||
-                (hasRealChecklist &&
-                 activity.ChecklistPercentage >= 50);
-
+            // REGLA 20/08:
+            // Avance Hoy NO puede salir del porcentaje histórico actual.
+            // Solo cuenta algo que ANFETA haya podido observar dentro del día:
+            // delta de checklist, delta de tiempo o transición R/Z de hoy.
+            // Una actividad puede seguir rezagada y aun así haber avanzado hoy,
+            // por lo que ambos indicadores pueden coexistir.
             var hasTodayMovement =
-                !isLagging &&
-                (observedMovement ||
-                 currentProgressQualifies);
+                !isSuspended &&
+                observedMovement;
 
             var duration =
                 activity.End > activity.Start
@@ -472,10 +986,53 @@ namespace Anfeta.UI.Services.Notion
                     (int)Math.Round(
                         duration.TotalMinutes));
 
-            var progressRatio =
+            // Este ratio conserva el progreso ACTUAL de la actividad para los
+            // datos descriptivos/checklist. NO se usa para Cobertura Hoy.
+            var currentProgressRatio =
                 CalculateActivityProgressRatio(
                     activity,
                     state.Code);
+
+            var checklistTodayRatio =
+                hasRealChecklist &&
+                checklistDelta > 0
+                    ? Math.Clamp(
+                        checklistDelta * 1d /
+                        Math.Max(1, activity.ChecklistTotal),
+                        0d,
+                        1d)
+                    : 0d;
+
+            var workedDenominator =
+                activity.EstimatedWorkMinutes > 0
+                    ? activity.EstimatedWorkMinutes
+                    : scheduledMinutes;
+
+            var workedTodayRatio =
+                workedDelta > 0
+                    ? Math.Clamp(
+                        workedDelta * 1d /
+                        Math.Max(1, workedDenominator),
+                        0d,
+                        1d)
+                    : 0d;
+
+            // Llegar hoy a R o Z sí es un hito diario observable. Para la
+            // cobertura del día se considera completado el bloque agendado.
+            var transitionTodayRatio =
+                isReviewMovement ||
+                isCompletedMovement
+                    ? 1d
+                    : 0d;
+
+            var todayProgressRatio =
+                observedMovement
+                    ? Math.Max(
+                        transitionTodayRatio,
+                        Math.Max(
+                            checklistTodayRatio,
+                            workedTodayRatio))
+                    : 0d;
 
             var progressMinutes =
                 isSuspended
@@ -483,26 +1040,31 @@ namespace Anfeta.UI.Services.Notion
                     : Math.Clamp(
                         (int)Math.Round(
                             scheduledMinutes *
-                            progressRatio),
+                            todayProgressRatio),
                         0,
                         scheduledMinutes);
 
-            var movementLabel =
+            var todayMovementLabel =
                 BuildMovementLabel(
                     checklistDelta,
                     workedDelta,
                     isReviewMovement,
-                    isCompletedMovement,
-                    observedMovement,
-                    currentProgressQualifies,
-                    activity.ChecklistScanned &&
-                    activity.ChecklistTotal > 0
-                        ? activity.ChecklistPercentage
-                        : Math.Clamp(
-                            (int)Math.Round(
-                                progressRatio * 100d),
-                            0,
-                            100));
+                    isCompletedMovement);
+
+            var carryOverLabel =
+                BuildCarryOverMovementLabel(
+                    carryOverMovement);
+
+            var movementLabel =
+                string.Join(
+                    " · ",
+                    new[]
+                    {
+                        carryOverLabel,
+                        todayMovementLabel
+                    }
+                    .Where(value =>
+                        !string.IsNullOrWhiteSpace(value)));
 
             return new DailyProgressActivityItem
             {
@@ -564,7 +1126,7 @@ namespace Anfeta.UI.Services.Notion
                 ProgressPercentage =
                     Math.Clamp(
                         (int)Math.Round(
-                            progressRatio * 100d),
+                            currentProgressRatio * 100d),
                         0,
                         100)
             };
@@ -890,28 +1452,51 @@ namespace Anfeta.UI.Services.Notion
             if (timestamps.Count == 0)
                 return false;
 
-            var reference =
-                new DateTimeOffset(
-                    referenceTime);
+            var localWindowStart =
+                GetDailyProgressWindowStart(selectedDay);
+
+            var localWindowEnd =
+                GetDailyProgressWindowEnd(selectedDay);
 
             var windowStart =
-                reference.AddHours(-15);
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        localWindowStart,
+                        DateTimeKind.Local));
+
+            var windowEnd =
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        localWindowEnd,
+                        DateTimeKind.Local));
+
+            var reference =
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        referenceTime,
+                        DateTimeKind.Local));
+
+            // Antes de las 06:00 no existe un movimiento válido para
+            // "hoy". Después de medianoche tampoco se mezcla con este día.
+            if (reference < windowStart)
+                return false;
+
+            var effectiveEnd =
+                reference < windowEnd
+                    ? reference
+                    : windowEnd;
 
             return timestamps.Any(timestamp =>
-                timestamp.LocalDateTime.Date ==
-                    selectedDay.Date &&
                 timestamp >= windowStart &&
-                timestamp <= reference);
+                timestamp < windowEnd &&
+                timestamp <= effectiveEnd);
         }
 
         private static string BuildMovementLabel(
             int checklistDelta,
             int workedDelta,
             bool reviewMovement,
-            bool completedMovement,
-            bool observedMovement,
-            bool currentProgressQualifies,
-            int currentProgressPercentage)
+            bool completedMovement)
         {
             var parts =
                 new List<string>();
@@ -931,21 +1516,14 @@ namespace Anfeta.UI.Services.Notion
             }
 
             if (reviewMovement)
-                parts.Add("pasó a R");
+                parts.Add("pasó a R hoy");
 
             if (completedMovement)
-                parts.Add("pasó a Z");
+                parts.Add("pasó a Z hoy");
 
-            // Primera lectura del día: todavía no hay delta, pero Genaro sí
-            // quiere ver R/Z y actividades con >=50% como "con avance".
-            // Lo etiquetamos como estado actual, sin inventar cuándo cambió.
-            if (!observedMovement &&
-                currentProgressQualifies)
-            {
-                parts.Add(
-                    $"avance actual {currentProgressPercentage}%");
-            }
-
+            // Sin movimiento observado no agregamos ninguna etiqueta.
+            // El estado/checklist histórico puede seguir mostrándose en la card,
+            // pero nunca se presenta como trabajo realizado hoy.
             return string.Join(
                 " · ",
                 parts);
@@ -1017,8 +1595,44 @@ namespace Anfeta.UI.Services.Notion
                         dateKey,
                         out var dayTracking);
 
-                if (dayTracking == null)
+                // La jornada operativa empieza a las 06:00. Si ANFETA fue
+                // abierta entre 00:00 y 05:59, ese baseline NO puede cruzar
+                // a la jornada nueva. En la primera lectura desde las 06:00
+                // se vuelve a capturar el estado actual y el contador parte
+                // de cero. Mientras todavía sean menos de las 06:00, cada
+                // lectura mantiene el baseline al día para no acumular cambios
+                // nocturnos que después parezcan trabajo de hoy.
+                var localNow =
+                    DateTime.Now;
+
+                var operationalWindowStart =
+                    GetDailyProgressWindowStart(day);
+
+                var operationalWindowEnd =
+                    GetDailyProgressWindowEnd(day);
+
+                var shouldResetForOperationalWindow =
+                    false;
+
+                if (dayTracking != null &&
+                    day.Date == DateTime.Today)
                 {
+                    var capturedLocal =
+                        dayTracking.FirstCapturedAtUtc
+                            .ToLocalTime()
+                            .LocalDateTime;
+
+                    shouldResetForOperationalWindow =
+                        localNow < operationalWindowStart ||
+                        capturedLocal < operationalWindowStart ||
+                        capturedLocal >= operationalWindowEnd;
+                }
+
+                if (dayTracking == null ||
+                    shouldResetForOperationalWindow)
+                {
+                    hadExistingDay = false;
+
                     dayTracking =
                         new PersistedDayTracking
                         {
@@ -1212,15 +1826,15 @@ namespace Anfeta.UI.Services.Notion
             if (!tracking.HadExistingDay)
             {
                 return
-                    $"{source} · baseline diario creado " +
+                    $"{source} · jornada 06:00–00:00 · baseline creado " +
                     $"{tracking.FirstCapturedAtUtc.ToLocalTime():HH:mm}. " +
-                    "Avance Hoy ya muestra R/Z y actividades con >=50% actual; " +
-                    "desde la siguiente lectura también mostrará deltas exactos. " +
+                    "Avance Hoy inicia en 0 y solo sube con cambios observados dentro de esta jornada " +
+                    "(checklist, tiempo o transición R/Z). " +
                     $"Sin checklist verificable: {noChecklist} · sin asignar: {unassigned}.";
             }
 
             return
-                $"{source} · seguimiento desde " +
+                $"{source} · jornada 06:00–00:00 · seguimiento desde " +
                 $"{tracking.FirstCapturedAtUtc.ToLocalTime():HH:mm} · " +
                 $"+{checksToday} checks detectados hoy · " +
                 $"sin checklist verificable: {noChecklist} · " +

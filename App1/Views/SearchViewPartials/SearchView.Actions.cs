@@ -1345,7 +1345,8 @@ namespace Anfeta.UI.Views
 
         private async Task UploadFilesToNotionRevisionsAsync(
             IReadOnlyList<StorageFile> files,
-            string source)
+            string source,
+            string? suggestedTitleOverride = null)
         {
             const string notionTokenKey = "Notion.Token";
 
@@ -1382,12 +1383,14 @@ namespace Anfeta.UI.Views
                 (SearchBox?.Text ?? string.Empty).Trim();
 
             var suggestedTitle =
-                !string.IsNullOrWhiteSpace(currentSearchTitle)
-                    ? currentSearchTitle
-                    : validFiles.Count == 1
-                        ? Path.GetFileNameWithoutExtension(
-                            validFiles[0].Name)
-                        : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
+                suggestedTitleOverride != null
+                    ? suggestedTitleOverride
+                    : !string.IsNullOrWhiteSpace(currentSearchTitle)
+                        ? currentSearchTitle
+                        : validFiles.Count == 1
+                            ? Path.GetFileNameWithoutExtension(
+                                validFiles[0].Name)
+                            : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
 
             var options =
                 await PromptNotionRevisionUploadOptionsAsync(

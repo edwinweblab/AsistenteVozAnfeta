@@ -1147,8 +1147,13 @@ namespace Anfeta.UI.Views
                             "Revisiones",
                             StringComparison.OrdinalIgnoreCase));
 
-                if (revisionesChanged)
+                if (revisionesChanged ||
+                    _calendarViewActive)
                 {
+                    // Aunque changed-since devuelva 0, una página mandada a
+                    // papelera puede haber desaparecido de la query. Si el
+                    // calendario está abierto, la reconciliación ligera del día
+                    // visible detecta ese hueco y limpia también App.LocalIndex.
                     await RefreshCalendarAfterNotionChangesAsync(
                         calendarChangeAnchorUtc);
                 }

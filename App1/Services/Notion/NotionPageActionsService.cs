@@ -127,10 +127,84 @@ namespace Anfeta.UI.Services.Notion
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
+            {
+                // Borrado idempotente: si ANFETA conserva una fila local pero
+                // la página ya fue eliminada/archivada en Notion, para el usuario
+                // el objetivo ya está cumplido. No se debe bloquear la limpieza
+                // local con "object_not_found".
+                if (IsMissingPageResponse(response, json))
+                    return;
+
                 throw CreateNotionException(
                     "mover la página a la papelera",
                     response,
                     json);
+            }
+        }
+
+        public static bool IsMissingPageError(Exception? exception)
+        {
+            if (exception == null)
+                return false;
+
+            var text = exception.ToString();
+
+            return text.Contains(
+                       "HTTP 404",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   text.Contains(
+                       "object_not_found",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   text.Contains(
+                       "could not find",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   text.Contains(
+                       "no se encuentra",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   IsAlreadyArchivedText(text);
+        }
+
+        private static bool IsMissingPageResponse(
+            HttpResponseMessage response,
+            string? body)
+        {
+            if ((int)response.StatusCode == 404)
+                return true;
+
+            var text = body ?? string.Empty;
+
+            return text.Contains(
+                       "object_not_found",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   text.Contains(
+                       "could not find",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   IsAlreadyArchivedText(text);
+        }
+
+        private static bool IsAlreadyArchivedText(
+            string? value)
+        {
+            var text =
+                value ??
+                string.Empty;
+
+            // Notion responde 400 validation_error cuando ANFETA intenta
+            // mandar a papelera una página que YA está archivada:
+            // "Can't edit block that is archived. You must unarchive..."
+            // Para eliminar/limpiar en ANFETA ese estado ya equivale a éxito.
+            return text.Contains(
+                       "archived",
+                       StringComparison.OrdinalIgnoreCase) &&
+                   (text.Contains(
+                        "must unarchive",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    text.Contains(
+                        "can't edit block",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    text.Contains(
+                        "cannot edit block",
+                        StringComparison.OrdinalIgnoreCase));
         }
 
         public Task<NotionDuplicatePageResult> DuplicatePageWithoutBodyAsync(

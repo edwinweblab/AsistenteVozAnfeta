@@ -103,6 +103,74 @@ namespace Anfeta.UI.Services.Notion
                 cancellationToken);
         }
 
+        /// <summary>
+        /// Crea una página nueva en Revisiones usando texto pegado como BODY.
+        /// El título se captura previamente en ANFETA; el contenido se conserva
+        /// completo dividiéndolo en párrafos/bloques compatibles con Notion.
+        /// </summary>
+        public async Task<NotionCreatedFilePage> CreateRevisionFromTextAsync(
+            string token,
+            string pageTitle,
+            string bodyText,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException(
+                    "No hay un token de Notion configurado.");
+
+            pageTitle = (pageTitle ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(pageTitle))
+                throw new ArgumentException(
+                    "El título de la página está vacío.");
+
+            bodyText = bodyText ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(bodyText))
+                throw new ArgumentException(
+                    "El contenido pegado está vacío.");
+
+            using var http = CreateHttpClient(token);
+
+            var bodyBlocks =
+                BuildPlainTextParagraphBlocks(bodyText);
+
+            // Notion admite hasta 100 children por petición. Se crea la página
+            // con el primer lote y el resto se agrega en lotes sucesivos para
+            // no recortar textos largos pegados con Ctrl+V.
+            var firstBatch = bodyBlocks
+                .Take(100)
+                .ToList();
+
+            var created =
+                await CreateRevisionPageAsync(
+                    http,
+                    Array.Empty<UploadedNotionFile>(),
+                    pageTitle,
+                    cancellationToken,
+                    firstBatch);
+
+            for (var offset = 100;
+                 offset < bodyBlocks.Count;
+                 offset += 100)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var batch = bodyBlocks
+                    .Skip(offset)
+                    .Take(100)
+                    .ToList();
+
+                await AppendChildrenToPageAsync(
+                    http,
+                    created.PageId,
+                    batch,
+                    cancellationToken);
+            }
+
+            return created;
+        }
+
         public Task<NotionCreatedFilePage> CreateRevisionFromFileAsync(
             string token,
             string localFilePath,
@@ -711,11 +779,126 @@ namespace Anfeta.UI.Services.Notion
                 throw CreateNotionException("enviar el archivo", response, json);
         }
 
+        private static List<object> BuildPlainTextParagraphBlocks(
+            string bodyText)
+        {
+            const int MaxTextPerBlock = 1800;
+
+            var normalized =
+                (bodyText ?? string.Empty)
+                    .Replace("\r\n", "\n")
+                    .Replace('\r', '\n');
+
+            var blocks = new List<object>();
+
+            foreach (var line in normalized.Split('\n'))
+            {
+                if (line.Length == 0)
+                {
+                    blocks.Add(
+                        CreatePlainTextParagraphBlock(
+                            string.Empty));
+                    continue;
+                }
+
+                for (var offset = 0;
+                     offset < line.Length;
+                     offset += MaxTextPerBlock)
+                {
+                    var length = Math.Min(
+                        MaxTextPerBlock,
+                        line.Length - offset);
+
+                    blocks.Add(
+                        CreatePlainTextParagraphBlock(
+                            line.Substring(
+                                offset,
+                                length)));
+                }
+            }
+
+            if (blocks.Count == 0)
+            {
+                blocks.Add(
+                    CreatePlainTextParagraphBlock(
+                        string.Empty));
+            }
+
+            return blocks;
+        }
+
+        private static object CreatePlainTextParagraphBlock(
+            string text)
+        {
+            var richText = string.IsNullOrEmpty(text)
+                ? Array.Empty<object>()
+                : new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["type"] = "text",
+                        ["text"] =
+                            new Dictionary<string, object?>
+                            {
+                                ["content"] = text
+                            }
+                    }
+                };
+
+            return new Dictionary<string, object?>
+            {
+                ["object"] = "block",
+                ["type"] = "paragraph",
+                ["paragraph"] =
+                    new Dictionary<string, object?>
+                    {
+                        ["rich_text"] = richText
+                    }
+            };
+        }
+
+        private static async Task AppendChildrenToPageAsync(
+            HttpClient http,
+            string pageId,
+            IReadOnlyList<object> children,
+            CancellationToken cancellationToken)
+        {
+            if (children == null || children.Count == 0)
+                return;
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["children"] = children
+                };
+
+            using var response =
+                await SendJsonAsync(
+                    http,
+                    HttpMethod.Patch,
+                    $"blocks/{pageId.Trim()}/children",
+                    JsonSerializer.Serialize(payload),
+                    cancellationToken);
+
+            var json =
+                await response.Content
+                    .ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "agregar el texto pegado al BODY",
+                    response,
+                    json);
+            }
+        }
+
         private static async Task<NotionCreatedFilePage> CreateRevisionPageAsync(
             HttpClient http,
             IReadOnlyList<UploadedNotionFile> uploadedFiles,
             string pageTitle,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IReadOnlyList<object>? additionalChildren = null)
         {
             var children = new List<object>();
 
@@ -758,6 +941,12 @@ namespace Anfeta.UI.Services.Notion
                         }
                     }
                 });
+            }
+
+            if (additionalChildren != null &&
+                additionalChildren.Count > 0)
+            {
+                children.AddRange(additionalChildren);
             }
 
             var payload = new Dictionary<string, object?>

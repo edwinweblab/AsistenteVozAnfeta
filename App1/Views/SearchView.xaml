@@ -2046,6 +2046,13 @@
                                         Content="💰 Cobros"
                                         ToolTipService.ToolTip="Mostrar u ocultar eventos de BD COBRAR Y PAGAR" />
 
+                                        <ToggleButton
+                                        x:Name="CalendarExtraHoursToggle"
+                                        Style="{StaticResource CalendarActionToggleStyle}"
+                                        Click="CalendarExtraHoursToggle_Click"
+                                        Content="🕘 9–10 PM ↓"
+                                        ToolTipService.ToolTip="Mostrar u ocultar el horario extra de 9:00 PM a 10:00 PM" />
+
                                         <Button
                                         Style="{StaticResource CalendarActionButtonStyle}"
                                         Click="CalendarRefresh_Click"

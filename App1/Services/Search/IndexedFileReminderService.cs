@@ -68,6 +68,18 @@ namespace Anfeta.UI.Services.Search
             IndexedFileReminder Reminder,
             DateTimeOffset DueAt);
 
+        // Ventana normal para avisos recién vencidos. Además, Notion tiene
+        // una recuperación controlada de 48 h para que un equipo apagado o una
+        // alerta que llegó tarde no desaparezca para siempre. Se emite solo una
+        // recuperación vieja por scan para no inundar de popups al iniciar.
+        private static readonly TimeSpan FreshReminderWindow =
+            TimeSpan.FromMinutes(15);
+
+        private static readonly TimeSpan NotionCatchUpWindow =
+            TimeSpan.FromHours(48);
+
+        private const int MaxCatchUpRemindersPerScan = 1;
+
         private DispatcherQueueTimer? _scanTimer;
         private bool _started;
         private bool _disposed;
@@ -139,16 +151,29 @@ namespace Anfeta.UI.Services.Search
             if (rows.Count == 0)
                 return;
 
-            // Si una notificación fue terminada, eliminada o enviada a
-            // papelera mientras estaba pospuesta, se limpia de inmediato.
             PruneInactiveSnoozedReminders();
 
             var now = DateTimeOffset.Now;
 
             FireDueSnoozedReminders(now);
 
-            var oldestAllowed =
-                now.Subtract(TimeSpan.FromMinutes(15));
+            var freshCutoff =
+                now.Subtract(FreshReminderWindow);
+
+            var notionCatchUpCutoff =
+                now.Subtract(NotionCatchUpWindow);
+
+            var candidates =
+                new List<(
+                    SearchResultRow Row,
+                    string VisibleTitle,
+                    DateTimeOffset ReminderAt,
+                    string Message,
+                    string RecipientTag,
+                    string RecipientName,
+                    string SenderTag,
+                    string SenderName,
+                    bool IsCatchUp)>();
 
             foreach (var row in rows)
             {
@@ -179,11 +204,19 @@ namespace Anfeta.UI.Services.Search
                     continue;
                 }
 
-                if (reminderAt > now ||
-                    reminderAt < oldestAllowed)
-                {
+                if (reminderAt > now)
                     continue;
-                }
+
+                var isFresh =
+                    reminderAt >= freshCutoff;
+
+                var isCatchUp =
+                    !isFresh &&
+                    row.Source == SearchSource.Notion &&
+                    reminderAt >= notionCatchUpCutoff;
+
+                if (!isFresh && !isCatchUp)
+                    continue;
 
                 var identity =
                     BuildReminderIdentity(
@@ -193,23 +226,61 @@ namespace Anfeta.UI.Services.Search
                 if (_fired.ContainsKey(identity))
                     continue;
 
+                candidates.Add((
+                    row,
+                    visibleTitle,
+                    reminderAt,
+                    reminderMessage,
+                    recipientTag,
+                    recipientName,
+                    senderTag,
+                    senderName,
+                    isCatchUp));
+            }
+
+            // Primero avisos frescos; después el pendiente antiguo más reciente.
+            // Los demás pendientes viejos quedan sin marcar y saldrán de uno en
+            // uno en scans posteriores (cada 30 s).
+            var catchUpFired = 0;
+
+            foreach (var candidate in candidates
+                         .OrderBy(item => item.IsCatchUp)
+                         .ThenByDescending(item => item.ReminderAt))
+            {
+                if (candidate.IsCatchUp &&
+                    catchUpFired >= MaxCatchUpRemindersPerScan)
+                {
+                    continue;
+                }
+
+                var identity =
+                    BuildReminderIdentity(
+                        candidate.Row,
+                        candidate.ReminderAt);
+
+                if (_fired.ContainsKey(identity))
+                    continue;
+
                 _fired[identity] = now;
                 SaveFiredReminders();
+
+                if (candidate.IsCatchUp)
+                    catchUpFired++;
 
                 ReminderDue?.Invoke(
                     this,
                     new IndexedFileReminder(
                         identity,
-                        visibleTitle,
-                        reminderMessage,
-                        ResolveTarget(row),
-                        reminderAt,
-                        row.Source,
-                        recipientTag,
-                        recipientName,
-                        senderTag,
-                        senderName,
-                        row.ExternalId ?? string.Empty));
+                        candidate.VisibleTitle,
+                        candidate.Message,
+                        ResolveTarget(candidate.Row),
+                        candidate.ReminderAt,
+                        candidate.Row.Source,
+                        candidate.RecipientTag,
+                        candidate.RecipientName,
+                        candidate.SenderTag,
+                        candidate.SenderName,
+                        candidate.Row.ExternalId ?? string.Empty));
             }
         }
 

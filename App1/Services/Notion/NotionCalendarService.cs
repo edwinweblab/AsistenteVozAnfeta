@@ -37,6 +37,20 @@ namespace Anfeta.UI.Services.Notion
         int TodayCount,
         string Message);
 
+    public sealed record NotionCalendarReconcileResult(
+        int FreshCount,
+        int Added,
+        int MovedOrRemovedFromDay,
+        int DeletedOrTrashed,
+        IReadOnlyList<string> DeletedOrTrashedPageIds,
+        IReadOnlyList<string> AffectedPageIds)
+    {
+        public bool HasChanges =>
+            Added > 0 ||
+            MovedOrRemovedFromDay > 0 ||
+            DeletedOrTrashed > 0;
+    }
+
     public sealed record NotionChecklistStats(
         int Total,
         int Completed)
@@ -167,6 +181,7 @@ namespace Anfeta.UI.Services.Notion
 
         private static readonly string[] PersonAliases =
         {
+            "Assignee/Ejecutor Principal",
             "Asignee/Ejecutor Principal",
             "Assignee / Ejecutor Principal",
             "Equipo weblab",
@@ -282,8 +297,11 @@ namespace Anfeta.UI.Services.Notion
         // porcentaje conocido de inmediato al abrir ANFETA. Los cambios reales
         // siguen refrescandose con forceRefresh cuando Notion reporta la pagina
         // como modificada.
+        // v4: además del fix de contenedores tachados, obliga a que una
+        // actividad proveniente del DayCache viejo no pueda bloquear el
+        // reescaneo por traer ChecklistScanned=true con cifras anteriores.
         private const string ChecklistStatsCacheFileName =
-            "notion_checklist_stats_cache_v2.json";
+            "notion_checklist_stats_cache_v5.json";
 
         private sealed class StoredChecklistStats
         {
@@ -1305,7 +1323,28 @@ namespace Anfeta.UI.Services.Notion
             var missing =
                 unique
                     .Where(activity =>
-                        !activity.ChecklistScanned)
+                    {
+                        // IMPORTANTE:
+                        // notion_calendar_cache_v13.json guarda también
+                        // ChecklistScanned/Total/Completed. Después de cambiar
+                        // el algoritmo, una actividad podía seguir llegando
+                        // como "ya escaneada" con 48/155 y por eso el warmup
+                        // jamás volvía a leer su BODY.
+                        //
+                        // Solo consideramos vigente el checklist si existe en
+                        // la cache de checklist de ESTA versión (v4), no por el
+                        // simple bool almacenado en DayCache.
+                        var hasCurrentMemoryStats =
+                            _checklistStatsCache.ContainsKey(
+                                activity.PageId);
+
+                        var hasCurrentPersistentStats =
+                            PersistentChecklistStats.ContainsKey(
+                                activity.PageId);
+
+                        return !hasCurrentMemoryStats &&
+                               !hasCurrentPersistentStats;
+                    })
                     .ToList();
 
             var alreadyReady =
@@ -1803,7 +1842,10 @@ namespace Anfeta.UI.Services.Notion
                 return false;
             }
 
-            var hasText = false;
+            var meaningfulFragments = 0;
+            var struckFragments = 0;
+            var visibleCharacters = 0;
+            var struckVisibleCharacters = 0;
 
             foreach (var item in richText.EnumerateArray())
             {
@@ -1813,22 +1855,49 @@ namespace Anfeta.UI.Services.Notion
                 if (string.IsNullOrWhiteSpace(plain))
                     continue;
 
-                hasText = true;
+                var visibleLength =
+                    plain.Count(character =>
+                        !char.IsWhiteSpace(character));
 
-                if (!item.TryGetProperty(
+                if (visibleLength <= 0)
+                    continue;
+
+                meaningfulFragments++;
+                visibleCharacters += visibleLength;
+
+                var isStruck =
+                    item.TryGetProperty(
                         "annotations",
-                        out var annotations) ||
-                    annotations.ValueKind != JsonValueKind.Object ||
-                    !annotations.TryGetProperty(
+                        out var annotations) &&
+                    annotations.ValueKind ==
+                        JsonValueKind.Object &&
+                    annotations.TryGetProperty(
                         "strikethrough",
-                        out var struck) ||
-                    struck.ValueKind != JsonValueKind.True)
-                {
-                    return false;
-                }
+                        out var struck) &&
+                    struck.ValueKind ==
+                        JsonValueKind.True;
+
+                if (!isStruck)
+                    continue;
+
+                struckFragments++;
+                struckVisibleCharacters += visibleLength;
             }
 
-            return hasText;
+            if (meaningfulFragments == 0 ||
+                visibleCharacters == 0)
+            {
+                return false;
+            }
+
+            if (struckFragments == meaningfulFragments)
+                return true;
+
+            var struckRatio =
+                struckVisibleCharacters /
+                (double)visibleCharacters;
+
+            return struckRatio >= 0.80d;
         }
 
         private static bool IsCompletedChecklistContainer(
@@ -1836,7 +1905,7 @@ namespace Anfeta.UI.Services.Notion
             string plainText,
             bool struckThrough)
         {
-            var canContainWork =
+            var structuralContainer =
                 type.Equals(
                     "toggle",
                     StringComparison.OrdinalIgnoreCase) ||
@@ -1850,14 +1919,32 @@ namespace Anfeta.UI.Services.Notion
                     "heading_3",
                     StringComparison.OrdinalIgnoreCase) ||
                 type.Equals(
+                    "heading_4",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
                     "callout",
                     StringComparison.OrdinalIgnoreCase);
 
-            if (!canContainWork)
-                return false;
+            var strikeAwareContainer =
+                structuralContainer ||
+                type.Equals(
+                    "paragraph",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "bulleted_list_item",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "numbered_list_item",
+                    StringComparison.OrdinalIgnoreCase);
 
-            if (struckThrough)
+            if (struckThrough &&
+                strikeAwareContainer)
+            {
                 return true;
+            }
+
+            if (!structuralContainer)
+                return false;
 
             var normalized =
                 Normalize(plainText);
@@ -2137,6 +2224,491 @@ namespace Anfeta.UI.Services.Notion
             return newTitle;
         }
 
+        private static bool PageAssigneeMatchesTarget(
+            JsonElement page,
+            string propertyName,
+            string targetPerson,
+            string? targetUserId = null)
+        {
+            if (page.ValueKind != JsonValueKind.Object ||
+                !page.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object ||
+                !properties.TryGetProperty(
+                    propertyName,
+                    out var property))
+            {
+                return false;
+            }
+
+            var target =
+                NormalizePersonLabel(
+                    targetPerson);
+
+            if (string.IsNullOrWhiteSpace(target))
+                return false;
+
+            var propertyType =
+                ReadString(
+                    property,
+                    "type");
+
+            // Para People, la identidad REAL de Notion es el user id.
+            // Los nombres visibles pueden ser "Genaro", "ggena@...",
+            // "ANFETA (TÚ)", etc. Por eso el ID tiene prioridad absoluta.
+            if (propertyType.Equals(
+                    "people",
+                    StringComparison.OrdinalIgnoreCase) &&
+                property.TryGetProperty(
+                    "people",
+                    out var people) &&
+                people.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var person in people.EnumerateArray())
+                {
+                    if (!string.IsNullOrWhiteSpace(targetUserId) &&
+                        string.Equals(
+                            ReadString(person, "id"),
+                            targetUserId,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+
+                    var name =
+                        ReadString(
+                            person,
+                            "name");
+
+                    var email =
+                        person.TryGetProperty(
+                                "person",
+                                out var personData) &&
+                            personData.ValueKind == JsonValueKind.Object
+                                ? ReadString(
+                                    personData,
+                                    "email")
+                                : string.Empty;
+
+                    var candidates =
+                        new[]
+                        {
+                            name,
+                            email,
+                            email.Split('@')
+                                .FirstOrDefault() ??
+                                string.Empty
+                        };
+
+                    foreach (var candidate in candidates)
+                    {
+                        var normalizedCandidate =
+                            NormalizePersonLabel(
+                                candidate);
+
+                        if (string.Equals(
+                                normalizedCandidate,
+                                target,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+
+            // Respaldo para rich_text/select u otros tipos editables.
+            var actual =
+                NormalizePersonLabel(
+                    ExtractPropertyText(property));
+
+            if (string.IsNullOrWhiteSpace(actual))
+                return false;
+
+            return actual
+                .Split(
+                    new[] { ',', ';', '|' },
+                    StringSplitOptions.RemoveEmptyEntries)
+                .Select(NormalizePersonLabel)
+                .Any(person =>
+                    string.Equals(
+                        person,
+                        target,
+                        StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static async Task<bool> VerifyActivityAssigneeAsync(
+            HttpClient http,
+            string pageId,
+            string propertyName,
+            string targetPerson,
+            string? targetUserId,
+            CancellationToken cancellationToken)
+        {
+            // Primera lectura rápida + dos lecturas de confirmación.
+            // People se valida por ID cuando lo tenemos, por lo que no depende
+            // del nombre visible/email que Notion decida mostrar.
+            foreach (var delay in new[] { 220, 700, 1500 })
+            {
+                if (delay > 0)
+                {
+                    await Task.Delay(
+                        delay,
+                        cancellationToken);
+                }
+
+                var page =
+                    await ReadPageAsync(
+                        http,
+                        pageId,
+                        cancellationToken);
+
+                if (page.HasValue &&
+                    PageAssigneeMatchesTarget(
+                        page.Value,
+                        propertyName,
+                        targetPerson,
+                        targetUserId))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static async Task ApplyActivityAssigneeToCacheAsync(
+            string pageId,
+            string targetPerson,
+            CancellationToken cancellationToken)
+        {
+            await EnsureCacheLoadedAsync(
+                cancellationToken);
+
+            await CacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                foreach (var day in DayCache.Values)
+                {
+                    foreach (var activity in day.Where(activity =>
+                                 string.Equals(
+                                     activity.PageId,
+                                     pageId,
+                                     StringComparison.OrdinalIgnoreCase)))
+                    {
+                        activity.Person =
+                            targetPerson;
+                    }
+                }
+
+                await SaveCacheUnsafeAsync(
+                    cancellationToken);
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+        }
+
+        public async Task<string> GetActivityAssigneeUserIdAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token) ||
+                string.IsNullOrWhiteSpace(pageId))
+            {
+                return string.Empty;
+            }
+
+            using var http =
+                CreateClient(token);
+
+            var page =
+                await ReadPageAsync(
+                    http,
+                    pageId,
+                    cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                return string.Empty;
+            }
+
+            foreach (var alias in PersonAliases)
+            {
+                var property =
+                    FindPropertyByAlias(
+                        properties,
+                        alias);
+
+                if (property.ValueKind != JsonValueKind.Object ||
+                    !ReadString(
+                        property,
+                        "type")
+                        .Equals(
+                            "people",
+                            StringComparison.OrdinalIgnoreCase) ||
+                    !property.TryGetProperty(
+                        "people",
+                        out var people) ||
+                    people.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                var ids =
+                    people
+                        .EnumerateArray()
+                        .Select(person =>
+                            ReadString(
+                                person,
+                                "id"))
+                        .Where(id =>
+                            !string.IsNullOrWhiteSpace(id))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                // Assignee/Ejecutor Principal debe representar una asignación
+                // principal. Si hubiera varios People no adivinamos cuál es.
+                return ids.Count == 1
+                    ? ids[0]
+                    : string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        public async Task<string> ResolveWorkspacePersonUserIdAsync(
+            string token,
+            string targetPerson,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token) ||
+                string.IsNullOrWhiteSpace(targetPerson))
+            {
+                return string.Empty;
+            }
+
+            using var http =
+                CreateClient(token);
+
+            return await ResolveWorkspaceUserIdAsync(
+                http,
+                targetPerson,
+                cancellationToken);
+        }
+
+        public async Task<bool> UpdateActivityAssigneeByUserIdAsync(
+            string token,
+            string pageId,
+            string targetUserId,
+            string targetPerson,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (string.IsNullOrWhiteSpace(pageId))
+            {
+                throw new InvalidOperationException(
+                    "La actividad no contiene un identificador de Notion.");
+            }
+
+            targetUserId =
+                (targetUserId ?? string.Empty)
+                    .Trim();
+
+            targetPerson =
+                NormalizePersonLabel(
+                    targetPerson);
+
+            if (string.IsNullOrWhiteSpace(targetUserId))
+            {
+                return await UpdateActivityAssigneeAsync(
+                    token,
+                    pageId,
+                    targetPerson,
+                    cancellationToken);
+            }
+
+            using var http =
+                CreateClient(token);
+
+            var page =
+                await ReadPageAsync(
+                    http,
+                    pageId,
+                    cancellationToken);
+
+            if (!page.HasValue ||
+                !page.Value.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var propertyName =
+                string.Empty;
+
+            var assigneePropertyValue =
+                default(JsonElement);
+
+            foreach (var alias in PersonAliases)
+            {
+                var normalizedAlias =
+                    Normalize(alias);
+
+                foreach (var property in properties.EnumerateObject())
+                {
+                    if (Normalize(property.Name) != normalizedAlias)
+                        continue;
+
+                    propertyName =
+                        property.Name;
+
+                    assigneePropertyValue =
+                        property.Value;
+
+                    break;
+                }
+
+                if (!string.IsNullOrWhiteSpace(propertyName))
+                    break;
+            }
+
+            if (string.IsNullOrWhiteSpace(propertyName))
+                return false;
+
+            var propertyType =
+                ReadString(
+                    assigneePropertyValue,
+                    "type");
+
+            if (!propertyType.Equals(
+                    "people",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Compatibilidad si el workspace cambia la propiedad.
+                return await UpdateActivityAssigneeAsync(
+                    token,
+                    pageId,
+                    targetPerson,
+                    cancellationToken);
+            }
+
+            if (PageAssigneeMatchesTarget(
+                    page.Value,
+                    propertyName,
+                    targetPerson,
+                    targetUserId))
+            {
+                await ApplyActivityAssigneeToCacheAsync(
+                    pageId,
+                    targetPerson,
+                    cancellationToken);
+
+                return true;
+            }
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["properties"] =
+                        new Dictionary<string, object?>
+                        {
+                            [propertyName] =
+                                new Dictionary<string, object?>
+                                {
+                                    ["people"] =
+                                        new object[]
+                                        {
+                                            new Dictionary<string, object?>
+                                            {
+                                                ["id"] =
+                                                    targetUserId
+                                            }
+                                        }
+                                }
+                        }
+                };
+
+            var payloadJson =
+                JsonSerializer.Serialize(
+                    payload);
+
+            async Task PatchByIdAsync()
+            {
+                using var response =
+                    await SendPatchWithRetryAsync(
+                        http,
+                        $"pages/{pageId}",
+                        payloadJson,
+                        cancellationToken);
+
+                var responseJson =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw CreateNotionException(
+                        "actualizar Assignee/Ejecutor Principal por User ID",
+                        response,
+                        responseJson);
+                }
+            }
+
+            await PatchByIdAsync();
+
+            var verified =
+                await VerifyActivityAssigneeAsync(
+                    http,
+                    pageId,
+                    propertyName,
+                    targetPerson,
+                    targetUserId,
+                    cancellationToken);
+
+            if (!verified)
+            {
+                await PatchByIdAsync();
+
+                verified =
+                    await VerifyActivityAssigneeAsync(
+                        http,
+                        pageId,
+                        propertyName,
+                        targetPerson,
+                        targetUserId,
+                        cancellationToken);
+            }
+
+            if (!verified)
+                return false;
+
+            await ApplyActivityAssigneeToCacheAsync(
+                pageId,
+                targetPerson,
+                cancellationToken);
+
+            return true;
+        }
+
         public async Task<bool> UpdateActivityAssigneeAsync(
             string token,
             string pageId,
@@ -2156,7 +2728,8 @@ namespace Anfeta.UI.Services.Notion
             }
 
             targetPerson =
-                NormalizePersonLabel(targetPerson);
+                NormalizePersonLabel(
+                    targetPerson);
 
             if (string.IsNullOrWhiteSpace(targetPerson) ||
                 string.Equals(
@@ -2168,12 +2741,14 @@ namespace Anfeta.UI.Services.Notion
                     "No se pudo identificar al nuevo responsable.");
             }
 
-            using var http = CreateClient(token);
+            using var http =
+                CreateClient(token);
 
-            var page = await ReadPageAsync(
-                http,
-                pageId,
-                cancellationToken);
+            var page =
+                await ReadPageAsync(
+                    http,
+                    pageId,
+                    cancellationToken);
 
             if (!page.HasValue ||
                 !page.Value.TryGetProperty(
@@ -2185,15 +2760,18 @@ namespace Anfeta.UI.Services.Notion
                     "No se pudieron leer las propiedades actuales de la actividad.");
             }
 
-            var propertyName = string.Empty;
-            var assigneePropertyValue = default(JsonElement);
+            var propertyName =
+                string.Empty;
+
+            var assigneePropertyValue =
+                default(JsonElement);
 
             foreach (var alias in PersonAliases)
             {
-                var normalizedAlias = Normalize(alias);
+                var normalizedAlias =
+                    Normalize(alias);
 
-                foreach (var property in
-                         properties.EnumerateObject())
+                foreach (var property in properties.EnumerateObject())
                 {
                     if (Normalize(property.Name) !=
                         normalizedAlias)
@@ -2201,8 +2779,12 @@ namespace Anfeta.UI.Services.Notion
                         continue;
                     }
 
-                    propertyName = property.Name;
-                    assigneePropertyValue = property.Value;
+                    propertyName =
+                        property.Name;
+
+                    assigneePropertyValue =
+                        property.Value;
+
                     break;
                 }
 
@@ -2210,137 +2792,384 @@ namespace Anfeta.UI.Services.Notion
                     break;
             }
 
-            var updatedInNotion = false;
+            if (string.IsNullOrWhiteSpace(propertyName))
+                return false;
 
-            if (!string.IsNullOrWhiteSpace(propertyName))
-            {
-                var propertyType = ReadString(
+            var propertyType =
+                ReadString(
                     assigneePropertyValue,
                     "type");
 
-                Dictionary<string, object?>? propertyValue =
-                    null;
+            Dictionary<string, object?>? propertyValue =
+                null;
 
-                if (propertyType.Equals(
-                        "people",
-                        StringComparison.OrdinalIgnoreCase))
+            var targetUserId =
+                string.Empty;
+
+            if (propertyType.Equals(
+                    "people",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // Si el campo YA contiene al objetivo, no necesitamos resolver
+                // ni escribir nada. Esto evita falsos errores como el caso de
+                // Genaro que ya estaba en Assignee pero la validación por texto
+                // no lo reconocía.
+                if (PageAssigneeMatchesTarget(
+                        page.Value,
+                        propertyName,
+                        targetPerson))
                 {
-                    var userId =
-                        await ResolveWorkspaceUserIdAsync(
-                            http,
-                            targetPerson,
-                            cancellationToken);
+                    await ApplyActivityAssigneeToCacheAsync(
+                        pageId,
+                        targetPerson,
+                        cancellationToken);
 
-                    if (!string.IsNullOrWhiteSpace(userId))
+                    return true;
+                }
+
+                targetUserId =
+                    await ResolveWorkspaceUserIdAsync(
+                        http,
+                        targetPerson,
+                        cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(targetUserId))
+                {
+                    return false;
+                }
+
+                // Segunda comprobación, ahora usando el ID real.
+                if (PageAssigneeMatchesTarget(
+                        page.Value,
+                        propertyName,
+                        targetPerson,
+                        targetUserId))
+                {
+                    await ApplyActivityAssigneeToCacheAsync(
+                        pageId,
+                        targetPerson,
+                        cancellationToken);
+
+                    return true;
+                }
+
+                propertyValue =
+                    new Dictionary<string, object?>
                     {
-                        propertyValue =
-                            new Dictionary<string, object?>
+                        ["people"] =
+                            new object[]
                             {
-                                ["people"] =
-                                    new object[]
-                                    {
+                                new Dictionary<string, object?>
+                                {
+                                    ["id"] =
+                                        targetUserId
+                                }
+                            }
+                    };
+            }
+            else if (propertyType.Equals(
+                         "rich_text",
+                         StringComparison.OrdinalIgnoreCase))
+            {
+                if (PageAssigneeMatchesTarget(
+                        page.Value,
+                        propertyName,
+                        targetPerson))
+                {
+                    await ApplyActivityAssigneeToCacheAsync(
+                        pageId,
+                        targetPerson,
+                        cancellationToken);
+
+                    return true;
+                }
+
+                propertyValue =
+                    new Dictionary<string, object?>
+                    {
+                        ["rich_text"] =
+                            new object[]
+                            {
+                                new Dictionary<string, object?>
+                                {
+                                    ["type"] = "text",
+                                    ["text"] =
                                         new Dictionary<string, object?>
                                         {
-                                            ["id"] = userId
+                                            ["content"] =
+                                                targetPerson
                                         }
-                                    }
-                            };
-                    }
-                }
-                else if (propertyType.Equals(
-                             "rich_text",
-                             StringComparison.OrdinalIgnoreCase))
-                {
-                    propertyValue =
-                        new Dictionary<string, object?>
-                        {
-                            ["rich_text"] =
-                                new object[]
-                                {
-                                    new Dictionary<string, object?>
-                                    {
-                                        ["type"] = "text",
-                                        ["text"] =
-                                            new Dictionary<string, object?>
-                                            {
-                                                ["content"] =
-                                                    targetPerson
-                                            }
-                                    }
                                 }
-                        };
-                }
-                else if (propertyType.Equals(
-                             "select",
-                             StringComparison.OrdinalIgnoreCase))
+                            }
+                    };
+            }
+            else if (propertyType.Equals(
+                         "select",
+                         StringComparison.OrdinalIgnoreCase))
+            {
+                if (PageAssigneeMatchesTarget(
+                        page.Value,
+                        propertyName,
+                        targetPerson))
                 {
-                    propertyValue =
-                        new Dictionary<string, object?>
-                        {
-                            ["select"] =
-                                new Dictionary<string, object?>
-                                {
-                                    ["name"] = targetPerson
-                                }
-                        };
+                    await ApplyActivityAssigneeToCacheAsync(
+                        pageId,
+                        targetPerson,
+                        cancellationToken);
+
+                    return true;
                 }
 
-                if (propertyValue != null)
+                propertyValue =
+                    new Dictionary<string, object?>
+                    {
+                        ["select"] =
+                            new Dictionary<string, object?>
+                            {
+                                ["name"] =
+                                    targetPerson
+                            }
+                    };
+            }
+            else
+            {
+                return false;
+            }
+
+            var payload =
+                new Dictionary<string, object?>
                 {
-                    var payload =
+                    ["properties"] =
                         new Dictionary<string, object?>
                         {
-                            ["properties"] =
-                                new Dictionary<string, object?>
-                                {
-                                    [propertyName] =
-                                        propertyValue
-                                }
-                        };
+                            [propertyName] =
+                                propertyValue
+                        }
+                };
 
-                    using var response =
-                        await SendPatchWithRetryAsync(
-                            http,
-                            $"pages/{pageId}",
-                            JsonSerializer.Serialize(payload),
-                            cancellationToken);
+            var payloadJson =
+                JsonSerializer.Serialize(
+                    payload);
 
-                    // Si la propiedad resulta ser de solo lectura o el
-                    // usuario no puede asignarse con esta integración, no se
-                    // cancela el flujo completo. El título ya contiene el tag
-                    // correcto y Notion podrá recalcular la propiedad.
-                    updatedInNotion =
-                        response.IsSuccessStatusCode;
+            async Task PatchAssigneeAsync()
+            {
+                using var response =
+                    await SendPatchWithRetryAsync(
+                        http,
+                        $"pages/{pageId}",
+                        payloadJson,
+                        cancellationToken);
+
+                var responseJson =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw CreateNotionException(
+                        "actualizar Assignee/Ejecutor Principal",
+                        response,
+                        responseJson);
                 }
             }
 
-            await CacheLock.WaitAsync(cancellationToken);
+            await PatchAssigneeAsync();
+
+            var verified =
+                await VerifyActivityAssigneeAsync(
+                    http,
+                    pageId,
+                    propertyName,
+                    targetPerson,
+                    targetUserId,
+                    cancellationToken);
+
+            if (!verified)
+            {
+                // Si una automatización pisa el cambio inmediatamente,
+                // repetimos una sola vez y volvemos a verificar por ID.
+                await PatchAssigneeAsync();
+
+                verified =
+                    await VerifyActivityAssigneeAsync(
+                        http,
+                        pageId,
+                        propertyName,
+                        targetPerson,
+                        targetUserId,
+                        cancellationToken);
+            }
+
+            if (!verified)
+                return false;
+
+            await ApplyActivityAssigneeToCacheAsync(
+                pageId,
+                targetPerson,
+                cancellationToken);
+
+            return true;
+        }
+
+        private static async Task<string>
+            ResolveWorkspaceUserIdFromKnownAssignmentsAsync(
+                HttpClient http,
+                string targetPerson,
+                CancellationToken cancellationToken)
+        {
+            var normalizedTarget =
+                NormalizePersonLabel(
+                    targetPerson);
+
+            if (string.IsNullOrWhiteSpace(normalizedTarget))
+                return string.Empty;
+
+            await EnsureCacheLoadedAsync(
+                cancellationToken);
+
+            List<string> candidatePageIds;
+
+            await CacheLock.WaitAsync(
+                cancellationToken);
 
             try
             {
-                foreach (var day in DayCache.Values)
-                {
-                    foreach (var activity in day.Where(activity =>
-                                 string.Equals(
-                                     activity.PageId,
-                                     pageId,
-                                     StringComparison.OrdinalIgnoreCase)))
-                    {
-                        activity.Person = targetPerson;
-                    }
-                }
-
-                await SaveCacheUnsafeAsync(cancellationToken);
+                // Si una tarjeta YA aparece correctamente en la columna de
+                // Neftali/Karla/etc., esa página contiene el People ID real
+                // que Notion usa para esa persona. Lo reutilizamos como fuente
+                // de identidad cuando /users muestra un nombre distinto
+                // (por ejemplo "ANFETA (TÚ)").
+                candidatePageIds =
+                    DayCache.Values
+                        .SelectMany(day => day)
+                        .Where(activity =>
+                            activity != null &&
+                            !string.IsNullOrWhiteSpace(activity.PageId) &&
+                            string.Equals(
+                                NormalizePersonLabel(activity.Person),
+                                normalizedTarget,
+                                StringComparison.OrdinalIgnoreCase))
+                        .Select(activity => activity.PageId)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(8)
+                        .ToList();
             }
             finally
             {
                 CacheLock.Release();
             }
 
-            // Si Assignee es fórmula, rollup o relación no editable, el título
-            // actualizado seguirá provocando su recálculo en Notion. La caché
-            // local se corrige de inmediato para no conservar al revisor.
-            return updatedInNotion;
+            foreach (var candidatePageId in candidatePageIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var candidatePage =
+                    await ReadPageAsync(
+                        http,
+                        candidatePageId,
+                        cancellationToken);
+
+                if (!candidatePage.HasValue ||
+                    !candidatePage.Value.TryGetProperty(
+                        "properties",
+                        out var properties) ||
+                    properties.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                foreach (var alias in PersonAliases)
+                {
+                    var property =
+                        FindPropertyByAlias(
+                            properties,
+                            alias);
+
+                    if (property.ValueKind != JsonValueKind.Object ||
+                        !ReadString(
+                            property,
+                            "type")
+                            .Equals(
+                                "people",
+                                StringComparison.OrdinalIgnoreCase) ||
+                        !property.TryGetProperty(
+                            "people",
+                            out var people) ||
+                        people.ValueKind != JsonValueKind.Array)
+                    {
+                        continue;
+                    }
+
+                    // La actividad candidata ya fue mapeada por ANFETA como
+                    // targetPerson usando este mismo campo. Si hay una sola
+                    // persona, su ID es la identidad correcta y más fiable
+                    // que intentar adivinarla por el display name.
+                    var peopleList =
+                        people
+                            .EnumerateArray()
+                            .ToList();
+
+                    if (peopleList.Count == 1)
+                    {
+                        var id =
+                            ReadString(
+                                peopleList[0],
+                                "id");
+
+                        if (!string.IsNullOrWhiteSpace(id))
+                            return id;
+                    }
+
+                    // Si hay varias personas, intentamos identificar la correcta
+                    // por nombre/email antes de aceptar un ID.
+                    foreach (var person in peopleList)
+                    {
+                        var name =
+                            ReadString(
+                                person,
+                                "name");
+
+                        var email =
+                            person.TryGetProperty(
+                                    "person",
+                                    out var personData) &&
+                                personData.ValueKind == JsonValueKind.Object
+                                    ? ReadString(
+                                        personData,
+                                        "email")
+                                    : string.Empty;
+
+                        var candidates =
+                            new[]
+                            {
+                                name,
+                                email,
+                                email.Split('@')
+                                    .FirstOrDefault() ??
+                                    string.Empty
+                            };
+
+                        if (!candidates.Any(candidate =>
+                                string.Equals(
+                                    NormalizePersonLabel(candidate),
+                                    normalizedTarget,
+                                    StringComparison.OrdinalIgnoreCase)))
+                        {
+                            continue;
+                        }
+
+                        var id =
+                            ReadString(
+                                person,
+                                "id");
+
+                        if (!string.IsNullOrWhiteSpace(id))
+                            return id;
+                    }
+                }
+            }
+
+            return string.Empty;
         }
 
         private static async Task<string> ResolveWorkspaceUserIdAsync(
@@ -2388,10 +3217,20 @@ namespace Anfeta.UI.Services.Notion
                         cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
-                    return string.Empty;
+                {
+                    // /users no debe ser el único camino. En algunos workspaces
+                    // el display name no coincide con los tags internos.
+                    return await ResolveWorkspaceUserIdFromKnownAssignmentsAsync(
+                        http,
+                        normalizedTarget,
+                        cancellationToken);
+                }
 
-                using var document = JsonDocument.Parse(json);
-                var root = document.RootElement;
+                using var document =
+                    JsonDocument.Parse(json);
+
+                var root =
+                    document.RootElement;
 
                 if (root.TryGetProperty(
                         "results",
@@ -2400,7 +3239,10 @@ namespace Anfeta.UI.Services.Notion
                 {
                     foreach (var user in users.EnumerateArray())
                     {
-                        if (!ReadString(user, "type").Equals(
+                        if (!ReadString(
+                                user,
+                                "type")
+                            .Equals(
                                 "person",
                                 StringComparison.OrdinalIgnoreCase))
                         {
@@ -2409,9 +3251,12 @@ namespace Anfeta.UI.Services.Notion
 
                         var name =
                             NormalizeIdentityToken(
-                                ReadString(user, "name"));
+                                ReadString(
+                                    user,
+                                    "name"));
 
-                        var email = string.Empty;
+                        var email =
+                            string.Empty;
 
                         if (user.TryGetProperty(
                                 "person",
@@ -2419,9 +3264,10 @@ namespace Anfeta.UI.Services.Notion
                             personData.ValueKind ==
                                 JsonValueKind.Object)
                         {
-                            email = ReadString(
-                                personData,
-                                "email");
+                            email =
+                                ReadString(
+                                    personData,
+                                    "email");
                         }
 
                         var emailLocal =
@@ -2445,10 +3291,25 @@ namespace Anfeta.UI.Services.Notion
                                     StringComparison.OrdinalIgnoreCase) ||
                                 emailLocal.StartsWith(
                                     token,
-                                    StringComparison.OrdinalIgnoreCase));
+                                    StringComparison.OrdinalIgnoreCase) ||
+                                (token.Length >= 5 &&
+                                 (name.Contains(
+                                      token,
+                                      StringComparison.OrdinalIgnoreCase) ||
+                                  emailLocal.Contains(
+                                      token,
+                                      StringComparison.OrdinalIgnoreCase))));
 
                         if (matches)
-                            return ReadString(user, "id");
+                        {
+                            var id =
+                                ReadString(
+                                    user,
+                                    "id");
+
+                            if (!string.IsNullOrWhiteSpace(id))
+                                return id;
+                        }
                     }
                 }
 
@@ -2463,13 +3324,21 @@ namespace Anfeta.UI.Services.Notion
                     root.TryGetProperty(
                         "next_cursor",
                         out var next) &&
-                    next.ValueKind == JsonValueKind.String
+                    next.ValueKind ==
+                        JsonValueKind.String
                         ? next.GetString()
                         : null;
             }
             while (!string.IsNullOrWhiteSpace(cursor));
 
-            return string.Empty;
+            // CLAVE DEL FIX:
+            // si Notion llama al usuario "ANFETA (TÚ)" u otro display name,
+            // aprendemos su People ID desde una actividad que ya está
+            // correctamente asignada a esa persona en el calendario.
+            return await ResolveWorkspaceUserIdFromKnownAssignmentsAsync(
+                http,
+                normalizedTarget,
+                cancellationToken);
         }
 
         private static string NormalizeIdentityToken(
@@ -3745,6 +4614,494 @@ namespace Anfeta.UI.Services.Notion
             return true;
         }
 
+        /// <summary>
+        /// Reconciliación ligera del día visible.
+        ///
+        /// La consulta incremental por last_edited_time no puede detectar por sí
+        /// sola una página que dejó de ser devuelta por Notion al mandarse a
+        /// papelera o al moverse a otro día. Este método consulta SOLO el día
+        /// solicitado, compara IDs contra DayCache y únicamente hace GET individual
+        /// de los candidatos que desaparecieron del día.
+        /// </summary>
+        public async Task<NotionCalendarReconcileResult> ReconcileDayAsync(
+            string token,
+            DateTime localDate,
+            CancellationToken cancellationToken = default,
+            IProgress<NotionCalendarProgress>? progress = null)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return new NotionCalendarReconcileResult(
+                    0, 0, 0, 0,
+                    Array.Empty<string>(),
+                    Array.Empty<string>());
+            }
+
+            using var fullSyncLease =
+                await NotionRequestCoordinator.EnterFullSyncAsync(
+                    cancellationToken);
+
+            await EnsureCacheLoadedAsync(
+                cancellationToken);
+
+            using var http =
+                CreateClient(token);
+
+            var schema =
+                await GetSchemaCachedAsync(
+                    http,
+                    cancellationToken);
+
+            if (schema.DateProperties.Count == 0)
+            {
+                return new NotionCalendarReconcileResult(
+                    0, 0, 0, 0,
+                    Array.Empty<string>(),
+                    Array.Empty<string>());
+            }
+
+            progress?.Report(
+                new NotionCalendarProgress(
+                    "Reconciliando día",
+                    0,
+                    1,
+                    $"Comparando la caché con Notion para {localDate:dd/MM/yyyy}..."));
+
+            var freshPages =
+                await QueryDayPagesAsync(
+                    http,
+                    localDate.Date,
+                    schema.DateProperties[0],
+                    progress: null,
+                    cancellationToken);
+
+            var freshById =
+                freshPages
+                    .Where(page =>
+                        !IsPageArchivedOrTrashed(page))
+                    .Select(page => new
+                    {
+                        Id = ReadString(page, "id"),
+                        Page = page
+                    })
+                    .Where(item =>
+                        !string.IsNullOrWhiteSpace(item.Id))
+                    .GroupBy(
+                        item => item.Id,
+                        StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group.Last().Page,
+                        StringComparer.OrdinalIgnoreCase);
+
+            var dayKey =
+                localDate.Date.ToString(
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture);
+
+            List<NotionCalendarActivity> cachedDay;
+
+            await CacheLock.WaitAsync(
+                cancellationToken);
+
+            try
+            {
+                cachedDay =
+                    DayCache.TryGetValue(
+                        dayKey,
+                        out var current)
+                        ? current.ToList()
+                        : new List<NotionCalendarActivity>();
+            }
+            finally
+            {
+                CacheLock.Release();
+            }
+
+            var cachedIds =
+                cachedDay
+                    .Where(activity =>
+                        activity != null &&
+                        !string.IsNullOrWhiteSpace(activity.PageId))
+                    .Select(activity => activity.PageId)
+                    .ToHashSet(
+                        StringComparer.OrdinalIgnoreCase);
+
+            var freshIds =
+                freshById.Keys
+                    .ToHashSet(
+                        StringComparer.OrdinalIgnoreCase);
+
+            var staleIds =
+                cachedIds
+                    .Where(id =>
+                        !freshIds.Contains(id))
+                    .ToList();
+
+            var newIds =
+                freshIds
+                    .Where(id =>
+                        !cachedIds.Contains(id))
+                    .ToList();
+
+            var deletedIds =
+                new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            var movedIds =
+                new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            var affectedIds =
+                new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            var remappedActivities =
+                new List<NotionCalendarActivity>();
+
+            // Si una página desapareció de la consulta del día, solo entonces
+            // se hace un GET de ESA PageId para distinguir:
+            // - eliminada/papelera;
+            // - movida de fecha;
+            // - error transitorio (en cuyo caso conservamos la caché).
+            for (var index = 0;
+                 index < staleIds.Count;
+                 index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var pageId = staleIds[index];
+
+                progress?.Report(
+                    new NotionCalendarProgress(
+                        "Verificando ausentes",
+                        index + 1,
+                        staleIds.Count,
+                        $"Comprobando {index + 1}/{staleIds.Count} página(s) que ya no están en el día..."));
+
+                var probe =
+                    await ProbeCalendarPageAsync(
+                        http,
+                        pageId,
+                        cancellationToken);
+
+                if (probe.State == CalendarPageProbeState.Unknown)
+                {
+                    // No borrar por un fallo de red/cooldown.
+                    continue;
+                }
+
+                affectedIds.Add(pageId);
+
+                if (probe.State ==
+                    CalendarPageProbeState.MissingOrTrashed)
+                {
+                    deletedIds.Add(pageId);
+                    continue;
+                }
+
+                if (probe.Page.HasValue)
+                {
+                    var remapped =
+                        await MapPageAsync(
+                            http,
+                            probe.Page.Value,
+                            schema,
+                            cancellationToken);
+
+                    if (remapped != null)
+                    {
+                        // Si otra propiedad de fecha válida todavía lo mantiene
+                        // en el mismo día, no lo retiramos por error.
+                        if (ActivityOverlapsDay(
+                                remapped,
+                                localDate.Date))
+                        {
+                            remappedActivities.Add(remapped);
+                            continue;
+                        }
+
+                        remappedActivities.Add(remapped);
+                    }
+                }
+
+                movedIds.Add(pageId);
+            }
+
+            // Páginas nuevas del día que por alguna razón no estaban en caché.
+            foreach (var pageId in newIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!freshById.TryGetValue(
+                        pageId,
+                        out var page))
+                {
+                    continue;
+                }
+
+                var mapped =
+                    await MapPageAsync(
+                        http,
+                        page,
+                        schema,
+                        cancellationToken);
+
+                if (mapped == null)
+                    continue;
+
+                remappedActivities.Add(mapped);
+                affectedIds.Add(pageId);
+            }
+
+            var hasCacheChanges =
+                deletedIds.Count > 0 ||
+                movedIds.Count > 0 ||
+                remappedActivities.Count > 0;
+
+            if (hasCacheChanges)
+            {
+                await CacheLock.WaitAsync(
+                    cancellationToken);
+
+                try
+                {
+                    var removeFromAll =
+                        deletedIds
+                            .Concat(movedIds)
+                            .ToHashSet(
+                                StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var key in DayCache.Keys.ToList())
+                    {
+                        DayCache[key].RemoveAll(activity =>
+                            removeFromAll.Contains(
+                                activity.PageId));
+                    }
+
+                    foreach (var activity in remappedActivities)
+                    {
+                        foreach (var key in DayCache.Keys.ToList())
+                        {
+                            DayCache[key].RemoveAll(item =>
+                                string.Equals(
+                                    item.PageId,
+                                    activity.PageId,
+                                    StringComparison.OrdinalIgnoreCase));
+                        }
+
+                        foreach (var day in EnumerateActivityDays(activity))
+                        {
+                            var key =
+                                day.ToString(
+                                    "yyyy-MM-dd",
+                                    CultureInfo.InvariantCulture);
+
+                            if (!DayCache.TryGetValue(
+                                    key,
+                                    out var list))
+                            {
+                                list =
+                                    new List<NotionCalendarActivity>();
+
+                                DayCache[key] = list;
+                            }
+
+                            list.Add(activity);
+                        }
+                    }
+
+                    await SaveCacheUnsafeAsync(
+                        cancellationToken);
+                }
+                finally
+                {
+                    CacheLock.Release();
+                }
+            }
+
+            foreach (var deletedId in deletedIds)
+            {
+                RemoveDeletedPageFromSecondaryCaches(
+                    deletedId);
+            }
+
+            var liveChanged =
+                remappedActivities
+                    .Where(activity =>
+                        activity != null &&
+                        !deletedIds.Contains(activity.PageId))
+                    .ToList();
+
+            if (liveChanged.Count > 0)
+            {
+                UpdateProjectCandidateCachesFromChanges(
+                    liveChanged.Select(activity => activity.PageId),
+                    liveChanged);
+            }
+
+            progress?.Report(
+                new NotionCalendarProgress(
+                    "Reconciliación lista",
+                    1,
+                    1,
+                    $"{deletedIds.Count} eliminada(s) · " +
+                    $"{movedIds.Count} movida(s) · " +
+                    $"{newIds.Count} nueva(s)."));
+
+            return new NotionCalendarReconcileResult(
+                freshById.Count,
+                newIds.Count,
+                movedIds.Count,
+                deletedIds.Count,
+                deletedIds
+                    .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                affectedIds
+                    .Concat(newIds)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+                    .ToList());
+        }
+
+        private enum CalendarPageProbeState
+        {
+            Active,
+            MissingOrTrashed,
+            Unknown
+        }
+
+        private sealed record CalendarPageProbeResult(
+            CalendarPageProbeState State,
+            JsonElement? Page);
+
+        private static async Task<CalendarPageProbeResult>
+            ProbeCalendarPageAsync(
+                HttpClient http,
+                string pageId,
+                CancellationToken cancellationToken)
+        {
+            using var response =
+                await SendGetWithRetryAsync(
+                    http,
+                    $"pages/{pageId}",
+                    cancellationToken);
+
+            var json =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                try
+                {
+                    using var document =
+                        JsonDocument.Parse(json);
+
+                    var page =
+                        document.RootElement.Clone();
+
+                    if (IsPageArchivedOrTrashed(page))
+                    {
+                        return new CalendarPageProbeResult(
+                            CalendarPageProbeState.MissingOrTrashed,
+                            page);
+                    }
+
+                    return new CalendarPageProbeResult(
+                        CalendarPageProbeState.Active,
+                        page);
+                }
+                catch
+                {
+                    return new CalendarPageProbeResult(
+                        CalendarPageProbeState.Unknown,
+                        null);
+                }
+            }
+
+            if ((int)response.StatusCode == 404 ||
+                json.Contains(
+                    "object_not_found",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return new CalendarPageProbeResult(
+                    CalendarPageProbeState.MissingOrTrashed,
+                    null);
+            }
+
+            return new CalendarPageProbeResult(
+                CalendarPageProbeState.Unknown,
+                null);
+        }
+
+        private static bool IsPageArchivedOrTrashed(
+            JsonElement page)
+        {
+            var archived =
+                page.TryGetProperty(
+                    "archived",
+                    out var archivedValue) &&
+                archivedValue.ValueKind == JsonValueKind.True;
+
+            var inTrash =
+                page.TryGetProperty(
+                    "in_trash",
+                    out var trashValue) &&
+                trashValue.ValueKind == JsonValueKind.True;
+
+            return archived || inTrash;
+        }
+
+        private void RemoveDeletedPageFromSecondaryCaches(
+            string pageId)
+        {
+            if (string.IsNullOrWhiteSpace(pageId))
+                return;
+
+            _checklistStatsCache.TryRemove(
+                pageId,
+                out _);
+
+            // No sobrescribimos el archivo persistente antes de que haya sido
+            // cargado en esta ejecución. Si ya está en memoria, sí quitamos el
+            // PageId eliminado y guardamos el snapshot limpio.
+            if (_persistentChecklistStatsLoaded)
+            {
+                PersistentChecklistStats.TryRemove(
+                    pageId,
+                    out _);
+
+                SchedulePersistentChecklistStatsSave();
+            }
+
+            foreach (var item in ProjectCandidateCache.ToArray())
+            {
+                if (!item.Value.Activities.Any(activity =>
+                        string.Equals(
+                            activity.PageId,
+                            pageId,
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                var next =
+                    item.Value.Activities
+                        .Where(activity =>
+                            !string.Equals(
+                                activity.PageId,
+                                pageId,
+                                StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                ProjectCandidateCache[item.Key] =
+                    new ProjectCandidateCacheEntry(
+                        DateTimeOffset.UtcNow,
+                        next);
+            }
+        }
+
         public void ClearCache()
         {
             ProjectCandidateCache.Clear();
@@ -4656,6 +6013,9 @@ namespace Anfeta.UI.Services.Notion
             SchemaInfo schema,
             CancellationToken cancellationToken)
         {
+            if (IsPageArchivedOrTrashed(page))
+                return null;
+
             if (!page.TryGetProperty("properties", out var props) ||
                 props.ValueKind != JsonValueKind.Object)
             {

@@ -37,6 +37,13 @@ namespace Anfeta.UI.Models.Notion
     {
         public string OriginalPerson { get; init; } = string.Empty;
         public string ReviewAssignee { get; init; } = string.Empty;
+
+        // Identidades REALES de la propiedad People de Notion.
+        // Se capturan antes de mover la actividad a revisión para no volver
+        // a depender del display name, correo o tags del título al aprobar.
+        public string OriginalAssigneeUserId { get; init; } = string.Empty;
+        public string ReviewAssigneeUserId { get; init; } = string.Empty;
+
         public string State { get; init; } = string.Empty;
         public DateTimeOffset SubmittedAt { get; init; }
         public DateTimeOffset UpdatedAt { get; init; }

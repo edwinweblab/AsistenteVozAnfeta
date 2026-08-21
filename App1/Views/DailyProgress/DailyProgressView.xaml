@@ -261,7 +261,7 @@
                         <TextBlock
                             FontSize="8.5"
                             Foreground="#7DD3FC"
-                            Text="COBERTURA" />
+                            Text="COBERTURA HOY" />
                         <TextBlock
                             x:Name="CoverageKpiText"
                             Margin="0,1,0,0"
@@ -327,7 +327,7 @@
                         <TextBlock
                             FontSize="9.5"
                             Foreground="#86EFAC"
-                            Text="Z HOY" />
+                            Text="✓ Z HOY" />
                         <TextBlock
                             x:Name="CompletedKpiText"
                             Margin="0,1,0,0"
@@ -349,7 +349,7 @@
                         <TextBlock
                             FontSize="9.5"
                             Foreground="#AAB6C2"
-                            Text="AVANCE / AGENDADO" />
+                            Text="AVANCE HOY / AGENDADO" />
                         <TextBlock
                             x:Name="ScheduledKpiText"
                             Margin="0,1,0,0"
@@ -552,7 +552,7 @@
                     VerticalAlignment="Center"
                     FontSize="10"
                     Foreground="#7F93A5"
-                    Text="Avance diario calculado con calendario, checklist y seguimiento local."
+                    Text="Avance diario: solo cambios observados hoy; el progreso histórico no suma."
                     TextTrimming="CharacterEllipsis" />
 
                 <TextBlock

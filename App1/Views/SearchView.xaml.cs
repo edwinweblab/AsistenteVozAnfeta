@@ -391,6 +391,11 @@ namespace Anfeta.UI.Views
             Loaded += SearchView_Loaded;
             RootLayout.LayoutUpdated += RootLayout_LayoutUpdated;
 
+            // BLOQUE 11 · Ctrl+V global. Se engancha una sola vez por pestaña.
+            // El handler ignora cualquier campo editable para conservar el
+            // pegado normal de TextBox / RichEditBox / AutoSuggestBox.
+            RootLayout.KeyDown += RootLayout_GlobalPasteKeyDown;
+
             _voiceSplitDefaultBg = VoiceSplit.Background;
             _voiceSplitDefaultFg = VoiceSplit.Foreground;
 

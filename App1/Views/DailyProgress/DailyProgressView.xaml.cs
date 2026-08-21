@@ -468,6 +468,17 @@ namespace Anfeta.UI.Views.DailyProgress
             }
         }
 
+        private static bool IsCarryOverItem(
+            DailyProgressActivityItem item)
+        {
+            return item != null &&
+                   !string.IsNullOrWhiteSpace(
+                       item.MovementLabel) &&
+                   item.MovementLabel.Contains(
+                       "↪ De ",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
         private UIElement BuildPersonCard(
             DailyProgressPersonSnapshot person)
         {
@@ -741,6 +752,23 @@ namespace Anfeta.UI.Views.DailyProgress
             stack.Children.Add(
                 coverageBar);
 
+            var carryOverItems =
+                person.AllActivities
+                    .Where(IsCarryOverItem)
+                    .OrderBy(item =>
+                        item.Start)
+                    .ToList();
+
+            if (carryOverItems.Count > 0)
+            {
+                stack.Children.Add(
+                    BuildMiniSection(
+                        "VIENEN DE DÍAS ANTERIORES",
+                        carryOverItems,
+                        danger: false,
+                        carryOver: true));
+            }
+
             stack.Children.Add(
                 BuildMiniSection(
                     "REZAGOS",
@@ -785,7 +813,8 @@ namespace Anfeta.UI.Views.DailyProgress
         private UIElement BuildMiniSection(
             string title,
             IReadOnlyList<DailyProgressActivityItem> items,
-            bool danger)
+            bool danger,
+            bool carryOver = false)
         {
             var section =
                 new Border
@@ -797,21 +826,33 @@ namespace Anfeta.UI.Views.DailyProgress
                             10,
                             8),
                     Background =
-                        danger
-                            ? DangerBackgroundBrush
-                            : ProgressBackgroundBrush,
-                    BorderBrush =
-                        danger
+                        carryOver
                             ? Brush(
                                 255,
-                                83,
-                                41,
-                                49)
-                            : Brush(
+                                12,
+                                36,
+                                50)
+                            : danger
+                                ? DangerBackgroundBrush
+                                : ProgressBackgroundBrush,
+                    BorderBrush =
+                        carryOver
+                            ? Brush(
                                 255,
                                 35,
-                                83,
-                                55),
+                                91,
+                                119)
+                            : danger
+                                ? Brush(
+                                    255,
+                                    83,
+                                    41,
+                                    49)
+                                : Brush(
+                                    255,
+                                    35,
+                                    83,
+                                    55),
                     BorderThickness =
                         new Thickness(1),
                     CornerRadius =
@@ -828,15 +869,17 @@ namespace Anfeta.UI.Views.DailyProgress
                 new TextBlock
                 {
                     Text =
-                        $"{(danger ? "●" : "✓")} {title}",
+                        $"{(carryOver ? "↪" : danger ? "●" : "✓")} {title}",
                     FontSize = 10,
                     FontWeight =
                         Microsoft.UI.Text
                             .FontWeights.SemiBold,
                     Foreground =
-                        danger
-                            ? DangerBrush
-                            : ProgressBrush
+                        carryOver
+                            ? AccentBrush
+                            : danger
+                                ? DangerBrush
+                                : ProgressBrush
                 });
 
             if (items.Count == 0)
@@ -847,7 +890,7 @@ namespace Anfeta.UI.Views.DailyProgress
                         Text =
                             danger
                                 ? "Sin rezagos detectados."
-                                : "Sin avance visible todavía.",
+                                : "Sin avance observado hoy todavía.",
                         FontSize = 9.5,
                         Foreground = MutedBrush
                     });
@@ -880,6 +923,80 @@ namespace Anfeta.UI.Views.DailyProgress
                 stack;
 
             return section;
+        }
+
+        private UIElement BuildTodayTransitionBadge(
+            DailyProgressActivityItem item)
+        {
+            var completed =
+                item.IsCompletedMovement;
+
+            var border =
+                new Border
+                {
+                    HorizontalAlignment =
+                        HorizontalAlignment.Left,
+                    Margin =
+                        new Thickness(0, 2, 0, 1),
+                    Padding =
+                        new Thickness(7, 2, 7, 2),
+                    Background =
+                        completed
+                            ? Brush(255, 11, 70, 38)
+                            : Brush(255, 8, 55, 72),
+                    BorderBrush =
+                        completed
+                            ? Brush(255, 74, 222, 128)
+                            : Brush(255, 34, 211, 238),
+                    BorderThickness =
+                        new Thickness(1),
+                    CornerRadius =
+                        new CornerRadius(9)
+                };
+
+            border.Child =
+                new TextBlock
+                {
+                    Text =
+                        completed
+                            ? "✓ PASÓ A Z HOY"
+                            : "↗ PASÓ A R HOY",
+                    FontSize = 9,
+                    FontWeight =
+                        Microsoft.UI.Text
+                            .FontWeights.Bold,
+                    Foreground =
+                        completed
+                            ? Brush(255, 187, 247, 208)
+                            : Brush(255, 165, 243, 252)
+                };
+
+            return border;
+        }
+
+        private static string BuildTodayMovementDetail(
+            DailyProgressActivityItem item)
+        {
+            var value =
+                item?.MovementLabel ??
+                string.Empty;
+
+            value =
+                Regex.Replace(
+                    value,
+                    @"(?:^|\s*·\s*)(?:pasó a [RZ] hoy)(?=\s*·\s*|$)",
+                    " ",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+            value =
+                Regex.Replace(
+                    value,
+                    @"\s*·\s*",
+                    " · ")
+                .Trim(' ', '·');
+
+            return value;
         }
 
         private UIElement BuildCompactActivity(
@@ -942,6 +1059,40 @@ namespace Anfeta.UI.Views.DailyProgress
                     TextTrimming =
                         TextTrimming.CharacterEllipsis
                 });
+
+            if (item.IsCompletedMovement ||
+                item.IsReviewMovement)
+            {
+                text.Children.Add(
+                    BuildTodayTransitionBadge(
+                        item));
+            }
+
+            var todayMovementDetail =
+                BuildTodayMovementDetail(
+                    item);
+
+            if (!string.IsNullOrWhiteSpace(
+                    todayMovementDetail))
+            {
+                text.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            todayMovementDetail,
+                        FontSize = 8.5,
+                        FontWeight =
+                            Microsoft.UI.Text
+                                .FontWeights.SemiBold,
+                        Foreground =
+                            IsCarryOverItem(item)
+                                ? AccentBrush
+                                : ProgressBrush,
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis,
+                        MaxLines = 1
+                    });
+            }
 
             row.Children.Add(
                 text);
@@ -1168,6 +1319,30 @@ namespace Anfeta.UI.Views.DailyProgress
 
             PersonDetailItems.Children.Clear();
 
+            var carryOverItems =
+                person.AllActivities
+                    .Where(IsCarryOverItem)
+                    .OrderBy(item =>
+                        item.Start)
+                    .ToList();
+
+            if (carryOverItems.Count > 0)
+            {
+                PersonDetailItems.Children.Add(
+                    BuildDetailSectionTitle(
+                        "VIENEN DE DÍAS ANTERIORES",
+                        carryOverItems.Count,
+                        danger: false));
+
+                foreach (var item in carryOverItems)
+                {
+                    PersonDetailItems.Children.Add(
+                        BuildDetailActivityCard(
+                            item,
+                            danger: false));
+                }
+            }
+
             PersonDetailItems.Children.Add(
                 BuildDetailSectionTitle(
                     "NECESITAN ATENCIÓN",
@@ -1201,7 +1376,7 @@ namespace Anfeta.UI.Views.DailyProgress
             {
                 PersonDetailItems.Children.Add(
                     BuildEmptyDetailCard(
-                        "Todavía no hay avance visible en el estado/checklist guardado."));
+                        "Todavía no hay cambios observados hoy después del baseline."));
             }
             else
             {
@@ -1435,20 +1610,34 @@ namespace Anfeta.UI.Views.DailyProgress
                         MutedBrush
                 });
 
+            if (item.IsCompletedMovement ||
+                item.IsReviewMovement)
+            {
+                info.Children.Add(
+                    BuildTodayTransitionBadge(
+                        item));
+            }
+
+            var todayMovementDetail =
+                BuildTodayMovementDetail(
+                    item);
+
             if (!string.IsNullOrWhiteSpace(
-                    item.MovementLabel))
+                    todayMovementDetail))
             {
                 info.Children.Add(
                     new TextBlock
                     {
                         Text =
-                            item.MovementLabel,
+                            todayMovementDetail,
                         FontSize = 9.5,
                         FontWeight =
                             Microsoft.UI.Text
                                 .FontWeights.SemiBold,
                         Foreground =
-                            ProgressBrush,
+                            IsCarryOverItem(item)
+                                ? AccentBrush
+                                : ProgressBrush,
                         TextWrapping =
                             TextWrapping.Wrap
                     });
@@ -1837,6 +2026,9 @@ namespace Anfeta.UI.Views.DailyProgress
                 return;
             }
 
+            var sourceDate =
+                item.Source.Start.Date;
+
             var targetDate =
                 _currentDate.Date.AddDays(1);
 
@@ -1872,8 +2064,34 @@ namespace Anfeta.UI.Views.DailyProgress
                     item.Source,
                     targetDate);
 
+                var movementTracked =
+                    true;
+
+                try
+                {
+                    await NotionDailyProgressService
+                        .RegisterCalendarMovementAsync(
+                            item.PageId,
+                            sourceDate,
+                            targetDate,
+                            "Avance Diario · Mover mañana");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // El movimiento en Notion YA ocurrió. Un fallo del archivo
+                    // local no debe fingir que el movimiento completo falló.
+                    movementTracked =
+                        false;
+                }
+
                 FeedStatusText.Text =
-                    $"Actividad movida a {targetDate:dd/MM/yyyy} ✅";
+                    movementTracked
+                        ? $"Actividad movida a {targetDate:dd/MM/yyyy} ✅ · origen conservado"
+                        : $"Actividad movida a {targetDate:dd/MM/yyyy} ✅ · no se pudo guardar la trazabilidad local";
 
                 // MoveActivityToDateAsync ya actualiza la caché de ambos días.
                 await LoadCurrentDateAsync(

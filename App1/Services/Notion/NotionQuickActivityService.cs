@@ -28,6 +28,26 @@ namespace Anfeta.UI.Services.Notion
         bool BodyApplied = false,
         string TemplatePageId = "");
 
+    public sealed record NotionQuickTemplateBatchRequest(
+        string TemplatePageId,
+        string Title,
+        DateTime Start,
+        DateTime End);
+
+    public sealed record NotionQuickTemplateBatchProgress(
+        int Current,
+        int Total,
+        string Title);
+
+    public sealed record NotionQuickTemplateBatchItemResult(
+        string TemplatePageId,
+        string Title,
+        bool Success,
+        string CreatedPageId = "",
+        string CreatedPageUrl = "",
+        bool BodyApplied = false,
+        string Error = "");
+
     /// <summary>
     /// Catálogo y creación de actividades rápidas basadas en páginas reales
     /// de Notion. El catálogo se obtiene consultando la vista configurada para
@@ -730,45 +750,221 @@ namespace Anfeta.UI.Services.Notion
                 dataSourceId,
                 cancellationToken);
 
-            var sourceHasBody = await PageHasBodyAsync(
+            return await CreateFromTemplateCoreAsync(
                 http,
-                templatePageId,
-                cancellationToken);
-
-            var properties = BuildCreationProperties(
                 schema,
+                dataSourceId,
+                templatePageId,
                 title,
                 start,
-                end);
+                end,
+                cancellationToken);
+        }
 
-            var payload = new Dictionary<string, object?>
+        /// <summary>
+        /// Crea un lote de Plantilla Fase1 de forma SECUENCIAL.
+        ///
+        /// Importante:
+        /// - Lee el esquema de Revisiones UNA sola vez para todo el lote.
+        /// - Cada item conserva su template_id y por lo tanto su BODY propio.
+        /// - Un fallo no cancela las demás plantillas.
+        /// - No ejecuta refresh del calendario; eso se hace UNA sola vez al final
+        ///   desde SearchView.Calendar.
+        /// </summary>
+        public async Task<IReadOnlyList<NotionQuickTemplateBatchItemResult>>
+            CreateBatchFromTemplatesAsync(
+                string token,
+                string dataSourceId,
+                IEnumerable<NotionQuickTemplateBatchRequest> requests,
+                IProgress<NotionQuickTemplateBatchProgress>? progress = null,
+                CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
             {
-                ["parent"] = new Dictionary<string, object?>
+                throw new InvalidOperationException(
+                    "Configura primero el token de Notion.");
+            }
+
+            if (string.IsNullOrWhiteSpace(dataSourceId))
+            {
+                throw new InvalidOperationException(
+                    "No se pudo identificar la base de Revisiones.");
+            }
+
+            var pending =
+                (requests ??
+                 Enumerable.Empty<NotionQuickTemplateBatchRequest>())
+                    .Where(item =>
+                        item != null &&
+                        !string.IsNullOrWhiteSpace(item.TemplatePageId))
+                    // La misma plantilla fuente solo puede formar una copia
+                    // dentro de ESTA ejecución. Evita doble clic / selección
+                    // duplicada en el ListView.
+                    .GroupBy(
+                        item => NormalizeId(item.TemplatePageId),
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+
+            if (pending.Count == 0)
+            {
+                return Array.Empty<NotionQuickTemplateBatchItemResult>();
+            }
+
+            using var http = CreateClient(token);
+
+            // Ahorro importante en creación masiva:
+            // antes CreateFromTemplateAsync volvía a leer el schema en cada item.
+            var schema =
+                await ReadSchemaAsync(
+                    http,
+                    dataSourceId,
+                    cancellationToken);
+
+            var results =
+                new List<NotionQuickTemplateBatchItemResult>(
+                    pending.Count);
+
+            for (var index = 0;
+                 index < pending.Count;
+                 index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var item =
+                    pending[index];
+
+                progress?.Report(
+                    new NotionQuickTemplateBatchProgress(
+                        index + 1,
+                        pending.Count,
+                        item.Title));
+
+                var title =
+                    item.Title;
+
+                var start =
+                    item.Start;
+
+                var end =
+                    item.End;
+
+                try
                 {
-                    ["type"] = "data_source_id",
-                    ["data_source_id"] = NormalizeId(dataSourceId)
-                },
-                ["properties"] = properties,
-                ["template"] = new Dictionary<string, object?>
-                {
-                    ["type"] = "template_id",
-                    ["template_id"] = NormalizeId(templatePageId)
+                    ValidateCreationInput(
+                        token,
+                        dataSourceId,
+                        ref title,
+                        ref start,
+                        ref end);
+
+                    var created =
+                        await CreateFromTemplateCoreAsync(
+                            http,
+                            schema,
+                            dataSourceId,
+                            item.TemplatePageId,
+                            title,
+                            start,
+                            end,
+                            cancellationToken);
+
+                    results.Add(
+                        new NotionQuickTemplateBatchItemResult(
+                            NormalizeId(item.TemplatePageId),
+                            title,
+                            true,
+                            created.PageId,
+                            created.PageUrl,
+                            created.BodyApplied,
+                            string.Empty));
                 }
-            };
-
-            using var response = await NotionRequestCoordinator.SendAsync(
-                http,
-                () => new HttpRequestMessage(HttpMethod.Post, "pages")
+                catch (OperationCanceledException)
                 {
-                    Content = new StringContent(
-                        JsonSerializer.Serialize(payload),
-                        Encoding.UTF8,
-                        "application/json")
-                },
-                cancellationToken);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Una plantilla mala no aborta las demás.
+                    results.Add(
+                        new NotionQuickTemplateBatchItemResult(
+                            NormalizeId(item.TemplatePageId),
+                            title,
+                            false,
+                            string.Empty,
+                            string.Empty,
+                            false,
+                            ex.Message));
+                }
+            }
 
-            var json = await response.Content.ReadAsStringAsync(
-                cancellationToken);
+            return results;
+        }
+
+        private static async Task<NotionQuickActivityResult>
+            CreateFromTemplateCoreAsync(
+                HttpClient http,
+                QuickSchema schema,
+                string dataSourceId,
+                string templatePageId,
+                string title,
+                DateTime start,
+                DateTime end,
+                CancellationToken cancellationToken)
+        {
+            var sourceHasBody =
+                await PageHasBodyAsync(
+                    http,
+                    templatePageId,
+                    cancellationToken);
+
+            var properties =
+                BuildCreationProperties(
+                    schema,
+                    title,
+                    start,
+                    end);
+
+            var payload =
+                new Dictionary<string, object?>
+                {
+                    ["parent"] =
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "data_source_id",
+                            ["data_source_id"] =
+                                NormalizeId(dataSourceId)
+                        },
+                    ["properties"] = properties,
+                    ["template"] =
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "template_id",
+                            ["template_id"] =
+                                NormalizeId(templatePageId)
+                        }
+                };
+
+            using var response =
+                await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () =>
+                        new HttpRequestMessage(
+                            HttpMethod.Post,
+                            "pages")
+                        {
+                            Content =
+                                new StringContent(
+                                    JsonSerializer.Serialize(
+                                        payload),
+                                    Encoding.UTF8,
+                                    "application/json")
+                        },
+                    cancellationToken);
+
+            var json =
+                await response.Content.ReadAsStringAsync(
+                    cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -778,23 +974,34 @@ namespace Anfeta.UI.Services.Notion
                     json);
             }
 
-            using var document = JsonDocument.Parse(json);
-            var pageId = ReadString(document.RootElement, "id");
-            var pageUrl = ReadString(document.RootElement, "url");
+            using var document =
+                JsonDocument.Parse(json);
 
-            var bodyApplied = !sourceHasBody;
+            var pageId =
+                ReadString(
+                    document.RootElement,
+                    "id");
 
-            if (!string.IsNullOrWhiteSpace(pageId) && sourceHasBody)
+            var pageUrl =
+                ReadString(
+                    document.RootElement,
+                    "url");
+
+            var bodyApplied =
+                !sourceHasBody;
+
+            if (!string.IsNullOrWhiteSpace(pageId) &&
+                sourceHasBody)
             {
-                bodyApplied = await WaitForTemplateBodyAsync(
-                    http,
-                    pageId,
-                    cancellationToken);
+                bodyApplied =
+                    await WaitForTemplateBodyAsync(
+                        http,
+                        pageId,
+                        cancellationToken);
             }
 
-            // La aplicación de templates es asíncrona y puede fusionar las
-            // propiedades de la página fuente. Se reafirma el título/fecha al
-            // terminar (o al agotar la espera) para conservar la selección.
+            // Notion aplica el template de forma asíncrona.
+            // Reafirmamos solamente título + Fecha POR Hacer.
             if (!string.IsNullOrWhiteSpace(pageId))
             {
                 await PatchFinalPropertiesAsync(
@@ -812,6 +1019,7 @@ namespace Anfeta.UI.Services.Notion
                 bodyApplied,
                 NormalizeId(templatePageId));
         }
+
 
         // Se conserva por compatibilidad con cualquier llamada vieja. No copia
         // BODY y solo debe usarse cuando explícitamente no hay plantilla fuente.
