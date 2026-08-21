@@ -64,6 +64,16 @@ namespace Anfeta.UI.Services.Search
         private readonly Dictionary<string, SnoozedReminder> _snoozed =
             new(StringComparer.OrdinalIgnoreCase);
 
+        // Segunda defensa anti-duplicados: una misma página de Notion no puede
+        // disparar dos recordatorios prácticamente al mismo tiempo aunque su
+        // título/fecha haya cambiado entre dos sincronizaciones.
+        private readonly Dictionary<string, DateTimeOffset>
+            _recentPageTriggers =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly TimeSpan RecentPageTriggerWindow =
+            TimeSpan.FromSeconds(75);
+
         public sealed record SnoozedReminder(
             IndexedFileReminder Reminder,
             DateTimeOffset DueAt);
@@ -193,7 +203,7 @@ namespace Anfeta.UI.Services.Search
                     continue;
                 }
 
-                if (!ShouldShowForCurrentUser(recipientTag))
+                if (!ShouldShowForCurrentUser(recipientTag, row.Source))
                     continue;
 
                 if (row.Source == SearchSource.Notion &&
@@ -226,6 +236,16 @@ namespace Anfeta.UI.Services.Search
                 if (_fired.ContainsKey(identity))
                     continue;
 
+                if (row.Source == SearchSource.Notion &&
+                    (IsPageCurrentlySnoozed(
+                         row.ExternalId) ||
+                     WasPageTriggeredRecently(
+                         row.ExternalId,
+                         now)))
+                {
+                    continue;
+                }
+
                 candidates.Add((
                     row,
                     visibleTitle,
@@ -243,7 +263,28 @@ namespace Anfeta.UI.Services.Search
             // uno en scans posteriores (cada 30 s).
             var catchUpFired = 0;
 
-            foreach (var candidate in candidates
+            var uniqueCandidates =
+                candidates
+                    .GroupBy(
+                        item =>
+                            item.Row.Source ==
+                                SearchSource.Notion &&
+                            !string.IsNullOrWhiteSpace(
+                                item.Row.ExternalId)
+                                ? $"NOTION|{item.Row.ExternalId.Trim()}"
+                                : BuildReminderIdentity(
+                                    item.Row,
+                                    item.ReminderAt),
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group =>
+                        group
+                            .OrderBy(item => item.IsCatchUp)
+                            .ThenByDescending(item =>
+                                item.ReminderAt)
+                            .First())
+                    .ToList();
+
+            foreach (var candidate in uniqueCandidates
                          .OrderBy(item => item.IsCatchUp)
                          .ThenByDescending(item => item.ReminderAt))
             {
@@ -266,6 +307,14 @@ namespace Anfeta.UI.Services.Search
 
                 if (candidate.IsCatchUp)
                     catchUpFired++;
+
+                if (candidate.Row.Source ==
+                        SearchSource.Notion)
+                {
+                    MarkPageTriggered(
+                        candidate.Row.ExternalId,
+                        now);
+                }
 
                 ReminderDue?.Invoke(
                     this,
@@ -397,6 +446,104 @@ namespace Anfeta.UI.Services.Search
             }
         }
 
+        private static string NormalizeReminderPersonTag(
+            string? value)
+        {
+            var clean =
+                (value ?? string.Empty)
+                    .Trim()
+                    .ToLowerInvariant();
+
+            return clean switch
+            {
+                "iisai" or "iisiaia" or "isaias" or "isai" => "iisaia",
+                "john" => "jjohn",
+                "karla" or "karl" => "kkarl",
+                "genaro" or "gena" => "ggena",
+                "neftali" or "neft" => "nneft",
+                "brian" or "bria" => "bbria",
+                "andrade" or "andr" => "aandr",
+                "emmanuel" or "emanuel" or "emma" => "eemma",
+                "sotelo" or "edua" or "eduardo" => "eedua",
+                "acalli" or "acal" => "aacal",
+                _ => clean
+            };
+        }
+
+        private static bool TryResolveReminderPerson(
+            string? rawTag,
+            out string normalizedTag,
+            out string displayName)
+        {
+            normalizedTag =
+                NormalizeReminderPersonTag(rawTag);
+
+            displayName = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(normalizedTag))
+                return false;
+
+            return RecipientNames.TryGetValue(
+                normalizedTag,
+                out displayName!);
+        }
+
+        private bool WasPageTriggeredRecently(
+            string? pageId,
+            DateTimeOffset now)
+        {
+            var cleanPageId =
+                (pageId ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(cleanPageId))
+                return false;
+
+            foreach (var key in _recentPageTriggers
+                .Where(item =>
+                    now - item.Value >
+                        RecentPageTriggerWindow)
+                .Select(item => item.Key)
+                .ToList())
+            {
+                _recentPageTriggers.Remove(key);
+            }
+
+            return _recentPageTriggers.TryGetValue(
+                       cleanPageId,
+                       out var triggeredAt) &&
+                   now - triggeredAt <=
+                       RecentPageTriggerWindow;
+        }
+
+        private void MarkPageTriggered(
+            string? pageId,
+            DateTimeOffset now)
+        {
+            var cleanPageId =
+                (pageId ?? string.Empty).Trim();
+
+            if (!string.IsNullOrWhiteSpace(cleanPageId))
+            {
+                _recentPageTriggers[cleanPageId] = now;
+            }
+        }
+
+        private bool IsPageCurrentlySnoozed(
+            string? pageId)
+        {
+            var cleanPageId =
+                (pageId ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(cleanPageId))
+                return false;
+
+            return _snoozed.Values.Any(item =>
+                string.Equals(
+                    item.Reminder.PageId,
+                    cleanPageId,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
         private static bool TryParseReminder(
             string title,
             out DateTimeOffset reminderAt,
@@ -464,12 +611,15 @@ namespace Anfeta.UI.Services.Search
                     StringSplitOptions.RemoveEmptyEntries)
                 .FirstOrDefault() ?? string.Empty;
 
-            if (RecipientNames.TryGetValue(
+            if (TryResolveReminderPerson(
                     firstToken,
+                    out var normalizedRecipientTag,
                     out var mappedName))
             {
-                recipientTag = firstToken;
-                recipientName = mappedName;
+                recipientTag =
+                    normalizedRecipientTag;
+                recipientName =
+                    mappedName;
 
                 message = message
                     .Substring(firstToken.Length)
@@ -493,12 +643,15 @@ namespace Anfeta.UI.Services.Search
                 var parsedSenderTag =
                     senderMatch.Groups["tag"].Value;
 
-                if (RecipientNames.TryGetValue(
+                if (TryResolveReminderPerson(
                         parsedSenderTag,
+                        out var normalizedSenderTag,
                         out var mappedSenderName))
                 {
-                    senderTag = parsedSenderTag;
-                    senderName = mappedSenderName;
+                    senderTag =
+                        normalizedSenderTag;
+                    senderName =
+                        mappedSenderName;
                 }
 
                 message = message
@@ -546,28 +699,52 @@ namespace Anfeta.UI.Services.Search
         }
 
         private static bool ShouldShowForCurrentUser(
-            string recipientTag)
+            string recipientTag,
+            SearchSource source)
         {
+            var normalizedRecipient =
+                NormalizeReminderPersonTag(
+                    recipientTag);
+
             var currentUserTag =
-                (ApplicationData.Current.LocalSettings.Values[
-                    LS_CurrentUserTag] as string ?? string.Empty)
-                .Trim();
+                NormalizeReminderPersonTag(
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_CurrentUserTag] as string);
 
-            if (string.IsNullOrWhiteSpace(currentUserTag))
-                return true;
+            // Notion SIEMPRE necesita destinatario explícito. Esto evita que
+            // una alerta cuyo título se haya indexado incompleto termine
+            // mostrándose a cualquier usuario.
+            if (source == SearchSource.Notion &&
+                string.IsNullOrWhiteSpace(
+                    normalizedRecipient))
+            {
+                return false;
+            }
 
-            if (string.IsNullOrWhiteSpace(recipientTag) ||
-                string.Equals(
-                    recipientTag,
+            // __all__ solo llega aquí si el título realmente contenía __all__.
+            if (string.Equals(
+                    normalizedRecipient,
                     "__all__",
                     StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
 
+            // Recordatorios locales/Dropbox antiguos sin destinatario siguen
+            // funcionando como antes.
+            if (string.IsNullOrWhiteSpace(
+                    normalizedRecipient))
+            {
+                return source !=
+                    SearchSource.Notion;
+            }
+
+            if (string.IsNullOrWhiteSpace(currentUserTag))
+                return false;
+
             return string.Equals(
                 currentUserTag,
-                recipientTag,
+                normalizedRecipient,
                 StringComparison.OrdinalIgnoreCase);
         }
 
@@ -759,6 +936,30 @@ namespace Anfeta.UI.Services.Search
                 {
                     continue;
                 }
+
+                if (WasPageTriggeredRecently(
+                        item.Value.Reminder.PageId,
+                        now))
+                {
+                    // Otro camino ya mostró esta misma página hace segundos.
+                    // La dejamos para el siguiente scan sin marcarla leída.
+                    var retryKey =
+                        $"{item.Value.Reminder.Identity}|retry|" +
+                        $"{Guid.NewGuid():N}";
+
+                    _snoozed[retryKey] =
+                        item.Value with
+                        {
+                            DueAt =
+                                now.AddSeconds(90)
+                        };
+
+                    continue;
+                }
+
+                MarkPageTriggered(
+                    item.Value.Reminder.PageId,
+                    now);
 
                 ReminderDue?.Invoke(
                     this,

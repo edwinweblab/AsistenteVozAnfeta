@@ -39,15 +39,22 @@ namespace Anfeta.UI
         {
             public Popup Popup { get; init; } = null!;
             public IndexedFileReminder Reminder { get; init; } = null!;
+            public string DedupKey { get; init; } = string.Empty;
         }
 
         private readonly List<ReminderToastEntry>
             _activeReminderToasts = new();
 
+        private readonly Dictionary<string, DateTimeOffset>
+            _recentReminderToastKeys =
+                new(StringComparer.OrdinalIgnoreCase);
+
         private const int MaxVisibleReminderToasts = 6;
-        private const double ReminderToastWidth = 360d;
+        private const double ReminderToastWidth = 460d;
         private const double ReminderToastGap = 10d;
         private const double ReminderToastMargin = 18d;
+        private static readonly TimeSpan ReminderToastRecentWindow =
+            TimeSpan.FromSeconds(90);
 
         private readonly NotionCalendarService _calendarStartupService = new();
         private const string LS_CalendarLastSyncUtc =
@@ -627,7 +634,16 @@ namespace Anfeta.UI
 
             return clean switch
             {
-                "iisai" or "iisiaia" or "isaias" => "iisaia",
+                "iisai" or "iisiaia" or "isaias" or "isai" => "iisaia",
+                "john" => "jjohn",
+                "karla" or "karl" => "kkarl",
+                "genaro" or "gena" => "ggena",
+                "neftali" or "neft" => "nneft",
+                "brian" or "bria" => "bbria",
+                "andrade" or "andr" => "aandr",
+                "emmanuel" or "emanuel" or "emma" => "eemma",
+                "sotelo" or "edua" or "eduardo" => "eedua",
+                "acalli" or "acal" => "aacal",
                 _ => clean
             };
         }
@@ -655,10 +671,45 @@ namespace Anfeta.UI
 
                 if (legacyRecipient.Success)
                 {
-                    recipientTag =
+                    var legacyTag =
                         NormalizeReminderPersonTag(
                             legacyRecipient.Groups["tag"].Value);
+
+                    var allowedLegacyTags =
+                        new HashSet<string>(
+                            new[]
+                            {
+                                "jjohn",
+                                "kkarl",
+                                "iisaia",
+                                "eedua",
+                                "aacal",
+                                "aandr",
+                                "eemma",
+                                "bbria",
+                                "ggena",
+                                "nneft",
+                                MessagesAllRecipientsTag
+                            },
+                            StringComparer.OrdinalIgnoreCase);
+
+                    if (allowedLegacyTags.Contains(
+                            legacyTag))
+                    {
+                        recipientTag =
+                            legacyTag;
+                    }
                 }
+            }
+
+            // En Notion jamás mostramos una alerta cuyo receptor siga
+            // indeterminado después del parser.
+            if (reminder.Source ==
+                    Models.Weblab.SearchSource.Notion &&
+                string.IsNullOrWhiteSpace(
+                    recipientTag))
+            {
+                return false;
             }
 
             if (string.Equals(
@@ -674,9 +725,6 @@ namespace Anfeta.UI
                     ApplicationData.Current.LocalSettings.Values[
                         LS_MessagingCurrentUserTag] as string);
 
-            // Los recordatorios locales sin destinatario se conservan. Las
-            // páginas de Mensajes/Revisiones de Notion deben tener receptor y
-            // nunca se muestran a otro usuario por un título incompleto.
             if (string.IsNullOrWhiteSpace(recipientTag))
             {
                 return reminder.Source !=
@@ -795,6 +843,174 @@ namespace Anfeta.UI
         }
 
 
+        private async Task<bool> OpenReminderNotionTargetAsync(
+            IndexedFileReminder reminder)
+        {
+            if (reminder == null ||
+                reminder.Source !=
+                    Models.Weblab.SearchSource.Notion)
+            {
+                return false;
+            }
+
+            Uri? webUri = null;
+
+            var rawTarget =
+                (reminder.Target ?? string.Empty)
+                    .Trim();
+
+            // Preferimos HTTPS para este botón rápido. Windows puede devolver
+            // true al lanzar notion:// aunque Notion Desktop no llegue a
+            // mostrar la página; eso dejaba el botón aparentemente "cargando"
+            // sin abrir nada visible.
+            if (!string.IsNullOrWhiteSpace(rawTarget) &&
+                Uri.TryCreate(
+                    rawTarget,
+                    UriKind.Absolute,
+                    out var parsedTarget))
+            {
+                if (parsedTarget.Scheme.Equals(
+                        "http",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    parsedTarget.Scheme.Equals(
+                        "https",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    webUri =
+                        parsedTarget;
+                }
+                else if (parsedTarget.Scheme.Equals(
+                             "notion",
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        webUri =
+                            new Uri(
+                                "https://" +
+                                parsedTarget.GetComponents(
+                                    UriComponents.HostAndPort |
+                                    UriComponents.PathAndQuery |
+                                    UriComponents.Fragment,
+                                    UriFormat.UriEscaped));
+                    }
+                    catch
+                    {
+                        webUri = null;
+                    }
+                }
+            }
+
+            // Respaldo por PageId si el índice no trae una URL utilizable.
+            if (webUri == null &&
+                !string.IsNullOrWhiteSpace(
+                    reminder.PageId))
+            {
+                var cleanPageId =
+                    reminder.PageId
+                        .Replace("-", string.Empty)
+                        .Trim();
+
+                if (!string.IsNullOrWhiteSpace(cleanPageId) &&
+                    Uri.TryCreate(
+                        $"https://www.notion.so/{cleanPageId}",
+                        UriKind.Absolute,
+                        out var pageUri))
+                {
+                    webUri =
+                        pageUri;
+                }
+            }
+
+            if (webUri == null)
+                return false;
+
+            try
+            {
+                return await Windows.System.Launcher
+                    .LaunchUriAsync(
+                        webUri);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void QueueReminderToastForLater(
+            ReminderToastEntry entry,
+            TimeSpan delay)
+        {
+            if (entry == null)
+                return;
+
+            entry.Popup.IsOpen = false;
+            entry.Popup.Child = null;
+
+            _activeReminderToasts.Remove(
+                entry);
+
+            // No se marca como leído ni entendido. Se vuelve a encolar para
+            // que una pantalla llena nunca haga desaparecer la notificación.
+            _indexedReminderService.Snooze(
+                entry.Reminder,
+                delay);
+        }
+
+        private void PruneRecentReminderToastKeys()
+        {
+            if (_recentReminderToastKeys.Count == 0)
+                return;
+
+            var now = DateTimeOffset.UtcNow;
+            var expired = _recentReminderToastKeys
+                .Where(item => now - item.Value > ReminderToastRecentWindow)
+                .Select(item => item.Key)
+                .ToList();
+
+            foreach (var key in expired)
+                _recentReminderToastKeys.Remove(key);
+        }
+
+        private static string NormalizeReminderToastText(
+            string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var compact = Regex.Replace(
+                value.Trim().ToLowerInvariant(),
+                @"\s+",
+                " ");
+
+            return compact;
+        }
+
+        private static string BuildReminderToastDedupKey(
+            IndexedFileReminder reminder)
+        {
+            var minuteKey =
+                reminder.ReminderAt
+                    .ToLocalTime()
+                    .ToString("yyyyMMddHHmm");
+
+            if (!string.IsNullOrWhiteSpace(reminder.PageId))
+            {
+                return $"page:{reminder.PageId.Trim().ToLowerInvariant()}|{minuteKey}";
+            }
+
+            if (!string.IsNullOrWhiteSpace(reminder.Target))
+            {
+                return $"target:{NormalizeReminderToastText(reminder.Target)}|{minuteKey}";
+            }
+
+            var messageKey = NormalizeReminderToastText(reminder.Message);
+            if (messageKey.Length > 180)
+                messageKey = messageKey[..180];
+
+            return $"msg:{messageKey}|{minuteKey}";
+        }
+
         private void ShowReminderToast(
             IndexedFileReminder reminder)
         {
@@ -817,13 +1033,24 @@ namespace Anfeta.UI
                 return;
             }
 
-            // Evita duplicar visualmente el mismo recordatorio si el escaneo
-            // y un pospuesto coinciden durante el mismo ciclo.
+            PruneRecentReminderToastKeys();
+
+            var dedupKey =
+                BuildReminderToastDedupKey(reminder);
+
+            // Blindaje visual extra: si la misma actividad entra repetida casi
+            // al mismo tiempo (aunque cambie sender/identity), se muestra una
+            // sola tarjeta usando PageId → Target → Message + minuto.
             if (_activeReminderToasts.Any(item =>
+                    string.Equals(
+                        item.DedupKey,
+                        dedupKey,
+                        StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(
                         item.Reminder.Identity,
                         reminder.Identity,
-                        StringComparison.OrdinalIgnoreCase)))
+                        StringComparison.OrdinalIgnoreCase)) ||
+                _recentReminderToastKeys.ContainsKey(dedupKey))
             {
                 return;
             }
@@ -904,6 +1131,15 @@ namespace Anfeta.UI
                             GridUnitType.Star)
                 });
 
+            actions.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
             var viewButton =
                 new Button
                 {
@@ -929,6 +1165,36 @@ namespace Anfeta.UI
             ToolTipService.SetToolTip(
                 remindAgainButton,
                 "Cerrar este aviso y volver a mostrarlo en 15 minutos.");
+
+            var openNotionButton =
+                new Button
+                {
+                    Content = "N",
+                    MinHeight = 32,
+                    MinWidth = 56,
+                    FontSize = 16,
+                    FontWeight =
+                        Microsoft.UI.Text.FontWeights.Bold,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment =
+                        HorizontalAlignment.Center,
+                    IsEnabled =
+                        reminder.Source ==
+                            Models.Weblab.SearchSource.Notion &&
+                        (Uri.TryCreate(
+                             reminder.Target,
+                             UriKind.Absolute,
+                             out _) ||
+                         !string.IsNullOrWhiteSpace(
+                             reminder.PageId))
+                };
+
+            ToolTipService.SetToolTip(
+                openNotionButton,
+                openNotionButton.IsEnabled
+                    ? "Abrir la actividad vinculada en Notion."
+                    : "Este recordatorio no tiene una página de Notion asociada.");
 
             var understoodButton =
                 new Button
@@ -961,7 +1227,10 @@ namespace Anfeta.UI
             Grid.SetColumn(remindAgainButton, 1);
             actions.Children.Add(remindAgainButton);
 
-            Grid.SetColumn(understoodButton, 2);
+            Grid.SetColumn(openNotionButton, 2);
+            actions.Children.Add(openNotionButton);
+
+            Grid.SetColumn(understoodButton, 3);
             actions.Children.Add(understoodButton);
 
             var body =
@@ -1014,8 +1283,12 @@ namespace Anfeta.UI
                 new ReminderToastEntry
                 {
                     Popup = popup,
-                    Reminder = reminder
+                    Reminder = reminder,
+                    DedupKey = dedupKey
                 };
+
+            _recentReminderToastKeys[dedupKey] =
+                DateTimeOffset.UtcNow;
 
             viewButton.Click +=
                 async (_, __) =>
@@ -1042,6 +1315,39 @@ namespace Anfeta.UI
                         acknowledged: false);
                 };
 
+            openNotionButton.Click +=
+                async (_, __) =>
+                {
+                    // Abrir Notion NO equivale a "Entendido": la tarjeta sigue
+                    // visible hasta que el usuario la cierre explícitamente.
+                    //
+                    // En alertas de revisión intentamos primero la actividad
+                    // REAL vinculada (open-original), porque reminder.Target
+                    // suele apuntar a la página auxiliar de notificación.
+                    if (IsReminderReviewAlert(
+                            reminder.Message) &&
+                        !string.IsNullOrWhiteSpace(
+                            reminder.PageId))
+                    {
+                        try
+                        {
+                            await OpenReminderQuickActionAsync(
+                                reminder,
+                                "open-original");
+
+                            return;
+                        }
+                        catch
+                        {
+                            // Si la resolución interna falla, usamos el
+                            // fallback HTTPS directo de abajo.
+                        }
+                    }
+
+                    await OpenReminderNotionTargetAsync(
+                        reminder);
+                };
+
             understoodButton.Click +=
                 (_, __) =>
                 {
@@ -1062,8 +1368,9 @@ namespace Anfeta.UI
                 var oldest =
                     _activeReminderToasts[0];
 
-                oldest.Popup.IsOpen = false;
-                _activeReminderToasts.RemoveAt(0);
+                QueueReminderToastForLater(
+                    oldest,
+                    TimeSpan.FromMinutes(2));
             }
 
             popup.IsOpen = true;
@@ -1132,8 +1439,12 @@ namespace Anfeta.UI
                 rootHeight -
                 ReminderToastMargin;
 
-            // La notificación más reciente queda abajo y las anteriores se
-            // apilan hacia arriba.
+            var overflow =
+                new List<ReminderToastEntry>();
+
+            // La más reciente queda abajo. Si por alturas variables ya no cabe
+            // una tarjeta completa arriba, esa tarjeta NO se pierde: se
+            // pospone brevemente y volverá a entrar por el servicio.
             for (var index =
                      _activeReminderToasts.Count - 1;
                  index >= 0;
@@ -1152,20 +1463,38 @@ namespace Anfeta.UI
                 var height =
                     child.ActualHeight > 10
                         ? child.ActualHeight
-                        : 116;
+                        : 132;
 
-                cursorBottom -= height;
+                var proposedTop =
+                    cursorBottom -
+                    height;
+
+                if (proposedTop <
+                    ReminderToastMargin)
+                {
+                    overflow.Add(entry);
+                    continue;
+                }
 
                 entry.Popup.HorizontalOffset =
                     x;
 
                 entry.Popup.VerticalOffset =
-                    Math.Max(
-                        ReminderToastMargin,
-                        cursorBottom);
+                    proposedTop;
 
-                cursorBottom -=
+                cursorBottom =
+                    proposedTop -
                     ReminderToastGap;
+            }
+
+            if (overflow.Count == 0)
+                return;
+
+            foreach (var entry in overflow)
+            {
+                QueueReminderToastForLater(
+                    entry,
+                    TimeSpan.FromMinutes(2));
             }
         }
 
@@ -1179,6 +1508,7 @@ namespace Anfeta.UI
             }
 
             _activeReminderToasts.Clear();
+            _recentReminderToastKeys.Clear();
         }
 
         private async Task ShowIndexedReminderAsync(
@@ -1940,7 +2270,17 @@ namespace Anfeta.UI
 
             if (hwnd != IntPtr.Zero)
             {
-                ShowWindow(hwnd, SW_RESTORE);
+                // SW_RESTORE sobre una ventana maximizada la regresaba a su
+                // tamaño normal/mediano. Solo restauramos si está minimizada.
+                // En cualquier otro estado conservamos exactamente el tamaño
+                // actual y únicamente llevamos ANFETA al frente.
+                if (IsIconic(hwnd))
+                {
+                    ShowWindow(
+                        hwnd,
+                        SW_RESTORE);
+                }
+
                 Activate();
                 SetForegroundWindow(hwnd);
             }
@@ -1980,7 +2320,17 @@ namespace Anfeta.UI
 
             if (hwnd != IntPtr.Zero)
             {
-                ShowWindow(hwnd, SW_RESTORE);
+                // SW_RESTORE sobre una ventana maximizada la regresaba a su
+                // tamaño normal/mediano. Solo restauramos si está minimizada.
+                // En cualquier otro estado conservamos exactamente el tamaño
+                // actual y únicamente llevamos ANFETA al frente.
+                if (IsIconic(hwnd))
+                {
+                    ShowWindow(
+                        hwnd,
+                        SW_RESTORE);
+                }
+
                 Activate();
                 SetForegroundWindow(hwnd);
             }

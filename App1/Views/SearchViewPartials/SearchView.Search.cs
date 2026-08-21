@@ -1116,6 +1116,149 @@ namespace Anfeta.UI.Views
                 .Trim(' ', '-', '–', '—', ':', '|', '/');
         }
 
+
+        private static void CollectNotionPreviewText(
+            DependencyObject element,
+            List<string> lines)
+        {
+            if (element == null)
+                return;
+
+            if (element is TextBlock textBlock &&
+                !string.IsNullOrWhiteSpace(textBlock.Text))
+            {
+                var value =
+                    textBlock.Text.Trim();
+
+                if (!string.IsNullOrWhiteSpace(value))
+                    lines.Add(value);
+            }
+            else if (element is TextBox textBox &&
+                     !string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                var value =
+                    textBox.Text.Trim();
+
+                if (!string.IsNullOrWhiteSpace(value))
+                    lines.Add(value);
+            }
+
+            var children =
+                Microsoft.UI.Xaml.Media.VisualTreeHelper
+                    .GetChildrenCount(element);
+
+            for (var index = 0;
+                 index < children;
+                 index++)
+            {
+                CollectNotionPreviewText(
+                    Microsoft.UI.Xaml.Media.VisualTreeHelper
+                        .GetChild(element, index),
+                    lines);
+            }
+        }
+
+        private void RefreshCopyNotionPreviewContentButton()
+        {
+            if (BtnCopyNotionPreviewContent == null ||
+                NotionPreviewContent == null)
+            {
+                return;
+            }
+
+            var lines = new List<string>();
+
+            CollectNotionPreviewText(
+                NotionPreviewContent,
+                lines);
+
+            BtnCopyNotionPreviewContent.IsEnabled =
+                lines.Any(line =>
+                    !string.IsNullOrWhiteSpace(line));
+        }
+
+        private void BtnCopyNotionPreviewContent_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (NotionPreviewContent == null)
+                return;
+
+            var lines = new List<string>();
+
+            CollectNotionPreviewText(
+                NotionPreviewContent,
+                lines);
+
+            var content =
+                string.Join(
+                    Environment.NewLine,
+                    lines
+                        .Where(line =>
+                            !string.IsNullOrWhiteSpace(line))
+                        .Select(line => line.Trim()));
+
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                if (NotionPreviewStatus != null)
+                {
+                    NotionPreviewStatus.Text =
+                        "No hay contenido cargado para copiar.";
+                }
+
+                return;
+            }
+
+            try
+            {
+                var package =
+                    new Windows.ApplicationModel.DataTransfer
+                        .DataPackage();
+
+                package.SetText(content);
+
+                Windows.ApplicationModel.DataTransfer
+                    .Clipboard.SetContent(package);
+
+                Windows.ApplicationModel.DataTransfer
+                    .Clipboard.Flush();
+
+                if (NotionPreviewStatus != null)
+                {
+                    NotionPreviewStatus.Text =
+                        $"Contenido copiado ✅ · {content.Length:N0} caracteres";
+                }
+
+                if (BtnCopyNotionPreviewContent != null)
+                {
+                    BtnCopyNotionPreviewContent.Content =
+                        "Copiado ✓";
+
+                    DispatcherQueue.TryEnqueue(
+                        async () =>
+                        {
+                            await Task.Delay(1400);
+
+                            if (BtnCopyNotionPreviewContent != null)
+                            {
+                                BtnCopyNotionPreviewContent.Content =
+                                    "Copiar contenido";
+
+                                RefreshCopyNotionPreviewContentButton();
+                            }
+                        });
+                }
+            }
+            catch (Exception ex)
+            {
+                if (NotionPreviewStatus != null)
+                {
+                    NotionPreviewStatus.Text =
+                        $"No se pudo copiar → {ex.Message}";
+                }
+            }
+        }
+
         #endregion
     }
 }

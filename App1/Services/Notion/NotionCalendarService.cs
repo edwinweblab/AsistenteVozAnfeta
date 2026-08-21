@@ -3348,6 +3348,43 @@ namespace Anfeta.UI.Services.Notion
                 .Replace(" ", string.Empty);
         }
 
+        private static bool IsHistoricalZRevisionDateProtected(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null)
+                return false;
+
+            var searchable =
+                string.Join(
+                    " ",
+                    new[]
+                    {
+                        activity.Title,
+                        activity.ReviewState
+                    }.Where(value =>
+                        !string.IsNullOrWhiteSpace(value)));
+
+            // Token exacto. No confunde zREVISION con rtuzREVISION,
+            // prtuzREVISION o sprtuzREVISION.
+            return Regex.IsMatch(
+                searchable,
+                @"(?<![\p{L}\p{Nd}_])zREVISION(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+        }
+
+        private static void ThrowIfHistoricalZRevisionDateProtected(
+            NotionCalendarActivity activity)
+        {
+            if (!IsHistoricalZRevisionDateProtected(activity))
+                return;
+
+            throw new InvalidOperationException(
+                "La actividad está en zREVISION y su Fecha POR Hacer es histórica. " +
+                "ANFETA no la moverá a otro día. Para reprogramarla, primero " +
+                "cámbiala/reasígnala a una fase activa como prtuzREVISION.");
+        }
+
         public async Task<NotionCalendarActivity> MoveActivityToDateAsync(
             string token,
             NotionCalendarActivity activity,
@@ -3372,6 +3409,12 @@ namespace Anfeta.UI.Services.Notion
                 throw new InvalidOperationException(
                     "La actividad está bloqueada para automatizaciones. Desbloquéala antes de moverla.");
             }
+
+            // Segunda capa de seguridad. Incluso si Procesar ayer, drag,
+            // una automatización o una acción futura llega hasta el servicio,
+            // zREVISION jamás cambia de día.
+            ThrowIfHistoricalZRevisionDateProtected(
+                activity);
 
             using var http =
                 CreateClient(token);
@@ -4018,6 +4061,11 @@ namespace Anfeta.UI.Services.Notion
                 throw new InvalidOperationException(
                     "La actividad está bloqueada para automatizaciones. Desbloquéala antes de moverla.");
             }
+
+            // Esta API también es usada por drag, One Click, editor de horario
+            // y automatizaciones. zREVISION conserva la fecha/hora histórica.
+            ThrowIfHistoricalZRevisionDateProtected(
+                activity);
 
             using var http =
                 CreateClient(token);

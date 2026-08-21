@@ -300,6 +300,15 @@ namespace Anfeta.UI.Views
         private string _calendarProjectPreviewSourcePageId =
             string.Empty;
 
+        // Segmentación visual del popup "Actividades del proyecto".
+        // Tipo = forma parte del criterio/caché de proyecto.
+        // Persona = filtro puramente local sobre las actividades ya cargadas.
+        private string _calendarProjectPersonSegmentFilter =
+            "*";
+
+        private string _calendarProjectSegmentContextKey =
+            string.Empty;
+
         // Índice rápido de checklist por identidad lógica:
         // tipo + dominio + mes.
         private sealed record CalendarProjectActivitiesCacheEntry(
@@ -12082,6 +12091,190 @@ namespace Anfeta.UI.Views
             };
         }
 
+        private static string GetCalendarProjectTypeLabel(
+            string projectType)
+        {
+            var clean =
+                (projectType ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(clean) ||
+                clean == "*")
+            {
+                return "TODAS";
+            }
+
+            var match =
+                WhatsAppCalendarProjectTypes
+                    .FirstOrDefault(item =>
+                        string.Equals(
+                            item.Token,
+                            clean,
+                            StringComparison.OrdinalIgnoreCase));
+
+            return string.IsNullOrWhiteSpace(match.Token)
+                ? clean.ToUpperInvariant()
+                : match.Label;
+        }
+
+        private async Task SwitchCalendarProjectTypeAsync(
+            NotionCalendarActivity sourceActivity,
+            string projectType)
+        {
+            if (sourceActivity == null ||
+                !TryBuildCalendarProjectGroupCriteria(
+                    sourceActivity,
+                    out var baseCriteria))
+            {
+                return;
+            }
+
+            var cleanType =
+                (projectType ?? string.Empty)
+                    .Trim()
+                    .ToLowerInvariant();
+
+            CalendarProjectGroupCriteria targetCriteria;
+
+            if (string.IsNullOrWhiteSpace(cleanType) ||
+                cleanType == "*")
+            {
+                targetCriteria =
+                    BuildCalendarAllProjectTypesCriteria(
+                        baseCriteria);
+            }
+            else
+            {
+                var typeInfo =
+                    WhatsAppCalendarProjectTypes
+                        .FirstOrDefault(item =>
+                            string.Equals(
+                                item.Token,
+                                cleanType,
+                                StringComparison.OrdinalIgnoreCase));
+
+                if (string.IsNullOrWhiteSpace(typeInfo.Token))
+                    return;
+
+                targetCriteria =
+                    baseCriteria with
+                    {
+                        ProjectType = typeInfo.Token,
+                        ProjectLabel = typeInfo.Label,
+                        IncludeAllProjectTypes = false
+                    };
+            }
+
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    "Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            SetCalendarActivityPreviewPinned(
+                sourceActivity.PageId,
+                true);
+
+            UpdateCalendarActivityPreviewContent(
+                BuildCalendarProjectHoverLoading(
+                    sourceActivity,
+                    targetCriteria));
+
+            try
+            {
+                using var cts =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(90));
+
+                var related =
+                    await GetCalendarProjectRelatedActivitiesAsync(
+                        sourceActivity,
+                        targetCriteria,
+                        token,
+                        cts.Token,
+                        forceRefresh: false);
+
+                if (!_calendarActivityPreviewPinned ||
+                    !string.Equals(
+                        _calendarActivityPreviewPinnedPageId,
+                        sourceActivity.PageId,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                UpdateCalendarActivityPreviewContent(
+                    BuildCalendarProjectHoverChecklist(
+                        sourceActivity,
+                        targetCriteria,
+                        related));
+
+                _ = WarmOpenCalendarProjectChecklistAsync(
+                    sourceActivity,
+                    targetCriteria,
+                    related,
+                    sourceActivity.PageId,
+                    cts.Token);
+
+                StatusText.Text =
+                    targetCriteria.IncludeAllProjectTypes
+                        ? $"Estado: Todas las áreas de {targetCriteria.Domain} · {targetCriteria.MonthTag} ✅"
+                        : $"Estado: {targetCriteria.ProjectLabel} · {targetCriteria.Domain} · {targetCriteria.MonthTag} ✅";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text =
+                    "Estado: Cambio de tipo cancelado.";
+            }
+            catch (Exception ex)
+            {
+                UpdateCalendarActivityPreviewContent(
+                    BuildCalendarActivityErrorPreview(
+                        sourceActivity,
+                        ex.Message));
+
+                StatusText.Text =
+                    $"Estado: No se pudo cambiar el tipo de proyecto → {ex.Message}";
+            }
+        }
+
+        private void SetCalendarProjectPersonSegmentFilter(
+            NotionCalendarActivity sourceActivity,
+            CalendarProjectGroupCriteria criteria,
+            IReadOnlyList<NotionCalendarActivity> activities,
+            string person)
+        {
+            if (sourceActivity == null ||
+                criteria == null)
+            {
+                return;
+            }
+
+            _calendarProjectPersonSegmentFilter =
+                string.IsNullOrWhiteSpace(person) ||
+                string.Equals(
+                    person,
+                    "Todas las personas",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "*"
+                    : NormalizeCalendarPerson(person);
+
+            UpdateCalendarActivityPreviewContent(
+                BuildCalendarProjectHoverChecklist(
+                    sourceActivity,
+                    criteria,
+                    activities));
+
+            StatusText.Text =
+                _calendarProjectPersonSegmentFilter == "*"
+                    ? $"Estado: Mostrando todas las personas · {criteria.Domain} ✅"
+                    : $"Estado: Filtrando {criteria.Domain} por {_calendarProjectPersonSegmentFilter} ✅";
+        }
+
         private async Task SwitchCalendarProjectScopeAsync(
             NotionCalendarActivity sourceActivity,
             bool includeAllProjectTypes)
@@ -19140,6 +19333,19 @@ namespace Anfeta.UI.Views
             return warnings;
         }
 
+        // zREVISION representa una revisión ya cerrada/aprobada.
+        // Su Fecha POR Hacer se vuelve histórica: ANFETA puede mostrarla,
+        // abrirla o reasignarla de fase, pero NO debe arrastrarla a otro día.
+        private static bool IsCalendarHistoricalReviewDateProtected(
+            NotionCalendarActivity activity)
+        {
+            return activity != null &&
+                   !activity.IsReviewMirror &&
+                   HasExactCalendarPhase(
+                       activity,
+                       "zREVISION");
+        }
+
         private static bool IsOneClickSuspendedActivity(
             NotionCalendarActivity activity)
         {
@@ -19160,9 +19366,8 @@ namespace Anfeta.UI.Views
                 return true;
             }
 
-            if (HasExactCalendarPhase(
-                    activity,
-                    "zREVISION"))
+            if (IsCalendarHistoricalReviewDateProtected(
+                    activity))
             {
                 return true;
             }
@@ -21364,6 +21569,14 @@ namespace Anfeta.UI.Views
                             continue;
                         }
 
+                        if (IsCalendarHistoricalReviewDateProtected(
+                                activity))
+                        {
+                            failures.Add(
+                                $"{activity.Title}: zREVISION conserva su fecha histórica y no se pasó a mañana.");
+                            continue;
+                        }
+
                         var oneClickSourceDate =
                             activity.Start.Date;
 
@@ -21416,6 +21629,14 @@ namespace Anfeta.UI.Views
                         {
                             failures.Add(
                                 $"{item.Activity.Title}: la actividad quedó bloqueada antes de guardar.");
+                            continue;
+                        }
+
+                        if (IsCalendarHistoricalReviewDateProtected(
+                                item.Activity))
+                        {
+                            failures.Add(
+                                $"{item.Activity.Title}: zREVISION conserva su fecha histórica y no se reprogramó.");
                             continue;
                         }
 
@@ -22988,9 +23209,91 @@ namespace Anfeta.UI.Views
                         current.PageId,
                         out var existingMetadata);
 
-                    var original = ResolveOriginalReviewPerson(
-                        current,
-                        reviewer);
+                    var original =
+                        existingMetadata != null &&
+                        IsUsableOriginalReviewPerson(
+                            existingMetadata.OriginalPerson,
+                            reviewer)
+                            ? NormalizeCalendarPerson(
+                                existingMetadata.OriginalPerson)
+                            : ResolveOriginalReviewPerson(
+                                current,
+                                reviewer);
+
+                    // IMPORTANTE — propiedad del envío automático:
+                    // Todas las instalaciones de ANFETA ven el mismo cambio de
+                    // Notion. Sin este filtro, Neftali, Brian, John, etc. podían
+                    // crear cada uno una página de notificación distinta para
+                    // la MISMA actividad.
+                    //
+                    // Solo la instancia del responsable/originador crea la
+                    // alerta automática. Las demás observan el cambio pero no
+                    // generan otra notificación/hilo.
+                    var currentLocalPerson =
+                        NormalizeCalendarPerson(
+                            GetCurrentCalendarUserName());
+
+                    var normalizedOriginal =
+                        NormalizeCalendarPerson(
+                            original);
+
+                    if (string.IsNullOrWhiteSpace(
+                            currentLocalPerson) ||
+                        string.IsNullOrWhiteSpace(
+                            normalizedOriginal) ||
+                        !string.Equals(
+                            currentLocalPerson,
+                            normalizedOriginal,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        Debug.WriteLine(
+                            $"[REVIEW_ALERT_OWNER] {current.PageId}: " +
+                            $"omitida en {currentLocalPerson}; propietario={normalizedOriginal}.");
+
+                        continue;
+                    }
+
+                    // Antes de crear nada, vuelve a leer metadata REAL por si
+                    // el propietario ya alcanzó a crear el hilo desde otra
+                    // pestaña/ventana de su propia ANFETA.
+                    try
+                    {
+                        var freshOwnerMetadata =
+                            await _calendarReviewFlowService
+                                .GetReviewFlowAsync(
+                                    token,
+                                    current.PageId,
+                                    CancellationToken.None);
+
+                        if (freshOwnerMetadata != null)
+                        {
+                            existingMetadata =
+                                freshOwnerMetadata;
+
+                            _calendarReviewFlowCache[
+                                current.PageId] =
+                                    freshOwnerMetadata;
+
+                            if (!string.IsNullOrWhiteSpace(
+                                    freshOwnerMetadata.AlertPageId))
+                            {
+                                Debug.WriteLine(
+                                    $"[REVIEW_ALERT_OWNER] {current.PageId}: " +
+                                    $"hilo ya existe={freshOwnerMetadata.AlertPageId}; no se duplica.");
+
+                                ApplyReviewFlowMetadata(
+                                    current,
+                                    freshOwnerMetadata);
+
+                                continue;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine(
+                            $"[REVIEW_ALERT_OWNER] lectura previa {current.PageId}: {ex.Message}");
+                    }
 
                     var metadata = new ReviewFlowMetadata
                     {
@@ -24602,6 +24905,7 @@ namespace Anfeta.UI.Views
             return activity != null &&
                    !activity.IsReviewMirror &&
                    !activity.IsAutomationLocked &&
+                   !IsCalendarHistoricalReviewDateProtected(activity) &&
                    !IsOneClickScheduleExcluded(activity);
         }
 
@@ -31955,7 +32259,7 @@ namespace Anfeta.UI.Views
                 CalendarProjectGroupCriteria criteria,
                 IReadOnlyList<NotionCalendarActivity> activities)
         {
-            var unique =
+            var allUnique =
                 (activities ??
                  Array.Empty<NotionCalendarActivity>())
                     .Where(activity =>
@@ -31969,14 +32273,46 @@ namespace Anfeta.UI.Views
                     .Select(group => group.First())
                     .ToList();
 
-            // Guarda el proyecto ya resuelto por el hover.
+            var segmentContextKey =
+                $"{criteria.Domain}|{criteria.MonthTag}";
+
+            if (!string.Equals(
+                    _calendarProjectSegmentContextKey,
+                    segmentContextKey,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _calendarProjectSegmentContextKey =
+                    segmentContextKey;
+
+                _calendarProjectPersonSegmentFilter =
+                    "*";
+            }
+
+            var unique =
+                _calendarProjectPersonSegmentFilter == "*"
+                    ? allUnique
+                    : allUnique
+                        .Where(activity =>
+                            SplitPersons(
+                                    activity.Person)
+                                .Select(
+                                    NormalizeCalendarPerson)
+                                .Any(person =>
+                                    string.Equals(
+                                        person,
+                                        _calendarProjectPersonSegmentFilter,
+                                        StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+
+            // Guarda SIEMPRE el proyecto completo ya resuelto por el hover.
+            // El filtro por persona es visual/local y no debe recortar la caché.
             // Al hacer clic se reutiliza para reconstruir la MISMA
             // checklist en modo fijado con el detalle completo arriba.
             _calendarActivityPreviewLastCriteria =
                 criteria;
 
             _calendarActivityPreviewLastProjectActivities =
-                unique;
+                allUnique;
 
             _calendarActivityPreviewLastSelectedPageId =
                 hoveredActivity.PageId ?? string.Empty;
@@ -32336,6 +32672,287 @@ namespace Anfeta.UI.Views
 
             root.Children.Add(heading);
 
+            // ---------------------------------------------------------
+            // SEGMENTACIÓN · TIPO DE PROYECTO + PERSONA
+            // ---------------------------------------------------------
+            // El dominio + mes permanecen fijos. Cambiar tipo usa la caché
+            // existente tipo|dominio|mes; cambiar persona NO consulta Notion.
+            var filtersRow =
+                new Grid
+                {
+                    ColumnSpacing = 8,
+                    Margin = new Thickness(0, 2, 0, 2)
+                };
+
+            filtersRow.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
+            filtersRow.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
+                            GridUnitType.Star)
+                });
+
+            Button BuildTypeFilterButton()
+            {
+                var activeLabel =
+                    criteria.IncludeAllProjectTypes
+                        ? "Todas"
+                        : criteria.ProjectLabel;
+
+                var button =
+                    new Button
+                    {
+                        Content =
+                            $"Tipo: {activeLabel} ▾",
+                        Height = 30,
+                        Padding =
+                            new Thickness(
+                                9, 2, 9, 2),
+                        HorizontalAlignment =
+                            HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment =
+                            HorizontalAlignment.Left,
+                        CornerRadius =
+                            new CornerRadius(7),
+                        FontSize = 10,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold
+                    };
+
+                var flyout =
+                    new MenuFlyout();
+
+                var allItem =
+                    new MenuFlyoutItem
+                    {
+                        Text = "✓ Todas las áreas"
+                    };
+
+                allItem.Click +=
+                    async (_, __) =>
+                        await SwitchCalendarProjectTypeAsync(
+                            hoveredActivity,
+                            "*");
+
+                flyout.Items.Add(allItem);
+                flyout.Items.Add(
+                    new MenuFlyoutSeparator());
+
+                foreach (var typeInfo in
+                         WhatsAppCalendarProjectTypes)
+                {
+                    var item =
+                        new MenuFlyoutItem
+                        {
+                            Text =
+                                string.Equals(
+                                    criteria.ProjectType,
+                                    typeInfo.Token,
+                                    StringComparison.OrdinalIgnoreCase) &&
+                                !criteria.IncludeAllProjectTypes
+                                    ? $"✓ {typeInfo.Label}"
+                                    : typeInfo.Label,
+                            Tag = typeInfo.Token
+                        };
+
+                    item.Click +=
+                        async (sender, __) =>
+                        {
+                            if (sender is not
+                                    MenuFlyoutItem menuItem)
+                            {
+                                return;
+                            }
+
+                            await SwitchCalendarProjectTypeAsync(
+                                hoveredActivity,
+                                menuItem.Tag?.ToString() ??
+                                string.Empty);
+                        };
+
+                    flyout.Items.Add(item);
+                }
+
+                button.Click +=
+                    (_, __) =>
+                        flyout.ShowAt(button);
+
+                ToolTipService.SetToolTip(
+                    button,
+                    "Cambiar entre SEO, WEB, ADS, APLICACIÓN y otras áreas del mismo dominio/mes.");
+
+                return button;
+            }
+
+            Button BuildPersonFilterButton()
+            {
+                var availablePeople =
+                    allUnique
+                        .SelectMany(activity =>
+                            SplitPersons(
+                                activity.Person))
+                        .Select(
+                            NormalizeCalendarPerson)
+                        .Where(person =>
+                            !string.IsNullOrWhiteSpace(person))
+                        .Distinct(
+                            StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(person =>
+                            person,
+                            StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                var activePerson =
+                    _calendarProjectPersonSegmentFilter == "*"
+                        ? "Todas"
+                        : _calendarProjectPersonSegmentFilter;
+
+                var button =
+                    new Button
+                    {
+                        Content =
+                            $"Persona: {activePerson} ▾",
+                        Height = 30,
+                        Padding =
+                            new Thickness(
+                                9, 2, 9, 2),
+                        HorizontalAlignment =
+                            HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment =
+                            HorizontalAlignment.Left,
+                        CornerRadius =
+                            new CornerRadius(7),
+                        FontSize = 10,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold
+                    };
+
+                var flyout =
+                    new MenuFlyout();
+
+                var allItem =
+                    new MenuFlyoutItem
+                    {
+                        Text =
+                            _calendarProjectPersonSegmentFilter == "*"
+                                ? "✓ Todas las personas"
+                                : "Todas las personas"
+                    };
+
+                allItem.Click +=
+                    (_, __) =>
+                        SetCalendarProjectPersonSegmentFilter(
+                            hoveredActivity,
+                            criteria,
+                            allUnique,
+                            "*");
+
+                flyout.Items.Add(allItem);
+
+                if (availablePeople.Count > 0)
+                {
+                    flyout.Items.Add(
+                        new MenuFlyoutSeparator());
+                }
+
+                foreach (var person in availablePeople)
+                {
+                    var item =
+                        new MenuFlyoutItem
+                        {
+                            Text =
+                                string.Equals(
+                                    _calendarProjectPersonSegmentFilter,
+                                    person,
+                                    StringComparison.OrdinalIgnoreCase)
+                                    ? $"✓ {person}"
+                                    : person,
+                            Tag = person
+                        };
+
+                    item.Click +=
+                        (sender, __) =>
+                        {
+                            if (sender is not
+                                    MenuFlyoutItem menuItem)
+                            {
+                                return;
+                            }
+
+                            SetCalendarProjectPersonSegmentFilter(
+                                hoveredActivity,
+                                criteria,
+                                allUnique,
+                                menuItem.Tag?.ToString() ??
+                                string.Empty);
+                        };
+
+                    flyout.Items.Add(item);
+                }
+
+                button.Click +=
+                    (_, __) =>
+                        flyout.ShowAt(button);
+
+                ToolTipService.SetToolTip(
+                    button,
+                    "Filtrar localmente las actividades ya cargadas por usuario asignado.");
+
+                return button;
+            }
+
+            var typeFilterButton =
+                BuildTypeFilterButton();
+
+            var personFilterButton =
+                BuildPersonFilterButton();
+
+            Grid.SetColumn(
+                typeFilterButton,
+                0);
+
+            Grid.SetColumn(
+                personFilterButton,
+                1);
+
+            filtersRow.Children.Add(
+                typeFilterButton);
+
+            filtersRow.Children.Add(
+                personFilterButton);
+
+            root.Children.Add(
+                filtersRow);
+
+            root.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        $"Dominio: {criteria.Domain} · {criteria.MonthTag} · " +
+                        $"{unique.Count}/{allUnique.Count} actividad(es) visibles" +
+                        (criteria.IncludeAllProjectTypes
+                            ? " · agrupadas por tipo"
+                            : string.Empty),
+                    FontSize = 9.2,
+                    Opacity = 0.62,
+                    Margin =
+                        new Thickness(
+                            1, -1, 0, 1),
+                    TextTrimming =
+                        TextTrimming.CharacterEllipsis,
+                    MaxLines = 1
+                });
+
             root.Children.Add(
                 new TextBlock
                 {
@@ -32533,7 +33150,20 @@ namespace Anfeta.UI.Views
                                 group
                                     .Select(item =>
                                         item.Activity)
-                                    .OrderBy(GetCalendarProjectOrderPresenceKey)
+                                    .OrderBy(activity =>
+                                    {
+                                        if (!criteria.IncludeAllProjectTypes)
+                                            return string.Empty;
+
+                                        return TryGetWhatsAppCalendarProjectType(
+                                            activity,
+                                            out _,
+                                            out var label)
+                                                ? label
+                                                : "OTROS";
+                                    },
+                                    StringComparer.OrdinalIgnoreCase)
+                                    .ThenBy(GetCalendarProjectOrderPresenceKey)
                                     .ThenBy(GetCalendarProjectOrderMajorKey)
                                     .ThenBy(GetCalendarProjectOrderMinorKey)
                                     .ThenBy(activity =>
@@ -32564,6 +33194,7 @@ namespace Anfeta.UI.Views
                     };
 
                 var phaseHasNumberedActivities =
+                    criteria.IncludeAllProjectTypes ||
                     phaseGroup.Activities.Any(activity =>
                         TryGetCalendarProjectOrderNumber(
                             activity,
@@ -32646,9 +33277,171 @@ namespace Anfeta.UI.Views
                                 .ThenBy(item =>
                                     item.Title);
 
+                    string lastProjectTypeLabel =
+                        string.Empty;
+
                     foreach (var activity in
                              orderedActivities)
                     {
+                        var activityTypeLabel =
+                            TryGetWhatsAppCalendarProjectType(
+                                activity,
+                                out _,
+                                out var resolvedActivityTypeLabel)
+                                    ? resolvedActivityTypeLabel
+                                    : "OTROS";
+
+                        if (criteria.IncludeAllProjectTypes &&
+                            !string.Equals(
+                                lastProjectTypeLabel,
+                                activityTypeLabel,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            lastProjectTypeLabel =
+                                activityTypeLabel;
+
+                            var typeCount =
+                                phaseGroup.Activities.Count(item =>
+                                    TryGetWhatsAppCalendarProjectType(
+                                        item,
+                                        out _,
+                                        out var candidateLabel)
+                                        ? string.Equals(
+                                            candidateLabel,
+                                            activityTypeLabel,
+                                            StringComparison.OrdinalIgnoreCase)
+                                        : string.Equals(
+                                            activityTypeLabel,
+                                            "OTROS",
+                                            StringComparison.OrdinalIgnoreCase));
+
+                            var typeHeaderGrid =
+                                new Grid
+                                {
+                                    ColumnSpacing = 8,
+                                    Margin =
+                                        new Thickness(
+                                            2, 7, 2, 3),
+                                    Padding =
+                                        new Thickness(
+                                            8, 5, 8, 5),
+                                    Background =
+                                        new SolidColorBrush(
+                                            Color.FromArgb(
+                                                24,
+                                                56,
+                                                189,
+                                                248))
+                                };
+
+                            typeHeaderGrid.ColumnDefinitions.Add(
+                                new ColumnDefinition
+                                {
+                                    Width =
+                                        new GridLength(
+                                            1,
+                                            GridUnitType.Star)
+                                });
+
+                            typeHeaderGrid.ColumnDefinitions.Add(
+                                new ColumnDefinition
+                                {
+                                    Width =
+                                        GridLength.Auto
+                                });
+
+                            var typeTitle =
+                                new TextBlock
+                                {
+                                    Text =
+                                        activityTypeLabel,
+                                    FontSize = 10.2,
+                                    FontWeight =
+                                        Microsoft.UI.Text.FontWeights.Bold,
+                                    Foreground =
+                                        new SolidColorBrush(
+                                            Color.FromArgb(
+                                                255,
+                                                186,
+                                                230,
+                                                253)),
+                                    CharacterSpacing = 20,
+                                    VerticalAlignment =
+                                        VerticalAlignment.Center
+                                };
+
+                            Grid.SetColumn(
+                                typeTitle,
+                                0);
+
+                            typeHeaderGrid.Children.Add(
+                                typeTitle);
+
+                            var typeCountBadge =
+                                new Border
+                                {
+                                    MinWidth = 28,
+                                    Padding =
+                                        new Thickness(
+                                            6, 1, 6, 1),
+                                    CornerRadius =
+                                        new CornerRadius(9),
+                                    Background =
+                                        new SolidColorBrush(
+                                            Color.FromArgb(
+                                                48,
+                                                56,
+                                                189,
+                                                248)),
+                                    BorderBrush =
+                                        new SolidColorBrush(
+                                            Color.FromArgb(
+                                                115,
+                                                125,
+                                                211,
+                                                252)),
+                                    BorderThickness =
+                                        new Thickness(1),
+                                    Child =
+                                        new TextBlock
+                                        {
+                                            Text =
+                                                typeCount.ToString(
+                                                    CultureInfo.InvariantCulture),
+                                            FontSize = 9,
+                                            FontWeight =
+                                                Microsoft.UI.Text.FontWeights.Bold,
+                                            HorizontalAlignment =
+                                                HorizontalAlignment.Center
+                                        }
+                                };
+
+                            Grid.SetColumn(
+                                typeCountBadge,
+                                1);
+
+                            typeHeaderGrid.Children.Add(
+                                typeCountBadge);
+
+                            phaseContent.Children.Add(
+                                new Border
+                                {
+                                    CornerRadius =
+                                        new CornerRadius(7),
+                                    BorderBrush =
+                                        new SolidColorBrush(
+                                            Color.FromArgb(
+                                                60,
+                                                125,
+                                                211,
+                                                252)),
+                                    BorderThickness =
+                                        new Thickness(1),
+                                    Child =
+                                        typeHeaderGrid
+                                });
+                        }
+
                         var isCurrent =
                             string.Equals(
                                 activity.PageId,
@@ -32948,6 +33741,75 @@ namespace Anfeta.UI.Views
                                 ? "Sin asignar"
                                 : activity.Person;
 
+                        var normalizedDisplayPerson =
+                            string.Join(
+                                ", ",
+                                SplitPersons(person)
+                                    .Select(
+                                        NormalizeCalendarPerson)
+                                    .Where(value =>
+                                        !string.IsNullOrWhiteSpace(value))
+                                    .Distinct(
+                                        StringComparer.OrdinalIgnoreCase));
+
+                        if (string.IsNullOrWhiteSpace(
+                                normalizedDisplayPerson))
+                        {
+                            normalizedDisplayPerson =
+                                "Sin asignar";
+                        }
+
+                        textStack.Children.Add(
+                            new Border
+                            {
+                                HorizontalAlignment =
+                                    HorizontalAlignment.Left,
+                                MaxWidth = 180,
+                                Margin =
+                                    new Thickness(
+                                        0, 1, 0, 1),
+                                Padding =
+                                    new Thickness(
+                                        6, 1, 6, 1),
+                                CornerRadius =
+                                    new CornerRadius(8),
+                                Background =
+                                    new SolidColorBrush(
+                                        Color.FromArgb(
+                                            42,
+                                            14,
+                                            165,
+                                            233)),
+                                BorderBrush =
+                                    new SolidColorBrush(
+                                        Color.FromArgb(
+                                            120,
+                                            56,
+                                            189,
+                                            248)),
+                                BorderThickness =
+                                    new Thickness(1),
+                                Child =
+                                    new TextBlock
+                                    {
+                                        Text =
+                                            $"👤 {normalizedDisplayPerson}",
+                                        FontSize = 8.7,
+                                        FontWeight =
+                                            Microsoft.UI.Text.FontWeights.SemiBold,
+                                        Foreground =
+                                            new SolidColorBrush(
+                                                Color.FromArgb(
+                                                    255,
+                                                    224,
+                                                    242,
+                                                    254)),
+                                        TextTrimming =
+                                            TextTrimming.CharacterEllipsis,
+                                        MaxLines = 1
+                                    }
+                            });
+
                         var technicalPhase =
                             GetCalendarProjectPhaseInfo(activity)?.Token ??
                             string.Empty;
@@ -32965,12 +33827,16 @@ namespace Anfeta.UI.Views
                                         new[]
                                         {
                                             technicalPhase,
-                                            criteria.ProjectLabel,
+                                            TryGetWhatsAppCalendarProjectType(
+                                                activity,
+                                                out _,
+                                                out var activityProjectLabel)
+                                                    ? activityProjectLabel
+                                                    : criteria.ProjectLabel,
                                             criteria.MonthTag,
                                             activity.Start.ToString(
                                                 "dd/MM",
-                                                CultureInfo.InvariantCulture),
-                                            person
+                                                CultureInfo.InvariantCulture)
                                         }.Where(value =>
                                             !string.IsNullOrWhiteSpace(value))),
                                 FontSize = 8.7,
@@ -37588,11 +38454,53 @@ namespace Anfeta.UI.Views
                     (values["Messaging.CurrentUserTag"] as string ??
                      string.Empty).Trim();
 
-                if (string.IsNullOrWhiteSpace(senderTag))
-                    senderTag = "anfeta";
-
                 var senderPerson =
                     GetCurrentCalendarUserName();
+
+                // Para la alerta inicial de revisión, el remitente NO depende
+                // de qué instalación de ANFETA detectó el cambio. Se toma del
+                // responsable original persistido en el flujo. Así la misma
+                // revisión siempre representa:
+                //     responsable original -> ReviewAssignee
+                // y nunca John/Brian/Genaro por accidente.
+                _calendarReviewFlowCache.TryGetValue(
+                    activity.PageId,
+                    out var senderMetadata);
+
+                if (messagePrefix.StartsWith(
+                        "Actividad lista para revisión",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var deterministicSender =
+                        NormalizeCalendarPerson(
+                            senderMetadata?.OriginalPerson ??
+                            activity.OriginalPerson ??
+                            string.Empty);
+
+                    if (!string.IsNullOrWhiteSpace(
+                            deterministicSender) &&
+                        !string.Equals(
+                            deterministicSender,
+                            recipientPerson,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        var deterministicSenderTag =
+                            GetCalendarMessageRecipientTag(
+                                deterministicSender);
+
+                        if (!string.IsNullOrWhiteSpace(
+                                deterministicSenderTag))
+                        {
+                            senderPerson =
+                                deterministicSender;
+                            senderTag =
+                                deterministicSenderTag;
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(senderTag))
+                    senderTag = "anfeta";
 
                 var now =
                     DateTimeOffset.Now;
@@ -38317,6 +39225,15 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text =
                     "Estado: La actividad está bloqueada. Desbloquéala antes de moverla.";
+                return;
+            }
+
+            if (IsCalendarHistoricalReviewDateProtected(
+                    activity))
+            {
+                StatusText.Text =
+                    "Estado: zREVISION conserva su fecha histórica. " +
+                    "Para reprogramarla primero cámbiala/reasígnala a una fase activa.";
                 return;
             }
 
