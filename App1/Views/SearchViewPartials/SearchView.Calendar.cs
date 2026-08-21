@@ -207,6 +207,12 @@ namespace Anfeta.UI.Views
         private Border? _calendarActivityPreviewPopupCard;
         private ContentControl? _calendarActivityPreviewHost;
 
+        // Ventana REAL desacoplada del popup fijado. Mientras exista,
+        // el estado pinned se conserva para que los controles sigan siendo
+        // interactivos y los cambios de actividad reutilicen la misma Window.
+        private string _calendarActivityDetachedPageId =
+            string.Empty;
+
         // Si Notion/checklist termina de actualizar justo mientras el usuario
         // arrastra el popup fijado, aplazamos el repintado hasta soltar. Evita
         // que el contenido cambie de medida/rasterizado durante el gesto.
@@ -10790,12 +10796,112 @@ namespace Anfeta.UI.Views
                     activity,
                     "rtuzREVISION");
 
+            var hasIncompleteChecklistWarning =
+                (HasExactCalendarPhase(
+                     activity,
+                     "rtuzREVISION") ||
+                 HasExactCalendarPhase(
+                     activity,
+                     "zREVISION") ||
+                 activity.IsPendingReview ||
+                 activity.IsApprovedReview) &&
+                activity.ChecklistScanned &&
+                activity.ChecklistTotal > 0 &&
+                activity.ChecklistCompleted <
+                    activity.ChecklistTotal;
+
             var cardContent = new Grid
             {
                 IsHitTestVisible = false
             };
 
             cardContent.Children.Add(content);
+
+            if (hasIncompleteChecklistWarning)
+            {
+                // Aviso fuerte sin sacrificar la franja izquierda de prioridad.
+                // Se dibuja dentro del contenido para no reemplazar BorderBrush
+                // del Button, que sigue indicando prioridad.
+                cardContent.Children.Add(
+                    new Border
+                    {
+                        BorderBrush =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    255,
+                                    250,
+                                    204,
+                                    21)),
+                        BorderThickness =
+                            new Thickness(2),
+                        CornerRadius =
+                            new CornerRadius(
+                                5 * _calendarZoom),
+                        Background =
+                            new SolidColorBrush(
+                                Colors.Transparent),
+                        IsHitTestVisible = false
+                    });
+
+                if (!ultraMiniCard &&
+                    cardWidth >= 96 &&
+                    height >= 42)
+                {
+                    cardContent.Children.Add(
+                        new Border
+                        {
+                            Padding =
+                                new Thickness(
+                                    5, 1, 5, 1),
+                            Margin =
+                                new Thickness(
+                                    0, 2, 2, 0),
+                            HorizontalAlignment =
+                                HorizontalAlignment.Right,
+                            VerticalAlignment =
+                                VerticalAlignment.Top,
+                            Background =
+                                new SolidColorBrush(
+                                    Color.FromArgb(
+                                        235,
+                                        82,
+                                        61,
+                                        9)),
+                            BorderBrush =
+                                new SolidColorBrush(
+                                    Color.FromArgb(
+                                        255,
+                                        250,
+                                        204,
+                                        21)),
+                            BorderThickness =
+                                new Thickness(1),
+                            CornerRadius =
+                                new CornerRadius(7),
+                            Child =
+                                new TextBlock
+                                {
+                                    Text = "⚠ CHECK",
+                                    FontSize =
+                                        Math.Max(
+                                            6.8,
+                                            7.3 * CalendarFontScale),
+                                    FontWeight =
+                                        Microsoft.UI.Text.FontWeights.Bold,
+                                    Foreground =
+                                        new SolidColorBrush(
+                                            Color.FromArgb(
+                                                255,
+                                                254,
+                                                240,
+                                                138)),
+                                    MaxLines = 1,
+                                    IsHitTestVisible = false
+                                },
+                            IsHitTestVisible = false
+                        });
+                }
+            }
 
             if (useStackedLayout &&
                 overlapTotal > 1 &&
@@ -10908,6 +11014,13 @@ namespace Anfeta.UI.Views
                     (string.IsNullOrWhiteSpace(activity.WorkLogDetail)
                         ? string.Empty
                         : $"\nSesiones: {activity.WorkLogDetail}"));
+            }
+
+            if (hasIncompleteChecklistWarning)
+            {
+                activityTooltipParts.Add(
+                    $"⚠ {activity.ChecklistCompleted}/{activity.ChecklistTotal} · " +
+                    "actividad en R/Z con checklist incompleta");
             }
 
             activityTooltipParts.Add(
@@ -32388,7 +32501,8 @@ namespace Anfeta.UI.Views
                     hoveredActivity,
                     content: null,
                     statusText: string.Empty,
-                    compactMeta: false);
+                    compactMeta: false,
+                    showEditorChrome: true);
 
             root.Children.Add(
                 new Border
@@ -34799,18 +34913,43 @@ namespace Anfeta.UI.Views
             var wasPinned =
                 _calendarActivityPreviewPinned;
 
-            _calendarActivityPreviewPinned =
-                pinned;
+            var previousPinnedPageId =
+                _calendarActivityPreviewPinnedPageId;
 
-            _calendarActivityPreviewPinnedPageId =
+            var nextPinnedPageId =
                 pinned
                     ? (pageId ?? string.Empty).Trim()
                     : string.Empty;
 
-            // Cada nueva fijación vuelve a iniciar junto a la card. Después
-            // de que el usuario la arrastre, PositionCalendarActivityPreviewPopup
-            // conserva esa posición en lugar de regresarla al ancla.
-            if (!pinned || !wasPinned)
+            var changedPinnedActivity =
+                pinned &&
+                !string.Equals(
+                    previousPinnedPageId,
+                    nextPinnedPageId,
+                    StringComparison.OrdinalIgnoreCase);
+
+            _calendarActivityPreviewPinned =
+                pinned;
+
+            _calendarActivityPreviewPinnedPageId =
+                nextPinnedPageId;
+
+            if (pinned &&
+                !string.IsNullOrWhiteSpace(
+                    _calendarActivityDetachedPageId) &&
+                Application.Current is App detachedApp &&
+                detachedApp.IsCalendarActivityWindowOpen)
+            {
+                _calendarActivityDetachedPageId =
+                    nextPinnedPageId;
+            }
+
+            // Cada NUEVA actividad fijada vuelve a iniciar junto a su card.
+            // Antes, si ya había una actividad fijada y se hacía clic en otra,
+            // se heredaba la posición/contenido de la anterior.
+            if (!pinned ||
+                !wasPinned ||
+                changedPinnedActivity)
             {
                 _calendarActivityPreviewUserMoved = false;
                 _calendarActivityPreviewDragActive = false;
@@ -34849,15 +34988,47 @@ namespace Anfeta.UI.Views
             _calendarHoveredActivityButton =
                 button;
 
+            var popupWasOpen =
+                _calendarActivityPreviewPopup?.IsOpen == true &&
+                _calendarActivityPreviewHost != null;
+
+            var sameActivityAlreadyOpen =
+                popupWasOpen &&
+                string.Equals(
+                    _calendarActivityPreviewPinnedPageId,
+                    activity.PageId,
+                    StringComparison.OrdinalIgnoreCase);
+
+            // Cancela cualquier carga del hover/actividad anterior antes de
+            // cambiar la identidad fijada.
+            if (!sameActivityAlreadyOpen)
+            {
+                try
+                {
+                    _calendarHoverPreviewCts?.Cancel();
+                }
+                catch
+                {
+                }
+
+                _calendarActivityPreviewLastCriteria =
+                    null;
+
+                _calendarActivityPreviewLastProjectActivities =
+                    Array.Empty<NotionCalendarActivity>();
+
+                _calendarActivityPreviewLastSelectedPageId =
+                    string.Empty;
+            }
+
             SetCalendarActivityPreviewPinned(
                 activity.PageId,
                 true);
 
-            // Si el hover ya dejó abierto el popup para esta misma tarjeta,
-            // reutilizamos los datos ya resueltos y reconstruimos ESA MISMA
-            // interfaz en modo fijado. En este modo aparece arriba el detalle
-            // completo con los campos/botones históricos de ANFETA.
-            if (_calendarActivityPreviewPopup?.IsOpen == true &&
+            // Solo se reutiliza contenido cuando el popup abierto YA pertenece
+            // a esta misma actividad. Si se hizo clic en otra, se continúa por
+            // la ruta normal y se reconstruye inmediatamente.
+            if (sameActivityAlreadyOpen &&
                 _calendarActivityPreviewHost != null)
             {
                 if (_calendarActivityPreviewLastCriteria != null &&
@@ -34992,6 +35163,194 @@ namespace Anfeta.UI.Views
                         activity,
                         ex.Message));
             }
+        }
+
+        private NotionCalendarActivity?
+            GetCalendarDetachedActivity()
+        {
+            var pageId =
+                !string.IsNullOrWhiteSpace(
+                    _calendarActivityPreviewPinnedPageId)
+                    ? _calendarActivityPreviewPinnedPageId
+                    : _calendarActivityDetachedPageId;
+
+            if (string.IsNullOrWhiteSpace(pageId))
+            {
+                return _calendarHoveredActivityButton?.Tag
+                    as NotionCalendarActivity;
+            }
+
+            return _calendarActivityPreviewLastProjectActivities
+                       .FirstOrDefault(activity =>
+                           string.Equals(
+                               activity.PageId,
+                               pageId,
+                               StringComparison.OrdinalIgnoreCase))
+                   ?? _calendarActivities
+                       .FirstOrDefault(activity =>
+                           string.Equals(
+                               activity.PageId,
+                               pageId,
+                               StringComparison.OrdinalIgnoreCase))
+                   ?? (_calendarHoveredActivityButton?.Tag
+                       as NotionCalendarActivity);
+        }
+
+        private string GetCalendarDetachedWindowTitle()
+        {
+            var activity =
+                GetCalendarDetachedActivity();
+
+            var title =
+                activity == null
+                    ? string.Empty
+                    : GetCalendarOrderedCompactActivityTitle(
+                        activity);
+
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                title =
+                    activity?.Title ??
+                    "Actividad";
+            }
+
+            title =
+                Regex.Replace(
+                    title ?? string.Empty,
+                    @"\s+",
+                    " ")
+                .Trim();
+
+            if (title.Length > 90)
+            {
+                title =
+                    title.Substring(
+                        0,
+                        87)
+                    .TrimEnd() +
+                    "…";
+            }
+
+            return
+                $"ANFETA · Actividad · {title}";
+        }
+
+        private void CalendarActivityPreviewDetach_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (!_calendarActivityPreviewPinned ||
+                _calendarActivityPreviewHost?.Content is not
+                    FrameworkElement currentContent)
+            {
+                StatusText.Text =
+                    "Estado: Primero fija una actividad para desacoplarla.";
+                return;
+            }
+
+            if (Application.Current is not App app)
+            {
+                StatusText.Text =
+                    "Estado: No se pudo crear la ventana flotante.";
+                return;
+            }
+
+            var pageId =
+                (_calendarActivityPreviewPinnedPageId ??
+                 string.Empty)
+                .Trim();
+
+            if (string.IsNullOrWhiteSpace(pageId))
+            {
+                StatusText.Text =
+                    "Estado: La actividad fijada no tiene identificador.";
+                return;
+            }
+
+            // El árbol visual NO se clona: se transfiere a una Window real.
+            // Conserva los mismos handlers, edición, checklist y acciones.
+            _calendarActivityPreviewHost.Content =
+                null;
+
+            _calendarActivityDetachedPageId =
+                pageId;
+
+            if (_calendarActivityPreviewPopup != null)
+            {
+                _calendarActivityPreviewPopup.IsOpen =
+                    false;
+            }
+
+            _calendarActivityPreviewPopup =
+                null;
+            _calendarActivityPreviewPopupCard =
+                null;
+            _calendarActivityPreviewHost =
+                null;
+            _calendarActivityPreviewPendingContent =
+                null;
+            _calendarActivityPreviewPinBar =
+                null;
+            _calendarActivityPreviewScrollViewer =
+                null;
+            _calendarActivityPreviewDragActive =
+                false;
+            _calendarActivityPreviewUserMoved =
+                false;
+            _calendarPointerOverPreview =
+                false;
+
+            app.OpenCalendarActivityWindow(
+                currentContent,
+                GetCalendarDetachedWindowTitle(),
+                () =>
+                {
+                    DispatcherQueue.TryEnqueue(
+                        OnCalendarDetachedActivityWindowClosed);
+                });
+
+            StatusText.Text =
+                "Estado: Actividad desacoplada ↗ · ya puedes moverla a otro monitor ✅";
+        }
+
+        private void OnCalendarDetachedActivityWindowClosed()
+        {
+            if (string.IsNullOrWhiteSpace(
+                    _calendarActivityDetachedPageId))
+            {
+                return;
+            }
+
+            _calendarActivityDetachedPageId =
+                string.Empty;
+
+            _calendarActivityPreviewPinned =
+                false;
+            _calendarActivityPreviewPinnedPageId =
+                string.Empty;
+            _calendarActivityPreviewUserMoved =
+                false;
+            _calendarActivityPreviewDragActive =
+                false;
+
+            _calendarActivityPreviewLastCriteria =
+                null;
+            _calendarActivityPreviewLastProjectActivities =
+                Array.Empty<NotionCalendarActivity>();
+            _calendarActivityPreviewLastSelectedPageId =
+                string.Empty;
+
+            _calendarHoveredActivityButton =
+                null;
+            _calendarPendingActivityButton =
+                null;
+            _calendarPointerOverActivity =
+                false;
+            _calendarPointerOverPreview =
+                false;
+
+            StatusText.Text =
+                "Estado: Ventana flotante de actividad cerrada ✅";
         }
 
         private void CalendarActivityPreviewClose_Click(
@@ -35643,6 +36002,22 @@ namespace Anfeta.UI.Views
             ApplyCalendarActivityPreviewUiScale(
                 content);
 
+            // Si la actividad ya fue desacoplada, el mismo flujo de contenido
+            // alimenta la Window real en vez de volver a crear un Popup dentro
+            // de ANFETA. Esto también permite hacer clic en otra actividad y
+            // reutilizar la ventana flotante.
+            if (!string.IsNullOrWhiteSpace(
+                    _calendarActivityDetachedPageId) &&
+                Application.Current is App detachedApp &&
+                detachedApp.IsCalendarActivityWindowOpen)
+            {
+                detachedApp.UpdateCalendarActivityWindowContent(
+                    content,
+                    GetCalendarDetachedWindowTitle());
+
+                return;
+            }
+
             if (_calendarActivityPreviewPopup?.IsOpen == true &&
                 _calendarActivityPreviewHost != null)
             {
@@ -35672,12 +36047,6 @@ namespace Anfeta.UI.Views
                 VerticalContentAlignment = VerticalAlignment.Top
             };
 
-            host.PointerEntered +=
-                CalendarPreviewContent_PointerEntered;
-
-            host.PointerExited +=
-                CalendarPreviewContent_PointerExited;
-
             var popupScroll =
                 new ScrollViewer
                 {
@@ -35694,12 +36063,6 @@ namespace Anfeta.UI.Views
                     HorizontalContentAlignment = HorizontalAlignment.Stretch,
                     IsTabStop = true
                 };
-
-            popupScroll.PointerEntered +=
-                CalendarPreviewContent_PointerEntered;
-
-            popupScroll.PointerExited +=
-                CalendarPreviewContent_PointerExited;
 
             var pinHeader =
                 new Grid
@@ -35765,6 +36128,12 @@ namespace Anfeta.UI.Views
                     Width = GridLength.Auto
                 });
 
+            pinHeader.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width = GridLength.Auto
+                });
+
             var pinLabel =
                 new TextBlock
                 {
@@ -35810,6 +36179,55 @@ namespace Anfeta.UI.Views
                 pinDragArea,
                 "Arrastra esta zona para mover la actividad fijada");
 
+            var detachButton =
+                new Button
+                {
+                    Content = "↗",
+                    Width = 30,
+                    Height = 26,
+                    Padding =
+                        new Thickness(0),
+                    HorizontalContentAlignment =
+                        HorizontalAlignment.Center,
+                    VerticalContentAlignment =
+                        VerticalAlignment.Center,
+                    Background =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                32,
+                                56,
+                                189,
+                                248)),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            Color.FromArgb(
+                                90,
+                                56,
+                                189,
+                                248)),
+                    BorderThickness =
+                        new Thickness(1),
+                    CornerRadius =
+                        new CornerRadius(6),
+                    FontSize = 13,
+                    VerticalAlignment =
+                        VerticalAlignment.Center
+                };
+
+            ToolTipService.SetToolTip(
+                detachButton,
+                "Desacoplar actividad · mover a otro monitor");
+
+            detachButton.Click +=
+                CalendarActivityPreviewDetach_Click;
+
+            Grid.SetColumn(
+                detachButton,
+                1);
+
+            pinHeader.Children.Add(
+                detachButton);
+
             var resizeButton =
                 new Button
                 {
@@ -35846,7 +36264,7 @@ namespace Anfeta.UI.Views
 
             Grid.SetColumn(
                 resizeButton,
-                1);
+                2);
 
             pinHeader.Children.Add(
                 resizeButton);
@@ -35888,7 +36306,7 @@ namespace Anfeta.UI.Views
 
             Grid.SetColumn(
                 closeButton,
-                2);
+                3);
 
             pinHeader.Children.Add(
                 closeButton);
@@ -36465,7 +36883,18 @@ namespace Anfeta.UI.Views
                         }
 
                         if (pinGrid.Children.Count > 1 &&
-                            pinGrid.Children[1] is Button sizeButton)
+                            pinGrid.Children[1] is Button detachPreviewButton)
+                        {
+                            detachPreviewButton.Width =
+                                30d * headerScale;
+                            detachPreviewButton.Height =
+                                26d * headerScale;
+                            detachPreviewButton.FontSize =
+                                13d * headerScale;
+                        }
+
+                        if (pinGrid.Children.Count > 2 &&
+                            pinGrid.Children[2] is Button sizeButton)
                         {
                             sizeButton.Width =
                                 30d * headerScale;
@@ -36475,8 +36904,8 @@ namespace Anfeta.UI.Views
                                 12d * headerScale;
                         }
 
-                        if (pinGrid.Children.Count > 2 &&
-                            pinGrid.Children[2] is Button closePreviewButton)
+                        if (pinGrid.Children.Count > 3 &&
+                            pinGrid.Children[3] is Button closePreviewButton)
                         {
                             closePreviewButton.Width =
                                 28d * headerScale;
@@ -36724,14 +37153,26 @@ namespace Anfeta.UI.Views
         private void UpdateCalendarActivityPreviewContent(
             FrameworkElement content)
         {
+            ApplyCalendarActivityPreviewUiScale(
+                content);
+
+            if (!string.IsNullOrWhiteSpace(
+                    _calendarActivityDetachedPageId) &&
+                Application.Current is App detachedApp &&
+                detachedApp.IsCalendarActivityWindowOpen)
+            {
+                detachedApp.UpdateCalendarActivityWindowContent(
+                    content,
+                    GetCalendarDetachedWindowTitle());
+
+                return;
+            }
+
             if (_calendarActivityPreviewPopup?.IsOpen != true ||
                 _calendarActivityPreviewHost == null)
             {
                 return;
             }
-
-            ApplyCalendarActivityPreviewUiScale(
-                content);
 
             // No cambies el árbol visual en pleno drag. Una actualización de
             // checklist puede llegar desde background justo mientras se mueve
@@ -36800,8 +37241,11 @@ namespace Anfeta.UI.Views
                 _calendarPreviewCloseTimer =
                     new DispatcherTimer
                     {
+                        // Da tiempo suficiente para cruzar desde la tarjeta
+                        // hasta el popup sin cerrarlo. Una vez dentro, el borde
+                        // exterior completo mantiene vivo el hover, incluido scroll.
                         Interval =
-                            TimeSpan.FromMilliseconds(320)
+                            TimeSpan.FromMilliseconds(650)
                     };
 
                 _calendarPreviewCloseTimer.Tick +=
@@ -36831,6 +37275,20 @@ namespace Anfeta.UI.Views
         {
             StopCalendarPreviewCloseTimer();
             StopNotionPreviewSpeech();
+
+            if (!string.IsNullOrWhiteSpace(
+                    _calendarActivityDetachedPageId) &&
+                Application.Current is App detachedApp &&
+                detachedApp.IsCalendarActivityWindowOpen)
+            {
+                // Limpiamos primero el identificador para que el callback de
+                // Closed no intente repetir el cierre mientras este método
+                // termina de resetear el estado local.
+                _calendarActivityDetachedPageId =
+                    string.Empty;
+
+                detachedApp.CloseCalendarActivityWindow();
+            }
 
             try
             {
@@ -37403,7 +37861,8 @@ namespace Anfeta.UI.Views
             UIElement? content,
             string statusText,
             IReadOnlyList<NotionPreviewBlock>? speechBlocks = null,
-            bool compactMeta = false)
+            bool compactMeta = false,
+            bool showEditorChrome = false)
         {
             var root = new StackPanel
             {
@@ -37413,8 +37872,15 @@ namespace Anfeta.UI.Views
                 Padding = new Thickness(10)
             };
 
+            // El clic fijado mantiene la edición REAL.
+            // El hover puede dibujar exactamente el mismo bloque visual,
+            // pero sus controles quedan en solo lectura hasta fijarlo.
             var pinnedEditorMode =
                 _calendarActivityPreviewPinned &&
+                !activity.IsReviewMirror;
+
+            var showEditorMode =
+                (pinnedEditorMode || showEditorChrome) &&
                 !activity.IsReviewMirror;
 
             TextBox? titleEditor =
@@ -37444,7 +37910,7 @@ namespace Anfeta.UI.Views
                         GridLength.Auto
                 });
 
-            if (pinnedEditorMode)
+            if (showEditorMode)
             {
                 titleEditor =
                     new TextBox
@@ -37461,13 +37927,16 @@ namespace Anfeta.UI.Views
                         AcceptsReturn = false,
                         HorizontalAlignment =
                             HorizontalAlignment.Stretch,
-                        MinHeight = 34
+                        MinHeight = 34,
+                        IsReadOnly = !pinnedEditorMode,
+                        IsTabStop = pinnedEditorMode
                     };
 
                 ToolTipService.SetToolTip(
                     titleEditor,
-                    "Edita el título original de Notion. " +
-                    "Se guarda con el botón Guardar cambios.");
+                    pinnedEditorMode
+                        ? "Edita el título original de Notion. Se guarda con el botón Guardar cambios."
+                        : "Vista previa · haz clic en la actividad para fijar y editar.");
 
                 Grid.SetColumn(
                     titleEditor,
@@ -37502,7 +37971,7 @@ namespace Anfeta.UI.Views
                     titleText);
             }
 
-            if (pinnedEditorMode)
+            if (showEditorMode)
             {
                 var lockButton =
                     new Button
@@ -37538,7 +38007,8 @@ namespace Anfeta.UI.Views
                                         110, 74, 222, 128)),
                         BorderThickness =
                             new Thickness(1),
-                        Tag = activity
+                        Tag = activity,
+                        IsEnabled = pinnedEditorMode
                     };
 
                 ToolTipService.SetToolTip(
@@ -37589,7 +38059,7 @@ namespace Anfeta.UI.Views
             Button? editorSave =
                 null;
 
-            if (pinnedEditorMode)
+            if (showEditorMode)
             {
                 var currentDuration =
                     Math.Max(
@@ -37612,6 +38082,7 @@ namespace Anfeta.UI.Views
                         HorizontalAlignment =
                             HorizontalAlignment.Stretch,
                         IsEnabled =
+                            pinnedEditorMode &&
                             !activity.IsAutomationLocked
                     };
 
@@ -37630,6 +38101,7 @@ namespace Anfeta.UI.Views
                         HorizontalAlignment =
                             HorizontalAlignment.Stretch,
                         IsEnabled =
+                            pinnedEditorMode &&
                             !activity.IsAutomationLocked
                     };
 
@@ -37640,6 +38112,7 @@ namespace Anfeta.UI.Views
                         HorizontalAlignment =
                             HorizontalAlignment.Stretch,
                         IsEnabled =
+                            pinnedEditorMode &&
                             !activity.IsAutomationLocked
                     };
 
@@ -37750,16 +38223,19 @@ namespace Anfeta.UI.Views
                         HorizontalAlignment =
                             HorizontalAlignment.Left,
                         CornerRadius =
-                            new CornerRadius(7)
+                            new CornerRadius(7),
+                        IsEnabled = pinnedEditorMode
                     };
 
                 editorStatus =
                     new TextBlock
                     {
                         Text =
-                            activity.IsAutomationLocked
-                                ? "🔒 Fecha y horario bloqueados; el título sigue siendo editable."
-                                : "Edita título, fecha, hora o duración y guarda.",
+                            pinnedEditorMode
+                                ? (activity.IsAutomationLocked
+                                    ? "🔒 Fecha y horario bloqueados; el título sigue siendo editable."
+                                    : "Edita título, fecha, hora o duración y guarda.")
+                                : "Vista previa · haz clic en la actividad para fijar y habilitar la edición.",
                         FontSize = 10,
                         Opacity = 0.68,
                         VerticalAlignment =

@@ -81,6 +81,14 @@ namespace Anfeta.UI.Views
 
             var q = (sender.Text ?? string.Empty).Trim();
 
+            // MULTI-MONITOR · Si existe un Calendario independiente abierto,
+            // replica automáticamente el filtro del Buscador después de un
+            // debounce corto. No abre la ventana si está cerrada.
+            if (!_calendarViewActive)
+            {
+                QueueCalendarWindowFilterSync(q);
+            }
+
             if (_calendarViewActive)
             {
                 CancelPendingSearch();

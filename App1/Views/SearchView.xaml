@@ -487,6 +487,27 @@
                     Glyph="&#xE787;" />
                     </ToggleButton>
 
+                    <!--  MULTI-MONITOR · abrir Calendario en una ventana independiente  -->
+                    <Button
+                x:Name="BtnOpenCalendarWindow"
+                Width="38"
+                MinHeight="32"
+                Padding="0"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
+                Click="OpenCalendarWindow_Click"
+                CornerRadius="6"
+                ToolTipService.ToolTip="Abrir Calendario en otra ventana / monitor">
+                        <TextBlock
+                    FontSize="16"
+                    FontWeight="SemiBold"
+                    Text="▣" />
+                    </Button>
+
                     <!--  Vistas rápidas de Notion  -->
                     <Button
                 x:Name="BtnNotionViews"

@@ -769,6 +769,24 @@ namespace Anfeta.UI.Views.DailyProgress
                         carryOver: true));
             }
 
+            var historicalItems =
+                person.AllActivities
+                    .Where(item =>
+                        item.IsHistoricalSnapshot)
+                    .OrderBy(item =>
+                        item.Start)
+                    .ToList();
+
+            if (historicalItems.Count > 0)
+            {
+                stack.Children.Add(
+                    BuildMiniSection(
+                        "HISTÓRICO DEL DÍA",
+                        historicalItems,
+                        danger: false,
+                        carryOver: true));
+            }
+
             stack.Children.Add(
                 BuildMiniSection(
                     "REZAGOS",
@@ -791,6 +809,8 @@ namespace Anfeta.UI.Views.DailyProgress
                         $"R hoy {person.ReviewCount} · " +
                         $"Z hoy {person.CompletedCount} · " +
                         $"P {person.PendingCount} · " +
+                        $"hist {person.HistoricalCount} · " +
+                        $"⚠ check {person.IncompleteChecklistCount} · " +
                         $"sin checklist {person.MissingChecklistCount}",
                     VerticalAlignment =
                         VerticalAlignment.Center,
@@ -1068,6 +1088,23 @@ namespace Anfeta.UI.Views.DailyProgress
                         item));
             }
 
+            if (item.HasIncompleteChecklistWarning)
+            {
+                text.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            $"⚠ {item.StateCode} con checklist incompleta · {item.ChecklistLabel}",
+                        FontSize = 8.7,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground =
+                            Brush(255, 253, 224, 71),
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis
+                    });
+            }
+
             var todayMovementDetail =
                 BuildTodayMovementDetail(
                     item);
@@ -1109,21 +1146,25 @@ namespace Anfeta.UI.Views.DailyProgress
                     VerticalAlignment =
                         VerticalAlignment.Center,
                     Background =
-                        danger
-                            ? Brush(
-                                255,
-                                62,
-                                25,
-                                31)
-                            : Brush(
-                                255,
-                                14,
-                                51,
-                                31),
+                        item.HasIncompleteChecklistWarning
+                            ? Brush(255, 66, 51, 12)
+                            : danger
+                                ? Brush(
+                                    255,
+                                    62,
+                                    25,
+                                    31)
+                                : Brush(
+                                    255,
+                                    14,
+                                    51,
+                                    31),
                     BorderBrush =
-                        danger
-                            ? DangerBrush
-                            : ProgressBrush,
+                        item.HasIncompleteChecklistWarning
+                            ? Brush(255, 250, 204, 21)
+                            : danger
+                                ? DangerBrush
+                                : ProgressBrush,
                     BorderThickness =
                         new Thickness(1),
                     CornerRadius =
@@ -1264,7 +1305,13 @@ namespace Anfeta.UI.Views.DailyProgress
                         item.StateCode == "P"),
                 MissingChecklistCount =
                     all.Count(item =>
-                        item.NeedsChecklistData)
+                        item.NeedsChecklistData),
+                HistoricalCount =
+                    all.Count(item =>
+                        item.IsHistoricalSnapshot),
+                IncompleteChecklistCount =
+                    all.Count(item =>
+                        item.HasIncompleteChecklistWarning)
             };
         }
 
@@ -1335,6 +1382,31 @@ namespace Anfeta.UI.Views.DailyProgress
                         danger: false));
 
                 foreach (var item in carryOverItems)
+                {
+                    PersonDetailItems.Children.Add(
+                        BuildDetailActivityCard(
+                            item,
+                            danger: false));
+                }
+            }
+
+            var historicalItems =
+                person.AllActivities
+                    .Where(item =>
+                        item.IsHistoricalSnapshot)
+                    .OrderBy(item =>
+                        item.Start)
+                    .ToList();
+
+            if (historicalItems.Count > 0)
+            {
+                PersonDetailItems.Children.Add(
+                    BuildDetailSectionTitle(
+                        "HISTÓRICO DEL DÍA",
+                        historicalItems.Count,
+                        danger: false));
+
+                foreach (var item in historicalItems)
                 {
                     PersonDetailItems.Children.Add(
                         BuildDetailActivityCard(
@@ -1494,29 +1566,41 @@ namespace Anfeta.UI.Views.DailyProgress
                             13,
                             10),
                     Background =
-                        danger
-                            ? DangerBackgroundBrush
-                            : SurfaceBrush,
+                        item.HasIncompleteChecklistWarning
+                            ? Brush(255, 45, 37, 13)
+                            : danger
+                                ? DangerBackgroundBrush
+                                : SurfaceBrush,
                     BorderBrush =
-                        danger
-                            ? Brush(
-                                255,
-                                101,
-                                44,
-                                53)
-                            : Brush(
-                                255,
-                                41,
-                                74,
-                                58),
+                        item.HasIncompleteChecklistWarning
+                            ? Brush(255, 250, 204, 21)
+                            : danger
+                                ? Brush(
+                                    255,
+                                    101,
+                                    44,
+                                    53)
+                                : Brush(
+                                    255,
+                                    41,
+                                    74,
+                                    58),
                     BorderThickness =
                         new Thickness(
-                            danger
-                                ? 3
-                                : 2,
-                            1,
-                            1,
-                            1),
+                            item.HasIncompleteChecklistWarning
+                                ? 4
+                                : danger
+                                    ? 3
+                                    : 2,
+                            item.HasIncompleteChecklistWarning
+                                ? 2
+                                : 1,
+                            item.HasIncompleteChecklistWarning
+                                ? 2
+                                : 1,
+                            item.HasIncompleteChecklistWarning
+                                ? 2
+                                : 1),
                     CornerRadius =
                         new CornerRadius(10)
                 };
@@ -1610,6 +1694,24 @@ namespace Anfeta.UI.Views.DailyProgress
                         MutedBrush
                 });
 
+            if (item.HasIncompleteChecklistWarning)
+            {
+                info.Children.Add(
+                    new TextBlock
+                    {
+                        Text =
+                            $"⚠ {item.StateLabel} con checklist incompleta · " +
+                            $"{item.ChecklistCompleted}/{item.ChecklistTotal} ({item.ChecklistPercentage}%)",
+                        FontSize = 9.5,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground =
+                            Brush(255, 253, 224, 71),
+                        TextWrapping =
+                            TextWrapping.Wrap
+                    });
+            }
+
             if (item.IsCompletedMovement ||
                 item.IsReviewMovement)
             {
@@ -1670,21 +1772,25 @@ namespace Anfeta.UI.Views.DailyProgress
                             9,
                             4),
                     Background =
-                        item.IsCompleted
-                            ? Brush(
-                                255,
-                                13,
-                                54,
-                                33)
-                            : Brush(
-                                255,
-                                21,
-                                34,
-                                44),
+                        item.HasIncompleteChecklistWarning
+                            ? Brush(255, 66, 51, 12)
+                            : item.IsCompleted
+                                ? Brush(
+                                    255,
+                                    13,
+                                    54,
+                                    33)
+                                : Brush(
+                                    255,
+                                    21,
+                                    34,
+                                    44),
                     BorderBrush =
-                        item.IsCompleted
-                            ? ProgressBrush
-                            : BorderBrush,
+                        item.HasIncompleteChecklistWarning
+                            ? Brush(255, 250, 204, 21)
+                            : item.IsCompleted
+                                ? ProgressBrush
+                                : BorderBrush,
                     BorderThickness =
                         new Thickness(1),
                     CornerRadius =

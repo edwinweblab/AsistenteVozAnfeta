@@ -44,6 +44,17 @@ namespace Anfeta.UI.Models.DailyProgress
         public bool IsCompleted { get; init; }
         public bool IsSuspended { get; init; }
 
+        // Auditoría diaria V3.
+        // HistoricalSnapshot = la actividad ya no pertenece al día actual en
+        // Notion (por ejemplo, fue movida), pero ANFETA conserva cómo estaba
+        // cuando fue observada en esa fecha.
+        public bool IsHistoricalSnapshot { get; init; }
+        public DateTimeOffset? HistoricalCapturedAt { get; init; }
+
+        // R/Z con checklist real incompleta necesita una advertencia explícita.
+        // No se interpreta automáticamente como 100% solo por el estado.
+        public bool HasIncompleteChecklistWarning { get; init; }
+
         // Deltas detectados desde el baseline persistente del día.
         public int ChecklistDeltaToday { get; init; }
         public int WorkedMinutesDeltaToday { get; init; }
@@ -82,6 +93,8 @@ namespace Anfeta.UI.Models.DailyProgress
         public int CompletedCount { get; init; }
         public int PendingCount { get; init; }
         public int MissingChecklistCount { get; init; }
+        public int HistoricalCount { get; init; }
+        public int IncompleteChecklistCount { get; init; }
     }
 
     public sealed class DailyProgressSnapshot
@@ -105,6 +118,8 @@ namespace Anfeta.UI.Models.DailyProgress
 
         public int MissingChecklistCount { get; init; }
         public int UnassignedCount { get; init; }
+        public int HistoricalCount { get; init; }
+        public int IncompleteChecklistCount { get; init; }
 
         public bool LoadedFromCalendarCache { get; init; }
 
