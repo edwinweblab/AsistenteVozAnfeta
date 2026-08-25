@@ -22,6 +22,13 @@ namespace Anfeta.UI.Models.DailyProgress
         public DateTime Start => Source.Start;
         public DateTime End => Source.End;
 
+        // Fechas inmutables para auditoría y futuro reporte semanal.
+        public DateTime OriginalScheduledDate { get; init; }
+        public DateTime CurrentScheduledDate { get; init; }
+        public int MoveCount { get; init; }
+        public IReadOnlyList<DateTime> RouteDates { get; init; } =
+            Array.Empty<DateTime>();
+
         public bool ChecklistScanned => Source.ChecklistScanned;
         public int ChecklistTotal => Source.ChecklistTotal;
         public int ChecklistCompleted => Source.ChecklistCompleted;
@@ -30,6 +37,25 @@ namespace Anfeta.UI.Models.DailyProgress
         public string ChecklistLabel =>
             ChecklistScanned
                 ? $"{ChecklistCompleted}/{ChecklistTotal}"
+                : "…";
+
+        // Avance de la fecha seleccionada, derivado de checked=true y del
+        // last_edited_time de cada bloque to_do. El total es el checklist
+        // completo de la actividad para que Hoy y Total sean comparables.
+        public int TodayChecklistCompleted { get; init; }
+        public int TodayChecklistTotal { get; init; }
+        public int TodayChecklistPercentage { get; init; }
+
+        public string TodayChecklistLabel =>
+            ChecklistScanned
+                ? $"{TodayChecklistCompleted}/{TodayChecklistTotal} · " +
+                  $"{TodayChecklistPercentage}%"
+                : "…";
+
+        public string TotalChecklistLabel =>
+            ChecklistScanned
+                ? $"{ChecklistCompleted}/{ChecklistTotal} · " +
+                  $"{ChecklistPercentage}%"
                 : "…";
 
         // Reglas del Feed V2.
@@ -127,6 +153,70 @@ namespace Anfeta.UI.Models.DailyProgress
         public bool HadTrackingBaseline { get; init; }
         public DateTimeOffset TrackingStartedAt { get; init; }
 
+        public string DataNote { get; init; } = "";
+    }
+
+    public sealed class WeeklyProgressActivityItem
+    {
+        public string PageId { get; init; } = "";
+        public string PageUrl { get; init; } = "";
+        public string Title { get; init; } = "";
+        public string Person { get; init; } = "";
+        public string Project { get; init; } = "";
+        public string StateCode { get; init; } = "P";
+        public DateTime ReportDate { get; init; }
+        public DateTime OriginalScheduledDate { get; init; }
+        public DateTime CurrentScheduledDate { get; init; }
+        public int MoveCount { get; init; }
+        public IReadOnlyList<DateTime> RouteDates { get; init; } = Array.Empty<DateTime>();
+        public int ChecklistCompleted { get; init; }
+        public int ChecklistTotal { get; init; }
+        public int ChecklistAdvanced { get; init; }
+        public int ScheduledMinutes { get; init; }
+        public int ProgressMinutes { get; init; }
+        public bool IsLagging { get; init; }
+        public bool IsReviewMovement { get; init; }
+        public bool IsCompletedMovement { get; init; }
+        public bool IsFinal { get; init; }
+        public bool HasProgress => ChecklistAdvanced > 0 || ProgressMinutes > 0 ||
+                                   IsReviewMovement || IsCompletedMovement;
+    }
+
+    public sealed class WeeklyProgressPersonSnapshot
+    {
+        public string Name { get; init; } = "";
+        public int CoveragePercentage { get; init; }
+        public int ActivityCount { get; init; }
+        public int LaggingCount { get; init; }
+        public int ReviewCount { get; init; }
+        public int CompletedCount { get; init; }
+        public int NoProgressCount { get; init; }
+        public int MovedCount { get; init; }
+        public int ChecklistAdvanced { get; init; }
+        public int ScheduledMinutes { get; init; }
+        public int ProgressMinutes { get; init; }
+        public IReadOnlyList<WeeklyProgressActivityItem> Items { get; init; } =
+            Array.Empty<WeeklyProgressActivityItem>();
+    }
+
+    public sealed class WeeklyProgressSnapshot
+    {
+        public DateTime WeekStart { get; init; }
+        public DateTime WeekEnd { get; init; }
+        public IReadOnlyList<DateTime> MissingDays { get; init; } = Array.Empty<DateTime>();
+        public IReadOnlyList<WeeklyProgressPersonSnapshot> People { get; init; } =
+            Array.Empty<WeeklyProgressPersonSnapshot>();
+        public int CoveragePercentage { get; init; }
+        public int ActivityCount { get; init; }
+        public int LaggingCount { get; init; }
+        public int ReviewCount { get; init; }
+        public int CompletedCount { get; init; }
+        public int NoProgressCount { get; init; }
+        public int MovedCount { get; init; }
+        public int ChecklistAdvanced { get; init; }
+        public int ScheduledMinutes { get; init; }
+        public int ProgressMinutes { get; init; }
+        public bool IsComplete => MissingDays.Count == 0;
         public string DataNote { get; init; } = "";
     }
 }

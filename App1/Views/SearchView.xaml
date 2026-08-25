@@ -350,43 +350,23 @@
                     Glyph="&#xE74E;" />
                     </Button>
 
-                    <!--  Micrófono  -->
-                    <Grid
-                Grid.Column="2"
-                Width="70"
+                    <!-- Captura prioritaria: permanece al inicio del área desplazable. -->
+                    <Button
+                x:Name="BtnCaptureResults"
+                Width="38"
                 MinHeight="32"
-                VerticalAlignment="Center">
-
-                        <muxc:SplitButton
-                    x:Name="VoiceSplit"
-                    MinHeight="32"
-                    Padding="6,0"
-                    HorizontalContentAlignment="Center"
-                    Click="VoiceSplit_Click"
-                    CornerRadius="7"
-                    ToolTipService.ToolTip="Voz">
-
-                            <muxc:SplitButton.Content>
-                                <SymbolIcon Symbol="Microphone" />
-                            </muxc:SplitButton.Content>
-
-                            <muxc:SplitButton.Flyout>
-                                <MenuFlyout>
-                                    <MenuFlyoutItem Click="VoiceMenu_Listen_Click" Text="Escuchar ahora" />
-                                    <MenuFlyoutItem Click="VoiceMenu_Config_Click" Text="Configurar comandos de voz..." />
-                                </MenuFlyout>
-                            </muxc:SplitButton.Flyout>
-                        </muxc:SplitButton>
-
-                        <ProgressRing
-                    x:Name="VoiceRing"
-                    Width="14"
-                    Height="14"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    IsActive="False"
-                    Visibility="Collapsed" />
-                    </Grid>
+                Padding="0"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                VerticalAlignment="Center"
+                Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                BorderBrush="#2A3947"
+                BorderThickness="1"
+                Click="BtnCaptureResults_Click"
+                CornerRadius="6"
+                ToolTipService.ToolTip="Capturar los resultados visibles y subirlos a Notion">
+                        <FontIcon FontSize="14" Glyph="&#xE722;" />
+                    </Button>
 
                     <!--  Ayuda  -->
                     <Button
@@ -411,40 +391,6 @@
                 Height="18"
                 VerticalAlignment="Center"
                 Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-                    <!--  Toggle Filtros  -->
-                    <ToggleButton
-                x:Name="ToggleFoldersPane"
-                Background="{StaticResource AnfetaSurfaceSoftBrush}"
-                BorderBrush="#2A3947"
-                BorderThickness="1"
-                Grid.Column="5"
-                MinWidth="70"
-                MinHeight="32"
-                Padding="12,0"
-                VerticalAlignment="Center"
-                Click="ToggleFoldersPane_Click"
-                Content="Filtros"
-                CornerRadius="6"
-                IsChecked="True"
-                ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
-
-                    <!--  Toggle Detalles  -->
-                    <ToggleButton
-                x:Name="ToggleDetailsPane"
-                Background="{StaticResource AnfetaSurfaceSoftBrush}"
-                BorderBrush="#2A3947"
-                BorderThickness="1"
-                Grid.Column="6"
-                MinWidth="76"
-                MinHeight="32"
-                Padding="12,0"
-                VerticalAlignment="Center"
-                Click="ToggleDetailsPane_Click"
-                Content="Detalles"
-                CornerRadius="6"
-                IsChecked="True"
-                ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
 
                     <!--  Actualizar Notion  -->
                     <Button
@@ -638,27 +584,6 @@
                         </Grid>
                     </ToggleButton>
 
-                    <!--  Pantallazo de resultados  -->
-                    <Button
-                x:Name="BtnCaptureResults"
-                Background="{StaticResource AnfetaSurfaceSoftBrush}"
-                BorderBrush="#2A3947"
-                BorderThickness="1"
-                Grid.Column="11"
-                Width="38"
-                MinHeight="32"
-                Padding="0"
-                HorizontalContentAlignment="Center"
-                VerticalContentAlignment="Center"
-                VerticalAlignment="Center"
-                Click="BtnCaptureResults_Click"
-                CornerRadius="6"
-                ToolTipService.ToolTip="Capturar los resultados visibles y subirlos a Notion">
-                        <FontIcon
-                    FontSize="14"
-                    Glyph="&#xE722;" />
-                    </Button>
-
                     <!--  Menú ⋯  -->
                     <Button
                 Grid.Column="13"
@@ -768,6 +693,7 @@
             ═══════════════════════════════════════════════════════
         -->
         <Border
+            x:Name="SearchFiltersBackdrop"
             Grid.Row="2"
             Margin="10,4,10,4"
             Background="#0D1319"
@@ -776,6 +702,7 @@
             CornerRadius="12" />
 
         <Grid
+            x:Name="SearchFiltersPanel"
             Grid.Row="2"
             Margin="10,4,10,4"
             Padding="12,5"
@@ -1051,10 +978,44 @@
                     Click="ResultsViewZoomIn_Click"
                     Content="+"
                     ToolTipService.ToolTip="Mostrar o ampliar miniaturas" />
+
+                    <ToggleButton
+                    x:Name="ToggleFoldersPane"
+                    MinWidth="70"
+                    MinHeight="26"
+                    Padding="10,0"
+                    VerticalAlignment="Center"
+                    Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                    BorderBrush="#2A3947"
+                    BorderThickness="1"
+                    Click="ToggleFoldersPane_Click"
+                    Content="Filtros"
+                    CornerRadius="6"
+                    IsChecked="True"
+                    ToolTipService.ToolTip="Mostrar/ocultar panel izquierdo" />
+
+                    <ToggleButton
+                    x:Name="ToggleDetailsPane"
+                    MinWidth="76"
+                    MinHeight="26"
+                    Padding="10,0"
+                    VerticalAlignment="Center"
+                    Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                    BorderBrush="#2A3947"
+                    BorderThickness="1"
+                    Click="ToggleDetailsPane_Click"
+                    Content="Detalles"
+                    CornerRadius="6"
+                    IsChecked="True"
+                    ToolTipService.ToolTip="Mostrar/ocultar panel derecho" />
                 </StackPanel>
             </ScrollViewer>
 
             <StackPanel Visibility="Collapsed">
+                <!-- Controles de voz conservados fuera de la UI para no romper
+                     compatibilidad con el flujo existente. -->
+                <muxc:SplitButton x:Name="VoiceSplit" />
+                <ProgressRing x:Name="VoiceRing" IsActive="False" />
                 <ToggleButton x:Name="ChipPdf" />
                 <ToggleButton x:Name="ChipDocx" />
                 <ToggleButton x:Name="ChipXlsx" />
@@ -1960,11 +1921,10 @@
                         <!--  Zoom y acciones existentes, agrupados visualmente.  -->
                         <ScrollViewer
                             Grid.Column="2"
-                            MinWidth="360"
-                            MaxWidth="640"
+                            MinWidth="350"
                             HorizontalAlignment="Right"
-                            HorizontalScrollBarVisibility="Auto"
-                            HorizontalScrollMode="Enabled"
+                            HorizontalScrollBarVisibility="Disabled"
+                            HorizontalScrollMode="Disabled"
                             VerticalScrollBarVisibility="Disabled"
                             VerticalScrollMode="Disabled"
                             ZoomMode="Disabled">
@@ -2028,62 +1988,66 @@
                                 CornerRadius="9">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <Button
-                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarRunDailyAutomation_Click"
-                                        Content="Procesar ayer"
+                                        Content="⏩"
                                         ToolTipService.ToolTip="Mover pendientes de ayer a hoy y guardar reporte" />
 
                                         <Button
-                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarDailyReport_Click"
-                                        Content="Reporte"
+                                        Content="▤"
                                         ToolTipService.ToolTip="Abrir el último reporte diario" />
 
                                         <Button
                                         x:Name="CalendarDailyProgressButton"
-                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarDailyProgress_Click"
                                         ToolTipService.ToolTip="Abrir Feed de Avance Diario">
-                                            <StackPanel Orientation="Horizontal" Spacing="5">
-                                                <FontIcon
-                                                FontSize="12"
-                                                Foreground="#7DD3FC"
-                                                Glyph="&#xE9D2;" />
-                                                <TextBlock Text="Avance" />
-                                            </StackPanel>
+                                            <FontIcon
+                                            FontSize="13"
+                                            Foreground="#7DD3FC"
+                                            Glyph="&#xE9D2;" />
                                         </Button>
 
                                         <Button
                                         x:Name="CalendarQuickTemplateButton"
-                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarQuickTemplate_Click"
-                                        Content="⚡ Plantillas ▾"
+                                        Content="⚡"
                                         ToolTipService.ToolTip="Crear actividad rápida desde WEB, SEO, ADS, Cobros o Bibliotecas" />
 
                                         <ToggleButton
                                         x:Name="CalendarCobrosToggle"
-                                        Style="{StaticResource CalendarActionToggleStyle}"
+                                        Width="38"
+                                        MinHeight="32"
+                                        Padding="0"
                                         Click="CalendarCobrosToggle_Click"
-                                        Content="💰 Cobros"
+                                        Content="💰"
+                                        CornerRadius="7"
                                         ToolTipService.ToolTip="Mostrar u ocultar eventos de BD COBRAR Y PAGAR" />
 
                                         <ToggleButton
                                         x:Name="CalendarExtraHoursToggle"
-                                        Style="{StaticResource CalendarActionToggleStyle}"
+                                        Width="38"
+                                        MinHeight="32"
+                                        Padding="0"
                                         Click="CalendarExtraHoursToggle_Click"
-                                        Content="🕘 9–10 PM ↓"
+                                        Content="🕘"
+                                        CornerRadius="7"
                                         ToolTipService.ToolTip="Mostrar u ocultar el horario extra de 9:00 PM a 10:00 PM" />
 
                                         <Button
-                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarRefresh_Click"
-                                        Content="Actualizar"
+                                        Content="↻"
                                         ToolTipService.ToolTip="Actualización rápida incremental · Ctrl + clic para recarga completa" />
 
                                         <Button
-                                        Style="{StaticResource CalendarActionButtonStyle}"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarClose_Click"
-                                        Content="Resultados" />
+                                        Content="⌕"
+                                        ToolTipService.ToolTip="Volver a Resultados" />
                                     </StackPanel>
                                 </Border>
                             </StackPanel>

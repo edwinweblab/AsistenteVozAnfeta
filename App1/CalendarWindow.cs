@@ -65,6 +65,13 @@ namespace Anfeta.UI
                         _initialized = false;
                     }
                 };
+
+            Closed +=
+                (_, __) =>
+                {
+                    _calendarView
+                        .ShutdownStandaloneCalendar();
+                };
         }
 
         public SearchView CalendarView =>

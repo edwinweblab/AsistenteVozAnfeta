@@ -15,21 +15,65 @@ using Windows.Storage;
 namespace Anfeta.UI.Services.Notion
 {
     /// <summary>
-    /// Feed de Avance Diario V2.
+    /// Feed de Avance Diario V3.
     ///
     /// Reglas acordadas:
-    /// - Rezago: P/PRTUZ + terminó su bloque + checklist REAL < 50%.
+    /// - Rezago: P/PRTUZ + terminó su bloque + avance Hoy < 33%.
+    ///   Un 33% o más cuenta como avance (umbral inclusivo).
     ///   Sin checklist NO se acusa como rezago; queda como dato faltante.
     /// - Cobertura: SOLO avance observado hoy, ponderado por minutos agendados.
     ///   El progreso histórico que ya existía al iniciar el seguimiento no suma.
     /// - R/Z del Feed: movimientos del día, no simplemente estados históricos.
-    /// - Checklist "hecho hoy": delta contra un baseline persistente.
-    /// - Cache-first: abrir el Feed no descarga bodies.
+    /// - Checklist "hecho hoy": checked=true + last_edited_time en la fecha.
+    /// - Baseline/snapshot: respaldo y auditoría; no es la fuente principal de H.
     /// </summary>
     public sealed class NotionDailyProgressService
     {
         private const string TrackingFileName =
             "daily_progress_tracking_v2.json";
+
+        private const string DailySnapshotFileName =
+            "daily_progress_snapshots_v1.json";
+
+        private static readonly SemaphoreSlim DailySnapshotGate =
+            new(1, 1);
+
+        private sealed class PersistedDailySnapshotStore
+        {
+            public Dictionary<string, Dictionary<string, PersistedDailyActivitySnapshot>> Days { get; set; } =
+                new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private sealed class PersistedDailyActivitySnapshot
+        {
+            public string PageId { get; set; } = "";
+            public DateTime ReportDate { get; set; }
+            public string PageUrl { get; set; } = "";
+            public string Title { get; set; } = "";
+            public string Person { get; set; } = "";
+            public string Status { get; set; } = "";
+            public string Project { get; set; } = "";
+            public DateTime Start { get; set; }
+            public DateTime End { get; set; }
+            public DateTime OriginalScheduledDate { get; set; }
+            public DateTime CurrentScheduledDate { get; set; }
+            public int MoveCount { get; set; }
+            public List<DateTime> RouteDates { get; set; } = new();
+            public bool ChecklistScanned { get; set; }
+            public int ChecklistTotal { get; set; }
+            public int ChecklistCompleted { get; set; }
+            public int TodayChecklistCompleted { get; set; }
+            public bool IsLagging { get; set; }
+            public bool IsReviewMovement { get; set; }
+            public bool IsCompletedMovement { get; set; }
+            public int ProgressMinutes { get; set; }
+            public DateTimeOffset CapturedAtUtc { get; set; }
+            public bool IsFinal { get; set; }
+            public DateTimeOffset? ClosedAtUtc { get; set; }
+            public string ReviewState { get; set; } = "";
+            public DateTimeOffset? ReviewSubmittedAt { get; set; }
+            public DateTimeOffset? ReviewUpdatedAt { get; set; }
+        }
 
         // Jornada operativa de Avance Diario.
         // Lo ocurrido antes de las 06:00 no se arrastra como avance del día
@@ -259,8 +303,11 @@ namespace Anfeta.UI.Services.Notion
         }
 
         private static List<DateTime> NormalizeMovementRoute(
-            PersistedCalendarMoveHistoryEntry entry)
+            PersistedCalendarMoveHistoryEntry? entry)
         {
+            if (entry == null)
+                return new List<DateTime>();
+
             var route =
                 (entry.RouteDates ??
                  new List<DateTime>())
@@ -642,11 +689,324 @@ namespace Anfeta.UI.Services.Notion
             return label;
         }
 
+        private static async Task<PersistedDailySnapshotStore>
+            ReadDailySnapshotStoreAsync(CancellationToken cancellationToken)
+        {
+            var path = Path.Combine(ApplicationData.Current.LocalFolder.Path, DailySnapshotFileName);
+            if (!File.Exists(path))
+                return new PersistedDailySnapshotStore();
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(path, cancellationToken);
+                return JsonSerializer.Deserialize<PersistedDailySnapshotStore>(json) ??
+                       new PersistedDailySnapshotStore();
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { return new PersistedDailySnapshotStore(); }
+        }
+
+        private static async Task WriteAuditFileAtomicallyAsync(
+            string path,
+            string json,
+            CancellationToken cancellationToken)
+        {
+            var temporaryPath = path + ".tmp";
+
+            try
+            {
+                await File.WriteAllTextAsync(
+                    temporaryPath,
+                    json,
+                    cancellationToken);
+
+                File.Move(
+                    temporaryPath,
+                    path,
+                    overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    try { File.Delete(temporaryPath); }
+                    catch { }
+                }
+            }
+        }
+
+        private static async Task<IReadOnlyList<PersistedDailyActivitySnapshot>>
+            ReadDailySnapshotsAsync(DateTime day, CancellationToken cancellationToken)
+        {
+            await DailySnapshotGate.WaitAsync(cancellationToken);
+            try
+            {
+                var store = await ReadDailySnapshotStoreAsync(cancellationToken);
+                var key = day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return store.Days.TryGetValue(key, out var snapshots)
+                    ? snapshots.Values.ToList()
+                    : Array.Empty<PersistedDailyActivitySnapshot>();
+            }
+            finally { DailySnapshotGate.Release(); }
+        }
+
+        private static async Task SaveDailySnapshotsAsync(
+            DateTime day,
+            IReadOnlyList<DailyProgressActivityItem> currentItems,
+            CancellationToken cancellationToken)
+        {
+            await DailySnapshotGate.WaitAsync(cancellationToken);
+            try
+            {
+                var store = await ReadDailySnapshotStoreAsync(cancellationToken);
+                var key = day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if (!store.Days.TryGetValue(key, out var snapshots))
+                {
+                    snapshots = new Dictionary<string, PersistedDailyActivitySnapshot>(
+                        StringComparer.OrdinalIgnoreCase);
+                    store.Days[key] = snapshots;
+                }
+
+                var capturedAt = DateTimeOffset.UtcNow;
+                var localNow = DateTime.Now;
+                var shouldFinalize =
+                    day.Date < DateTime.Today ||
+                    (day.Date == DateTime.Today &&
+                     localNow.TimeOfDay >= TimeSpan.FromHours(18.5));
+
+                foreach (var item in currentItems.Where(item => !item.IsHistoricalSnapshot))
+                {
+                    // Una fecha cerrada se congela en la primera fotografía.
+                    // Consultarla después no debe reescribirla con el estado
+                    // actual de una página que cambió posteriormente.
+                    if (snapshots.TryGetValue(item.PageId, out var existing) &&
+                        (existing.IsFinal || day.Date < DateTime.Today))
+                    {
+                        continue;
+                    }
+
+                    snapshots[item.PageId] = new PersistedDailyActivitySnapshot
+                    {
+                        PageId = item.PageId,
+                        ReportDate = day.Date,
+                        PageUrl = item.PageUrl,
+                        Title = item.Source.Title,
+                        Person = item.Source.Person,
+                        Status = item.Source.Status,
+                        Project = item.Source.Project,
+                        Start = item.Start,
+                        End = item.End,
+                        OriginalScheduledDate = item.OriginalScheduledDate,
+                        CurrentScheduledDate = item.CurrentScheduledDate,
+                        MoveCount = item.MoveCount,
+                        RouteDates = item.RouteDates.ToList(),
+                        ChecklistScanned = item.ChecklistScanned,
+                        ChecklistTotal = item.ChecklistTotal,
+                        ChecklistCompleted = item.ChecklistCompleted,
+                        TodayChecklistCompleted = item.TodayChecklistCompleted,
+                        IsLagging = item.IsLagging,
+                        IsReviewMovement = item.IsReviewMovement,
+                        IsCompletedMovement = item.IsCompletedMovement,
+                        ProgressMinutes = item.ProgressMinutes,
+                        CapturedAtUtc = capturedAt,
+                        IsFinal = shouldFinalize,
+                        ClosedAtUtc = shouldFinalize
+                            ? capturedAt
+                            : null,
+                        ReviewState = item.Source.ReviewState,
+                        ReviewSubmittedAt = item.Source.ReviewSubmittedAt,
+                        ReviewUpdatedAt = item.Source.ReviewUpdatedAt
+                    };
+                }
+
+                // Conserva cuatro meses de auditoría local sin crecimiento
+                // indefinido. El cron/backend y el reporte semanal permanecen
+                // deliberadamente fuera de este cierre.
+                var retentionStart = day.Date.AddDays(-120);
+                foreach (var oldKey in store.Days.Keys
+                             .Where(value =>
+                                 DateTime.TryParseExact(
+                                     value,
+                                     "yyyy-MM-dd",
+                                     CultureInfo.InvariantCulture,
+                                     DateTimeStyles.None,
+                                     out var storedDay) &&
+                                 storedDay.Date < retentionStart)
+                             .ToList())
+                {
+                    store.Days.Remove(oldKey);
+                }
+
+                var json = JsonSerializer.Serialize(store);
+                await WriteAuditFileAtomicallyAsync(
+                    Path.Combine(ApplicationData.Current.LocalFolder.Path, DailySnapshotFileName),
+                    json,
+                    cancellationToken);
+            }
+            finally { DailySnapshotGate.Release(); }
+        }
+
+        public async Task<WeeklyProgressSnapshot> BuildWeeklyAuditAsync(
+            DateTime anchorDay,
+            CancellationToken cancellationToken = default)
+        {
+            var anchor = anchorDay.Date;
+            var mondayOffset = ((int)anchor.DayOfWeek + 6) % 7;
+            var weekStart = anchor.AddDays(-mondayOffset);
+            var weekEnd = weekStart.AddDays(6);
+            var auditedEnd = weekEnd < DateTime.Today ? weekEnd : DateTime.Today;
+
+            PersistedDailySnapshotStore store;
+            await DailySnapshotGate.WaitAsync(cancellationToken);
+            try
+            {
+                store = await ReadDailySnapshotStoreAsync(cancellationToken);
+            }
+            finally
+            {
+                DailySnapshotGate.Release();
+            }
+
+            var missingDays = new List<DateTime>();
+            var items = new List<WeeklyProgressActivityItem>();
+
+            for (var day = weekStart; day <= auditedEnd; day = day.AddDays(1))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var key = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                if (!store.Days.TryGetValue(key, out var daySnapshots))
+                {
+                    missingDays.Add(day);
+                    continue;
+                }
+
+                foreach (var saved in daySnapshots.Values)
+                {
+                    var reportDate = saved.ReportDate == default ? day : saved.ReportDate.Date;
+                    var start = saved.Start;
+                    var scheduled = Math.Max(0, (int)Math.Round((saved.End - start).TotalMinutes));
+                    var original = saved.OriginalScheduledDate == default
+                        ? start.Date
+                        : saved.OriginalScheduledDate.Date;
+                    var current = saved.CurrentScheduledDate == default
+                        ? start.Date
+                        : saved.CurrentScheduledDate.Date;
+
+                    foreach (var person in SplitPeople(saved.Person))
+                    {
+                        items.Add(new WeeklyProgressActivityItem
+                        {
+                            PageId = saved.PageId,
+                            PageUrl = saved.PageUrl,
+                            Title = saved.Title,
+                            Person = person,
+                            Project = saved.Project,
+                            StateCode = string.IsNullOrWhiteSpace(saved.Status) ? "P" : saved.Status,
+                            ReportDate = reportDate,
+                            OriginalScheduledDate = original,
+                            CurrentScheduledDate = current,
+                            MoveCount = saved.MoveCount,
+                            RouteDates = saved.RouteDates != null
+                                ? saved.RouteDates.Select(value => value.Date).ToList()
+                                : new List<DateTime>(),
+                            ChecklistCompleted = saved.ChecklistCompleted,
+                            ChecklistTotal = saved.ChecklistTotal,
+                            ChecklistAdvanced = saved.TodayChecklistCompleted,
+                            ScheduledMinutes = scheduled,
+                            ProgressMinutes = Math.Max(0, saved.ProgressMinutes),
+                            IsLagging = saved.IsLagging,
+                            IsReviewMovement = saved.IsReviewMovement,
+                            IsCompletedMovement = saved.IsCompletedMovement,
+                            IsFinal = saved.IsFinal
+                        });
+                    }
+                }
+            }
+
+            WeeklyProgressPersonSnapshot Summarize(string name, List<WeeklyProgressActivityItem> source)
+            {
+                var scheduled = source.Sum(item => item.ScheduledMinutes);
+                var progress = source.Sum(item => item.ProgressMinutes);
+                return new WeeklyProgressPersonSnapshot
+                {
+                    Name = name,
+                    ActivityCount = source.Select(item => item.PageId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    LaggingCount = source.Count(item => item.IsLagging),
+                    ReviewCount = source.Count(item => item.IsReviewMovement),
+                    CompletedCount = source.Count(item => item.IsCompletedMovement),
+                    NoProgressCount = source.Count(item => !item.HasProgress && !item.IsFinal),
+                    MovedCount = source.Where(item => item.MoveCount > 0).Select(item => item.PageId)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    ChecklistAdvanced = source.Sum(item => item.ChecklistAdvanced),
+                    ScheduledMinutes = scheduled,
+                    ProgressMinutes = progress,
+                    CoveragePercentage = scheduled > 0
+                        ? Math.Clamp((int)Math.Round(progress * 100d / scheduled), 0, 100)
+                        : 0,
+                    Items = source.OrderBy(item => item.ReportDate).ThenBy(item => item.Title).ToList()
+                };
+            }
+
+            var people = items.GroupBy(item => item.Person, StringComparer.OrdinalIgnoreCase)
+                .Select(group => Summarize(group.Key, group.ToList()))
+                .OrderBy(person => Array.FindIndex(KnownPersonOrder,
+                    known => string.Equals(known, person.Name, StringComparison.OrdinalIgnoreCase)) is var index && index >= 0
+                        ? index : int.MaxValue)
+                .ThenBy(person => person.Name)
+                .ToList();
+            var scheduledTotal = people.Sum(person => person.ScheduledMinutes);
+            var progressTotal = people.Sum(person => person.ProgressMinutes);
+
+            return new WeeklyProgressSnapshot
+            {
+                WeekStart = weekStart,
+                WeekEnd = weekEnd,
+                MissingDays = missingDays,
+                People = people,
+                ActivityCount = items.Select(item => item.PageId).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                LaggingCount = items.Count(item => item.IsLagging),
+                ReviewCount = items.Count(item => item.IsReviewMovement),
+                CompletedCount = items.Count(item => item.IsCompletedMovement),
+                NoProgressCount = items.Count(item => !item.HasProgress && !item.IsFinal),
+                MovedCount = items.Where(item => item.MoveCount > 0).Select(item => item.PageId)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                ChecklistAdvanced = items.Sum(item => item.ChecklistAdvanced),
+                ScheduledMinutes = scheduledTotal,
+                ProgressMinutes = progressTotal,
+                CoveragePercentage = scheduledTotal > 0
+                    ? Math.Clamp((int)Math.Round(progressTotal * 100d / scheduledTotal), 0, 100)
+                    : 0,
+                DataNote = missingDays.Count == 0
+                    ? "Reporte semanal local · fotografías disponibles"
+                    : $"Reporte semanal parcial · faltan {missingDays.Count} fotografía(s)"
+            };
+        }
+
+        private static NotionCalendarActivity RestoreSnapshotActivity(
+            PersistedDailyActivitySnapshot snapshot) => new()
+            {
+                PageId = snapshot.PageId,
+                PageUrl = snapshot.PageUrl,
+                Title = snapshot.Title,
+                Person = snapshot.Person,
+                Status = snapshot.Status,
+                Project = snapshot.Project,
+                Start = snapshot.Start,
+                End = snapshot.End,
+                ChecklistScanned = snapshot.ChecklistScanned,
+                ChecklistTotal = snapshot.ChecklistTotal,
+                ChecklistCompleted = snapshot.ChecklistCompleted,
+                ReviewState = snapshot.ReviewState,
+                ReviewSubmittedAt = snapshot.ReviewSubmittedAt,
+                ReviewUpdatedAt = snapshot.ReviewUpdatedAt
+            };
+
         public async Task<DailyProgressSnapshot> BuildAsync(
             NotionCalendarService calendarService,
             string token,
             DateTime day,
             bool forceRefresh = false,
+            bool requireFreshDay = false,
             IProgress<string>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -663,7 +1023,7 @@ namespace Anfeta.UI.Services.Notion
                 "Leyendo el día desde la caché del calendario…");
 
             var cached =
-                forceRefresh
+                requireFreshDay
                     ? null
                     : await calendarService.TryGetCachedDayAsync(
                         day,
@@ -691,7 +1051,7 @@ namespace Anfeta.UI.Services.Notion
                         day,
                         progress: null,
                         cancellationToken: cancellationToken,
-                        forceRefresh: forceRefresh);
+                        forceRefresh: requireFreshDay);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -709,6 +1069,34 @@ namespace Anfeta.UI.Services.Notion
                     .OrderBy(activity => activity.Start)
                     .ThenBy(activity => activity.Title)
                     .ToList();
+
+            // La fuente principal de H es el detalle actual de los bloques
+            // to_do. El servicio conserva el desglose por last_edited_time;
+            // el baseline permanece únicamente como respaldo/auditoría.
+            progress?.Report(
+                "Leyendo fechas de edición de las checklists…");
+
+            var checklistRows =
+                await Task.WhenAll(
+                    operational.Select(async activity =>
+                        new
+                        {
+                            activity.PageId,
+                            Stats = await calendarService.GetChecklistStatsAsync(
+                                token,
+                                activity.PageId,
+                                cancellationToken,
+                                forceRefresh &&
+                                calendarService.LastChangedPageIds.Contains(
+                                    activity.PageId,
+                                    StringComparer.OrdinalIgnoreCase))
+                        }));
+
+            var checklistByPage =
+                checklistRows.ToDictionary(
+                    item => item.PageId,
+                    item => item.Stats,
+                    StringComparer.OrdinalIgnoreCase);
 
             // Avance Diario trabaja con una ventana fija 06:00 → 00:00.
             // Para días pasados el corte es medianoche; para hoy se usa la
@@ -752,8 +1140,13 @@ namespace Anfeta.UI.Services.Notion
                                 activity,
                                 movementHistory);
 
+                        checklistByPage.TryGetValue(
+                            activity.PageId,
+                            out var checklistStats);
+
                         return CreateActivityItem(
                             activity,
+                            checklistStats,
                             baseline,
                             tracking.NewlyAddedPageIds.Contains(
                                 activity.PageId),
@@ -762,6 +1155,46 @@ namespace Anfeta.UI.Services.Notion
                             carryOver);
                     })
                     .ToList();
+
+            // Guarda la fotografía antes de mezclar históricos. Si mañana la
+            // actividad cambia de fecha o estado, este registro permanece.
+            await SaveDailySnapshotsAsync(
+                day,
+                baseItems,
+                cancellationToken);
+
+            var savedSnapshots =
+                await ReadDailySnapshotsAsync(day, cancellationToken);
+
+            var currentPageIds =
+                baseItems.Select(item => item.PageId)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var saved in savedSnapshots.Where(item =>
+                         !currentPageIds.Contains(item.PageId)))
+            {
+                var restored = RestoreSnapshotActivity(saved);
+                var completedByDate = new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    [day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)] =
+                        saved.TodayChecklistCompleted
+                };
+
+                baseItems.Add(
+                    CreateActivityItem(
+                        restored,
+                        new NotionChecklistStats(
+                            saved.ChecklistTotal,
+                            saved.ChecklistCompleted,
+                            completedByDate),
+                        baseline: null,
+                        baselineWasCreatedNow: true,
+                        referenceTime: referenceTime,
+                        selectedDay: day,
+                        carryOverMovement: null,
+                        historicalSnapshot: saved));
+            }
 
             var people =
                 BuildPeople(
@@ -835,6 +1268,12 @@ namespace Anfeta.UI.Services.Notion
                             IsOnlyUnassigned(
                                 item.Person)),
 
+                    HistoricalCount =
+                        unique.Count(item => item.IsHistoricalSnapshot),
+
+                    IncompleteChecklistCount =
+                        unique.Count(item => item.HasIncompleteChecklistWarning),
+
                     LoadedFromCalendarCache =
                         fromCache,
 
@@ -861,11 +1300,13 @@ namespace Anfeta.UI.Services.Notion
 
         private static DailyProgressActivityItem CreateActivityItem(
             NotionCalendarActivity activity,
+            NotionChecklistStats? checklistStats,
             PersistedActivityBaseline? baseline,
             bool baselineWasCreatedNow,
             DateTime referenceTime,
             DateTime selectedDay,
-            PersistedCalendarMoveHistoryEntry? carryOverMovement)
+            PersistedCalendarMoveHistoryEntry? carryOverMovement,
+            PersistedDailyActivitySnapshot? historicalSnapshot = null)
         {
             var state =
                 ClassifyState(
@@ -890,24 +1331,46 @@ namespace Anfeta.UI.Services.Notion
                  activity.End <= referenceTime);
 
             // REGLA GENARO:
-            // rezago solo cuando existe checklist real y no llegó al 50%.
+            // rezago usa exclusivamente el avance de la fecha seleccionada.
+            // >= 33% significa que sí hubo avance; por eso rezago es < 33%.
             // No tener checklist no se interpreta como 0%; se reporta aparte.
             var hasRealChecklist =
                 activity.ChecklistScanned &&
                 activity.ChecklistTotal > 0;
 
+            var hasEditedDateData =
+                checklistStats?.CompletedByDate != null;
+
+            var completedOnSelectedDay =
+                hasRealChecklist
+                    ? checklistStats?.GetCompletedOn(selectedDay) ?? 0
+                    : 0;
+
+            var todayChecklistPercentage =
+                hasRealChecklist
+                    ? Math.Clamp(
+                        (int)Math.Round(
+                            completedOnSelectedDay * 100d /
+                            Math.Max(1, activity.ChecklistTotal)),
+                        0,
+                        100)
+                    : 0;
+
             var isLagging =
                 state.Code == "P" &&
                 deadlineReached &&
                 hasRealChecklist &&
-                activity.ChecklistPercentage < 50;
+                todayChecklistPercentage < 33;
+
+            if (historicalSnapshot != null)
+                isLagging = historicalSnapshot.IsLagging;
 
             var needsChecklistData =
                 state.Code == "P" &&
                 deadlineReached &&
                 !hasRealChecklist;
 
-            var checklistDelta =
+            var baselineChecklistDelta =
                 !baselineWasCreatedNow &&
                 baseline != null &&
                 hasRealChecklist
@@ -916,6 +1379,11 @@ namespace Anfeta.UI.Services.Notion
                         activity.ChecklistCompleted -
                         baseline.ChecklistCompleted)
                     : 0;
+
+            var checklistDelta =
+                hasEditedDateData
+                    ? completedOnSelectedDay
+                    : baselineChecklistDelta;
 
             var workedDelta =
                 !baselineWasCreatedNow &&
@@ -948,6 +1416,9 @@ namespace Anfeta.UI.Services.Notion
                 changedToReview ||
                 reviewTimestampMovement;
 
+            if (historicalSnapshot != null)
+                isReviewMovement = historicalSnapshot.IsReviewMovement;
+
             // Z no tiene timestamp confiable en el modelo actual.
             // Solo lo afirmamos cuando ANFETA observó la transición.
             var isCompletedMovement =
@@ -958,6 +1429,23 @@ namespace Anfeta.UI.Services.Notion
                     "Z",
                     StringComparison.OrdinalIgnoreCase) &&
                 state.Code == "Z";
+
+            // Un flujo aprobado sí aporta un timestamp real para Z. Para una
+            // Z manual sin metadata solo vale la transición observada.
+            var approvedTimestampMovement =
+                state.Code == "Z" &&
+                activity.IsApprovedReview &&
+                IsTimestampInWindow(
+                    activity.ReviewUpdatedAt,
+                    selectedDay,
+                    referenceTime);
+
+            isCompletedMovement =
+                isCompletedMovement ||
+                approvedTimestampMovement;
+
+            if (historicalSnapshot != null)
+                isCompletedMovement = historicalSnapshot.IsCompletedMovement;
 
             var observedMovement =
                 checklistDelta > 0 ||
@@ -1044,6 +1532,9 @@ namespace Anfeta.UI.Services.Notion
                         0,
                         scheduledMinutes);
 
+            if (historicalSnapshot != null)
+                progressMinutes = historicalSnapshot.ProgressMinutes;
+
             var todayMovementLabel =
                 BuildMovementLabel(
                     checklistDelta,
@@ -1111,6 +1602,42 @@ namespace Anfeta.UI.Services.Notion
                     isCompleted,
                 IsSuspended =
                     isSuspended,
+
+                IsHistoricalSnapshot =
+                    historicalSnapshot != null,
+                HistoricalCapturedAt =
+                    historicalSnapshot?.CapturedAtUtc.ToLocalTime(),
+                OriginalScheduledDate =
+                    historicalSnapshot?.OriginalScheduledDate != default
+                        ? historicalSnapshot!.OriginalScheduledDate.Date
+                        : NormalizeMovementRoute(carryOverMovement)
+                            .FirstOrDefault(activity.Start.Date),
+                CurrentScheduledDate =
+                    historicalSnapshot?.CurrentScheduledDate != default
+                        ? historicalSnapshot!.CurrentScheduledDate.Date
+                        : activity.Start.Date,
+                MoveCount =
+                    historicalSnapshot?.MoveCount ??
+                    carryOverMovement?.MoveCount ?? 0,
+                RouteDates =
+                    historicalSnapshot?.RouteDates?.Count > 0
+                        ? historicalSnapshot.RouteDates
+                            .Select(value => value.Date)
+                            .ToList()
+                        : NormalizeMovementRoute(carryOverMovement),
+                HasIncompleteChecklistWarning =
+                    (isReview || isCompleted) &&
+                    hasRealChecklist &&
+                    activity.ChecklistCompleted < activity.ChecklistTotal,
+
+                TodayChecklistCompleted =
+                    completedOnSelectedDay,
+                TodayChecklistTotal =
+                    hasRealChecklist
+                        ? activity.ChecklistTotal
+                        : 0,
+                TodayChecklistPercentage =
+                    todayChecklistPercentage,
 
                 ChecklistDeltaToday =
                     checklistDelta,
@@ -1256,7 +1783,13 @@ namespace Anfeta.UI.Services.Notion
 
                         MissingChecklistCount =
                             active.Count(item =>
-                                item.NeedsChecklistData)
+                                item.NeedsChecklistData),
+
+                        HistoricalCount =
+                            all.Count(item => item.IsHistoricalSnapshot),
+
+                        IncompleteChecklistCount =
+                            all.Count(item => item.HasIncompleteChecklistWarning)
                     };
                 })
                 .OrderBy(person =>
@@ -1490,6 +2023,29 @@ namespace Anfeta.UI.Services.Notion
                 timestamp >= windowStart &&
                 timestamp < windowEnd &&
                 timestamp <= effectiveEnd);
+        }
+
+        private static bool IsTimestampInWindow(
+            DateTimeOffset? timestamp,
+            DateTime selectedDay,
+            DateTime referenceTime)
+        {
+            if (!timestamp.HasValue)
+                return false;
+
+            var local = timestamp.Value.ToLocalTime();
+            var start = new DateTimeOffset(DateTime.SpecifyKind(
+                GetDailyProgressWindowStart(selectedDay), DateTimeKind.Local));
+            var end = new DateTimeOffset(DateTime.SpecifyKind(
+                GetDailyProgressWindowEnd(selectedDay), DateTimeKind.Local));
+            var reference = new DateTimeOffset(DateTime.SpecifyKind(
+                referenceTime, DateTimeKind.Local));
+
+            if (reference < start)
+                return false;
+
+            var effectiveEnd = reference < end ? reference : end;
+            return local >= start && local < end && local <= effectiveEnd;
         }
 
         private static string BuildMovementLabel(

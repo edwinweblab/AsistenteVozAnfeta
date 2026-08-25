@@ -241,7 +241,6 @@ namespace Anfeta.UI.Views
         private bool _loadingModulePreferences;
         private bool _defaultTagAppliedOnce;
         private string _lastAppliedDefaultTag = string.Empty;
-        private DateTime _lastTextScaleVisualPassUtc = DateTime.MinValue;
 
         // estado visual global de carga
         private int _busyOperationCount;
@@ -389,7 +388,6 @@ namespace Anfeta.UI.Views
             FolderTree.ItemsSource = new ObservableCollection<FolderNode>();
 
             Loaded += SearchView_Loaded;
-            RootLayout.LayoutUpdated += RootLayout_LayoutUpdated;
 
             // BLOQUE 11 · Ctrl+V global. Se engancha una sola vez por pestaña.
             // El handler ignora cualquier campo editable para conservar el
@@ -1699,17 +1697,6 @@ namespace Anfeta.UI.Views
 
             ApplicationData.Current.LocalSettings.Values[LS_SearchTextScale] = key;
             ApplyTextScaleToVisualTree();
-        }
-
-        private void RootLayout_LayoutUpdated(object? sender, object e)
-        {
-            var now = DateTime.UtcNow;
-            if ((now - _lastTextScaleVisualPassUtc).TotalMilliseconds < 250)
-                return;
-
-            _lastTextScaleVisualPassUtc = now;
-            ApplyTextScaleToVisualTree();
-            ApplyResultColumnWidthsToVisualTree();
         }
 
         private void ApplyTextScaleToVisualTree()

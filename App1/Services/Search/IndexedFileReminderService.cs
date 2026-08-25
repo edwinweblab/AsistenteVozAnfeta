@@ -78,6 +78,23 @@ namespace Anfeta.UI.Services.Search
             IndexedFileReminder Reminder,
             DateTimeOffset DueAt);
 
+        private sealed record ParsedReminderRow(
+            SearchResultRow Row,
+            string VisibleTitle,
+            DateTimeOffset ReminderAt,
+            string Message,
+            string RecipientTag,
+            string RecipientName,
+            string SenderTag,
+            string SenderName);
+
+        // Analizar fechas, destinatarios y títulos de todo el índice en cada
+        // Tick bloqueaba el Dispatcher de WinUI. El índice ya expone Version,
+        // así que solo reconstruimos esta vista cuando sus datos cambian.
+        private long _parsedReminderIndexVersion = -1;
+        private IReadOnlyList<ParsedReminderRow> _parsedReminderRows =
+            Array.Empty<ParsedReminderRow>();
+
         // Ventana normal para avisos recién vencidos. Además, Notion tiene
         // una recuperación controlada de 48 h para que un equipo apagado o una
         // alerta que llegó tarde no desaparezca para siempre. Se emite solo una
@@ -150,13 +167,7 @@ namespace Anfeta.UI.Services.Search
             if (!_started || _disposed)
                 return;
 
-            var rows = App.LocalIndex
-                .GetAll()
-                .Where(row =>
-                    row != null &&
-                    !string.IsNullOrWhiteSpace(
-                        row.Name))
-                .ToList();
+            var rows = GetParsedReminderRows();
 
             if (rows.Count == 0)
                 return;
@@ -185,23 +196,16 @@ namespace Anfeta.UI.Services.Search
                     string SenderName,
                     bool IsCatchUp)>();
 
-            foreach (var row in rows)
+            foreach (var parsed in rows)
             {
-                var visibleTitle =
-                    StripReminderSourcePrefix(
-                        row.Name);
-
-                if (!TryParseReminder(
-                        visibleTitle,
-                        out var reminderAt,
-                        out var reminderMessage,
-                        out var recipientTag,
-                        out var recipientName,
-                        out var senderTag,
-                        out var senderName))
-                {
-                    continue;
-                }
+                var row = parsed.Row;
+                var visibleTitle = parsed.VisibleTitle;
+                var reminderAt = parsed.ReminderAt;
+                var reminderMessage = parsed.Message;
+                var recipientTag = parsed.RecipientTag;
+                var recipientName = parsed.RecipientName;
+                var senderTag = parsed.SenderTag;
+                var senderName = parsed.SenderName;
 
                 if (!ShouldShowForCurrentUser(recipientTag, row.Source))
                     continue;
@@ -331,6 +335,67 @@ namespace Anfeta.UI.Services.Search
                         candidate.SenderName,
                         candidate.Row.ExternalId ?? string.Empty));
             }
+        }
+
+        private IReadOnlyList<ParsedReminderRow>
+            GetParsedReminderRows()
+        {
+            var indexVersion = App.LocalIndex.Version;
+
+            if (_parsedReminderIndexVersion == indexVersion)
+                return _parsedReminderRows;
+
+            var parsedRows =
+                new List<ParsedReminderRow>();
+
+            foreach (var row in App.LocalIndex.GetAll())
+            {
+                if (row == null ||
+                    string.IsNullOrWhiteSpace(row.Name))
+                {
+                    continue;
+                }
+
+                // La expresión completa es más costosa; este descarte evita
+                // ejecutarla para archivos/tareas que evidentemente no tienen
+                // el formato AAAA-MM-DD del recordatorio.
+                var name = row.Name;
+                if (name.Length < 10 ||
+                    name.IndexOf('-', StringComparison.Ordinal) < 0)
+                {
+                    continue;
+                }
+
+                var visibleTitle =
+                    StripReminderSourcePrefix(name);
+
+                if (!TryParseReminder(
+                        visibleTitle,
+                        out var reminderAt,
+                        out var reminderMessage,
+                        out var recipientTag,
+                        out var recipientName,
+                        out var senderTag,
+                        out var senderName))
+                {
+                    continue;
+                }
+
+                parsedRows.Add(
+                    new ParsedReminderRow(
+                        row,
+                        visibleTitle,
+                        reminderAt,
+                        reminderMessage,
+                        recipientTag,
+                        recipientName,
+                        senderTag,
+                        senderName));
+            }
+
+            _parsedReminderRows = parsedRows;
+            _parsedReminderIndexVersion = indexVersion;
+            return _parsedReminderRows;
         }
 
         private static string StripReminderSourcePrefix(

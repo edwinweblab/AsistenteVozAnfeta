@@ -15,6 +15,29 @@ namespace Anfeta.UI.Views
     {
         #region ===== Search (Everything-like) =====
 
+        private const string DomainPredictivePattern =
+            @"(?<![\w@])(?:https?://)?(?:www\.)?" +
+            @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
+            @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
+            @"com|mx|org|net|io|co|app|dev))" +
+            @"(?=$|[/:?#\s)\]}>.,;!])";
+
+        private static readonly Regex DomainPredictiveRegex =
+            new(
+                DomainPredictivePattern,
+                RegexOptions.Compiled |
+                RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+
+        private static readonly SemaphoreSlim DomainPredictiveCacheGate =
+            new(1, 1);
+
+        private static long _domainPredictiveIndexVersion = -1;
+        private static IReadOnlyDictionary<string, int>
+            _domainPredictiveFrequency =
+                new Dictionary<string, int>(
+                    StringComparer.OrdinalIgnoreCase);
+
         private void EnsureSearchDebounce()
         {
             if (_searchDebounceTimer != null) return;
@@ -103,7 +126,7 @@ namespace Anfeta.UI.Views
             // Prioriza dominios completos dentro del predictivo personalizado.
             // Ejemplo: al escribir "weblab" o "weblab." se muestran primero
             // weblab.mx, weblab.com y weblab.com.mx, conservando los puntos.
-            PromoteDomainPredictiveSuggestions(q);
+            _ = PromoteDomainPredictiveSuggestionsAsync(q);
 
             if (ShouldShowQuickFlyout(q))
                 ShowQuickCommandsInputFlyout();
@@ -172,7 +195,7 @@ namespace Anfeta.UI.Views
         }
 
 
-        private void PromoteDomainPredictiveSuggestions(
+        private async Task PromoteDomainPredictiveSuggestionsAsync(
             string query)
         {
             if (!App.LocalIndex.HasData)
@@ -197,61 +220,24 @@ namespace Anfeta.UI.Views
             if (currentPart.Length < 2)
                 return;
 
-            const string domainPattern =
-                @"(?<![\w@])(?:https?://)?(?:www\.)?" +
-                @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
-                @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
-                @"com|mx|org|net|io|co|app|dev))" +
-                @"(?=$|[/:?#\s)\]}>.,;!])";
-
             var frequency =
-                new Dictionary<string, int>(
-                    StringComparer.OrdinalIgnoreCase);
+                await GetDomainPredictiveFrequencyAsync();
 
-            foreach (var row in App.LocalIndex.GetAll())
+            // Mientras el cache se preparaba el usuario pudo borrar o seguir
+            // escribiendo. Un resultado viejo nunca debe repintar el flyout.
+            if (!string.Equals(
+                    (SearchBox?.Text ?? string.Empty).Trim(),
+                    raw,
+                    StringComparison.Ordinal))
             {
-                var searchable = string.Join(
-                    " ",
-                    new[]
-                    {
-                        row.DisplayName,
-                        row.Name,
-                        row.SearchText,
-                        row.Description,
-                        row.Target
-                    }.Where(value =>
-                        !string.IsNullOrWhiteSpace(value)));
-
-                foreach (Match match in Regex.Matches(
-                             searchable,
-                             domainPattern,
-                             RegexOptions.IgnoreCase |
-                             RegexOptions.CultureInvariant))
-                {
-                    var domain = match.Groups["domain"]
-                        .Value
-                        .Trim()
-                        .TrimEnd('.')
-                        .ToLowerInvariant();
-
-                    if (string.IsNullOrWhiteSpace(domain))
-                        continue;
-
-                    if (!domain.StartsWith(
-                            currentPart,
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    frequency[domain] =
-                        frequency.TryGetValue(domain, out var count)
-                            ? count + 1
-                            : 1;
-                }
+                return;
             }
 
             var domains = frequency
+                .Where(pair =>
+                    pair.Key.StartsWith(
+                        currentPart,
+                        StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(pair =>
                     string.Equals(
                         pair.Key,
@@ -314,6 +300,74 @@ namespace Anfeta.UI.Views
 
             BindPredictiveSuggestions();
             UpdateQuickFlyoutVisibility();
+        }
+
+        private static async Task<IReadOnlyDictionary<string, int>>
+            GetDomainPredictiveFrequencyAsync()
+        {
+            var requestedVersion = App.LocalIndex.Version;
+            if (_domainPredictiveIndexVersion == requestedVersion)
+                return _domainPredictiveFrequency;
+
+            await DomainPredictiveCacheGate.WaitAsync();
+
+            try
+            {
+                requestedVersion = App.LocalIndex.Version;
+                if (_domainPredictiveIndexVersion == requestedVersion)
+                    return _domainPredictiveFrequency;
+
+                var rows = App.LocalIndex.GetAll();
+                var frequency = await Task.Run(() =>
+                {
+                    var result =
+                        new Dictionary<string, int>(
+                            StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var row in rows)
+                    {
+                        var searchable = string.Join(
+                            " ",
+                            new[]
+                            {
+                                row.DisplayName,
+                                row.Name,
+                                row.SearchText,
+                                row.Description,
+                                row.Target
+                            }.Where(value =>
+                                !string.IsNullOrWhiteSpace(value)));
+
+                        foreach (Match match in
+                                 DomainPredictiveRegex.Matches(searchable))
+                        {
+                            var domain = match.Groups["domain"]
+                                .Value
+                                .Trim()
+                                .TrimEnd('.')
+                                .ToLowerInvariant();
+
+                            if (string.IsNullOrWhiteSpace(domain))
+                                continue;
+
+                            result[domain] =
+                                result.TryGetValue(domain, out var count)
+                                    ? count + 1
+                                    : 1;
+                        }
+                    }
+
+                    return result;
+                });
+
+                _domainPredictiveFrequency = frequency;
+                _domainPredictiveIndexVersion = requestedVersion;
+                return _domainPredictiveFrequency;
+            }
+            finally
+            {
+                DomainPredictiveCacheGate.Release();
+            }
         }
 
         private async void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)

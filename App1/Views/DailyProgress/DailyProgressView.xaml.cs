@@ -43,7 +43,12 @@ namespace Anfeta.UI.Views.DailyProgress
         private string _token = string.Empty;
         private DateTime _currentDate = DateTime.Today;
         private DailyProgressSnapshot? _snapshot;
+        private WeeklyProgressSnapshot? _weeklySnapshot;
+        private bool _isWeeklyMode;
         private CancellationTokenSource? _loadCts;
+        private DateTimeOffset _lastIncrementalCheckUtc =
+            DateTimeOffset.MinValue;
+        private int _checklistProbeOffset;
 
         // Mientras el Feed está abierto, relee únicamente la caché cada minuto.
         // Esto permite registrar deltas sin bombardear Notion.
@@ -118,6 +123,12 @@ namespace Anfeta.UI.Views.DailyProgress
             Visibility =
                 Visibility.Visible;
 
+            if (_lastIncrementalCheckUtc == DateTimeOffset.MinValue)
+            {
+                _lastIncrementalCheckUtc =
+                    DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(3));
+            }
+
             await LoadCurrentDateAsync(
                 forceRefresh: false);
 
@@ -125,7 +136,8 @@ namespace Anfeta.UI.Views.DailyProgress
         }
 
         private async Task LoadCurrentDateAsync(
-            bool forceRefresh)
+            bool forceRefresh,
+            bool quiet = false)
         {
             if (_isLoading)
                 return;
@@ -161,11 +173,14 @@ namespace Anfeta.UI.Views.DailyProgress
 
             _isLoading = true;
 
-            SetLoading(
-                true,
-                forceRefresh
-                    ? "Actualizando avance…"
-                    : "Preparando avance…");
+            if (!quiet)
+            {
+                SetLoading(
+                    true,
+                    forceRefresh
+                        ? "Comprobando cambios recientes…"
+                        : "Preparando avance…");
+            }
 
             UpdateDateHeader();
 
@@ -182,14 +197,160 @@ namespace Anfeta.UI.Views.DailyProgress
 
             try
             {
+                if (forceRefresh)
+                {
+                    var incrementalStartedAt = DateTimeOffset.UtcNow;
+
+                    ((IProgress<string>)progress).Report(
+                        "Comprobando cambios recientes en Notion…");
+
+                    await _calendarService.RefreshChangedSinceAsync(
+                        _token,
+                        _lastIncrementalCheckUtc.Subtract(
+                            TimeSpan.FromMinutes(2)),
+                        cancellationToken);
+
+                    // El solapamiento de dos minutos en la siguiente consulta
+                    // protege contra retrasos de indexación de Notion.
+                    _lastIncrementalCheckUtc = incrementalStartedAt;
+
+                    var cachedDay =
+                        await _calendarService.TryGetCachedDayAsync(
+                            _currentDate,
+                            cancellationToken);
+
+                    var visibleActivities =
+                        (cachedDay ?? Array.Empty<Anfeta.UI.Models.Notion.NotionCalendarActivity>())
+                            .Where(activity =>
+                                activity != null &&
+                                !activity.IsReviewMirror &&
+                                !string.IsNullOrWhiteSpace(activity.PageId))
+                            .GroupBy(
+                                activity => activity.PageId,
+                                StringComparer.OrdinalIgnoreCase)
+                            .Select(group => group.First())
+                            .ToList();
+
+                    IReadOnlyList<Anfeta.UI.Models.Notion.NotionCalendarActivity>
+                        checklistTargets;
+
+                    if (!quiet)
+                    {
+                        // En modo Por usuario solo se refrescan las cards que
+                        // realmente están en pantalla. Antes se tomaban todas
+                        // las páginas cargadas por el calendario (por ejemplo
+                        // 79) y la checklist relevante quedaba al final de una
+                        // cola limitada a dos lecturas simultáneas.
+                        if (PersonModeToggle.IsChecked == true &&
+                            _snapshot != null &&
+                            PersonPicker.SelectedItem is string selectedPerson)
+                        {
+                            var canonicalSelected =
+                                CanonicalPersonUi(selectedPerson);
+
+                            var selectedPageIds =
+                                _snapshot.People
+                                    .Where(person => string.Equals(
+                                        CanonicalPersonUi(person.Name),
+                                        canonicalSelected,
+                                        StringComparison.OrdinalIgnoreCase))
+                                    .SelectMany(person =>
+                                        person.Lagging
+                                            .Concat(person.Progress)
+                                            .Concat(person.AllActivities.Where(item =>
+                                                IsCarryOverItem(item) &&
+                                                !item.IsHistoricalSnapshot)))
+                                    .Select(item => item.PageId)
+                                    .Where(pageId => !string.IsNullOrWhiteSpace(pageId))
+                                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                            checklistTargets = visibleActivities
+                                .Where(activity => selectedPageIds.Contains(activity.PageId))
+                                .ToList();
+                        }
+                        else
+                        {
+                            var reportPageIds =
+                                (_snapshot?.People ??
+                                 Array.Empty<DailyProgressPersonSnapshot>())
+                                    .SelectMany(person =>
+                                        person.Lagging
+                                            .Concat(person.Progress)
+                                            .Concat(person.AllActivities.Where(item =>
+                                                IsCarryOverItem(item) &&
+                                                !item.IsHistoricalSnapshot)))
+                                    .Select(item => item.PageId)
+                                    .Where(pageId => !string.IsNullOrWhiteSpace(pageId))
+                                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                            checklistTargets = visibleActivities
+                                .Where(activity => reportPageIds.Contains(activity.PageId))
+                                .ToList();
+                        }
+                    }
+                    else
+                    {
+                        var changedIds =
+                            _calendarService.LastChangedPageIds.ToHashSet(
+                                StringComparer.OrdinalIgnoreCase);
+
+                        var targets = visibleActivities
+                            .Where(activity => changedIds.Contains(activity.PageId))
+                            .ToList();
+
+                        // Sondeo rotativo: dos checklists adicionales cada 30 s.
+                        // Así los cambios de bloques hijos se descubren sin
+                        // descargar todos los bodies en cada ciclo.
+                        if (visibleActivities.Count > 0)
+                        {
+                            for (var index = 0;
+                                 index < Math.Min(2, visibleActivities.Count);
+                                 index++)
+                            {
+                                var activity = visibleActivities[
+                                    (_checklistProbeOffset + index) % visibleActivities.Count];
+
+                                if (!targets.Any(item => string.Equals(
+                                        item.PageId,
+                                        activity.PageId,
+                                        StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    targets.Add(activity);
+                                }
+                            }
+
+                            _checklistProbeOffset =
+                                (_checklistProbeOffset + 2) % visibleActivities.Count;
+                        }
+
+                        checklistTargets = targets;
+                    }
+
+                    if (checklistTargets.Count > 0)
+                    {
+                        ((IProgress<string>)progress).Report(
+                            quiet
+                                ? "Comprobando cambios de checklist…"
+                                : $"Actualizando {checklistTargets.Count} checklist(s) visibles…");
+
+                        await Task.WhenAll(
+                            checklistTargets.Select(activity =>
+                                _calendarService.GetChecklistStatsAsync(
+                                    _token,
+                                    activity.PageId,
+                                    cancellationToken,
+                                    forceRefresh: true)));
+                    }
+                }
+
                 var snapshot =
                     await _service.BuildAsync(
                         _calendarService,
                         _token,
                         _currentDate,
-                        forceRefresh,
-                        progress,
-                        cancellationToken);
+                        forceRefresh: false,
+                        progress: progress,
+                        cancellationToken: cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -211,9 +372,12 @@ namespace Anfeta.UI.Views.DailyProgress
             {
                 _isLoading = false;
 
-                SetLoading(
-                    false,
-                    string.Empty);
+                if (!quiet)
+                {
+                    SetLoading(
+                        false,
+                        string.Empty);
+                }
             }
         }
 
@@ -310,24 +474,7 @@ namespace Anfeta.UI.Views.DailyProgress
         {
             UpdateDateHeader();
 
-            CoverageKpiText.Text =
-                $"{snapshot.CoveragePercentage}%";
-
-            LaggingKpiText.Text =
-                snapshot.LaggingCount.ToString(
-                    CultureInfo.InvariantCulture);
-
-            ReviewKpiText.Text =
-                snapshot.ReviewCount.ToString(
-                    CultureInfo.InvariantCulture);
-
-            CompletedKpiText.Text =
-                snapshot.CompletedCount.ToString(
-                    CultureInfo.InvariantCulture);
-
-            ScheduledKpiText.Text =
-                $"{FormatMinutes(snapshot.ProgressMinutes)} / " +
-                $"{FormatMinutes(snapshot.ScheduledMinutes)}";
+            UpdateKpis(snapshot);
 
             FeedSourceText.Text =
                 snapshot.LoadedFromCalendarCache
@@ -413,6 +560,28 @@ namespace Anfeta.UI.Views.DailyProgress
             {
                 ShowGeneralMode();
             }
+        }
+
+        private void UpdateKpis(DailyProgressSnapshot snapshot)
+        {
+            CoverageKpiText.Text = $"{snapshot.CoveragePercentage}%";
+            LaggingKpiText.Text = snapshot.LaggingCount.ToString(CultureInfo.InvariantCulture);
+            ReviewKpiText.Text = snapshot.ReviewCount.ToString(CultureInfo.InvariantCulture);
+            CompletedKpiText.Text = snapshot.CompletedCount.ToString(CultureInfo.InvariantCulture);
+            ScheduledKpiText.Text =
+                $"{FormatMinutes(snapshot.ProgressMinutes)} / " +
+                $"{FormatMinutes(snapshot.ScheduledMinutes)}";
+        }
+
+        private void UpdateKpis(DailyProgressPersonSnapshot person)
+        {
+            CoverageKpiText.Text = $"{person.CoveragePercentage}%";
+            LaggingKpiText.Text = person.Lagging.Count.ToString(CultureInfo.InvariantCulture);
+            ReviewKpiText.Text = person.ReviewCount.ToString(CultureInfo.InvariantCulture);
+            CompletedKpiText.Text = person.CompletedCount.ToString(CultureInfo.InvariantCulture);
+            ScheduledKpiText.Text =
+                $"{FormatMinutes(person.ProgressMinutes)} / " +
+                $"{FormatMinutes(person.ScheduledMinutes)}";
         }
 
         private void PeopleGrid_SizeChanged(
@@ -1072,6 +1241,18 @@ namespace Anfeta.UI.Views.DailyProgress
                 new TextBlock
                 {
                     Text =
+                        item.ChecklistScanned
+                            ? $"Hoy {item.TodayChecklistLabel} · Total {item.TotalChecklistLabel}"
+                            : "Hoy … · Total …",
+                    FontSize = 8.5,
+                    Foreground = MutedBrush,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                });
+
+            text.Children.Add(
+                new TextBlock
+                {
+                    Text =
                         item.ShortTitle,
                     FontSize = 9,
                     Foreground =
@@ -1175,7 +1356,10 @@ namespace Anfeta.UI.Views.DailyProgress
                 new TextBlock
                 {
                     Text =
-                        $"{item.StateCode} {item.ChecklistLabel}",
+                        item.ChecklistScanned
+                            ? $"{item.StateCode} · Hoy {item.TodayChecklistPercentage}%\n" +
+                              $"Total {item.ChecklistPercentage}%"
+                            : $"{item.StateCode} · …",
                     FontSize = 9,
                     Foreground =
                         danger
@@ -1352,6 +1536,8 @@ namespace Anfeta.UI.Views.DailyProgress
                     person.Name;
             }
 
+            UpdateKpis(person);
+
             DetailInitialText.Text =
                 person.Initial;
 
@@ -1448,7 +1634,7 @@ namespace Anfeta.UI.Views.DailyProgress
             {
                 PersonDetailItems.Children.Add(
                     BuildEmptyDetailCard(
-                        "Todavía no hay cambios observados hoy después del baseline."));
+                        "Todavía no hay checks completados con fecha de edición en este día."));
             }
             else
             {
@@ -1688,10 +1874,23 @@ namespace Anfeta.UI.Views.DailyProgress
                 new TextBlock
                 {
                     Text =
-                        $"{item.TimeLabel} · checklist {item.ChecklistLabel}",
+                        item.TimeLabel,
                     FontSize = 9.5,
                     Foreground =
                         MutedBrush
+                });
+
+            info.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        item.ChecklistScanned
+                            ? $"Hoy {item.TodayChecklistLabel}   ·   Total {item.TotalChecklistLabel}"
+                            : "Hoy …   ·   Total …",
+                    FontSize = 9.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = Brush(255, 186, 230, 253),
+                    TextWrapping = TextWrapping.Wrap
                 });
 
             if (item.HasIncompleteChecklistWarning)
@@ -1802,7 +2001,8 @@ namespace Anfeta.UI.Views.DailyProgress
                 {
                     Text =
                         item.ChecklistScanned
-                            ? $"{item.ChecklistLabel} · {item.ChecklistPercentage}%"
+                            ? $"Hoy {item.TodayChecklistLabel}\n" +
+                              $"Total {item.TotalChecklistLabel}"
                             : "Checklist …",
                     FontSize = 9.5,
                     Foreground =
@@ -2040,13 +2240,25 @@ namespace Anfeta.UI.Views.DailyProgress
                 false;
 
             GeneralViewHost.Visibility =
-                Visibility.Visible;
+                _isWeeklyMode ? Visibility.Collapsed : Visibility.Visible;
 
             PersonDetailHost.Visibility =
                 Visibility.Collapsed;
 
+            WeeklyReportHost.Visibility =
+                _isWeeklyMode ? Visibility.Visible : Visibility.Collapsed;
+
             FeedFooter.Visibility =
                 Visibility.Visible;
+
+            if (_isWeeklyMode && _weeklySnapshot != null)
+            {
+                RenderWeeklyReport(_weeklySnapshot);
+            }
+            else if (_snapshot != null)
+            {
+                UpdateKpis(_snapshot);
+            }
         }
 
         private void ShowPersonMode()
@@ -2061,7 +2273,10 @@ namespace Anfeta.UI.Views.DailyProgress
                 Visibility.Collapsed;
 
             PersonDetailHost.Visibility =
-                Visibility.Visible;
+                _isWeeklyMode ? Visibility.Collapsed : Visibility.Visible;
+
+            WeeklyReportHost.Visibility =
+                _isWeeklyMode ? Visibility.Visible : Visibility.Collapsed;
 
             // En detalle priorizamos el espacio vertical para actividades.
             FeedFooter.Visibility =
@@ -2079,6 +2294,16 @@ namespace Anfeta.UI.Views.DailyProgress
             object sender,
             RoutedEventArgs e)
         {
+            if (_isWeeklyMode)
+            {
+                if (_weeklySnapshot?.People.Count > 0 && PersonPicker.SelectedIndex < 0)
+                    PersonPicker.SelectedIndex = 0;
+                GeneralModeToggle.IsChecked = false;
+                PersonModeToggle.IsChecked = true;
+                RenderWeeklyReport(_weeklySnapshot);
+                return;
+            }
+
             if (_snapshot?.People.Count > 0 &&
                 PersonPicker.SelectedIndex < 0)
             {
@@ -2092,11 +2317,19 @@ namespace Anfeta.UI.Views.DailyProgress
             object sender,
             SelectionChangedEventArgs e)
         {
-            if (_snapshot == null ||
-                PersonPicker.SelectedItem == null)
+            if (PersonPicker.SelectedItem == null)
             {
                 return;
             }
+
+            if (_isWeeklyMode)
+            {
+                if (PersonModeToggle.IsChecked == true)
+                    RenderWeeklyReport(_weeklySnapshot);
+                return;
+            }
+
+            if (_snapshot == null) return;
 
             if (PersonModeToggle.IsChecked == true)
             {
@@ -2239,21 +2472,22 @@ namespace Anfeta.UI.Views.DailyProgress
                 DispatcherQueue.CreateTimer();
 
             _trackingRefreshTimer.Interval =
-                TimeSpan.FromMinutes(1);
+                TimeSpan.FromSeconds(30);
 
             _trackingRefreshTimer.Tick +=
                 async (_, __) =>
                 {
-                    if (Visibility != Visibility.Visible ||
+                    if (_isWeeklyMode || Visibility != Visibility.Visible ||
                         _isLoading)
                     {
                         return;
                     }
 
-                    // forceRefresh:false = cache-first.
-                    // El calendario sigue siendo quien actualiza Notion.
+                    // La misma ruta incremental del calendario detecta las
+                    // PageId modificadas. Solo sus bodies se vuelven a leer.
                     await LoadCurrentDateAsync(
-                        forceRefresh: false);
+                        forceRefresh: true,
+                        quiet: true);
                 };
 
             _trackingRefreshTimer.Start();
@@ -2279,30 +2513,28 @@ namespace Anfeta.UI.Views.DailyProgress
             object sender,
             RoutedEventArgs e)
         {
-            _currentDate =
-                _currentDate.AddDays(-1);
+            _currentDate = _currentDate.AddDays(_isWeeklyMode ? -7 : -1);
 
-            await LoadCurrentDateAsync(
-                forceRefresh: false);
+            if (_isWeeklyMode) await LoadWeeklyAsync();
+            else await LoadCurrentDateAsync(forceRefresh: false);
         }
 
         private async void NextDay_Click(
             object sender,
             RoutedEventArgs e)
         {
-            _currentDate =
-                _currentDate.AddDays(1);
+            _currentDate = _currentDate.AddDays(_isWeeklyMode ? 7 : 1);
 
-            await LoadCurrentDateAsync(
-                forceRefresh: false);
+            if (_isWeeklyMode) await LoadWeeklyAsync();
+            else await LoadCurrentDateAsync(forceRefresh: false);
         }
 
         private async void Refresh_Click(
             object sender,
             RoutedEventArgs e)
         {
-            await LoadCurrentDateAsync(
-                forceRefresh: true);
+            if (_isWeeklyMode) await LoadWeeklyAsync();
+            else await LoadCurrentDateAsync(forceRefresh: true);
         }
 
         private void Close_Click(
@@ -2326,6 +2558,16 @@ namespace Anfeta.UI.Views.DailyProgress
 
         private void UpdateDateHeader()
         {
+            if (_isWeeklyMode)
+            {
+                var offset = ((int)_currentDate.DayOfWeek + 6) % 7;
+                var monday = _currentDate.Date.AddDays(-offset);
+                var sunday = monday.AddDays(6);
+                FeedDateText.Text = $"{monday:dd/MM}–{sunday:dd/MM/yyyy}";
+                FeedDateSubtitle.Text = "Reporte semanal · fotografías locales";
+                return;
+            }
+
             FeedDateText.Text =
                 _currentDate.ToString(
                     "dd/MM/yyyy",
@@ -2334,7 +2576,174 @@ namespace Anfeta.UI.Views.DailyProgress
             FeedDateSubtitle.Text =
                 _currentDate.ToString(
                     "dddd, d 'de' MMMM 'de' yyyy",
-                    new CultureInfo("es-MX"));
+                new CultureInfo("es-MX"));
+        }
+
+        private async void WeeklyScope_Click(object sender, RoutedEventArgs e)
+        {
+            _isWeeklyMode = !_isWeeklyMode;
+            WeeklyScopeButton.Content = _isWeeklyMode ? "Día" : "Semana";
+            UpdateScopeLabels();
+            if (_isWeeklyMode)
+            {
+                StopTrackingRefreshTimer();
+                await LoadWeeklyAsync();
+            }
+            else
+            {
+                WeeklyReportHost.Visibility = Visibility.Collapsed;
+                await LoadCurrentDateAsync(forceRefresh: false);
+                StartTrackingRefreshTimer();
+            }
+        }
+
+        private async Task LoadWeeklyAsync()
+        {
+            if (_isLoading) return;
+            _isLoading = true;
+            SetLoading(true, "Leyendo fotografías de la semana…");
+            UpdateDateHeader();
+            try
+            {
+                _loadCts?.Cancel();
+                _loadCts?.Dispose();
+                _loadCts = new CancellationTokenSource();
+                _weeklySnapshot = await _service.BuildWeeklyAuditAsync(
+                    _currentDate, _loadCts.Token);
+                RenderWeeklyReport(_weeklySnapshot);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { ShowError(ex.Message); }
+            finally
+            {
+                _isLoading = false;
+                SetLoading(false, string.Empty);
+            }
+        }
+
+        private void UpdateScopeLabels()
+        {
+            CoverageKpiLabel.Text = _isWeeklyMode ? "COBERTURA SEMANA" : "COBERTURA HOY";
+            ReviewKpiLabel.Text = _isWeeklyMode ? "R SEMANA" : "R HOY";
+            CompletedKpiLabel.Text = _isWeeklyMode ? "✓ Z SEMANA" : "✓ Z HOY";
+            ScheduledKpiLabel.Text = _isWeeklyMode
+                ? "AVANCE SEMANA / AGENDADO"
+                : "AVANCE HOY / AGENDADO";
+        }
+
+        private void RenderWeeklyReport(WeeklyProgressSnapshot? report)
+        {
+            if (report == null) return;
+            UpdateDateHeader();
+            GeneralViewHost.Visibility = Visibility.Collapsed;
+            PersonDetailHost.Visibility = Visibility.Collapsed;
+            WeeklyReportHost.Visibility = Visibility.Visible;
+            FeedFooter.Visibility = Visibility.Visible;
+            FeedSourceText.Text = "Auditoría local";
+            FeedStatusText.Text = report.DataNote;
+
+            var previous = CanonicalPersonUi(PersonPicker.SelectedItem as string);
+            var names = report.People.Select(item => CanonicalPersonUi(item.Name))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            PersonPicker.ItemsSource = null;
+            PersonPicker.ItemsSource = names;
+            PersonPicker.SelectedItem = names.FirstOrDefault(item => string.Equals(
+                item, previous, StringComparison.OrdinalIgnoreCase));
+            if (PersonPicker.SelectedIndex < 0 && names.Count > 0) PersonPicker.SelectedIndex = 0;
+
+            var selected = PersonModeToggle.IsChecked == true
+                ? report.People.FirstOrDefault(item => string.Equals(CanonicalPersonUi(item.Name),
+                    CanonicalPersonUi(PersonPicker.SelectedItem as string), StringComparison.OrdinalIgnoreCase))
+                : null;
+            CoverageKpiText.Text = $"{selected?.CoveragePercentage ?? report.CoveragePercentage}%";
+            LaggingKpiText.Text = (selected?.LaggingCount ?? report.LaggingCount).ToString(CultureInfo.InvariantCulture);
+            ReviewKpiText.Text = (selected?.ReviewCount ?? report.ReviewCount).ToString(CultureInfo.InvariantCulture);
+            CompletedKpiText.Text = (selected?.CompletedCount ?? report.CompletedCount).ToString(CultureInfo.InvariantCulture);
+            ScheduledKpiText.Text = $"{FormatMinutes(selected?.ProgressMinutes ?? report.ProgressMinutes)} / " +
+                                    $"{FormatMinutes(selected?.ScheduledMinutes ?? report.ScheduledMinutes)}";
+
+            WeeklyReportItems.Children.Clear();
+            WeeklyReportItems.Children.Add(BuildWeeklyTextCard(
+                $"RESUMEN · {report.WeekStart:dd/MM}–{report.WeekEnd:dd/MM/yyyy}",
+                $"{report.ActivityCount} actividades · {report.MovedCount} movidas · " +
+                $"{report.NoProgressCount} registros sin avance · +{report.ChecklistAdvanced} checks",
+                AccentBrush));
+
+            if (report.MissingDays.Count > 0)
+            {
+                WeeklyReportItems.Children.Add(BuildWeeklyTextCard(
+                    "⚠ REPORTE PARCIAL",
+                    "Falta fotografía de: " + string.Join(", ", report.MissingDays.Select(day => day.ToString("ddd dd/MM", new CultureInfo("es-MX")))) +
+                    ". Esos días no se cuentan como cero.", DangerBrush));
+            }
+
+            var visiblePeople = selected != null ? new[] { selected } : report.People;
+            foreach (var person in visiblePeople)
+            {
+                WeeklyReportItems.Children.Add(BuildWeeklyTextCard(
+                    person.Name,
+                    $"{person.ActivityCount} actividades · cobertura {person.CoveragePercentage}% · " +
+                    $"{person.LaggingCount} rezagadas · R {person.ReviewCount} · Z {person.CompletedCount}\n" +
+                    $"{FormatMinutes(person.ProgressMinutes)} / {FormatMinutes(person.ScheduledMinutes)} · " +
+                    $"+{person.ChecklistAdvanced} checks · {person.NoProgressCount} sin avance · {person.MovedCount} movidas",
+                    AccentBrush));
+
+                if (selected == null) continue;
+                foreach (var item in person.Items
+                    .OrderByDescending(item => item.IsLagging)
+                    .ThenByDescending(item => item.IsCompletedMovement || item.IsReviewMovement)
+                    .ThenBy(item => item.ReportDate)
+                    .ThenBy(item => item.Title))
+                {
+                    var route = item.RouteDates.Count > 1
+                        ? " · ruta " + string.Join(" → ", item.RouteDates.Select(date => date.ToString("dd/MM")))
+                        : string.Empty;
+                    var movement = item.IsCompletedMovement ? "✓ Z" :
+                        item.IsReviewMovement ? "↗ R" :
+                        item.IsLagging ? "⚠ REZAGADA" :
+                        item.MoveCount > 0 ? "↪ MOVIDA" :
+                        item.HasProgress ? "● AVANCE" : "○ SIN AVANCE";
+                    WeeklyReportItems.Children.Add(BuildWeeklyTextCard(
+                        $"{movement} · {item.ReportDate:ddd dd/MM} · {item.Title}",
+                        $"{item.Project} · {item.StateCode} · checks {item.ChecklistCompleted}/{item.ChecklistTotal} " +
+                        $"(+{item.ChecklistAdvanced}) · {FormatMinutes(item.ProgressMinutes)}/{FormatMinutes(item.ScheduledMinutes)}" + route,
+                        item.IsLagging ? DangerBrush :
+                        item.IsCompletedMovement ? CompletedBrush :
+                        item.IsReviewMovement ? ReviewBrush :
+                        item.HasProgress ? ProgressBrush : MutedBrush));
+                }
+            }
+
+            FeedEmptyState.Visibility = report.People.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            FeedEmptyText.Text = "No hay fotografías con actividades para esta semana.";
+        }
+
+        private static Border BuildWeeklyTextCard(string title, string detail, Brush accent)
+        {
+            var panel = new StackPanel { Spacing = 3 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 14,
+                Foreground = accent,
+                TextWrapping = TextWrapping.Wrap
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = detail,
+                FontSize = 11,
+                Foreground = MutedBrush,
+                TextWrapping = TextWrapping.Wrap
+            });
+            return new Border
+            {
+                Padding = new Thickness(12, 9, 12, 9),
+                Background = SurfaceSoftBrush,
+                BorderBrush = accent,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Child = panel
+            };
         }
 
         private void SetLoading(

@@ -196,6 +196,7 @@ namespace Anfeta.UI.Views
         private DispatcherTimer? _calendarZoomDebounceTimer;
         private double _calendarPendingZoomDelta;
         private long _calendarLoadVersion;
+        private int _calendarChecklistProbeOffset;
         private Button? _calendarHoveredActivityButton;
         private CancellationTokenSource? _calendarHoverPreviewCts;
         private DispatcherTimer? _calendarPreviewCloseTimer;
@@ -403,6 +404,13 @@ namespace Anfeta.UI.Views
         private string _calendarSearchQuery = string.Empty;
         private string _calendarPhaseFilter = string.Empty;
         private bool _calendarReviewAlertSending;
+
+        // ContentDialog es modal respecto a su XamlRoot. El contenido fijado
+        // puede vivir en CalendarActivityWindow aunque este SearchView siga
+        // perteneciendo lógicamente a la ventana principal. Este gate evita
+        // dos diálogos simultáneos y la raíz se toma siempre del botón real.
+        private readonly SemaphoreSlim _calendarContentDialogGate =
+            new(1, 1);
 
         // Una sola creación de alerta de revisión a la vez entre pestañas de
         // SearchView. Evita la ventana en la que dos vistas ven AlertPageId vacío
@@ -1032,6 +1040,8 @@ namespace Anfeta.UI.Views
             // en segundo plano. Nunca dejamos el modulo en blanco esperando
             // rezagadas/checklist.
             CalendarHost.Visibility = Visibility.Visible;
+            SearchFiltersBackdrop.Visibility = Visibility.Collapsed;
+            SearchFiltersPanel.Visibility = Visibility.Collapsed;
             ToggleCalendarView.IsChecked = true;
             CalendarDateTitle.Text = FormatCalendarDate(_calendarSelectedDate);
 
@@ -1445,6 +1455,8 @@ namespace Anfeta.UI.Views
             _calendarHoveredActivityButton = null;
 
             CalendarHost.Visibility = Visibility.Collapsed;
+            SearchFiltersBackdrop.Visibility = Visibility.Visible;
+            SearchFiltersPanel.Visibility = Visibility.Visible;
             ToggleCalendarView.IsChecked = false;
 
             if (CalendarPhaseFilterControl != null)
@@ -3515,10 +3527,10 @@ namespace Anfeta.UI.Views
 
             CalendarExtraHoursToggleControl.Content =
                 _calendarShowExtraHours
-                    ? "🕙 Ocultar 9–10 PM ↑"
+                    ? "🕙"
                     : extraCount > 0
-                        ? $"🕘 9–10 PM ({extraCount}) ↓"
-                        : "🕘 9–10 PM ↓";
+                        ? $"🕘{Math.Min(extraCount, 9)}"
+                        : "🕘";
 
             ToolTipService.SetToolTip(
                 CalendarExtraHoursToggleControl,
@@ -3623,7 +3635,7 @@ namespace Anfeta.UI.Views
 
             CalendarCobrosToggleControl.IsChecked = _calendarShowCobros;
             CalendarCobrosToggleControl.Content =
-                _calendarShowCobros ? "💰 Cobros ✓" : "💰 Cobros";
+                _calendarShowCobros ? "💰✓" : "💰";
 
             ToolTipService.SetToolTip(
                 CalendarCobrosToggleControl,
@@ -8798,6 +8810,35 @@ namespace Anfeta.UI.Views
                     : $"{shortPrefix} —";
             }
 
+            // Fuente principal compartida con Avance Diario: cada to_do
+            // actualmente marcado cuenta en la fecha de su last_edited_time.
+            // El baseline queda únicamente como respaldo para cachés antiguas.
+            var currentStats =
+                GetCalendarChecklistStats(activity);
+
+            if (currentStats.CompletedByDate != null)
+            {
+                var completedOnSelectedDay =
+                    currentStats.GetCompletedOn(_calendarSelectedDate);
+
+                var dailyPercentage =
+                    Math.Clamp(
+                        (int)Math.Round(
+                            completedOnSelectedDay * 100d /
+                            Math.Max(1, currentStats.Total)),
+                        0,
+                        100);
+
+                tooltip =
+                    $"{dayLabel} (H): {completedOnSelectedDay}/{currentStats.Total} " +
+                    $"checks actualmente completados cuya última edición cae " +
+                    $"en {_calendarSelectedDate:dd/MM/yyyy} · {dailyPercentage}%.";
+
+                return ultraCompact
+                    ? $"{shortPrefix}{dailyPercentage}"
+                    : $"{shortPrefix} {dailyPercentage}%";
+            }
+
             if (!_calendarCardChecklistBaselines.TryGetValue(
                     activity.PageId,
                     out var baseline))
@@ -8977,7 +9018,7 @@ namespace Anfeta.UI.Views
                     out _))
             {
                 tooltip =
-                    "PROY: esta actividad no tiene un proyecto comparable.";
+                    "P · Avance total del proyecto: esta actividad no tiene un proyecto comparable.";
 
                 return string.Empty;
             }
@@ -8991,7 +9032,7 @@ namespace Anfeta.UI.Views
                     out var totalActivities))
             {
                 tooltip =
-                    "PROY: preparando el avance total desde la caché del proyecto. " +
+                    "P · Avance total del proyecto: preparando datos desde la caché. " +
                     "No se hace una consulta por tarjeta.";
 
                 return ultraCompact
@@ -9007,7 +9048,7 @@ namespace Anfeta.UI.Views
                 if (isPartial)
                 {
                     tooltip =
-                        $"PROY: {projectLabel} · todavía faltan " +
+                        $"P · Avance total del proyecto: {projectLabel} · todavía faltan " +
                         $"{Math.Max(0, totalActivities - scannedActivities)} actividad(es) por revisar.";
 
                     return ultraCompact
@@ -9016,7 +9057,7 @@ namespace Anfeta.UI.Views
                 }
 
                 tooltip =
-                    $"PROY: {projectLabel} · sin checklist de proyecto.";
+                    $"P · Avance total del proyecto: {projectLabel} · sin checklist de proyecto.";
 
                 return string.Empty;
             }
@@ -9028,7 +9069,7 @@ namespace Anfeta.UI.Views
             if (isPartial)
             {
                 tooltip =
-                    $"PROY: {projectLabel} · cálculo parcial con " +
+                    $"P · Avance total del proyecto: {projectLabel} · cálculo parcial con " +
                     $"{scannedActivities}/{totalActivities} actividad(es) ya leídas · " +
                     $"{stats.Completed}/{stats.Total} checks disponibles · " +
                     $"{percentage}%. El símbolo ~ indica que todavía faltan actividades.";
@@ -9039,7 +9080,7 @@ namespace Anfeta.UI.Views
             }
 
             tooltip =
-                $"PROY: {projectLabel} · " +
+                $"P · Avance total del proyecto: {projectLabel} · " +
                 $"{stats.Completed}/{stats.Total} checks · " +
                 $"{percentage}%.";
 
@@ -9100,11 +9141,11 @@ namespace Anfeta.UI.Views
                 visual.ChecklistBadge,
                 activity.ChecklistScanned
                     ? stats.HasChecklist
-                        ? $"ACT: checklist de esta actividad · " +
+                        ? $"A · Avance total de la actividad: " +
                           $"{stats.Completed}/{stats.Total} · " +
                           $"{GetChecklistPercentage(stats)}%"
-                        : "ACT: checklist revisado · sin tareas activas"
-                    : "ACT: calculando checklist de la actividad…");
+                        : "A · Avance total: checklist revisado, sin tareas activas"
+                    : "A · Avance total: calculando checklist de la actividad…");
 
             var todayText =
                 BuildCalendarTodayProgressBadgeText(
@@ -9777,9 +9818,9 @@ namespace Anfeta.UI.Views
                 checklistBadge,
                 activity.ChecklistScanned
                     ? calendarChecklist.HasChecklist
-                        ? $"ACT: {calendarChecklist.Completed}/{calendarChecklist.Total} · {GetChecklistPercentage(calendarChecklist)}%"
-                        : "ACT: checklist revisado · sin tareas activas"
-                    : "ACT: calculando checklist…");
+                        ? $"A · Avance total de la actividad: {calendarChecklist.Completed}/{calendarChecklist.Total} · {GetChecklistPercentage(calendarChecklist)}%"
+                        : "A · Avance total: checklist revisado, sin tareas activas"
+                    : "A · Avance total: calculando checklist…");
 
             // HOY: el más importante visualmente.
             var todayProgressText =
@@ -9978,9 +10019,11 @@ namespace Anfeta.UI.Views
             }
 
             var todayNaturalWidth =
-                EstimateProgressBadgeWidth(
-                    todayProgressText.Text,
-                    ultraMiniCard);
+                Math.Max(
+                    ultraMiniCard ? 27d : 31d,
+                    EstimateProgressBadgeWidth(
+                        todayProgressText.Text,
+                        ultraMiniCard));
 
             var activityNaturalWidth =
                 EstimateProgressBadgeWidth(
@@ -10020,17 +10063,30 @@ namespace Anfeta.UI.Views
                         ? 94d
                         : 150d);
 
+            // En columnas creadas por muchos empalmes puede quedar menos de
+            // 78 px. En ese caso la card prioriza exclusivamente H/A/P en una
+            // sola fila ultra compacta; fase/título siguen disponibles en el
+            // hover y el detalle.
+            var extremeNarrowProgress =
+                cardWidth < 78d;
+
+            // H es el dato prioritario y nunca debe colapsar a una cápsula sin
+            // texto. Antes era el único badge con MinWidth=0; en cards bajas la
+            // medición de la fila podía entregarle el sobrante a A/P.
+            todayProgressBadge.MinWidth = todayNaturalWidth;
+
             // Si el texto real no entra, P baja. También se baja antes en cards
             // medianas para conservar dominio/título sin apretarlos.
             var wrapProgressStrip =
-                oneRowNaturalWidth >
-                    oneRowAvailableWidth ||
-                cardWidth <
-                    (ultraMiniCard
-                        ? 112d
-                        : miniCard
-                            ? 178d
-                            : 188d);
+                !extremeNarrowProgress &&
+                (oneRowNaturalWidth >
+                     oneRowAvailableWidth ||
+                 cardWidth <
+                     (ultraMiniCard
+                         ? 112d
+                         : miniCard
+                             ? 178d
+                             : 188d));
 
             var topRowNaturalWidth =
                 todayNaturalWidth +
@@ -10046,7 +10102,9 @@ namespace Anfeta.UI.Views
                 new Grid
                 {
                     Width =
-                        wrapProgressStrip
+                        extremeNarrowProgress
+                            ? Math.Max(30d, cardWidth - 4d)
+                            : wrapProgressStrip
                             ? Math.Min(
                                 Math.Max(
                                     ultraMiniCard
@@ -10178,30 +10236,52 @@ namespace Anfeta.UI.Views
             else
             {
                 checklistBadge.Margin =
-                    new Thickness(
-                        1, 0, 1, 0);
+                    extremeNarrowProgress
+                        ? new Thickness(0)
+                        : new Thickness(
+                            1, 0, 1, 0);
+
+                if (extremeNarrowProgress)
+                {
+                    todayProgressBadge.Padding = new Thickness(0);
+                    checklistBadge.Padding = new Thickness(0);
+                    projectProgressBadge.Padding = new Thickness(0);
+                    todayProgressBadge.Margin = new Thickness(0);
+                    projectProgressBadge.Margin = new Thickness(0);
+
+                    todayProgressText.FontSize = Math.Max(5.4, 5.8 * CalendarFontScale);
+                    checklistText.FontSize = Math.Max(5.4, 5.8 * CalendarFontScale);
+                    projectProgressText.FontSize = Math.Max(5.2, 5.6 * CalendarFontScale);
+
+                    // En modo ultraestrecho se permite reducir, pero H conserva
+                    // una porción ligeramente mayor para que siempre sea legible.
+                    todayProgressBadge.MinWidth = 0;
+                }
 
                 // Auto/Auto/Auto evita truncar ACT cuando el conteo tiene
                 // más dígitos que HOY o PROY.
                 progressStrip.ColumnDefinitions.Add(
                     new ColumnDefinition
                     {
-                        Width =
-                            GridLength.Auto
+                        Width = extremeNarrowProgress
+                            ? new GridLength(1.20, GridUnitType.Star)
+                            : GridLength.Auto
                     });
 
                 progressStrip.ColumnDefinitions.Add(
                     new ColumnDefinition
                     {
-                        Width =
-                            GridLength.Auto
+                        Width = extremeNarrowProgress
+                            ? new GridLength(1, GridUnitType.Star)
+                            : GridLength.Auto
                     });
 
                 progressStrip.ColumnDefinitions.Add(
                     new ColumnDefinition
                     {
-                        Width =
-                            GridLength.Auto
+                        Width = extremeNarrowProgress
+                            ? new GridLength(1, GridUnitType.Star)
+                            : GridLength.Auto
                     });
 
                 Grid.SetColumn(
@@ -10555,27 +10635,55 @@ namespace Anfeta.UI.Views
 
                 if (cardWidth < 112)
                 {
-                    // En cards extremadamente angostas H/A/P usan todo el ancho
-                    // INTERNO disponible. Nunca alteran cardWidth.
-                    progressStrip.Width =
-                        Math.Max(
-                            30,
-                            cardWidth -
-                            8);
+                    if (extremeNarrowProgress)
+                    {
+                        phaseBadge.Visibility = Visibility.Collapsed;
+                        shortIdentityText.Visibility = Visibility.Collapsed;
 
-                    progressStrip.HorizontalAlignment =
-                        HorizontalAlignment.Stretch;
+                        progressStrip.Width = Math.Max(30, cardWidth - 4);
+                        progressStrip.HorizontalAlignment = HorizontalAlignment.Stretch;
 
-                    Grid.SetColumn(
-                        progressStrip,
-                        0);
+                        Grid.SetColumn(progressStrip, 0);
+                        Grid.SetColumnSpan(progressStrip, 3);
+                        shortRow.Children.Add(progressStrip);
+                    }
+                    else
+                    {
+                        // En cards extremadamente angostas H/A/P ocupan una segunda
+                        // fila propia. Antes compartían la misma celda con fase y
+                        // título, por lo que podían taparse/desaparecer con zoom.
+                        shortRow.RowDefinitions.Add(
+                            new RowDefinition { Height = GridLength.Auto });
+                        shortRow.RowDefinitions.Add(
+                            new RowDefinition { Height = GridLength.Auto });
 
-                    Grid.SetColumnSpan(
-                        progressStrip,
-                        3);
+                        Grid.SetRow(phaseBadge, 0);
+                        Grid.SetRow(shortIdentityText, 0);
 
-                    shortRow.Children.Add(
-                        progressStrip);
+                        progressStrip.Width =
+                            Math.Max(
+                                30,
+                                cardWidth -
+                                8);
+
+                        progressStrip.HorizontalAlignment =
+                            HorizontalAlignment.Stretch;
+
+                        Grid.SetColumn(
+                            progressStrip,
+                            0);
+
+                        Grid.SetColumnSpan(
+                            progressStrip,
+                            3);
+
+                        Grid.SetRow(
+                            progressStrip,
+                            1);
+
+                        shortRow.Children.Add(
+                            progressStrip);
+                    }
                 }
                 else
                 {
@@ -10819,47 +10927,29 @@ namespace Anfeta.UI.Views
 
             if (hasIncompleteChecklistWarning)
             {
-                // Aviso fuerte sin sacrificar la franja izquierda de prioridad.
-                // Se dibuja dentro del contenido para no reemplazar BorderBrush
-                // del Button, que sigue indicando prioridad.
-                cardContent.Children.Add(
-                    new Border
-                    {
-                        BorderBrush =
-                            new SolidColorBrush(
-                                Color.FromArgb(
-                                    255,
-                                    250,
-                                    204,
-                                    21)),
-                        BorderThickness =
-                            new Thickness(2),
-                        CornerRadius =
-                            new CornerRadius(
-                                5 * _calendarZoom),
-                        Background =
-                            new SolidColorBrush(
-                                Colors.Transparent),
-                        IsHitTestVisible = false
-                    });
-
                 if (!ultraMiniCard &&
                     cardWidth >= 96 &&
                     height >= 42)
                 {
+                    // Una sola señal compacta montada sobre el borde inferior.
+                    // El marco amarillo interior se eliminó porque duplicaba la
+                    // franja de prioridad y el antiguo badge tapaba H/A/P.
                     cardContent.Children.Add(
                         new Border
                         {
                             Padding =
                                 new Thickness(
-                                    5, 1, 5, 1),
+                                    3, 0, 3, 0),
                             Margin =
                                 new Thickness(
-                                    0, 2, 2, 0),
+                                    0,
+                                    0,
+                                    Math.Max(-2, -1.5 * _calendarZoom),
+                                    Math.Max(-2, -1.5 * _calendarZoom)),
                             HorizontalAlignment =
                                 HorizontalAlignment.Right,
                             VerticalAlignment =
-                                VerticalAlignment.Top,
+                                VerticalAlignment.Bottom,
                             Background =
                                 new SolidColorBrush(
                                     Color.FromArgb(
@@ -10877,15 +10967,15 @@ namespace Anfeta.UI.Views
                             BorderThickness =
                                 new Thickness(1),
                             CornerRadius =
-                                new CornerRadius(7),
+                                new CornerRadius(6),
                             Child =
                                 new TextBlock
                                 {
-                                    Text = "⚠ CHECK",
+                                    Text = "⚠",
                                     FontSize =
                                         Math.Max(
-                                            6.8,
-                                            7.3 * CalendarFontScale),
+                                            7.2,
+                                            7.7 * CalendarFontScale),
                                     FontWeight =
                                         Microsoft.UI.Text.FontWeights.Bold,
                                     Foreground =
@@ -15684,9 +15774,15 @@ namespace Anfeta.UI.Views
                         ? 400d
                         : 360d;
 
+            // El zoom aumenta tipografía, alturas y el ancho preferido, pero
+            // no debe multiplicar también el mínimo rígido de TODAS las
+            // personas. Con 8 columnas a 130% eso obligaba al calendario a
+            // desbordar la ventana aunque todavía podían comprimirse de forma
+            // legible. El mínimo base mantiene el ajuste responsivo; solo se
+            // habilita desplazamiento horizontal cuando ni siquiera ese mínimo
+            // cabe en el viewport.
             var minResolvedWidth =
-                CalendarMinPersonColumnWidth *
-                _calendarZoom;
+                CalendarMinPersonColumnWidth;
 
             var maxResolvedWidth =
                 Math.Max(
@@ -17185,7 +17281,25 @@ namespace Anfeta.UI.Views
                     activity.PageId,
                     out var cached))
             {
+                if (cached.CompletedByDate == null &&
+                    _notionCalendarService.TryGetCachedChecklistStats(
+                        activity.PageId,
+                        out var enriched))
+                {
+                    _oneClickChecklistStats[activity.PageId] = enriched;
+                    return enriched;
+                }
+
                 return cached;
+            }
+
+            if (!string.IsNullOrWhiteSpace(activity.PageId) &&
+                _notionCalendarService.TryGetCachedChecklistStats(
+                    activity.PageId,
+                    out var serviceCached))
+            {
+                _oneClickChecklistStats[activity.PageId] = serviceCached;
+                return serviceCached;
             }
 
             return new NotionChecklistStats(
@@ -25564,6 +25678,35 @@ namespace Anfeta.UI.Views
                 if (!changed &&
                     !reconcile.HasChanges)
                 {
+                    // Cambiar un bloque to_do hijo no siempre modifica el
+                    // last_edited_time de la página padre en Notion. Sondeamos
+                    // una sola actividad visible por ciclo para descubrir esos
+                    // cambios sin descargar todos los BODY del calendario.
+                    if (_calendarViewActive)
+                    {
+                        var probeCandidates = _calendarActivities
+                            .Where(activity =>
+                                activity != null &&
+                                !activity.IsReviewMirror &&
+                                !string.IsNullOrWhiteSpace(activity.PageId))
+                            .GroupBy(activity => activity.PageId, StringComparer.OrdinalIgnoreCase)
+                            .Select(group => group.First())
+                            .ToList();
+
+                        if (probeCandidates.Count > 0)
+                        {
+                            var probe = probeCandidates[
+                                _calendarChecklistProbeOffset % probeCandidates.Count];
+                            _calendarChecklistProbeOffset =
+                                (_calendarChecklistProbeOffset + 1) % probeCandidates.Count;
+
+                            StartCalendarIncrementalChecklistRefresh(
+                                new[] { probe.PageId },
+                                _calendarSelectedDate.Date,
+                                _calendarLoadVersion);
+                        }
+                    }
+
                     return;
                 }
 
@@ -27285,12 +27428,82 @@ namespace Anfeta.UI.Views
                 return;
 
             await PromptAndSendCalendarActivityToReviewAsync(
-                activity);
+                activity,
+                (sender as FrameworkElement)?.XamlRoot);
+        }
+
+        private XamlRoot? ResolveCalendarDialogRoot(
+            XamlRoot? requestedRoot = null)
+        {
+            return requestedRoot ?? XamlRoot;
+        }
+
+        private async Task<ContentDialogResult?>
+            ShowCalendarOwnedDialogAsync(
+                ContentDialog dialog,
+                XamlRoot? requestedRoot = null)
+        {
+            if (!await _calendarContentDialogGate.WaitAsync(0))
+            {
+                StatusText.Text =
+                    "Estado: Termina primero el diálogo que ya está abierto.";
+                return null;
+            }
+
+            try
+            {
+                // WinUI 3 puede conservar la modalidad/foco atrapados cuando
+                // una Window real de actividad permanece abierta y desde su
+                // árbol se intenta mostrar otro ContentDialog. No coexistimos:
+                // cerramos primero la actividad desacoplada y mostramos después
+                // un único diálogo sobre la ventana principal.
+                var hadActivityPreview =
+                    _calendarActivityPreviewPinned ||
+                    _calendarActivityPreviewPopup != null ||
+                    !string.IsNullOrWhiteSpace(
+                        _calendarActivityDetachedPageId) ||
+                    (Application.Current is App openApp &&
+                     openApp.IsCalendarActivityWindowOpen);
+
+                if (hadActivityPreview)
+                {
+                    // Cubre los DOS casos: popup fijado interno (botón ↗ aún
+                    // visible) y Window desacoplada real.
+                    HideCalendarActivityPreviewFlyout();
+
+                    // El cierre del Popup/Window y la limpieza de su árbol se
+                    // completan antes de crear la nueva capa modal.
+                    await Task.Delay(120);
+                    requestedRoot = XamlRoot;
+                }
+
+                var ownerRoot = ResolveCalendarDialogRoot(requestedRoot);
+                if (ownerRoot == null)
+                {
+                    StatusText.Text =
+                        "Estado: No se encontró la ventana propietaria del diálogo.";
+                    return null;
+                }
+
+                dialog.XamlRoot = ownerRoot;
+                return await dialog.ShowAsync();
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo abrir el diálogo → {ex.Message}";
+                return null;
+            }
+            finally
+            {
+                _calendarContentDialogGate.Release();
+            }
         }
 
         private async Task<bool>
             PromptAndSendCalendarActivityToReviewAsync(
-                NotionCalendarActivity activity)
+                NotionCalendarActivity activity,
+                XamlRoot? dialogRoot = null)
         {
             if (activity == null)
                 return false;
@@ -27324,7 +27537,6 @@ namespace Anfeta.UI.Views
 
             var dialog = new ContentDialog
             {
-                XamlRoot = XamlRoot,
                 Title = "Enviar actividad a revisión",
                 Content = combo,
                 PrimaryButtonText = "Enviar",
@@ -27332,7 +27544,9 @@ namespace Anfeta.UI.Views
                 DefaultButton = ContentDialogButton.Primary
             };
 
-            if (await dialog.ShowAsync() !=
+            if (await ShowCalendarOwnedDialogAsync(
+                    dialog,
+                    dialogRoot) !=
                 ContentDialogResult.Primary)
             {
                 return false;
@@ -27632,7 +27846,6 @@ namespace Anfeta.UI.Views
 
             var dialog = new ContentDialog
             {
-                XamlRoot = XamlRoot,
                 Title = "Regresar actividad",
                 Content = noteBox,
                 PrimaryButtonText = "Regresar",
@@ -27640,7 +27853,9 @@ namespace Anfeta.UI.Views
                 DefaultButton = ContentDialogButton.Primary
             };
 
-            if (await dialog.ShowAsync() !=
+            if (await ShowCalendarOwnedDialogAsync(
+                    dialog,
+                    (sender as FrameworkElement)?.XamlRoot) !=
                 ContentDialogResult.Primary)
             {
                 return;
@@ -27858,7 +28073,6 @@ namespace Anfeta.UI.Views
 
             var dialog = new ContentDialog
             {
-                XamlRoot = XamlRoot,
                 Title =
                     "Reasignar y pasar a prtuzREVISION",
                 Content = combo,
@@ -27868,7 +28082,9 @@ namespace Anfeta.UI.Views
                     ContentDialogButton.Primary
             };
 
-            if (await dialog.ShowAsync() !=
+            if (await ShowCalendarOwnedDialogAsync(
+                    dialog,
+                    (sender as FrameworkElement)?.XamlRoot) !=
                     ContentDialogResult.Primary ||
                 combo.SelectedItem is not ComboBoxItem selected)
             {
@@ -30019,6 +30235,88 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text =
                     $"Estado: Se guardó el cambio, pero no se pudo refrescar la checklist → {ex.Message}";
+            }
+        }
+
+        private async Task RefreshPinnedActivityChecklistFromNotionAsync(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.PageId))
+            {
+                return;
+            }
+
+            var token = ApplicationData.Current.LocalSettings.Values[
+                "Notion.Token"] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+                return;
+
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                var stats = await _notionCalendarService.GetChecklistStatsAsync(
+                    token,
+                    activity.PageId,
+                    cts.Token,
+                    forceRefresh: true);
+
+                activity.ChecklistScanned = true;
+                activity.ChecklistTotal = stats.Total;
+                activity.ChecklistCompleted = stats.Completed;
+
+                foreach (var instance in _calendarActivities.Where(item =>
+                             string.Equals(item.PageId, activity.PageId,
+                                 StringComparison.OrdinalIgnoreCase)))
+                {
+                    instance.ChecklistScanned = true;
+                    instance.ChecklistTotal = stats.Total;
+                    instance.ChecklistCompleted = stats.Completed;
+                }
+
+                foreach (var instance in _calendarActivityPreviewLastProjectActivities.Where(item =>
+                             string.Equals(item.PageId, activity.PageId,
+                                 StringComparison.OrdinalIgnoreCase)))
+                {
+                    instance.ChecklistScanned = true;
+                    instance.ChecklistTotal = stats.Total;
+                    instance.ChecklistCompleted = stats.Completed;
+                }
+
+                _oneClickChecklistStats[activity.PageId] = stats;
+
+                if (!_calendarActivityPreviewPinned ||
+                    !string.Equals(_calendarActivityPreviewPinnedPageId,
+                        activity.PageId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (_calendarActivityPreviewLastCriteria != null &&
+                    _calendarActivityPreviewLastProjectActivities.Count > 0)
+                {
+                    UpdateCalendarActivityPreviewContent(
+                        BuildCalendarProjectHoverChecklist(
+                            activity,
+                            _calendarActivityPreviewLastCriteria,
+                            _calendarActivityPreviewLastProjectActivities));
+                }
+                else
+                {
+                    UpdateCalendarActivityPreviewContent(
+                        BuildCalendarActivitySummary(activity));
+                }
+
+                StatusText.Text =
+                    $"Estado: Checklist actualizado · {stats.Completed}/{stats.Total} ✅";
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[PINNED_CHECKLIST_REFRESH] {ex.Message}");
             }
         }
 
@@ -35053,6 +35351,8 @@ namespace Anfeta.UI.Views
                 PositionCalendarActivityPreviewPopup(
                     button);
 
+                _ = RefreshPinnedActivityChecklistFromNotionAsync(activity);
+
                 return;
             }
 
@@ -35068,6 +35368,8 @@ namespace Anfeta.UI.Views
                 SetCalendarActivityPreviewPinned(
                     activity.PageId,
                     true);
+
+                _ = RefreshPinnedActivityChecklistFromNotionAsync(activity);
 
                 return;
             }
@@ -35136,6 +35438,8 @@ namespace Anfeta.UI.Views
                         activity,
                         criteria,
                         related));
+
+                _ = RefreshPinnedActivityChecklistFromNotionAsync(activity);
 
                 _ = WarmOpenCalendarProjectChecklistAsync(
                     activity,
@@ -38574,7 +38878,8 @@ namespace Anfeta.UI.Views
                         {
                             var sent =
                                 await PromptAndSendCalendarActivityToReviewAsync(
-                                    activity);
+                                    activity,
+                                    reviewButton.XamlRoot);
 
                             if (sent)
                             {

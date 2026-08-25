@@ -23,6 +23,9 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.Notion;
+using Windows.Storage;
+using System.Threading;
 
 namespace Anfeta.UI
 {
@@ -33,6 +36,12 @@ namespace Anfeta.UI
         private FloatingMicButton? _floatingButton;
         private bool _isShuttingDown = false;
         private readonly object _floatingButtonLock = new object();
+        private DispatcherQueueTimer? _dailyAuditTimer;
+        private readonly SemaphoreSlim _dailyAuditGate = new(1, 1);
+        private readonly NotionCalendarService _dailyAuditCalendarService = new();
+        private readonly NotionDailyProgressService _dailyAuditProgressService = new();
+        private const string LS_LastDailyAuditDate =
+            "Audit.DailyProgress.LastClosedDate.v1";
 
         public static Window? MainWindowInstance { get; private set; }
         public static IHost AppHost { get; private set; } = null!;
@@ -341,6 +350,71 @@ namespace Anfeta.UI
             // el modelo, micrófono y servicios del módulo de voz sin utilizarlos.
 
             _window.Activate();
+            StartDailyAuditTimer();
+        }
+
+        private void StartDailyAuditTimer()
+        {
+            if (UIQueue == null || _dailyAuditTimer != null)
+                return;
+
+            _dailyAuditTimer = UIQueue.CreateTimer();
+            _dailyAuditTimer.Interval = TimeSpan.FromMinutes(1);
+            _dailyAuditTimer.Tick += async (_, __) =>
+                await TryCloseDailyAuditAsync();
+            _dailyAuditTimer.Start();
+
+            // Si ANFETA abrió después del corte, captura sin esperar un minuto.
+            _ = TryCloseDailyAuditAsync();
+        }
+
+        private async Task TryCloseDailyAuditAsync()
+        {
+            var now = DateTime.Now;
+            if (now.TimeOfDay < TimeSpan.FromHours(18.5) ||
+                !_dailyAuditGate.Wait(0))
+            {
+                return;
+            }
+
+            try
+            {
+                var dayKey = now.ToString("yyyy-MM-dd");
+                var settings = ApplicationData.Current.LocalSettings.Values;
+                if (string.Equals(
+                        settings[LS_LastDailyAuditDate] as string,
+                        dayKey,
+                        StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                var token = settings["Notion.Token"] as string;
+                if (string.IsNullOrWhiteSpace(token))
+                    return;
+
+                await _dailyAuditProgressService.BuildAsync(
+                    _dailyAuditCalendarService,
+                    token,
+                    now.Date,
+                    forceRefresh: true,
+                    requireFreshDay: true,
+                    progress: null,
+                    cancellationToken: CancellationToken.None);
+
+                settings[LS_LastDailyAuditDate] = dayKey;
+                Debug.WriteLine(
+                    $"[AUDIT_EOD] Fotografía local cerrada {dayKey} ✅");
+            }
+            catch (Exception ex)
+            {
+                // No marca el día como cerrado: el timer reintentará después.
+                Debug.WriteLine($"[AUDIT_EOD] Reintento pendiente: {ex.Message}");
+            }
+            finally
+            {
+                _dailyAuditGate.Release();
+            }
         }
 
         private async Task BootstrapAuthAsync(string deviceId)

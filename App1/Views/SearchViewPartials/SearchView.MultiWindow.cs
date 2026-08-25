@@ -146,6 +146,36 @@ namespace Anfeta.UI.Views
         }
 
         /// <summary>
+        /// Detiene el trabajo exclusivo de una ventana secundaria antes de
+        /// liberar su árbol visual. Evita consultas, repintados y debounces
+        /// sobrevivientes después de cerrar el monitor adicional.
+        /// </summary>
+        public void ShutdownStandaloneCalendar()
+        {
+            _calendarWindowFilterSyncTimer?.Stop();
+            _calendarWindowFilterSyncTimer = null;
+
+            if (_calendarViewActive)
+                CloseCalendarView();
+
+            SuspendAsBackgroundTab();
+
+            try
+            {
+                _calendarCts?.Cancel();
+                _calendarChecklistHydrationCts?.Cancel();
+                _calendarIncrementalChecklistCts?.Cancel();
+                _calendarReviewFlowBackgroundCts?.Cancel();
+                _calendarProjectWarmupCts?.Cancel();
+            }
+            catch
+            {
+                // Cerrar la ventana siempre debe completar aunque una carga
+                // ya haya finalizado o esté liberando su CTS.
+            }
+        }
+
+        /// <summary>
         /// Botón ▣ de la barra superior.
         /// La ventana principal NO cambia de modo ni pierde su búsqueda.
         /// </summary>

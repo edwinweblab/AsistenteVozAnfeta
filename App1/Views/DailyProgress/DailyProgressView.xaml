@@ -198,6 +198,13 @@
                     VerticalAlignment="Center"
                     Spacing="5">
                     <Button
+                        x:Name="WeeklyScopeButton"
+                        Style="{StaticResource FeedButton}"
+                        Click="WeeklyScope_Click"
+                        Content="Semana"
+                        ToolTipService.ToolTip="Alternar entre el reporte diario y el reporte semanal local" />
+
+                    <Button
                         Style="{StaticResource FeedButton}"
                         Click="PreviousDay_Click"
                         Content="‹"
@@ -256,9 +263,11 @@
                     Background="#0E1C24"
                     BorderBrush="#23516A"
                     BorderThickness="1"
-                    CornerRadius="10">
+                    CornerRadius="10"
+                    ToolTipService.ToolTip="Cobertura: avance observado en la fecha seleccionada, ponderado por los minutos agendados. En Por usuario solo incluye a la persona seleccionada.">
                     <StackPanel>
                         <TextBlock
+                            x:Name="CoverageKpiLabel"
                             FontSize="8.5"
                             Foreground="#7DD3FC"
                             Text="COBERTURA HOY" />
@@ -278,9 +287,11 @@
                     Background="#211316"
                     BorderBrush="#67323B"
                     BorderThickness="1"
-                    CornerRadius="10">
+                    CornerRadius="10"
+                    ToolTipService.ToolTip="Rezagadas: actividades P cuyo horario ya terminó y cuyo avance Hoy es menor a 33%. Un 33% o más cuenta como sí hubo avance. Sin checklist se reporta aparte.">
                     <StackPanel>
                         <TextBlock
+                            x:Name="LaggingKpiLabel"
                             FontSize="8.5"
                             Foreground="#FDA4AF"
                             Text="REZAGADAS" />
@@ -300,9 +311,11 @@
                     Background="#10202A"
                     BorderBrush="#245169"
                     BorderThickness="1"
-                    CornerRadius="10">
+                    CornerRadius="10"
+                    ToolTipService.ToolTip="R: actividades que pasaron a Revisión durante la fecha seleccionada. No significa que estén terminadas.">
                     <StackPanel>
                         <TextBlock
+                            x:Name="ReviewKpiLabel"
                             FontSize="8.5"
                             Foreground="#67E8F9"
                             Text="R HOY" />
@@ -322,9 +335,11 @@
                     Background="#102019"
                     BorderBrush="#275640"
                     BorderThickness="1"
-                    CornerRadius="10">
+                    CornerRadius="10"
+                    ToolTipService.ToolTip="Z: actividades que pasaron a Terminada/Aprobada durante la fecha seleccionada. No se copia del contador R.">
                     <StackPanel>
                         <TextBlock
+                            x:Name="CompletedKpiLabel"
                             FontSize="9.5"
                             Foreground="#86EFAC"
                             Text="✓ Z HOY" />
@@ -344,9 +359,11 @@
                     Background="#171A20"
                     BorderBrush="#343C47"
                     BorderThickness="1"
-                    CornerRadius="10">
+                    CornerRadius="10"
+                    ToolTipService.ToolTip="Avance / Agendado: minutos equivalentes al avance de la fecha seleccionada frente a los minutos programados. Hoy usa checks completados editados ese día; Total es acumulado y no alimenta este KPI.">
                     <StackPanel>
                         <TextBlock
+                            x:Name="ScheduledKpiLabel"
                             FontSize="9.5"
                             Foreground="#AAB6C2"
                             Text="AVANCE HOY / AGENDADO" />
@@ -462,6 +479,21 @@
                             Spacing="7" />
                     </ScrollViewer>
                 </Grid>
+            </Grid>
+
+            <!-- Reporte semanal: se construye únicamente desde fotografías locales. -->
+            <Grid
+                x:Name="WeeklyReportHost"
+                Visibility="Collapsed">
+                <ScrollViewer
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto"
+                    VerticalScrollMode="Enabled">
+                    <StackPanel
+                        x:Name="WeeklyReportItems"
+                        Padding="0,0,4,8"
+                        Spacing="8" />
+                </ScrollViewer>
             </Grid>
 
             <!-- Estado vacío -->

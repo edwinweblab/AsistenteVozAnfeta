@@ -1,60 +1,60 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
-    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <RootNamespace>Anfeta.UI</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Platforms>x86;x64;ARM64</Platforms>
-    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
-    <PublishProfile>win-$(Platform).pubxml</PublishProfile>
-    <UseWinUI>true</UseWinUI>
-    <EnableMsixTooling>true</EnableMsixTooling>
-    <Nullable>enable</Nullable>
-    <Version>1.0.12.0</Version>
-    <AssemblyVersion>1.0.12.0</AssemblyVersion>
-    <FileVersion>1.0.12.0</FileVersion>
-  </PropertyGroup>
-  <ItemGroup>
-    <None Remove="FunctionTests\TestRunner.xaml" />
-    <None Remove="Resources\Styles.xaml" />
-    <None Remove="Views\AllowedAppsView.xaml" />
-    <None Remove="Views\ApiKeysView.xaml" />
-    <None Remove="Views\DailyProgress\DailyProgressView.xaml" />
-    <None Remove="Views\Dialogs\ImportVoiceCommandsDialog.xaml" />
-    <None Remove="Views\Dialogs\SavedSearchFilterDialog.xaml" />
-    <None Remove="Views\Dialogs\VoiceCommandEditDialog.xaml" />
-    <None Remove="Views\Dialogs\VoiceCommandsDialog.xaml" />
-    <None Remove="Views\GoogleCalendarView.xaml" />
-    <None Remove="Views\LinkSharedAccountView.xaml" />
-    <None Remove="Views\SearchTabsView.xaml" />
-    <None Remove="Views\SearchView.xaml" />
-    <None Remove="Views\TodoistView.xaml" />
-    <None Remove="Views\TroubleshootView.xaml" />
-  </ItemGroup>
-  <ItemGroup>
-    <Page Remove="Resources\Styles.xaml" />
-  </ItemGroup>
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+		<TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+		<RootNamespace>Anfeta.UI</RootNamespace>
+		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<Platforms>x86;x64;ARM64</Platforms>
+		<RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+		<PublishProfile>win-$(Platform).pubxml</PublishProfile>
+		<UseWinUI>true</UseWinUI>
+		<EnableMsixTooling>true</EnableMsixTooling>
+		<Nullable>enable</Nullable>
+		<Version>1.0.12.0</Version>
+		<AssemblyVersion>1.0.12.0</AssemblyVersion>
+		<FileVersion>1.0.12.0</FileVersion>
+	</PropertyGroup>
+	<ItemGroup>
+		<None Remove="FunctionTests\TestRunner.xaml" />
+		<None Remove="Resources\Styles.xaml" />
+		<None Remove="Views\AllowedAppsView.xaml" />
+		<None Remove="Views\ApiKeysView.xaml" />
+		<None Remove="Views\DailyProgress\DailyProgressView.xaml" />
+		<None Remove="Views\Dialogs\ImportVoiceCommandsDialog.xaml" />
+		<None Remove="Views\Dialogs\SavedSearchFilterDialog.xaml" />
+		<None Remove="Views\Dialogs\VoiceCommandEditDialog.xaml" />
+		<None Remove="Views\Dialogs\VoiceCommandsDialog.xaml" />
+		<None Remove="Views\GoogleCalendarView.xaml" />
+		<None Remove="Views\LinkSharedAccountView.xaml" />
+		<None Remove="Views\SearchTabsView.xaml" />
+		<None Remove="Views\SearchView.xaml" />
+		<None Remove="Views\TodoistView.xaml" />
+		<None Remove="Views\TroubleshootView.xaml" />
+	</ItemGroup>
+	<ItemGroup>
+		<Page Remove="Resources\Styles.xaml" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <Content Include="Assets\SplashScreen.scale-200.png" />
-    <Content Include="Assets\LockScreenLogo.scale-200.png" />
-    <Content Include="Assets\Square150x150Logo.scale-200.png" />
-    <Content Include="Assets\Square44x44Logo.scale-200.png" />
-    <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
-    <Content Include="Assets\StoreLogo.png" />
-    <Content Include="Assets\Wide310x150Logo.scale-200.png" />
-    <Content Include="Resources\Styles.xaml">
-      <Generator>MSBuild:Compile</Generator>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
+	<ItemGroup>
+		<Content Include="Assets\SplashScreen.scale-200.png" />
+		<Content Include="Assets\LockScreenLogo.scale-200.png" />
+		<Content Include="Assets\Square150x150Logo.scale-200.png" />
+		<Content Include="Assets\Square44x44Logo.scale-200.png" />
+		<Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
+		<Content Include="Assets\StoreLogo.png" />
+		<Content Include="Assets\Wide310x150Logo.scale-200.png" />
+		<Content Include="Resources\Styles.xaml">
+			<Generator>MSBuild:Compile</Generator>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
 
-  <ItemGroup>
-    <Manifest Include="$(ApplicationManifest)" />
-  </ItemGroup>
+	<ItemGroup>
+		<Manifest Include="$(ApplicationManifest)" />
+	</ItemGroup>
 
-  <!--
+	<!--
     Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging
     Tools extension to be activated for this project even if the Windows App SDK Nuget
     package has not yet been restored.
@@ -77,54 +77,54 @@
 		<Folder Include="Assets\vosk-model-es\" />
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\TodoistView.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\TodoistView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\Dialogs\SavedSearchFilterDialog.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\Dialogs\SavedSearchFilterDialog.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\SearchTabsView.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\SearchTabsView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\Dialogs\ImportVoiceCommandsDialog.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\Dialogs\ImportVoiceCommandsDialog.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\Dialogs\VoiceCommandEditDialog.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\Dialogs\VoiceCommandEditDialog.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\Dialogs\VoiceCommandsDialog.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\Dialogs\VoiceCommandsDialog.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\AllowedAppsView.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\AllowedAppsView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\ApiKeysView.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\ApiKeysView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\LinkSharedAccountView.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\LinkSharedAccountView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
-	  <Page Update="Views\SearchView.xaml">
-	    <Generator>MSBuild:Compile</Generator>
-	  </Page>
+		<Page Update="Views\SearchView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
 	</ItemGroup>
 	<ItemGroup>
 		<Page Update="FunctionTests\TestRunner.xaml">
@@ -132,50 +132,52 @@
 		</Page>
 	</ItemGroup>
 
-  <!--
+	<!--
     Defining the "HasPackageAndPublishMenuAddedByProject" property here allows the Solution
     Explorer "Package and Publish" context menu entry to be enabled for this project even if
     the Windows App SDK Nuget package has not yet been restored.
   -->
-  <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
-    <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
-  </PropertyGroup>
+	<PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+		<HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
+	</PropertyGroup>
 
-  <!-- Publish Properties -->
-  <PropertyGroup>
-	  <PublishReadyToRun>False</PublishReadyToRun>
-    <!--
+	<!-- Publish Properties -->
+	<PropertyGroup>
+		<PublishReadyToRun>False</PublishReadyToRun>
+		<!--
       PublishTrimmed deshabilitado: la app usa COM (NAudio, AudioSwitcher, MMDeviceEnumerator),
       Vosk (nativo), y DI por reflexión — incompatibles con IL trimming.
     -->
-    <PublishTrimmed>false</PublishTrimmed>
-    <DefaultLanguage>es-mx</DefaultLanguage>
-    <GenerateAppInstallerFile>True</GenerateAppInstallerFile>
-    <AppxPackageSigningEnabled>True</AppxPackageSigningEnabled>
-    <PackageCertificateKeyFile>Anfeta.UI_TemporaryKey.pfx</PackageCertificateKeyFile>
-    <AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
-    <AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
-    <GenerateTestArtifacts>True</GenerateTestArtifacts>
-    <AppxBundle>Never</AppxBundle>
-    <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
-    <AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
-    <AppInstallerUri>https://github.com/neftaliweblab/anfeta-updates/releases/latest/download/ANFETA.appinstaller</AppInstallerUri>
-  </PropertyGroup>
+		<PublishTrimmed>false</PublishTrimmed>
+		<DefaultLanguage>es-mx</DefaultLanguage>
+		<GenerateAppInstallerFile>True</GenerateAppInstallerFile>
+		<AppxPackageSigningEnabled>True</AppxPackageSigningEnabled>
+		<PackageCertificateKeyFile>Anfeta.UI_TemporaryKey.pfx</PackageCertificateKeyFile>
+		<AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
+		<AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
+		<GenerateTestArtifacts>True</GenerateTestArtifacts>
+		<AppxBundle>Never</AppxBundle>
+		<HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
+		<AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
+		<AppInstallerUri>https://github.com/neftaliweblab/anfeta-updates/releases/latest/download/ANFETA.appinstaller</AppInstallerUri>
+	</PropertyGroup>
 
-  <!-- Símbolos de depuración en Release (para depurar sin romper el instalador) -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <DebugType>pdbonly</DebugType>
-    <DebugSymbols>true</DebugSymbols>
-    <Optimize>false</Optimize>
-  </PropertyGroup>
+	<!-- Símbolos de depuración en Release (para depurar sin romper el instalador) -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugType>pdbonly</DebugType>
+		<DebugSymbols>true</DebugSymbols>
+		<!-- Release debe conservar símbolos para diagnóstico, pero no ejecutar
+         con las optimizaciones del compilador desactivadas. -->
+		<Optimize>true</Optimize>
+	</PropertyGroup>
 
-  <!-- Mantener soporte de COM integrado (NAudio, AudioSwitcher, MMDeviceEnumerator) -->
-  <ItemGroup>
-    <RuntimeHostConfigurationOption Include="System.Runtime.InteropServices.BuiltInComInterop.IsSupported" Value="true" Trim="true" />
-  </ItemGroup>
-  <ItemGroup>
-    <Page Update="Views\DailyProgress\DailyProgressView.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
+	<!-- Mantener soporte de COM integrado (NAudio, AudioSwitcher, MMDeviceEnumerator) -->
+	<ItemGroup>
+		<RuntimeHostConfigurationOption Include="System.Runtime.InteropServices.BuiltInComInterop.IsSupported" Value="true" Trim="true" />
+	</ItemGroup>
+	<ItemGroup>
+		<Page Update="Views\DailyProgress\DailyProgressView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+	</ItemGroup>
 </Project>
