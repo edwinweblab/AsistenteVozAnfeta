@@ -58,6 +58,8 @@ namespace Anfeta.UI.Views
         private const string LS_CalendarOrder = "Search.Calendar.Order";
         private const string LS_CalendarColumnWidths =
             "Search.Calendar.ColumnWidths";
+        private const string LS_CalendarColumnWidthsVersion =
+            "Search.Calendar.ColumnWidthsVersion";
         private const string LS_CalendarPeopleSelectionVersion =
             "Search.Calendar.PeopleSelectionVersion";
         private const string LS_SearchLastSubView =
@@ -326,6 +328,23 @@ namespace Anfeta.UI.Views
             string,
             CalendarProjectActivitiesCacheEntry>
             _calendarProjectActivitiesCache =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        // Conserva el último cálculo PROY ya confirmado mientras una
+        // invalidación incremental vuelve a cargar las actividades. Así un
+        // repintado no degrada un porcentaje conocido a P….
+        private sealed record CalendarProjectProgressSnapshot(
+            DateTimeOffset StoredAt,
+            NotionChecklistStats Stats,
+            string ProjectLabel,
+            bool IsPartial,
+            int ScannedActivities,
+            int TotalActivities);
+
+        private readonly ConcurrentDictionary<
+            string,
+            CalendarProjectProgressSnapshot>
+            _calendarProjectProgressSnapshots =
                 new(StringComparer.OrdinalIgnoreCase);
 
         // Hover, clic y precalentado comparten una sola carga por proyecto.
@@ -705,7 +724,7 @@ namespace Anfeta.UI.Views
         private readonly Dictionary<string, double> _calendarResolvedColumnLefts =
             new(StringComparer.OrdinalIgnoreCase);
 
-        private const double CalendarBasePersonColumnWidth = 170;
+        private const double CalendarBasePersonColumnWidth = 240;
         private const double CalendarSmallPersonColumnWidth = 125;
         private const double CalendarBasePersonColumnWidthNormal = 170;
         private const double CalendarLargePersonColumnWidth = 240;
@@ -716,7 +735,11 @@ namespace Anfeta.UI.Views
         private double CalendarTimeColumnWidth => 76 * _calendarZoom;
         private double CalendarDefaultPersonColumnWidth =>
             CalendarBasePersonColumnWidth * _calendarZoom;
-        private double CalendarHeaderHeight => 54 * _calendarZoom;
+        // En zoom bajo el encabezado necesita conservar altura suficiente para
+        // que nombre y métricas sigan siendo legibles. El contenido del
+        // calendario sí escala; esta banda informativa no baja de 48 px.
+        private double CalendarHeaderHeight =>
+            Math.Max(48d, 54d * _calendarZoom);
         private double CalendarFontScale => Math.Clamp(_calendarZoom, 0.70, 1.35);
 
         private void StartCalendarStartupPipeline()
@@ -1044,6 +1067,7 @@ namespace Anfeta.UI.Views
             SearchFiltersPanel.Visibility = Visibility.Collapsed;
             ToggleCalendarView.IsChecked = true;
             CalendarDateTitle.Text = FormatCalendarDate(_calendarSelectedDate);
+            UpdateCalendarRelativeDateButtons();
 
             if (SearchBox != null)
             {
@@ -1300,10 +1324,12 @@ namespace Anfeta.UI.Views
                 .Subtract(TimeSpan.FromSeconds(20));
         }
 
-        private void SaveCalendarChangesCheckpoint()
+        private void SaveCalendarChangesCheckpoint(
+            DateTimeOffset? checkpointUtc = null)
         {
             _calendarLastChangesCheckUtc =
-                DateTimeOffset.UtcNow;
+                (checkpointUtc ?? DateTimeOffset.UtcNow)
+                    .ToUniversalTime();
 
             ApplicationData.Current.LocalSettings.Values[
                 LS_CalendarLastSyncUtc] =
@@ -1520,6 +1546,7 @@ namespace Anfeta.UI.Views
             DateTime date)
         {
             _calendarSelectedDate = date.Date;
+            UpdateCalendarRelativeDateButtons();
             _calendarCardChecklistBaselines.Clear();
 
             // Cancela cualquier consulta del día anterior para impedir que
@@ -1541,18 +1568,83 @@ namespace Anfeta.UI.Views
                 preferCache: true);
         }
 
+        private void UpdateCalendarRelativeDateButtons()
+        {
+            var accent =
+                new SolidColorBrush(
+                    Color.FromArgb(255, 14, 165, 233));
+
+            var normal =
+                new SolidColorBrush(
+                    Color.FromArgb(255, 34, 45, 55));
+
+            var selectedBackground =
+                new SolidColorBrush(
+                    Color.FromArgb(72, 14, 165, 233));
+
+            var normalBackground =
+                new SolidColorBrush(Colors.Transparent);
+
+            void Apply(Button button, DateTime representedDate)
+            {
+                var selected =
+                    _calendarSelectedDate.Date == representedDate.Date;
+
+                button.BorderBrush = selected ? accent : normal;
+                button.Background =
+                    selected ? selectedBackground : normalBackground;
+            }
+
+            Apply(CalendarYesterdayButton, DateTime.Today.AddDays(-1));
+            Apply(CalendarTodayButton, DateTime.Today);
+            Apply(CalendarTomorrowButton, DateTime.Today.AddDays(1));
+        }
+
         private async void CalendarRefresh_Click(
             object sender,
             RoutedEventArgs e)
         {
             _calendarCobroOverlayCache.Clear();
 
-            // El botón manual siempre reconstruye el día directamente desde
-            // Notion. La actualización automática conserva la ruta incremental.
-            // Esto evita que una caché incompleta deje actividades ocultas.
-            await LoadCalendarDayAsync(
-                preferCache: false,
-                forceRefresh: true);
+            // Una hidratación completa de checklist puede dejar decenas de
+            // lecturas esperando turno. La actualización manual prioriza la
+            // comprobación solicitada por el usuario y después refresca SOLO
+            // las PageId que Notion reporte como modificadas.
+            CancelCalendarChecklistBackgroundWork();
+
+            var requestedDate = _calendarSelectedDate.Date;
+            var loadVersion = _calendarLoadVersion;
+
+            var cached =
+                await _notionCalendarService.TryGetCachedDayAsync(
+                    requestedDate);
+
+            if (cached == null)
+            {
+                // Primera apertura o caché eliminada: esta es la única ruta en
+                // que el botón necesita reconstruir el día completo.
+                await LoadCalendarDayAsync(
+                    preferCache: false,
+                    forceRefresh: true);
+                return;
+            }
+
+            await RefreshCalendarDaySilentlyAsync(
+                requestedDate,
+                loadVersion,
+                userInitiated: true);
+        }
+
+        private void CancelCalendarChecklistBackgroundWork()
+        {
+            try
+            {
+                _calendarChecklistHydrationCts?.Cancel();
+                _calendarIncrementalChecklistCts?.Cancel();
+            }
+            catch
+            {
+            }
         }
 
         private async Task LoadCalendarDayAsync(
@@ -1877,12 +1969,19 @@ namespace Anfeta.UI.Views
 
             _calendarChangesRefreshRunning = true;
 
+            // Guardar la hora de inicio evita perder una edición que ocurra
+            // mientras Notion todavía está respondiendo esta consulta.
+            var refreshStartedUtc =
+                DateTimeOffset.UtcNow;
+
             var processVersion =
                 BeginCalendarProcess(
                     userInitiated
                         ? "Actualizando calendario"
                         : "Mostrando caché",
-                    "Esperando turno para comprobar cambios recientes...");
+                    userInitiated
+                        ? "Preparando consulta incremental prioritaria..."
+                        : "Comprobando cambios recientes en segundo plano...");
 
             try
             {
@@ -1902,14 +2001,16 @@ namespace Anfeta.UI.Views
                         token,
                         GetCalendarChangesAnchorUtc(),
                         cts.Token,
-                        progress);
+                        progress,
+                        forceNetworkCheck: userInitiated);
 
                 var reconcile =
                     await _notionCalendarService.ReconcileDayAsync(
                         token,
                         requestedDate,
                         cts.Token,
-                        progress);
+                        progress,
+                        prioritizeUser: userInitiated);
 
                 var anyChanges =
                     changed ||
@@ -1925,7 +2026,8 @@ namespace Anfeta.UI.Views
                                 StringComparer.OrdinalIgnoreCase));
                 }
 
-                SaveCalendarChangesCheckpoint();
+                SaveCalendarChangesCheckpoint(
+                    refreshStartedUtc);
 
                 if (!_calendarViewActive ||
                     requestedDate != _calendarSelectedDate.Date ||
@@ -2802,6 +2904,9 @@ namespace Anfeta.UI.Views
                 var currentCoverage =
                     CalculateCurrentCalendarCoverage(person);
 
+                var currentProgress =
+                    CalculateCurrentCalendarProgress(person);
+
                 var headerContent = new StackPanel
                 {
                     Spacing = 0,
@@ -2820,23 +2925,60 @@ namespace Anfeta.UI.Views
                         MaxLines = 1
                     });
 
-                var realWorkedMinutes =
-                    GetCalendarPersonWorkedMinutesToday(
-                        person);
+                var compactMetrics = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 4,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
 
-                headerContent.Children.Add(
-                    new TextBlock
+                compactMetrics.Children.Add(
+                    new Border
                     {
-                        Text = _calendarZoom < 0.85
-                            ? $"Cob. {currentCoverage:0}% · ⏱ {FormatCalendarWorkMinutes(realWorkedMinutes)}"
-                            : $"Cobertura {currentCoverage:0}% · Real {FormatCalendarWorkMinutes(realWorkedMinutes)}",
-                        FontSize = 8.8 * CalendarFontScale,
-                        Foreground =
-                            GetOneClickCoverageBrush(currentCoverage),
-                        Opacity = 0.92,
-                        MaxLines = 1,
-                        TextTrimming = TextTrimming.CharacterEllipsis
+                        Padding = new Thickness(4, 0, 4, 0),
+                        CornerRadius = new CornerRadius(5),
+                        Background = new SolidColorBrush(
+                            Color.FromArgb(82, 14, 116, 144)),
+                        BorderBrush = new SolidColorBrush(
+                            Color.FromArgb(190, 56, 189, 248)),
+                        BorderThickness = new Thickness(1),
+                        Child = new TextBlock
+                        {
+                            Text = $"C {currentCoverage:0}%",
+                            FontSize = Math.Max(9.6, 9.9 * CalendarFontScale),
+                            FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                            Foreground = GetOneClickCoverageBrush(currentCoverage),
+                            MaxLines = 1
+                        }
                     });
+
+                compactMetrics.Children.Add(
+                    new Border
+                    {
+                        Padding = new Thickness(4, 0, 4, 0),
+                        CornerRadius = new CornerRadius(5),
+                        Background = new SolidColorBrush(
+                            Color.FromArgb(105, 126, 34, 206)),
+                        BorderBrush = new SolidColorBrush(
+                            Color.FromArgb(220, 216, 180, 254)),
+                        BorderThickness = new Thickness(1),
+                        Child = new TextBlock
+                        {
+                            Text = $"A {currentProgress:0}%",
+                            FontSize = Math.Max(9.6, 9.9 * CalendarFontScale),
+                            FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                            Foreground = new SolidColorBrush(
+                                Color.FromArgb(255, 245, 238, 255)),
+                            MaxLines = 1
+                        }
+                    });
+
+                ToolTipService.SetToolTip(
+                    compactMetrics,
+                    $"Cobertura: {currentCoverage:0}%\n" +
+                    $"Progreso actual: {currentProgress:0}%");
+
+                headerContent.Children.Add(compactMetrics);
 
                 var headerButton = new Button
                 {
@@ -2854,7 +2996,9 @@ namespace Anfeta.UI.Views
 
                 ToolTipService.SetToolTip(
                     headerButton,
-                    $"Ver actividades de {person}");
+                    $"Ver actividades de {person}\n" +
+                    $"Cobertura: {currentCoverage:0}% · " +
+                    $"Actual: {currentProgress:0}%");
 
                 // El encabezado completo reemplaza al antiguo botón del ojo.
                 headerButton.Click +=
@@ -3757,12 +3901,44 @@ namespace Anfeta.UI.Views
             string ProjectToken,
             string SourceUrl,
             int DefaultDurationMinutes,
-            string Hint);
+            string Hint,
+            string? BrowseUrl = null);
 
         private static readonly IReadOnlyList<CalendarQuickTemplateDefinition>
             CalendarQuickTemplates =
                 new[]
                 {
+                    new CalendarQuickTemplateDefinition(
+                        "actividad-rapida",
+                        "Actividad rápida",
+                        "rrapi",
+                        "https://app.notion.com/p/393abd7d91b7804993bdd14809e1b27b?v=393abd7d91b7803e9921000c068624c5&source=copy_link",
+                        60,
+                        "Plantillas para crear actividades rápidas."),
+                    new CalendarQuickTemplateDefinition(
+                        "cliente",
+                        "Cliente",
+                        "cclien",
+                        "https://app.notion.com/p/393abd7d91b7804993bdd14809e1b27b?v=393abd7d91b780869898000c6b7bfcea&source=copy_link",
+                        60,
+                        "Plantillas de información y pendientes del cliente.",
+                        CalendarTemplateHubUrl),
+                    new CalendarQuickTemplateDefinition(
+                        "acceso-correo",
+                        "Crear acceso correo",
+                        "aacce-ccorre",
+                        "https://app.notion.com/p/correo-midominio-com-dominio-ttags-Acceso-correo-aacce-ccorr-3c8abd7d91b780179ec9c7dde93fd335?v=2f1abd7d91b7812ba58a000cbcead7ad&source=copy_link",
+                        30,
+                        "Plantilla para documentar acceso y contraseña de correo.",
+                        "https://app.notion.com/p/correo-midominio-com-dominio-ttags-Acceso-correo-aacce-ccorr-3c8abd7d91b780179ec9c7dde93fd335?v=2f1abd7d91b7812ba58a000cbcead7ad&source=copy_link"),
+                    new CalendarQuickTemplateDefinition(
+                        "acceso-dominio",
+                        "Crear acceso dominio",
+                        "aacce-ddomi",
+                        "https://app.notion.com/p/aprtuzDOMINIO-dominio-com-acceso-contrase-a-aacce-ccont-wword-o-hhost-o-ssite-o-ccpane-ddomi-39eabd7d91b780aa86f0f02f60887f12?source=copy_link",
+                        30,
+                        "Plantilla para documentar acceso y contraseña de dominio.",
+                        "https://app.notion.com/p/aprtuzDOMINIO-dominio-com-acceso-contrase-a-aacce-ccont-wword-o-hhost-o-ssite-o-ccpane-ddomi-39eabd7d91b780aa86f0f02f60887f12?source=copy_link"),
                     new CalendarQuickTemplateDefinition(
                         "web",
                         "WEB",
@@ -3813,6 +3989,13 @@ namespace Anfeta.UI.Views
             CalendarQuickCreationSeed seed)
         {
             if (seed == null)
+                return;
+
+            // Una actividad fijada es una Window real. Abrir además un
+            // ContentDialog sobre el calendario deja dos capas compitiendo por
+            // la modalidad y el foco. La creación desde hueco se cancela antes
+            // de construir el segundo modal.
+            if (BlockCalendarEmptySlotWhileActivityPinned())
                 return;
 
             var token =
@@ -4386,6 +4569,25 @@ namespace Anfeta.UI.Views
                         RegexOptions.IgnoreCase |
                         RegexOptions.CultureInvariant),
 
+                "rrapi" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"\[ttipo-actividad(?:-rrapi\s+rapido)?\]",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "aacce-ddomi" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])aacce(?![\p{L}\p{Nd}_]).*(?<![\p{L}\p{Nd}_])ddomi(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+
+                "aacce-ccorre" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])aacce(?![\p{L}\p{Nd}_]).*(?<![\p{L}\p{Nd}_])ccorr(?:e)?(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+
                 _ =>
                     normalized.Contains(
                         template.ProjectToken,
@@ -4400,6 +4602,62 @@ namespace Anfeta.UI.Views
         {
             if (template == null)
                 return;
+
+            // Dominio y correo no son views ni catálogos de Plantilla Fase1:
+            // cada enlace apunta a UNA página plantilla fija que ya contiene
+            // sus propiedades. Se duplica esa página directamente.
+            if (template.Key == "acceso-dominio" ||
+                template.Key == "acceso-correo")
+            {
+                var sourceUrl = string.IsNullOrWhiteSpace(template.BrowseUrl)
+                    ? template.SourceUrl
+                    : template.BrowseUrl;
+                var idMatch = Regex.Matches(
+                        sourceUrl ?? string.Empty,
+                        @"(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                    .Cast<Match>()
+                    // El enlace de correo también contiene ?v=VIEW_ID.
+                    // La plantilla es el PRIMER id; el último pertenece a la view.
+                    .FirstOrDefault();
+
+                if (idMatch == null)
+                {
+                    StatusText.Text =
+                        $"Estado: La página plantilla de {template.Label} no tiene un ID válido.";
+                    return;
+                }
+
+                var sourcePage = new NotionQuickTemplateItem(
+                    idMatch.Value,
+                    template.Key == "acceso-dominio"
+                        ? "aprtuzDOMINIO @dominio.com acceso contraseña aacce ccont [wword o hhost o ssite o ccpane] [ddomi]"
+                        : "[correo@midominio.com] [dominio] [ttags] Acceso correo aacce ccorr",
+                    sourceUrl);
+
+                // El MenuFlyout todavía puede estar cerrándose durante Click.
+                // WinUI descarta o rechaza un ContentDialog mostrado en ese
+                // mismo instante. Ceder brevemente permite cerrar el flyout.
+                await Task.Delay(180);
+
+                try
+                {
+                    await ShowCalendarQuickTemplateDialogAsync(
+                        template,
+                        sourcePage,
+                        seed);
+                }
+                catch (Exception ex)
+                {
+                    var rootError = ex.GetBaseException();
+                    Debug.WriteLine(
+                        $"[CALENDAR_QUICK_DIRECT_DIALOG] {template.Key}: {ex}");
+                    StatusText.Text =
+                        $"Estado: No se pudo abrir {template.Label} → " +
+                        $"{rootError.GetType().Name}: {rootError.Message}";
+                }
+                return;
+            }
 
             var token =
                 ApplicationData.Current.LocalSettings.Values[
@@ -4547,33 +4805,46 @@ namespace Anfeta.UI.Views
             // también ContentDialogMinWidth/ContentDialogMaxWidth.
             var dialogWidth =
                 Math.Max(
-                    560d,
+                    620d,
                     Math.Min(
-                        1100d,
-                        rootWidth - 64d));
+                        860d,
+                        rootWidth - 96d));
 
             var contentWidth =
                 Math.Max(
                     500d,
                     dialogWidth - 44d);
 
+            // La altura siempre contiene filas completas. Así el borde inferior no
+            // corta visualmente la siguiente actividad al abrir la modal.
+            const double templateRowHeight = 72d;
+            var availableListHeight = Math.Clamp(rootHeight - 450d, 216d, 360d);
+            var listHeight = Math.Max(
+                templateRowHeight * 3d,
+                Math.Floor(availableListHeight / templateRowHeight) * templateRowHeight);
+
             var list =
                 new ListView
                 {
                     SelectionMode =
                         ListViewSelectionMode.Multiple,
-                    MaxHeight =
-                        Math.Clamp(
-                            rootHeight - 330d,
-                            300d,
-                            520d),
-                    MinHeight = 260,
+                    Height = listHeight,
+                    MinHeight = listHeight,
+                    MaxHeight = listHeight,
+                    Background = new SolidColorBrush(
+                        Color.FromArgb(255, 9, 17, 23)),
+                    BorderBrush = new SolidColorBrush(
+                        Color.FromArgb(115, 40, 81, 106)),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(7, 5, 7, 5),
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch
                 };
 
+            var templateNumber = 0;
             foreach (var sourceTemplate in orderedTemplates)
             {
+                templateNumber++;
                 var order =
                     ExtractCalendarQuickTemplateOrder(
                         sourceTemplate.Title);
@@ -4589,9 +4860,8 @@ namespace Anfeta.UI.Views
                         : $"{order} · {cleanTitle}";
 
                 var itemContent =
-                    new StackPanel
+                    new Grid
                     {
-                        Spacing = 2,
                         HorizontalAlignment =
                             HorizontalAlignment.Stretch,
                         Width =
@@ -4602,44 +4872,90 @@ namespace Anfeta.UI.Views
                             Math.Max(
                                 440d,
                                 contentWidth - 58d),
-                        Children =
-                        {
-                            new TextBlock
-                            {
-                                Text = displayTitle,
-                                FontWeight =
-                                    Microsoft.UI.Text
-                                        .FontWeights.SemiBold,
-                                TextWrapping =
-                                    TextWrapping.Wrap,
-                                TextTrimming =
-                                    TextTrimming.CharacterEllipsis,
-                                MaxLines = 2,
-                                MinWidth = 0
-                            },
-                            new TextBlock
-                            {
-                                Text = sourceTemplate.Title,
-                                FontSize = 10.5,
-                                Opacity = 0.55,
-                                TextWrapping =
-                                    TextWrapping.NoWrap,
-                                TextTrimming =
-                                    TextTrimming.CharacterEllipsis,
-                                MaxLines = 1,
-                                MinWidth = 0
-                            }
-                        }
+                        ColumnSpacing = 10,
+                        Padding = new Thickness(10, 7, 10, 7)
                     };
 
-                list.Items.Add(
-                    new ListViewItem
+                itemContent.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                itemContent.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var orderBadge = new Border
+                {
+                    MinWidth = 42,
+                    Padding = new Thickness(8, 5, 8, 5),
+                    CornerRadius = new CornerRadius(12),
+                    Background = new SolidColorBrush(Color.FromArgb(42, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(115, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    Child = new TextBlock
                     {
-                        Content = itemContent,
-                        Tag = sourceTemplate,
-                        HorizontalContentAlignment =
-                            HorizontalAlignment.Stretch
-                    });
+                        Text = templateNumber.ToString("00", CultureInfo.InvariantCulture),
+                        FontSize = 11,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                };
+
+                var itemTexts = new StackPanel
+                {
+                    Spacing = 2,
+                    MinWidth = 0,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = displayTitle,
+                            FontSize = 14,
+                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                            TextWrapping = TextWrapping.Wrap,
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                            MaxLines = 2,
+                            MinWidth = 0
+                        },
+                        new TextBlock
+                        {
+                            Text = sourceTemplate.Title,
+                            FontSize = 11,
+                            Opacity = 0.58,
+                            TextWrapping = TextWrapping.NoWrap,
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                            MinWidth = 0
+                        }
+                    }
+                };
+
+                Grid.SetColumn(orderBadge, 0);
+                Grid.SetColumn(itemTexts, 1);
+                itemContent.Children.Add(orderBadge);
+                itemContent.Children.Add(itemTexts);
+
+                var listItem = new ListViewItem
+                {
+                    Content = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(18, 255, 255, 255)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(62, 83, 190, 235)),
+                        BorderThickness = new Thickness(1, 1, 1, 1),
+                        CornerRadius = new CornerRadius(9),
+                        Child = itemContent
+                    },
+                    Tag = sourceTemplate,
+                    Height = templateRowHeight - 2d,
+                    Margin = new Thickness(0, 3, 0, 3),
+                    Padding = new Thickness(3),
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch
+                };
+
+                var selectedBackground =
+                    new SolidColorBrush(Color.FromArgb(42, 20, 112, 148));
+                var hoverBackground =
+                    new SolidColorBrush(Color.FromArgb(28, 56, 189, 248));
+                listItem.Resources["ListViewItemBackgroundSelected"] = selectedBackground;
+                listItem.Resources["ListViewItemBackgroundSelectedPointerOver"] = selectedBackground;
+                listItem.Resources["ListViewItemBackgroundPointerOver"] = hoverBackground;
+                listItem.Resources["ListViewItemBackgroundSelectedPressed"] = selectedBackground;
+                list.Items.Add(listItem);
             }
 
             var selectedCountText =
@@ -4652,6 +4968,33 @@ namespace Anfeta.UI.Views
                         Microsoft.UI.Text.FontWeights.SemiBold,
                     Opacity = 0.84
                 };
+
+            var templateSearchBox = new TextBox
+            {
+                Header = "Buscar plantilla",
+                PlaceholderText = "Nombre, responsable, dominio o número…",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                MaxWidth = contentWidth
+            };
+
+            templateSearchBox.TextChanged += (_, __) =>
+            {
+                var query = Regex.Replace(
+                    templateSearchBox.Text ?? string.Empty,
+                    @"\s+", " ").Trim();
+
+                foreach (var rawItem in list.Items)
+                {
+                    if (rawItem is not ListViewItem candidate ||
+                        candidate.Tag is not NotionQuickTemplateItem source)
+                        continue;
+
+                    candidate.Visibility = string.IsNullOrWhiteSpace(query) ||
+                        source.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
+                            ? Visibility.Visible
+                            : Visibility.Collapsed;
+                }
+            };
 
             var selectAllButton =
                 new Button
@@ -4739,7 +5082,9 @@ namespace Anfeta.UI.Views
             sourceButton.Click += async (_, __) =>
             {
                 await OpenNotionPageWithFallbackAsync(
-                    template.SourceUrl,
+                    string.IsNullOrWhiteSpace(template.BrowseUrl)
+                        ? template.SourceUrl
+                        : template.BrowseUrl,
                     desktopSuccessStatus:
                         $"Vista {template.Label} abierta en Notion Desktop",
                     browserSuccessStatus:
@@ -4844,7 +5189,7 @@ namespace Anfeta.UI.Views
                     MaxWidth = contentWidth,
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch,
-                    Spacing = 10,
+                    Spacing = 12,
                     Children =
                     {
                         new Border
@@ -4854,10 +5199,8 @@ namespace Anfeta.UI.Views
                                     10, 8, 10, 8),
                             CornerRadius =
                                 new CornerRadius(7),
-                            Background =
-                                new SolidColorBrush(
-                                    Color.FromArgb(
-                                        26, 56, 189, 248)),
+                            Background = new SolidColorBrush(
+                                Color.FromArgb(255, 14, 35, 46)),
                             BorderBrush =
                                 new SolidColorBrush(
                                     Color.FromArgb(
@@ -4868,13 +5211,14 @@ namespace Anfeta.UI.Views
                                 new TextBlock
                                 {
                                     Text =
-                                        $"Plantilla Fase1 · {template.Label}. " +
-                                        "Selecciona todo el proyecto o quita únicamente " +
-                                        "las actividades que no apliquen. Cada copia conserva SU BODY.",
+                                        $"{orderedTemplates.Count} actividades disponibles · {template.Label}\n" +
+                                        "Todas están seleccionadas. Desmarca únicamente las que no apliquen; cada copia conserva su contenido.",
+                                    FontSize = 13,
                                     TextWrapping =
                                         TextWrapping.Wrap
                                 }
                         },
+                        templateSearchBox,
                         selectionBar,
                         list,
                         sourceButton
@@ -4910,11 +5254,36 @@ namespace Anfeta.UI.Views
             dialog.Resources["ContentDialogMaxWidth"] =
                 dialogWidth;
 
+            dialog.Resources["ContentDialogBackground"] =
+                new SolidColorBrush(Color.FromArgb(255, 10, 18, 24));
+            dialog.Resources["ContentDialogBorderBrush"] =
+                new SolidColorBrush(Color.FromArgb(150, 40, 81, 106));
+            dialog.Resources["ContentDialogForeground"] =
+                new SolidColorBrush(Color.FromArgb(255, 232, 242, 248));
+
+            MakeCalendarContentDialogMovable(
+                dialog,
+                $"⚡ Plantillas masivas · {template.Label}");
+
             // John pidió poder seleccionar todo y luego quitar excepciones.
             // Dejamos TODO seleccionado al abrir para que el flujo masivo sea
             // de "quitar lo que no aplica", no de marcar 30 filas una por una.
             list.SelectAll();
             UpdateSelectionUi();
+
+            // SelectAll desplaza internamente el ListView hacia el último elemento.
+            // Regresamos al inicio cuando la modal ya calculó sus dimensiones para
+            // que nunca aparezca una card superior cortada a la mitad.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                list.UpdateLayout();
+                if (list.Items.Count > 0)
+                {
+                    list.ScrollIntoView(
+                        list.Items[0],
+                        ScrollIntoViewAlignment.Leading);
+                }
+            });
 
             var result =
                 await dialog.ShowAsync();
@@ -5107,6 +5476,161 @@ namespace Anfeta.UI.Views
         }
 
 
+        private async Task<Dictionary<string, NotionQuickPropertyCatalog>>
+            LoadCalendarQuickTemplatePropertyCatalogsAsync(
+                string token,
+                CalendarQuickTemplateDefinition template,
+                string sourcePageId,
+                CancellationToken cancellationToken)
+        {
+            var result = new Dictionary<string, NotionQuickPropertyCatalog>(
+                StringComparer.OrdinalIgnoreCase);
+
+            // La preparación de estos campos es auxiliar: nunca debe impedir
+            // que se abra el editor si Notion está ocupado o aplica rate limit.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+            // La ventana ya está visible mientras esto corre. Las relaciones
+            // grandes (CLIENTES) pueden esperar más sin bloquear la interfaz.
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            var boundedToken = timeout.Token;
+
+            if (template == null ||
+                (template.Key != "acceso-dominio" &&
+                 template.Key != "acceso-correo"))
+            {
+                return result;
+            }
+
+            // Ahora sourcePageId siempre representa la página (no el ?v= de
+            // la URL), por lo que su padre es la fuente más confiable del esquema.
+            var targetDataSourceName = template.Key == "acceso-correo"
+                ? "Correos Contraseñas"
+                : "Dominios";
+
+            var catalogDataSourceId =
+                await _calendarQuickActivityService
+                    .GetPageDataSourceIdAsync(
+                        token,
+                        sourcePageId,
+                        boundedToken);
+
+            // Respaldo para una página compartida sin información de parent.
+            if (string.IsNullOrWhiteSpace(catalogDataSourceId))
+                catalogDataSourceId = NotionDataSources.Default
+                    .FirstOrDefault(source => source.Name.Equals(
+                        targetDataSourceName,
+                        StringComparison.OrdinalIgnoreCase))
+                    ?.DataSourceId ?? string.Empty;
+
+            // Respaldo únicamente para plantillas antiguas que sí vivan
+            // directamente en Revisiones.
+            if (string.IsNullOrWhiteSpace(catalogDataSourceId))
+            {
+                catalogDataSourceId =
+                    NotionFilePageService.RevisionesDataSourceId;
+            }
+
+            var requested = template.Key == "acceso-dominio"
+                ? new (string Key, string[] Aliases)[]
+                {
+                    ("Sitio Activo", new[] { "Sitio Activo", "⚠ Sitio Activo" }),
+                    ("Servidor/hosting", new[] { "Servidor/hosting", "Servidor hosting" }),
+                    ("Proveedor dominio", new[] { "Proveedor dominio", "Proveedor del dominio" }),
+                    ("CLIENTES", new[] { "CLIENTES", "CLIENTES bien" })
+                }
+                : new (string Key, string[] Aliases)[]
+                {
+                    ("TIPO CORREO", new[] { "TIPO CORREO", "Tipo correo" }),
+                    ("CLIENTES", new[] { "CLIENTES", "CLIENTES bien" })
+                };
+
+            // Secuencial a propósito: la primera propiedad llena el caché del
+            // esquema y las siguientes lo reutilizan. En paralelo se lanzaban
+            // varias lecturas idénticas y competían con la actualización del calendario.
+            foreach (var item in requested)
+            {
+                try
+                {
+                    var catalog = await _calendarQuickActivityService
+                        .GetPropertyCatalogAsync(
+                            token,
+                            catalogDataSourceId,
+                            item.Aliases,
+                            forceRefresh: false,
+                            boundedToken);
+
+                    if (!string.IsNullOrWhiteSpace(catalog.PropertyName))
+                        result[item.Key] = catalog;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine(
+                        $"[CALENDAR_TEMPLATE_PROPERTY_CATALOG] {item.Key}: {ex.Message}");
+                }
+            }
+
+            return result;
+        }
+
+        private static ComboBox BuildCalendarQuickTemplatePropertyCombo(
+            string logicalName,
+            string label,
+            NotionQuickPropertyCatalog catalog)
+        {
+            var combo = new ComboBox
+            {
+                Header = label,
+                PlaceholderText = catalog.Options.Count > 0
+                    ? "Selecciona una opción de Notion"
+                    : "Sin opciones disponibles",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                IsEnabled = catalog.Options.Count > 0,
+                // FrameworkElement.Tag cruza la frontera WinRT y no admite
+                // records CLR personalizados. Solo conservar metadata textual.
+                Tag = $"{logicalName}\u001f{catalog.PropertyType}"
+            };
+
+            foreach (var option in catalog.Options)
+            {
+                combo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = option.Name,
+                        Tag = option.Id ?? string.Empty
+                    });
+            }
+
+            return combo;
+        }
+
+        private static void AppendCalendarQuickTemplateComboValues(
+            IDictionary<string, string> propertyValues,
+            IEnumerable<ComboBox> combos)
+        {
+            foreach (var combo in combos ?? Enumerable.Empty<ComboBox>())
+            {
+                if (combo.Tag is not string rawMeta ||
+                    combo.SelectedItem is not ComboBoxItem selected)
+                {
+                    continue;
+                }
+
+                var meta = rawMeta.Split('\u001f');
+                if (meta.Length != 2 || string.IsNullOrWhiteSpace(meta[0]))
+                    continue;
+
+                var value = meta[1].Equals(
+                    "relation",
+                    StringComparison.OrdinalIgnoreCase)
+                        ? selected.Tag?.ToString()
+                        : selected.Content?.ToString();
+
+                if (!string.IsNullOrWhiteSpace(value))
+                    propertyValues[meta[0]] = value.Trim();
+            }
+        }
+
         private async Task ShowCalendarQuickTemplateBatchDialogAsync(
             CalendarQuickTemplateDefinition template,
             IReadOnlyList<NotionQuickTemplateItem> selectedTemplates,
@@ -5116,6 +5640,19 @@ namespace Anfeta.UI.Views
                 selectedTemplates == null ||
                 selectedTemplates.Count == 0)
             {
+                return;
+            }
+
+            // Estas opciones representan una página plantilla individual.
+            // Aunque algún evento antiguo llegue por la ruta masiva, se fuerza
+            // el editor individual, que ahora abre antes de consultar Notion.
+            if (template.Key == "acceso-correo" ||
+                template.Key == "acceso-dominio")
+            {
+                await ShowCalendarQuickTemplateDialogAsync(
+                    template,
+                    selectedTemplates[0],
+                    seed);
                 return;
             }
 
@@ -5171,6 +5708,68 @@ namespace Anfeta.UI.Views
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch
                 };
+
+            StatusText.Text =
+                $"Estado: Preparando campos de {template.Label} desde su base de Notion…";
+
+            var propertyCatalogs =
+                await LoadCalendarQuickTemplatePropertyCatalogsAsync(
+                    token,
+                    template,
+                    selectedTemplates[0].PageId,
+                    CancellationToken.None);
+
+            var basicPropertyBoxes = new Dictionary<string, TextBox>(
+                StringComparer.OrdinalIgnoreCase);
+            var basicPropertyCombos = new List<ComboBox>();
+            var basicPropertiesPanel = new StackPanel { Spacing = 8 };
+
+            void AddBasicProperty(string propertyName, string label, string placeholder)
+            {
+                var box = new TextBox
+                {
+                    Header = label,
+                    PlaceholderText = placeholder,
+                    HorizontalAlignment = HorizontalAlignment.Stretch
+                };
+                basicPropertyBoxes[propertyName] = box;
+                basicPropertiesPanel.Children.Add(box);
+            }
+
+            void AddBasicCatalogProperty(string logicalName, string label)
+            {
+                if (!propertyCatalogs.TryGetValue(logicalName, out var catalog))
+                    return;
+
+                var combo = BuildCalendarQuickTemplatePropertyCombo(
+                    logicalName,
+                    label,
+                    catalog);
+
+                basicPropertyCombos.Add(combo);
+                basicPropertiesPanel.Children.Add(combo);
+            }
+
+            if (template.Key == "acceso-dominio")
+            {
+                AddBasicCatalogProperty("Sitio Activo", "Sitio activo");
+                AddBasicCatalogProperty("Servidor/hosting", "Servidor / hosting");
+                AddBasicCatalogProperty("Proveedor dominio", "Proveedor del dominio");
+                AddBasicCatalogProperty("CLIENTES", "Cliente");
+                AddBasicProperty("Usuario CMS WP", "Usuario CMS / WordPress", "Usuario");
+                AddBasicProperty("Contraseña CMS", "Contraseña CMS", "Contraseña");
+                AddBasicProperty("Hosting", "URL de hosting", "https://…");
+                AddBasicProperty("Contraseña", "Contraseña de hosting", "Contraseña");
+            }
+            else if (template.Key == "acceso-correo")
+            {
+                AddBasicCatalogProperty("TIPO CORREO", "Tipo de correo");
+                AddBasicCatalogProperty("CLIENTES", "Cliente");
+                AddBasicProperty("Correo", "Correo", "correo@dominio.com");
+                AddBasicProperty("Contraseña", "Contraseña", "Contraseña del correo");
+                AddBasicProperty("Correo Usuario", "Usuario del correo", "correo@dominio.com");
+                AddBasicProperty("link - para entrar", "Enlace para entrar", "https://…");
+            }
 
             // IMPORTANTE: responsable EN BLANCO por defecto.
             // No se hereda usuario actual.
@@ -5598,6 +6197,7 @@ namespace Anfeta.UI.Views
                         summaryText,
                         notice,
                         fields,
+                        basicPropertiesPanel,
                         scheduleRow,
                         sequentialCheck,
                         previewBorder
@@ -5693,6 +6293,17 @@ namespace Anfeta.UI.Views
             var distributeSequentially =
                 sequentialCheck.IsChecked == true;
 
+            var propertyValues = basicPropertyBoxes
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
+                .ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value.Text.Trim(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            AppendCalendarQuickTemplateComboValues(
+                propertyValues,
+                basicPropertyCombos);
+
             var requests =
                 new List<NotionQuickTemplateBatchRequest>(
                     selectedTemplates.Count);
@@ -5734,7 +6345,8 @@ namespace Anfeta.UI.Views
                         source.PageId,
                         title,
                         start,
-                        end));
+                        end,
+                        propertyValues));
 
                 if (distributeSequentially)
                 {
@@ -6034,6 +6646,107 @@ namespace Anfeta.UI.Views
                 TextWrapping = TextWrapping.Wrap,
                 MinHeight = 72,
                 HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var singlePropertyBoxes = new Dictionary<string, TextBox>(
+                StringComparer.OrdinalIgnoreCase);
+            var singlePropertyCombos = new List<ComboBox>();
+            var singlePropertyCombosByName = new Dictionary<string, ComboBox>(
+                StringComparer.OrdinalIgnoreCase);
+            var singlePropertiesPanel = new StackPanel { Spacing = 8 };
+            var catalogStatusText = new TextBlock
+            {
+                Text = "Cargando opciones desde Notion…",
+                FontSize = 11,
+                Opacity = 0.72,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            void AddSingleProperty(string propertyName, string label, string placeholder)
+            {
+                var box = new TextBox
+                {
+                    Header = label,
+                    PlaceholderText = placeholder,
+                    HorizontalAlignment = HorizontalAlignment.Stretch
+                };
+                singlePropertyBoxes[propertyName] = box;
+                singlePropertiesPanel.Children.Add(box);
+            }
+
+            void AddSingleCatalogProperty(string logicalName, string label)
+            {
+                var combo = BuildCalendarQuickTemplatePropertyCombo(
+                    logicalName,
+                    label,
+                    new NotionQuickPropertyCatalog(
+                        logicalName,
+                        string.Empty,
+                        Array.Empty<NotionQuickPropertyOption>()));
+
+                combo.PlaceholderText = "Cargando opciones…";
+
+                singlePropertyCombos.Add(combo);
+                singlePropertyCombosByName[logicalName] = combo;
+                singlePropertiesPanel.Children.Add(combo);
+            }
+
+            if (template.Key == "acceso-dominio")
+            {
+                AddSingleCatalogProperty("Sitio Activo", "Sitio activo");
+                AddSingleCatalogProperty("Servidor/hosting", "Servidor / hosting");
+                AddSingleCatalogProperty("Proveedor dominio", "Proveedor del dominio");
+                AddSingleCatalogProperty("CLIENTES", "Cliente");
+                AddSingleProperty("Usuario CMS WP", "Usuario CMS / WordPress", "Usuario");
+                AddSingleProperty("Contraseña CMS", "Contraseña CMS", "Contraseña");
+                AddSingleProperty("Hosting", "URL de hosting", "https://…");
+                AddSingleProperty("Contraseña", "Contraseña de hosting", "Contraseña");
+            }
+            else if (template.Key == "acceso-correo")
+            {
+                AddSingleCatalogProperty("TIPO CORREO", "Tipo de correo");
+                AddSingleCatalogProperty("CLIENTES", "Cliente");
+                AddSingleProperty("Correo", "Correo", "correo@dominio.com");
+                AddSingleProperty("Contraseña", "Contraseña", "Contraseña del correo");
+                AddSingleProperty("Correo Usuario", "Usuario del correo", "correo@dominio.com");
+                AddSingleProperty("link - para entrar", "Enlace para entrar", "https://…");
+            }
+
+            var singlePropertiesSection = new Border
+            {
+                Padding = new Thickness(12, 10, 12, 12),
+                CornerRadius = new CornerRadius(9),
+                Background = new SolidColorBrush(Color.FromArgb(255, 11, 27, 36)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(105, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                Visibility = singlePropertyBoxes.Count > 0
+                    ? Visibility.Visible
+                    : Visibility.Collapsed,
+                Child = new StackPanel
+                {
+                    Spacing = 8,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = template.Key == "acceso-dominio"
+                                ? "🔐 DATOS DEL ACCESO AL DOMINIO"
+                                : "✉ DATOS DEL ACCESO AL CORREO",
+                            Foreground = new SolidColorBrush(Color.FromArgb(255, 75, 201, 255)),
+                            FontSize = 12,
+                            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                        },
+                        new TextBlock
+                        {
+                            Text = "Completa únicamente los datos disponibles. Se guardarán en las propiedades compatibles de Notion.",
+                            FontSize = 11,
+                            Opacity = 0.72,
+                            TextWrapping = TextWrapping.Wrap
+                        },
+                        catalogStatusText,
+                        singlePropertiesPanel
+                    }
+                }
             };
 
             var personCombo = new ComboBox
@@ -6382,6 +7095,7 @@ namespace Anfeta.UI.Views
                     notice,
                     identityRow,
                     descriptionBox,
+                    singlePropertiesSection,
                     personCombo,
                     row,
                     previewBorder,
@@ -6422,7 +7136,86 @@ namespace Anfeta.UI.Views
                 DefaultButton = ContentDialogButton.Primary
             };
 
+            dialog.Resources["ContentDialogBackground"] =
+                new SolidColorBrush(Color.FromArgb(255, 9, 17, 23));
+            dialog.Resources["ContentDialogBorderBrush"] =
+                new SolidColorBrush(Color.FromArgb(155, 40, 81, 106));
+            dialog.Resources["ContentDialogForeground"] =
+                new SolidColorBrush(Color.FromArgb(255, 232, 242, 248));
+            dialog.Resources["TextControlBackground"] =
+                new SolidColorBrush(Color.FromArgb(255, 17, 31, 40));
+            dialog.Resources["TextControlBackgroundPointerOver"] =
+                new SolidColorBrush(Color.FromArgb(255, 20, 39, 50));
+            dialog.Resources["TextControlBorderBrush"] =
+                new SolidColorBrush(Color.FromArgb(110, 40, 81, 106));
+
+            MakeCalendarContentDialogMovable(
+                dialog,
+                $"Crear desde plantilla · {template.Label}");
+
+            // Mostrar primero la ventana. Los catálogos de Notion se cargan
+            // después y actualizan los ComboBox sin bloquear el botón.
+            using var catalogCts = new CancellationTokenSource();
+            async Task LoadCatalogsIntoOpenDialogAsync()
+            {
+                try
+                {
+                    var catalogs =
+                        await LoadCalendarQuickTemplatePropertyCatalogsAsync(
+                            token,
+                            template,
+                            sourceTemplate.PageId,
+                            catalogCts.Token);
+
+                    foreach (var pair in singlePropertyCombosByName)
+                    {
+                        var combo = pair.Value;
+                        combo.Items.Clear();
+
+                        if (!catalogs.TryGetValue(pair.Key, out var catalog))
+                        {
+                            combo.PlaceholderText = "No se pudieron cargar las opciones";
+                            combo.IsEnabled = false;
+                            continue;
+                        }
+
+                        combo.Tag = $"{pair.Key}\u001f{catalog.PropertyType}";
+
+                        foreach (var option in catalog.Options)
+                        {
+                            combo.Items.Add(new ComboBoxItem
+                            {
+                                Content = option.Name,
+                                Tag = option.Id ?? string.Empty
+                            });
+                        }
+
+                        combo.PlaceholderText = catalog.Options.Count > 0
+                            ? "Selecciona una opción de Notion"
+                            : "Sin opciones disponibles";
+                        combo.IsEnabled = catalog.Options.Count > 0;
+                    }
+
+                    var loadedCount = singlePropertyCombosByName.Values
+                        .Count(combo => combo.IsEnabled);
+                    catalogStatusText.Text = loadedCount > 0
+                        ? $"Opciones de Notion listas · {loadedCount} desplegable(s)"
+                        : "Notion no devolvió opciones; puedes cerrar y volver a intentar.";
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    catalogStatusText.Text =
+                        $"No se pudieron cargar las opciones: {ex.Message}";
+                }
+            }
+
+            var catalogLoadTask = LoadCatalogsIntoOpenDialogAsync();
+
             var result = await dialog.ShowAsync();
+            catalogCts.Cancel();
 
             if (result != ContentDialogResult.Primary)
                 return;
@@ -6496,6 +7289,17 @@ namespace Anfeta.UI.Views
                     domain,
                     personTag);
 
+            var singlePropertyValues = singlePropertyBoxes
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
+                .ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value.Text.Trim(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            AppendCalendarQuickTemplateComboValues(
+                singlePropertyValues,
+                singlePropertyCombos);
+
             try
             {
                 ShowLoadingState(
@@ -6518,7 +7322,20 @@ namespace Anfeta.UI.Views
                             title,
                             start,
                             end,
+                            singlePropertyValues,
                             cts.Token);
+
+                // La copia ya existe: abrirla inmediatamente sin esperar a que
+                // la consulta incremental la indexe y la pinte en el calendario.
+                if (!string.IsNullOrWhiteSpace(created.PageUrl))
+                {
+                    await OpenNotionPageWithFallbackAsync(
+                        created.PageUrl,
+                        desktopSuccessStatus: "Actividad creada y abierta en Notion Desktop ✅",
+                        browserSuccessStatus: "Actividad creada y abierta en Notion ✅",
+                        failureStatus: "La actividad se creó, pero no se pudo abrir Notion",
+                        invalidUrlStatus: "La actividad se creó, pero Notion no devolvió una URL válida");
+                }
 
                 var refreshed = false;
 
@@ -9002,6 +9819,16 @@ namespace Anfeta.UI.Views
                 GetCalendarProjectChecklistStats(
                     scanned);
 
+            _calendarProjectProgressSnapshots[
+                criteria.Key] =
+                    new CalendarProjectProgressSnapshot(
+                        DateTimeOffset.UtcNow,
+                        stats,
+                        projectLabel,
+                        isPartial,
+                        scannedActivities,
+                        totalActivities);
+
             return true;
         }
 
@@ -9015,7 +9842,7 @@ namespace Anfeta.UI.Views
             if (activity == null ||
                 !TryBuildCalendarProjectGroupCriteria(
                     activity,
-                    out _))
+                    out var criteria))
             {
                 tooltip =
                     "P · Avance total del proyecto: esta actividad no tiene un proyecto comparable.";
@@ -9031,6 +9858,30 @@ namespace Anfeta.UI.Views
                     out var scannedActivities,
                     out var totalActivities))
             {
+                // Durante el refresco incremental la lista principal puede
+                // quedar invalidada unos instantes. Si ya hubo un cálculo
+                // completo, mantenlo visible hasta sustituirlo por el nuevo.
+                if (_calendarProjectProgressSnapshots.TryGetValue(
+                        criteria.Key,
+                        out var previous) &&
+                    DateTimeOffset.UtcNow - previous.StoredAt <=
+                        TimeSpan.FromHours(4) &&
+                    previous.Stats.Total > 0)
+                {
+                    var previousPercentage =
+                        GetChecklistPercentage(
+                            previous.Stats);
+
+                    tooltip =
+                        $"P · Avance total del proyecto: {previous.ProjectLabel} · " +
+                        $"{previous.Stats.Completed}/{previous.Stats.Total} checks · " +
+                        $"{previousPercentage}%. Actualizando datos en segundo plano.";
+
+                    return ultraCompact
+                        ? $"P{previousPercentage}"
+                        : $"P {previousPercentage}%";
+                }
+
                 tooltip =
                     "P · Avance total del proyecto: preparando datos desde la caché. " +
                     "No se hace una consulta por tarjeta.";
@@ -9341,7 +10192,7 @@ namespace Anfeta.UI.Views
                 return string.Empty;
 
             if (HasExactCalendarPhase(activity, "sprtuzREVISION"))
-                return "SP";
+                return "S";
 
             if (HasExactCalendarPhase(activity, "aprtuzREVISION"))
                 return "AP";
@@ -9375,7 +10226,7 @@ namespace Anfeta.UI.Views
                     Color.FromArgb(235, 8, 47, 73),
                     Color.FromArgb(255, 56, 189, 248),
                     Color.FromArgb(255, 186, 230, 253)),
-                "SP" => (
+                "S" or "SP" => (
                     Color.FromArgb(235, 59, 7, 100),
                     Color.FromArgb(255, 192, 132, 252),
                     Color.FromArgb(255, 233, 213, 255)),
@@ -9637,8 +10488,17 @@ namespace Anfeta.UI.Views
                     CalendarHourHeight -
                     5);
 
-            var phaseBadgeLabel =
+            var phaseBaseBadgeLabel =
                 GetCalendarPhaseBadgeLabel(activity);
+
+            // Visible incluso en cards estrechas: el comentario acompaña al
+            // badge de fase y su contenido completo queda en el tooltip.
+            var phaseBadgeLabel =
+                activity.HasComments
+                    ? string.IsNullOrWhiteSpace(phaseBaseBadgeLabel)
+                        ? $"💬{activity.CommentCount}"
+                        : $"{phaseBaseBadgeLabel} · 💬{activity.CommentCount}"
+                    : phaseBaseBadgeLabel;
 
             // La tarjeta cambia de densidad según SU espacio real. Además,
             // 70–80% se trata deliberadamente como vista panorámica: muestra
@@ -9668,6 +10528,10 @@ namespace Anfeta.UI.Views
             var phaseBadgeWidth =
                 string.IsNullOrWhiteSpace(phaseBadgeLabel)
                     ? 0
+                    : activity.HasComments
+                        ? miniCard
+                            ? Math.Max(38, 43 * _calendarZoom)
+                            : Math.Max(44, 50 * _calendarZoom)
                     : miniCard
                         ? phaseBadgeLabel.Length > 1
                             ? Math.Max(19, 20 * _calendarZoom)
@@ -9997,6 +10861,7 @@ namespace Anfeta.UI.Views
             // que H 0%, y eso era lo que provocaba textos como "A 23...".
             static double EstimateProgressBadgeWidth(
                 string? value,
+                double fontSize,
                 bool ultra)
             {
                 var text =
@@ -10004,9 +10869,9 @@ namespace Anfeta.UI.Views
                     string.Empty;
 
                 var charWidth =
-                    ultra
-                        ? 4.4d
-                        : 5.1d;
+                    Math.Max(
+                        ultra ? 3.8d : 4.5d,
+                        fontSize * 0.64d);
 
                 return Math.Max(
                     ultra
@@ -10023,11 +10888,13 @@ namespace Anfeta.UI.Views
                     ultraMiniCard ? 27d : 31d,
                     EstimateProgressBadgeWidth(
                         todayProgressText.Text,
+                        todayProgressText.FontSize,
                         ultraMiniCard));
 
             var activityNaturalWidth =
                 EstimateProgressBadgeWidth(
                     checklistText.Text,
+                    checklistText.FontSize,
                     ultraMiniCard);
 
             var hasProjectProgress =
@@ -10038,6 +10905,7 @@ namespace Anfeta.UI.Views
                 hasProjectProgress
                     ? EstimateProgressBadgeWidth(
                         projectProgressText.Text,
+                        projectProgressText.FontSize,
                         ultraMiniCard)
                     : 0d;
 
@@ -10048,20 +10916,22 @@ namespace Anfeta.UI.Views
                     ? projectNaturalWidth + 4d
                     : 2d);
 
+            var headerIdentityReserve =
+                phaseBadgeWidth +
+                projectTypeLabel.Length *
+                (miniCard ? 4.8d : 5.8d) *
+                Math.Max(1d, CalendarFontScale) +
+                Math.Max(10d, 12d * _calendarZoom);
+
             var oneRowAvailableWidth =
                 Math.Clamp(
-                    cardWidth *
-                    (ultraMiniCard
-                        ? 0.72
-                        : miniCard
-                            ? 0.68
-                            : 0.62),
+                    cardWidth - headerIdentityReserve,
                     ultraMiniCard
                         ? 42d
                         : 86d,
                     ultraMiniCard
                         ? 94d
-                        : 150d);
+                        : 182d);
 
             // En columnas creadas por muchos empalmes puede quedar menos de
             // 78 px. En ese caso la card prioriza exclusivamente H/A/P en una
@@ -10078,15 +10948,16 @@ namespace Anfeta.UI.Views
             // Si el texto real no entra, P baja. También se baja antes en cards
             // medianas para conservar dominio/título sin apretarlos.
             var wrapProgressStrip =
+                hasProjectProgress &&
                 !extremeNarrowProgress &&
                 (oneRowNaturalWidth >
                      oneRowAvailableWidth ||
                  cardWidth <
                      (ultraMiniCard
-                         ? 112d
+                         ? 122d
                          : miniCard
-                             ? 178d
-                             : 188d));
+                             ? 206d
+                             : 218d));
 
             var topRowNaturalWidth =
                 todayNaturalWidth +
@@ -10117,8 +10988,8 @@ namespace Anfeta.UI.Views
                                         : 70d,
                                     cardWidth *
                                     (ultraMiniCard
-                                        ? 0.72
-                                        : 0.62)))
+                                        ? 0.82
+                                        : 0.76)))
                             : Math.Min(
                                 oneRowNaturalWidth,
                                 oneRowAvailableWidth),
@@ -10336,27 +11207,39 @@ namespace Anfeta.UI.Views
             if (!string.IsNullOrWhiteSpace(phaseBadgeLabel))
             {
                 var phaseColors =
-                    GetCalendarPhaseBadgeColors(phaseBadgeLabel);
+                    GetCalendarPhaseBadgeColors(phaseBaseBadgeLabel);
 
                 phaseBadge.Background =
-                    new SolidColorBrush(phaseColors.Background);
+                    new SolidColorBrush(
+                        activity.HasComments
+                            ? Color.FromArgb(255, 120, 53, 15)
+                            : phaseColors.Background);
                 phaseBadge.BorderBrush =
-                    new SolidColorBrush(phaseColors.Border);
+                    new SolidColorBrush(
+                        activity.HasComments
+                            ? Color.FromArgb(255, 251, 191, 36)
+                            : phaseColors.Border);
                 phaseBadge.BorderThickness =
-                    new Thickness(1);
+                    new Thickness(activity.HasComments ? 1.5 : 1);
                 phaseBadge.Child =
                     new TextBlock
                     {
                         Text = phaseBadgeLabel,
                         FontSize = Math.Max(
-                            miniCard ? 6.8 : 7.4,
-                            (miniCard ? 7.1 : 7.8) *
+                            activity.HasComments
+                                ? miniCard ? 7.8 : 8.5
+                                : miniCard ? 6.8 : 7.4,
+                            (activity.HasComments
+                                ? miniCard ? 8.1 : 8.9
+                                : miniCard ? 7.1 : 7.8) *
                             CalendarFontScale),
                         FontWeight =
                             Microsoft.UI.Text.FontWeights.Bold,
                         Foreground =
                             new SolidColorBrush(
-                                phaseColors.Foreground),
+                                activity.HasComments
+                                    ? Color.FromArgb(255, 255, 247, 237)
+                                    : phaseColors.Foreground),
                         HorizontalAlignment =
                             HorizontalAlignment.Center,
                         VerticalAlignment =
@@ -10896,9 +11779,9 @@ namespace Anfeta.UI.Views
                 content.Children.Add(progressFooter);
             }
 
-            // rtuzREVISION conserva el microbadge R, pero además recupera un
-            // fondo verde oscuro para poder localizar visualmente las revisiones
-            // con un vistazo, tal como se pidió en Meet.
+            // rtuzREVISION conserva el microbadge R, pero usa un fondo cercano
+            // al calendario. Así sigue siendo identificable sin competir con
+            // las PRTUZ pendientes, que deben conservar el foco principal.
             var isRtuzCalendarActivity =
                 HasExactCalendarPhase(
                     activity,
@@ -11067,16 +11950,13 @@ namespace Anfeta.UI.Views
                 Background =
                     isRtuzCalendarActivity
                         ? new SolidColorBrush(
-                            Color.FromArgb(
-                                235,
-                                20,
-                                70,
-                                50))
+                            Lighten(
+                                Darken(_calendarThemeColor, 0.02),
+                                0.035))
                         : GetNeutralCalendarActivityBrush(
                             activity.Status,
                             activity.StatusColor),
-                // rtuzREVISION usa fondo verde oscuro; el resto conserva el
-                // fondo neutro. La franja izquierda sigue indicando prioridad.
+                // La franja izquierda y el badge R continúan indicando estado.
                 BorderBrush =
                     new SolidColorBrush(
                         activityPriority.Color),
@@ -11111,6 +11991,15 @@ namespace Anfeta.UI.Views
                 activityTooltipParts.Add(
                     $"⚠ {activity.ChecklistCompleted}/{activity.ChecklistTotal} · " +
                     "actividad en R/Z con checklist incompleta");
+            }
+
+            if (activity.HasComments)
+            {
+                activityTooltipParts.Add(
+                    $"💬 {activity.CommentCount} comentario(s) abierto(s)" +
+                    (string.IsNullOrWhiteSpace(activity.LatestCommentText)
+                        ? string.Empty
+                        : $"\n{activity.LatestCommentText}"));
             }
 
             activityTooltipParts.Add(
@@ -11926,7 +12815,8 @@ namespace Anfeta.UI.Views
                 ("aapli", "APLICACIÓN"),
                 ("pprog", "PROGRAMACIÓN"),
                 ("ddise", "DISEÑO"),
-                ("rrede", "REDES")
+                ("rrede", "REDES"),
+                ("mmaps", "MAPS")
             };
 
         private static bool TryGetWhatsAppCalendarProjectType(
@@ -12245,13 +13135,11 @@ namespace Anfeta.UI.Views
                 return false;
             }
 
-            if (!TryGetWhatsAppCalendarProjectType(
+            var hasKnownProjectType =
+                TryGetWhatsAppCalendarProjectType(
                     activity,
                     out var projectType,
-                    out var projectLabel))
-            {
-                return false;
-            }
+                    out var projectLabel);
 
             var domain =
                 TryExtractFirstDomain(
@@ -12262,6 +13150,16 @@ namespace Anfeta.UI.Views
 
             if (string.IsNullOrWhiteSpace(domain))
                 return false;
+
+            // El dominio es la identidad mínima del proyecto. Si mañana se
+            // agrega un prefijo nuevo, el modal no pierde su columna derecha:
+            // consulta todas las áreas del dominio hasta que el tipo sea
+            // incorporado formalmente a la tabla.
+            if (!hasKnownProjectType)
+            {
+                projectType = string.Empty;
+                projectLabel = "PROYECTO";
+            }
 
             TryGetCalendarProjectMonth(
                 activity,
@@ -12277,7 +13175,9 @@ namespace Anfeta.UI.Views
                     "Todas las personas",
                     year,
                     month,
-                    monthTag);
+                    monthTag,
+                    IncludeAllProjectTypes:
+                        !hasKnownProjectType);
 
             return true;
         }
@@ -15245,6 +16145,9 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            if (BlockCalendarEmptySlotWhileActivityPinned())
+                return;
+
             // Clics sobre cards, botones, pickers, etc. pertenecen a esos
             // controles y nunca deben iniciar la creación desde hueco.
             // One Click lateral NO bloquea el resto del calendario: la idea
@@ -15287,6 +16190,11 @@ namespace Anfeta.UI.Views
             }
 
             _calendarEmptySlotPointerArmed = false;
+
+            // Se vuelve a comprobar al soltar por si la actividad se fijó
+            // entre PointerPressed y PointerReleased.
+            if (BlockCalendarEmptySlotWhileActivityPinned())
+                return;
 
             if (!_calendarViewActive ||
                 CalendarCanvas == null ||
@@ -15337,6 +16245,28 @@ namespace Anfeta.UI.Views
             {
                 _calendarEmptySlotDialogOpen = false;
             }
+        }
+
+        private bool BlockCalendarEmptySlotWhileActivityPinned()
+        {
+            var hasPinnedActivity =
+                _calendarActivityPreviewPinned;
+
+            if (Application.Current is App app &&
+                app.TryBringCalendarActivityWindowToFront())
+            {
+                hasPinnedActivity = true;
+            }
+
+            if (!hasPinnedActivity)
+                return false;
+
+            _calendarEmptySlotPointerArmed = false;
+
+            StatusText.Text =
+                "Estado: Cierra la actividad fijada antes de crear otra.";
+
+            return true;
         }
 
         private static bool IsCalendarInteractiveTapSource(
@@ -15656,8 +16586,29 @@ namespace Anfeta.UI.Views
                 }
             }
 
+            var savedWidthVersion =
+                values.TryGetValue(
+                    LS_CalendarColumnWidthsVersion,
+                    out var widthVersionRaw) &&
+                int.TryParse(widthVersionRaw?.ToString(), out var widthVersion)
+                    ? widthVersion
+                    : 0;
+
+            // v2 cambia únicamente el valor inicial: Grande (240). Las
+            // elecciones posteriores Pequeño/Normal/Grande siguen guardándose.
+            // El perfil viejo almacenaba 170 para todas las columnas aunque el
+            // usuario nunca hubiese elegido "Normal", por eso se migra una vez.
             var savedWidths =
-                values[LS_CalendarColumnWidths] as string;
+                savedWidthVersion >= 2
+                    ? values[LS_CalendarColumnWidths] as string
+                    : null;
+
+            if (savedWidthVersion < 2)
+            {
+                _calendarColumnWidths.Clear();
+                values[LS_CalendarColumnWidthsVersion] = 2;
+                values.Remove(LS_CalendarColumnWidths);
+            }
 
             if (!string.IsNullOrWhiteSpace(savedWidths))
             {
@@ -15742,6 +16693,8 @@ namespace Anfeta.UI.Views
             values[LS_CalendarOrder] =
                 string.Join("|", _calendarPeopleOrder);
 
+            values[LS_CalendarColumnWidthsVersion] = 2;
+
             values[LS_CalendarColumnWidths] =
                 string.Join(
                     "|",
@@ -15774,13 +16727,10 @@ namespace Anfeta.UI.Views
                         ? 400d
                         : 360d;
 
-            // El zoom aumenta tipografía, alturas y el ancho preferido, pero
-            // no debe multiplicar también el mínimo rígido de TODAS las
-            // personas. Con 8 columnas a 130% eso obligaba al calendario a
-            // desbordar la ventana aunque todavía podían comprimirse de forma
-            // legible. El mínimo base mantiene el ajuste responsivo; solo se
-            // habilita desplazamiento horizontal cuando ni siquiera ese mínimo
-            // cabe en el viewport.
+            // El zoom aumenta tipografía y el ancho elegido por el usuario.
+            // Si el conjunto ya no cabe, se conserva ese ancho y el ScrollViewer
+            // ofrece desplazamiento horizontal; "Grande" no debe terminar
+            // visualmente convertido en "Normal" por una compresión automática.
             var minResolvedWidth =
                 CalendarMinPersonColumnWidth;
 
@@ -15852,40 +16802,6 @@ namespace Anfeta.UI.Views
                         break;
 
                     remaining -= consumed;
-                }
-            }
-            else if (activityAvailable > 0 &&
-                     total > activityAvailable + 0.5)
-            {
-                var required = total - activityAvailable;
-
-                while (required > 0.5)
-                {
-                    var shrinkable =
-                        Enumerable.Range(0, widths.Count)
-                            .Where(index =>
-                                widths[index] >
-                                minResolvedWidth + 0.5)
-                            .ToList();
-
-                    if (shrinkable.Count == 0)
-                        break;
-
-                    var share = required / shrinkable.Count;
-                    var reduced = 0d;
-
-                    foreach (var index in shrinkable)
-                    {
-                        var room = widths[index] - minResolvedWidth;
-                        var take = Math.Min(room, share);
-                        widths[index] -= take;
-                        reduced += take;
-                    }
-
-                    if (reduced <= 0.5)
-                        break;
-
-                    required -= reduced;
                 }
             }
 
@@ -17422,6 +18338,8 @@ namespace Anfeta.UI.Views
                         activity.ChecklistScanned = true;
                         activity.ChecklistTotal = stats.Total;
                         activity.ChecklistCompleted = stats.Completed;
+                        activity.CommentCount = stats.CommentCount;
+                        activity.LatestCommentText = stats.LatestCommentText;
                         _oneClickChecklistStats[activity.PageId] = stats;
                     }
                     catch (OperationCanceledException)
@@ -17477,19 +18395,42 @@ namespace Anfeta.UI.Views
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            if (ids.Count == 0)
-                return;
-
             // Se consultan únicamente los PageId que Notion reportó como
-            // modificados y que siguen visibles en este día. Esto también
-            // cubre páginas nuevas (por ejemplo, una actividad duplicada).
-            var snapshot =
+            // modificados y que siguen visibles en este día. Las RTUZ se
+            // agregan como sondeo prioritario (máximo dos), porque Notion
+            // no siempre propaga al last_edited_time de la página los cambios
+            // hechos dentro de toggles, checks hijos o comentarios.
+            var changedActivities =
                 _calendarActivities
                     .Where(activity =>
                         activity != null &&
                         !activity.IsReviewMirror &&
                         !string.IsNullOrWhiteSpace(activity.PageId) &&
                         ids.Contains(activity.PageId))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+
+            var rtuzProbes =
+                _calendarActivities
+                    .Where(activity =>
+                        activity != null &&
+                        !activity.IsReviewMirror &&
+                        !string.IsNullOrWhiteSpace(activity.PageId) &&
+                        HasExactCalendarPhase(
+                            activity,
+                            "rtuzREVISION"))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .Take(2);
+
+            var snapshot =
+                changedActivities
+                    .Concat(rtuzProbes)
                     .GroupBy(
                         activity => activity.PageId,
                         StringComparer.OrdinalIgnoreCase)
@@ -17574,7 +18515,9 @@ namespace Anfeta.UI.Views
                     var activity = activities[index];
                     var previous = new NotionChecklistStats(
                         activity.ChecklistTotal,
-                        activity.ChecklistCompleted);
+                        activity.ChecklistCompleted,
+                        CommentCount: activity.CommentCount,
+                        LatestCommentText: activity.LatestCommentText);
 
                     try
                     {
@@ -17599,12 +18542,19 @@ namespace Anfeta.UI.Views
                             instance.ChecklistScanned = true;
                             instance.ChecklistTotal = stats.Total;
                             instance.ChecklistCompleted = stats.Completed;
+                            instance.CommentCount = stats.CommentCount;
+                            instance.LatestCommentText = stats.LatestCommentText;
                         }
 
                         _oneClickChecklistStats[activity.PageId] = stats;
 
                         if (previous.Total != stats.Total ||
-                            previous.Completed != stats.Completed)
+                            previous.Completed != stats.Completed ||
+                            previous.CommentCount != stats.CommentCount ||
+                            !string.Equals(
+                                previous.LatestCommentText,
+                                stats.LatestCommentText,
+                                StringComparison.Ordinal))
                         {
                             changedCount++;
                         }
@@ -17650,9 +18600,11 @@ namespace Anfeta.UI.Views
 
                     if (changedCount > 0)
                     {
-                        UpdateCalendarChecklistVisuals(
-                            activities.Select(
-                                activity => activity.PageId));
+                        // Las cards y los indicadores C/Actual/Real del
+                        // encabezado dependen de los mismos checks. Redibujar
+                        // conserva la posición y evita que el encabezado se
+                        // quede mostrando un porcentaje anterior.
+                        DrawCalendarPreservingView(_calendarActivities);
                     }
 
                     StatusText.Text =
@@ -18697,10 +19649,18 @@ namespace Anfeta.UI.Views
                     activity.PageId,
                     out var cachedBlocks))
             {
-                contentHost.Content =
+                var cachedContent =
                     BuildCalendarPersonActivityContent(
                         activity,
                         cachedBlocks);
+
+                // El body se crea después de que el modal fijado ya recibió
+                // su escala. Se la aplicamos también al contenido nuevo para
+                // que Grande/Extra grande/Máximo aumenten sus textos.
+                ApplyCalendarActivityPreviewUiScale(
+                    cachedContent);
+
+                contentHost.Content = cachedContent;
 
                 return;
             }
@@ -18774,10 +19734,15 @@ namespace Anfeta.UI.Views
                     activity.PageId,
                     blocks);
 
-                contentHost.Content =
+                var loadedContent =
                     BuildCalendarPersonActivityContent(
                         activity,
                         blocks);
+
+                ApplyCalendarActivityPreviewUiScale(
+                    loadedContent);
+
+                contentHost.Content = loadedContent;
             }
             catch (OperationCanceledException)
             {
@@ -18806,8 +19771,25 @@ namespace Anfeta.UI.Views
             var cardScale =
                 GetCalendarProjectCardScale();
 
+            // El body antes quedaba limitado a 350 px aunque la tarjeta del
+            // proyecto ocupara casi toda la ventana. Conservamos un mínimo
+            // cómodo para el panel lateral, pero en vistas amplias utilizamos
+            // todo el ancho real disponible para textos, checks e imágenes.
+            var previewPanelWidth =
+                CalendarPersonPreviewPanel?.ActualWidth ?? 0;
+
+            var availableContentWidth =
+                Math.Clamp(
+                    (previewPanelWidth > 0
+                        ? previewPanelWidth
+                        : RootLayout?.ActualWidth ?? 700) - 54,
+                    350,
+                    1800);
+
             var content = new StackPanel
             {
+                HorizontalAlignment =
+                    HorizontalAlignment.Stretch,
                 Spacing =
                     Math.Max(
                         3,
@@ -18888,7 +19870,7 @@ namespace Anfeta.UI.Views
 
                 ConstrainCalendarPreviewElement(
                     element,
-                    350);
+                    availableContentWidth);
 
                 content.Children.Add(element);
             }
@@ -18910,6 +19892,8 @@ namespace Anfeta.UI.Views
 
             return new Border
             {
+                HorizontalAlignment =
+                    HorizontalAlignment.Stretch,
                 Padding =
                     new Thickness(
                         Math.Max(
@@ -19573,6 +20557,17 @@ namespace Anfeta.UI.Views
                        "zREVISION");
         }
 
+        // R y Z conservan su fecha durante procesos automáticos. R todavía
+        // puede moverse manualmente; Z mantiene además su protección histórica.
+        private static bool IsCalendarAutomaticMoveExcluded(
+            NotionCalendarActivity activity)
+        {
+            return IsCalendarHistoricalReviewDateProtected(activity) ||
+                   (activity != null &&
+                    !activity.IsReviewMirror &&
+                    HasExactCalendarPhase(activity, "rtuzREVISION"));
+        }
+
         private static bool IsOneClickSuspendedActivity(
             NotionCalendarActivity activity)
         {
@@ -19593,7 +20588,7 @@ namespace Anfeta.UI.Views
                 return true;
             }
 
-            if (IsCalendarHistoricalReviewDateProtected(
+            if (IsCalendarAutomaticMoveExcluded(
                     activity))
             {
                 return true;
@@ -20059,8 +21054,9 @@ namespace Anfeta.UI.Views
             var day = _calendarSelectedDate.Date;
             var windows = new[]
             {
-                (Start: day.AddHours(10), End: day.AddHours(13)),
-                (Start: day.AddHours(14), End: day.AddHours(18))
+                (
+                    Start: day.AddHours(9).AddMinutes(30),
+                    End: day.AddHours(18))
             };
 
             var intervals =
@@ -20120,9 +21116,77 @@ namespace Anfeta.UI.Views
                 (currentEnd - currentStart).TotalMinutes;
 
             return Math.Clamp(
-                coveredMinutes * 100d / (7 * 60d),
+                coveredMinutes * 100d / (8.5d * 60d),
                 0,
                 999);
+        }
+
+        private double CalculateCurrentCalendarProgress(string person)
+        {
+            var day = _calendarSelectedDate.Date;
+            var windowStart = day.AddHours(9).AddMinutes(30);
+            var windowEnd = day.AddHours(18);
+            var normalizedPerson = NormalizeCalendarPerson(person);
+
+            var activities =
+                ExpandCalendarReviewActivities(_calendarActivities)
+                    .Where(activity =>
+                        activity != null &&
+                        !activity.IsReviewMirror &&
+                        !IsOneClickSuspendedActivity(activity) &&
+                        activity.End > windowStart &&
+                        activity.Start < windowEnd &&
+                        SplitPersons(activity.Person)
+                            .Select(NormalizeCalendarPerson)
+                            .Any(candidate =>
+                                string.Equals(
+                                    candidate,
+                                    normalizedPerson,
+                                    StringComparison.OrdinalIgnoreCase)))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+
+            if (activities.Count == 0)
+                return 0;
+
+            double totalMinutes = 0;
+            double weightedProgress = 0;
+
+            foreach (var activity in activities)
+            {
+                var effectiveStart =
+                    activity.Start > windowStart
+                        ? activity.Start
+                        : windowStart;
+                var effectiveEnd =
+                    activity.End < windowEnd
+                        ? activity.End
+                        : windowEnd;
+                var minutes = Math.Max(
+                    1d,
+                    (effectiveEnd - effectiveStart).TotalMinutes);
+
+                var percentage =
+                    activity.ChecklistScanned &&
+                    activity.ChecklistTotal > 0
+                        ? activity.ChecklistPercentage
+                        : HasExactCalendarPhase(activity, "zREVISION")
+                            ? 100d
+                            : activity.WorkPercentage;
+
+                totalMinutes += minutes;
+                weightedProgress += minutes * Math.Clamp(percentage, 0d, 100d);
+            }
+
+            return totalMinutes <= 0
+                ? 0
+                : Math.Clamp(
+                    weightedProgress / totalMinutes,
+                    0d,
+                    100d);
         }
 
         private static SolidColorBrush GetOneClickCoverageBrush(
@@ -21796,11 +22860,11 @@ namespace Anfeta.UI.Views
                             continue;
                         }
 
-                        if (IsCalendarHistoricalReviewDateProtected(
+                        if (IsCalendarAutomaticMoveExcluded(
                                 activity))
                         {
                             failures.Add(
-                                $"{activity.Title}: zREVISION conserva su fecha histórica y no se pasó a mañana.");
+                                $"{activity.Title}: R/Z conserva su fecha y no se pasó automáticamente a mañana.");
                             continue;
                         }
 
@@ -21859,11 +22923,11 @@ namespace Anfeta.UI.Views
                             continue;
                         }
 
-                        if (IsCalendarHistoricalReviewDateProtected(
+                        if (IsCalendarAutomaticMoveExcluded(
                                 item.Activity))
                         {
                             failures.Add(
-                                $"{item.Activity.Title}: zREVISION conserva su fecha histórica y no se reprogramó.");
+                                $"{item.Activity.Title}: R/Z conserva su fecha y no se reprogramó automáticamente.");
                             continue;
                         }
 
@@ -23335,6 +24399,16 @@ namespace Anfeta.UI.Views
             return "John";
         }
 
+        private static bool IsAutomaticallyInferredReviewMetadata(
+            ReviewFlowMetadata? metadata)
+        {
+            return metadata != null &&
+                   string.Equals(
+                       metadata.UpdatedBy?.Trim(),
+                       "Notion / detección automática",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
         private void EnsureCalendarRtuzObservationBaseline(
             IReadOnlyList<NotionCalendarActivity> activities)
         {
@@ -23417,6 +24491,28 @@ namespace Anfeta.UI.Views
                 if (wasRtuz || !isRtuz)
                     continue;
 
+                // Cambiar únicamente la fase desde Notion NO equivale a usar
+                // "Enviar a revisión". Solo continuamos cuando ya existe una
+                // metadata explícita creada por ese flujo. Así se evita inventar
+                // un revisor, crear un hilo y mover la tarjeta a Genaro/John.
+                if (!_calendarReviewFlowCache.TryGetValue(
+                        current.PageId,
+                        out var existingMetadata) ||
+                    existingMetadata == null ||
+                    IsAutomaticallyInferredReviewMetadata(existingMetadata))
+                {
+                    _calendarReviewFlowCache[current.PageId] = null;
+                    current.ReviewAssignee = string.Empty;
+                    current.ReviewState = string.Empty;
+                    current.ReviewUpdatedBy = string.Empty;
+                    current.ReviewNote = string.Empty;
+
+                    Debug.WriteLine(
+                        $"[CALENDAR_RTUZ_PHASE_ONLY] {current.PageId}: " +
+                        "fase observada sin envío explícito; se conserva responsable.");
+                    continue;
+                }
+
                 // La notificación debe ir al MISMO revisor que quedó
                 // asignado en el flujo (Genaro o John). Versiones anteriores
                 // forzaban John y por eso Genaro no recibía sus revisiones.
@@ -23432,10 +24528,6 @@ namespace Anfeta.UI.Views
 
                 try
                 {
-                    _calendarReviewFlowCache.TryGetValue(
-                        current.PageId,
-                        out var existingMetadata);
-
                     var original =
                         existingMetadata != null &&
                         IsUsableOriginalReviewPerson(
@@ -25132,7 +26224,7 @@ namespace Anfeta.UI.Views
             return activity != null &&
                    !activity.IsReviewMirror &&
                    !activity.IsAutomationLocked &&
-                   !IsCalendarHistoricalReviewDateProtected(activity) &&
+                   !IsCalendarAutomaticMoveExcluded(activity) &&
                    !IsOneClickScheduleExcluded(activity);
         }
 
@@ -25782,6 +26874,22 @@ namespace Anfeta.UI.Views
         {
             _calendarThemeColor = background;
 
+            if (_calendarActivityPreviewPopupCard != null)
+            {
+                _calendarActivityPreviewPopupCard.Background =
+                    new SolidColorBrush(background);
+
+                _calendarActivityPreviewPopupCard.BorderBrush =
+                    new SolidColorBrush(
+                        Lighten(background, 0.30));
+
+                _calendarActivityPreviewPopupCard.BorderThickness =
+                    new Thickness(2);
+            }
+
+            if (Application.Current is App app)
+                app.UpdateCalendarActivityWindowTheme(background);
+
             if (CalendarHost != null)
             {
                 CalendarHost.Background =
@@ -26376,6 +27484,8 @@ namespace Anfeta.UI.Views
                 ChecklistScanned = activity.ChecklistScanned,
                 ChecklistTotal = activity.ChecklistTotal,
                 ChecklistCompleted = activity.ChecklistCompleted,
+                CommentCount = activity.CommentCount,
+                LatestCommentText = activity.LatestCommentText,
                 Project = activity.Project,
                 Status = activity.Status,
                 StatusColor = activity.StatusColor,
@@ -27350,6 +28460,11 @@ namespace Anfeta.UI.Views
             if (activity == null || metadata == null)
                 return;
 
+            // Compatibilidad con metadata creada por versiones anteriores:
+            // una detección automática de fase nunca debe reasignar la tarjeta.
+            if (IsAutomaticallyInferredReviewMetadata(metadata))
+                return;
+
             var normalizedReviewer =
                 NormalizeCalendarPerson(
                     metadata.ReviewAssignee);
@@ -27430,6 +28545,92 @@ namespace Anfeta.UI.Views
             await PromptAndSendCalendarActivityToReviewAsync(
                 activity,
                 (sender as FrameworkElement)?.XamlRoot);
+        }
+
+        private static void MakeCalendarContentDialogMovable(
+            ContentDialog dialog,
+            string title)
+        {
+            var titleText = new TextBlock
+            {
+                Text = title,
+                FontSize = 20,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 1,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var dragArea = new Border
+            {
+                MinHeight = 42,
+                Padding = new Thickness(2, 6, 12, 6),
+                Background = new SolidColorBrush(Colors.Transparent),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Child = titleText
+            };
+
+            ToolTipService.SetToolTip(
+                dragArea,
+                "Arrastra esta barra para mover la ventana");
+
+            dialog.Title = dragArea;
+
+            var transform = new TranslateTransform();
+            dialog.RenderTransform = transform;
+
+            var dragging = false;
+            uint pointerId = 0;
+            var start = new Windows.Foundation.Point();
+            var startX = 0d;
+            var startY = 0d;
+
+            dragArea.PointerPressed += (_, args) =>
+            {
+                var point = args.GetCurrentPoint(null);
+                if (!point.Properties.IsLeftButtonPressed)
+                    return;
+
+                dragging = true;
+                pointerId = args.Pointer.PointerId;
+                start = point.Position;
+                startX = transform.X;
+                startY = transform.Y;
+                dragArea.CapturePointer(args.Pointer);
+                args.Handled = true;
+            };
+
+            dragArea.PointerMoved += (_, args) =>
+            {
+                if (!dragging || args.Pointer.PointerId != pointerId)
+                    return;
+
+                var point = args.GetCurrentPoint(null);
+                if (!point.Properties.IsLeftButtonPressed)
+                {
+                    dragging = false;
+                    dragArea.ReleasePointerCapture(args.Pointer);
+                    return;
+                }
+
+                transform.X = startX + point.Position.X - start.X;
+                transform.Y = startY + point.Position.Y - start.Y;
+                args.Handled = true;
+            };
+
+            void EndDrag(PointerRoutedEventArgs args)
+            {
+                if (args.Pointer.PointerId != pointerId)
+                    return;
+
+                dragging = false;
+                dragArea.ReleasePointerCapture(args.Pointer);
+                args.Handled = true;
+            }
+
+            dragArea.PointerReleased += (_, args) => EndDrag(args);
+            dragArea.PointerCanceled += (_, args) => EndDrag(args);
+            dragArea.PointerCaptureLost += (_, __) => dragging = false;
         }
 
         private XamlRoot? ResolveCalendarDialogRoot(
@@ -30265,6 +31466,8 @@ namespace Anfeta.UI.Views
                 activity.ChecklistScanned = true;
                 activity.ChecklistTotal = stats.Total;
                 activity.ChecklistCompleted = stats.Completed;
+                activity.CommentCount = stats.CommentCount;
+                activity.LatestCommentText = stats.LatestCommentText;
 
                 foreach (var instance in _calendarActivities.Where(item =>
                              string.Equals(item.PageId, activity.PageId,
@@ -30273,6 +31476,8 @@ namespace Anfeta.UI.Views
                     instance.ChecklistScanned = true;
                     instance.ChecklistTotal = stats.Total;
                     instance.ChecklistCompleted = stats.Completed;
+                    instance.CommentCount = stats.CommentCount;
+                    instance.LatestCommentText = stats.LatestCommentText;
                 }
 
                 foreach (var instance in _calendarActivityPreviewLastProjectActivities.Where(item =>
@@ -30282,9 +31487,20 @@ namespace Anfeta.UI.Views
                     instance.ChecklistScanned = true;
                     instance.ChecklistTotal = stats.Total;
                     instance.ChecklistCompleted = stats.Completed;
+                    instance.CommentCount = stats.CommentCount;
+                    instance.LatestCommentText = stats.LatestCommentText;
                 }
 
                 _oneClickChecklistStats[activity.PageId] = stats;
+
+                // Modal, card y encabezado comparten inmediatamente el mismo
+                // snapshot. Evita casos como modal 5/11 pero card 5/5 y 100%.
+                if (_calendarViewActive)
+                {
+                    DrawCalendarPreservingView(
+                        _calendarActivities,
+                        force: true);
+                }
 
                 if (!_calendarActivityPreviewPinned ||
                     !string.Equals(_calendarActivityPreviewPinnedPageId,
@@ -34785,24 +36001,24 @@ namespace Anfeta.UI.Views
                                     new SolidColorBrush(
                                         isCurrent
                                             ? Color.FromArgb(
-                                                145,
-                                                20,
-                                                83,
-                                                45)
+                                                105,
+                                                14,
+                                                91,
+                                                125)
                                             : isRtuzProjectActivity
                                                 ? Color.FromArgb(
-                                                    100,
-                                                    20,
-                                                    83,
-                                                    45)
+                                                    42,
+                                                    30,
+                                                    64,
+                                                    82)
                                                 : Color.FromArgb(
                                                     20,
                                                     255,
                                                     255,
                                                     255)),
-                                // rtuzREVISION conserva el FONDO verde, pero
-                                // ya no dibuja un rectángulo verde alrededor.
-                                // Solo queda un separador neutro entre renglones.
+                                // La actividad abierta usa azul y las revisiones
+                                // un tono neutro. El verde queda reservado para
+                                // comunicar actividades realmente terminadas.
                                 BorderBrush =
                                     new SolidColorBrush(
                                         isCurrent
@@ -35374,6 +36590,12 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            // El resumen fijado es por dominio: aunque Notion no tenga una
+            // relación explícita o solo exista una actividad del mismo tipo,
+            // incluye las demás áreas del dominio dentro del mismo mes.
+            var relatedCriteria =
+                BuildCalendarAllProjectTypesCriteria(criteria);
+
             ShowCalendarActivityPreviewFlyout(
                 button,
                 BuildCalendarProjectHoverLoading(
@@ -35419,7 +36641,7 @@ namespace Anfeta.UI.Views
                 var related =
                     await GetCalendarProjectRelatedActivitiesAsync(
                         activity,
-                        criteria,
+                        relatedCriteria,
                         token,
                         localCts.Token);
 
@@ -35611,7 +36833,8 @@ namespace Anfeta.UI.Views
                 {
                     DispatcherQueue.TryEnqueue(
                         OnCalendarDetachedActivityWindowClosed);
-                });
+                },
+                themeColor: _calendarThemeColor);
 
             StatusText.Text =
                 "Estado: Actividad desacoplada ↗ · ya puedes moverla a otro monitor ✅";
@@ -35749,6 +36972,9 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            var relatedCriteria =
+                BuildCalendarAllProjectTypesCriteria(criteria);
+
             ShowCalendarActivityPreviewFlyout(
                 button,
                 BuildCalendarProjectHoverLoading(
@@ -35774,7 +37000,7 @@ namespace Anfeta.UI.Views
                 var related =
                     await GetCalendarProjectRelatedActivitiesAsync(
                         activity,
-                        criteria,
+                        relatedCriteria,
                         token,
                         localCts.Token);
 
@@ -36658,20 +37884,14 @@ namespace Anfeta.UI.Views
                 CornerRadius = new CornerRadius(10),
                 Background =
                     new SolidColorBrush(
-                        Color.FromArgb(
-                            255,
-                            42,
-                            42,
-                            42)),
+                        _calendarThemeColor),
                 BorderBrush =
                     new SolidColorBrush(
-                        Color.FromArgb(
-                            70,
-                            255,
-                            255,
-                            255)),
+                        Lighten(
+                            _calendarThemeColor,
+                            0.30)),
                 BorderThickness =
-                    new Thickness(1),
+                    new Thickness(2),
                 Shadow =
                     new Microsoft.UI.Xaml.Media.ThemeShadow()
             };
@@ -38794,6 +40014,59 @@ namespace Anfeta.UI.Views
                     activity,
                     shellChecklist));
 
+            if (activity.HasComments)
+            {
+                var commentPanel = new StackPanel
+                {
+                    Spacing = 3
+                };
+
+                commentPanel.Children.Add(
+                    new TextBlock
+                    {
+                        Text = $"💬 COMENTARIOS DE NOTION · {activity.CommentCount}",
+                        FontSize = 10.5,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground = new SolidColorBrush(
+                            Color.FromArgb(255, 253, 186, 116))
+                    });
+
+                var commentsText = new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(activity.LatestCommentText)
+                        ? "Esta actividad tiene comentarios. Ábrela en Notion para consultar el hilo completo."
+                        : activity.LatestCommentText,
+                    FontSize = 11,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextTrimming = TextTrimming.None,
+                    Opacity = 0.94
+                };
+
+                commentPanel.Children.Add(
+                    new ScrollViewer
+                    {
+                        MaxHeight = 125,
+                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        VerticalScrollMode = ScrollMode.Auto,
+                        Content = commentsText
+                    });
+
+                root.Children.Add(
+                    new Border
+                    {
+                        Padding = new Thickness(10, 8, 10, 8),
+                        Margin = new Thickness(0, 3, 0, 2),
+                        CornerRadius = new CornerRadius(7),
+                        Background = new SolidColorBrush(
+                            Color.FromArgb(72, 120, 53, 15)),
+                        BorderBrush = new SolidColorBrush(
+                            Color.FromArgb(210, 251, 191, 36)),
+                        BorderThickness = new Thickness(1.5),
+                        Child = commentPanel
+                    });
+            }
+
             // En modo fijado el estado vive en el candado compacto superior.
             // En hover conservamos texto únicamente si está bloqueada.
             if (!pinnedEditorMode &&
@@ -38808,14 +40081,20 @@ namespace Anfeta.UI.Views
                 "Movimiento ANFETA",
                 GetCalendarDayMovementDetail(activity));
 
+            var largePreviewText = CalendarFontScale >= 1.15;
+            var actionItemWidth = largePreviewText ? 250d : 198d;
+            var actionItemHeight = largePreviewText ? 46d : 35d;
+            var actionButtonWidth = largePreviewText ? 242d : 190d;
+            var actionButtonHeight = largePreviewText ? 39d : 30d;
+
             var actionsPanel = new VariableSizedWrapGrid
             {
                 Orientation = Orientation.Horizontal,
                 // Sin ancho fijo: al agrandar la checklist el panel usa el
                 // espacio nuevo y acomoda más acciones por fila. En tamaños
                 // pequeños mantiene los botones compactos existentes.
-                ItemWidth = 198,
-                ItemHeight = 35,
+                ItemWidth = actionItemWidth,
+                ItemHeight = actionItemHeight,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Margin = new Thickness(0, 4, 0, 2)
             };
@@ -38834,8 +40113,8 @@ namespace Anfeta.UI.Views
                     var button = new Button
                     {
                         Content = text,
-                        Width = 190,
-                        Height = 30,
+                        Width = actionButtonWidth,
+                        Height = actionButtonHeight,
                         Margin = new Thickness(0, 0, 8, 6),
                         Padding = new Thickness(10, 0, 10, 0),
                         CornerRadius = new CornerRadius(6),
@@ -38861,8 +40140,8 @@ namespace Anfeta.UI.Views
                     new Button
                     {
                         Content = "Enviar a revisión…",
-                        Width = 190,
-                        Height = 30,
+                        Width = actionButtonWidth,
+                        Height = actionButtonHeight,
                         Margin = new Thickness(0, 0, 8, 6),
                         Padding = new Thickness(10, 0, 10, 0),
                         CornerRadius = new CornerRadius(6),
@@ -38909,8 +40188,8 @@ namespace Anfeta.UI.Views
                 {
                     Content =
                         "Reasignar → prtuzREVISION",
-                    Width = 190,
-                    Height = 30,
+                    Width = actionButtonWidth,
+                    Height = actionButtonHeight,
                     Margin =
                         new Thickness(0, 0, 8, 6),
                     Padding =
@@ -38931,8 +40210,8 @@ namespace Anfeta.UI.Views
                 new Button
                 {
                     Content = "Enviar mensaje…",
-                    Width = 190,
-                    Height = 30,
+                    Width = actionButtonWidth,
+                    Height = actionButtonHeight,
                     Margin = new Thickness(0, 0, 8, 6),
                     Padding = new Thickness(10, 0, 10, 0),
                     CornerRadius = new CornerRadius(6),
@@ -38961,8 +40240,8 @@ namespace Anfeta.UI.Views
                 var button = new Button
                 {
                     Content = text,
-                    Width = 190,
-                    Height = 30,
+                    Width = actionButtonWidth,
+                    Height = actionButtonHeight,
                     Margin = new Thickness(0, 0, 8, 6),
                     Padding = new Thickness(10, 0, 10, 0),
                     CornerRadius = new CornerRadius(6),
@@ -39005,8 +40284,8 @@ namespace Anfeta.UI.Views
             var readSpeechButton = new Button
             {
                 Content = "▶ Leer resumen",
-                Width = 190,
-                Height = 30,
+                Width = actionButtonWidth,
+                Height = actionButtonHeight,
                 Margin = new Thickness(0, 0, 8, 6),
                 Padding = new Thickness(10, 0, 10, 0),
                 CornerRadius = new CornerRadius(6),
@@ -39016,8 +40295,8 @@ namespace Anfeta.UI.Views
             var stopSpeechButton = new Button
             {
                 Content = "■ Detener lectura",
-                Width = 190,
-                Height = 30,
+                Width = actionButtonWidth,
+                Height = actionButtonHeight,
                 Margin = new Thickness(0, 0, 8, 6),
                 Padding = new Thickness(10, 0, 10, 0),
                 CornerRadius = new CornerRadius(6),

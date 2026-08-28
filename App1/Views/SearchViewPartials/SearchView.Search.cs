@@ -128,8 +128,17 @@ namespace Anfeta.UI.Views
             // weblab.mx, weblab.com y weblab.com.mx, conservando los puntos.
             _ = PromoteDomainPredictiveSuggestionsAsync(q);
 
-            if (ShouldShowQuickFlyout(q))
+            if (args.Reason ==
+                    AutoSuggestionBoxTextChangeReason.UserInput &&
+                !string.IsNullOrWhiteSpace(q) &&
+                ShouldShowQuickFlyout(q))
+            {
                 ShowQuickCommandsInputFlyout();
+            }
+            else if (string.IsNullOrWhiteSpace(q))
+            {
+                QuickCommandsInputFlyout?.Hide();
+            }
 
             // ─────────────────────────────────────────────
             // Si el usuario limpió el buscador
@@ -460,7 +469,6 @@ namespace Anfeta.UI.Views
         {
             _isBrowsing = false;
             _mode = ViewMode.Explorer;
-            Results.Clear();
 
             var rawQuery = (query ?? "").Trim();
             IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> items = App.LocalIndex.GetAll();
@@ -546,13 +554,15 @@ namespace Anfeta.UI.Views
 
             items = ApplySortKey(items);
 
-            foreach (var it in items.Take(500))
+            var nextResults = items.Take(500).ToList();
+
+            foreach (var it in nextResults)
             {
                 it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
-                Results.Add(it);
             }
-            RefreshResultsListView();
+
+            ReplaceSearchResults(nextResults);
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -568,7 +578,6 @@ namespace Anfeta.UI.Views
 
             _isBrowsing = false;
             _mode = ViewMode.Explorer;
-            Results.Clear();
 
             var rawQuery = (query ?? "").Trim();
             IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> items = App.LocalIndex.GetAll();
@@ -644,20 +653,42 @@ namespace Anfeta.UI.Views
 
             items = ApplySortKey(items);
 
-            foreach (var it in items.Take(500))
+            var nextResults = items.Take(500).ToList();
+
+            foreach (var it in nextResults)
             {
                 token.ThrowIfCancellationRequested();
                 it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
-                Results.Add(it);
             }
-            RefreshResultsListView();
+
+            token.ThrowIfCancellationRequested();
+            ReplaceSearchResults(nextResults);
 
             CountText.Text = $"{Results.Count} resultados";
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             _voicePost.NotifySearchResults(Results);
             Dictation_SetResults(BuildSpeechResults(Results));
             await Task.CompletedTask;
+        }
+
+        private void ReplaceSearchResults(
+            IReadOnlyList<Anfeta.UI.Models.Weblab.SearchResultRow> rows)
+        {
+            // Desconectar temporalmente evita que WinUI procese Clear + hasta
+            // 500 Add como cientos de diseños separados. Al final se enlaza y
+            // mide una sola vez, también en la ventana independiente.
+            ResultsList.ItemsSource = null;
+
+            if (ResultsThumbnailGrid != null)
+                ResultsThumbnailGrid.ItemsSource = null;
+
+            Results.Clear();
+
+            foreach (var row in rows)
+                Results.Add(row);
+
+            RefreshResultsListView();
         }
 
         /// <summary>

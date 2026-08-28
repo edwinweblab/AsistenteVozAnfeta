@@ -26,10 +26,13 @@ namespace Anfeta.UI
     {
         private readonly ContentControl _contentHost;
         private readonly ScrollViewer _scrollViewer;
+        private readonly Border _root;
+        private Color _themeColor;
 
         public CalendarActivityWindow(
             FrameworkElement content,
-            string? title = null)
+            string? title = null,
+            Color? themeColor = null)
         {
             Title =
                 string.IsNullOrWhiteSpace(title)
@@ -68,7 +71,7 @@ namespace Anfeta.UI
                         HorizontalAlignment.Stretch
                 };
 
-            var root =
+            _root =
                 new Border
                 {
                     Padding =
@@ -94,13 +97,65 @@ namespace Anfeta.UI
                 };
 
             Content =
-                root;
+                _root;
+
+            ApplyTheme(
+                themeColor ??
+                Color.FromArgb(255, 21, 21, 21));
 
             SetContent(
                 content,
                 title);
 
             TryApplyInitialWindowSize();
+        }
+
+        public void ApplyTheme(Color background)
+        {
+            _themeColor = background;
+
+            _root.Background =
+                new SolidColorBrush(background);
+
+            _root.BorderBrush =
+                new SolidColorBrush(
+                    BlendWithWhite(background, 0.30));
+
+            _root.BorderThickness =
+                new Thickness(2);
+
+            ApplyThemeToContent();
+        }
+
+        private void ApplyThemeToContent()
+        {
+            // La tarjeta transferida desde el Popup tenía un gris opaco
+            // propio que ocultaba el color aplicado a la Window.
+            if (_contentHost.Content is not Border contentCard)
+                return;
+
+            contentCard.Background =
+                new SolidColorBrush(_themeColor);
+
+            contentCard.BorderBrush =
+                new SolidColorBrush(
+                    BlendWithWhite(_themeColor, 0.30));
+
+            contentCard.BorderThickness =
+                new Thickness(2);
+        }
+
+        private static Color BlendWithWhite(
+            Color color,
+            double amount)
+        {
+            amount = Math.Clamp(amount, 0, 1);
+
+            return Color.FromArgb(
+                255,
+                (byte)(color.R + (255 - color.R) * amount),
+                (byte)(color.G + (255 - color.G) * amount),
+                (byte)(color.B + (255 - color.B) * amount));
         }
 
         public void SetContent(
@@ -118,6 +173,8 @@ namespace Anfeta.UI
 
             _contentHost.Content =
                 content;
+
+            ApplyThemeToContent();
 
             _scrollViewer.ChangeView(
                 horizontalOffset: null,

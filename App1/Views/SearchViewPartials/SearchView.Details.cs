@@ -18,6 +18,22 @@ namespace Anfeta.UI.Views
         private async void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
+
+            try
+            {
+                _selectionPreviewDebounceCts?.Cancel();
+                _selectionPreviewDebounceCts?.Dispose();
+            }
+            catch
+            {
+            }
+
+            _selectionPreviewDebounceCts =
+                new CancellationTokenSource();
+
+            var selectionCts =
+                _selectionPreviewDebounceCts;
+
             BtnDetailsLocation.Content = IsNotionRow(row)
     ? "Abrir Notion"
     : "Ubicación";
@@ -26,6 +42,25 @@ namespace Anfeta.UI.Views
 
             DetailsTitle.Text = row.Name;
             DetailsPath.Text = row.Target;
+
+            try
+            {
+                // Permite navegar rápido con mouse/teclado sin descargar y
+                // renderizar cada selección intermedia.
+                await Task.Delay(
+                    160,
+                    selectionCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (selectionCts.IsCancellationRequested ||
+                !ReferenceEquals(ResultsList.SelectedItem, row))
+            {
+                return;
+            }
 
             if (IsNotionRow(row))
             {

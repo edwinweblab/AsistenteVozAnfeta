@@ -86,6 +86,7 @@ namespace Anfeta.UI.Views
         private DispatcherTimer? _searchDebounceTimer;
         private CancellationTokenSource? _searchCts;
         private CancellationTokenSource? _cts;
+        private CancellationTokenSource? _selectionPreviewDebounceCts;
 
         // UI / help popup
         private ContentControl? _helpBodyHost;

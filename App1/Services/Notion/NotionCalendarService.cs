@@ -54,7 +54,9 @@ namespace Anfeta.UI.Services.Notion
     public sealed record NotionChecklistStats(
         int Total,
         int Completed,
-        IReadOnlyDictionary<string, int>? CompletedByDate = null)
+        IReadOnlyDictionary<string, int>? CompletedByDate = null,
+        int CommentCount = 0,
+        string LatestCommentText = "")
     {
         public int Pending =>
             Math.Max(0, Total - Completed);
@@ -310,15 +312,19 @@ namespace Anfeta.UI.Services.Notion
         // v4: además del fix de contenedores tachados, obliga a que una
         // actividad proveniente del DayCache viejo no pueda bloquear el
         // reescaneo por traer ChecklistScanned=true con cifras anteriores.
-        // v7 invalida cifras generadas antes de excluir de forma estricta
-        // cualquier to_do alojado dentro de un synced_block.
+        // v9 aplica la convención operativa nueva: tachar texto ya no excluye
+        // una checklist. Solo una rama cuyo encabezado/contenedor tenga la
+        // anotación inline `code` queda fuera del cálculo. Los synced_block
+        // continúan excluidos de forma estricta.
         private const string ChecklistStatsCacheFileName =
-            "notion_checklist_stats_cache_v7.json";
+            "notion_checklist_stats_cache_v9.json";
 
         private sealed class StoredChecklistStats
         {
             public int Total { get; set; }
             public int Completed { get; set; }
+            public int CommentCount { get; set; }
+            public string LatestCommentText { get; set; } = "";
             public Dictionary<string, int> CompletedByDate { get; set; } =
                 new(StringComparer.OrdinalIgnoreCase);
             public DateTimeOffset StoredAtUtc { get; set; }
@@ -1183,7 +1189,9 @@ namespace Anfeta.UI.Services.Notion
                                 persisted.Completed,
                                 0,
                                 Math.Max(0, persisted.Total)),
-                            persisted.CompletedByDate);
+                            persisted.CompletedByDate,
+                            Math.Max(0, persisted.CommentCount),
+                            persisted.LatestCommentText ?? string.Empty);
 
                     _checklistStatsCache[pageId] =
                         persistedStats;
@@ -1254,7 +1262,9 @@ namespace Anfeta.UI.Services.Notion
                         stored.Completed,
                         0,
                         Math.Max(0, stored.Total)),
-                    stored.CompletedByDate);
+                    stored.CompletedByDate,
+                    Math.Max(0, stored.CommentCount),
+                    stored.LatestCommentText ?? string.Empty);
                 return true;
             }
 
@@ -1280,6 +1290,35 @@ namespace Anfeta.UI.Services.Notion
                         depth: 0,
                         cancellationToken);
 
+                // Comentarios y checklist comparten el mismo ciclo
+                // incremental. Si la integración no tiene el permiso de
+                // comentarios, se conserva el valor conocido y el calendario
+                // continúa sin fallar.
+                var commentSummary =
+                    await TryReadCommentSummaryAsync(
+                        http,
+                        pageId,
+                        cancellationToken);
+
+                if (commentSummary != null)
+                {
+                    stats = stats with
+                    {
+                        CommentCount = commentSummary.Count,
+                        LatestCommentText = commentSummary.LatestText
+                    };
+                }
+                else if (_checklistStatsCache.TryGetValue(
+                             pageId,
+                             out var previousStats))
+                {
+                    stats = stats with
+                    {
+                        CommentCount = previousStats.CommentCount,
+                        LatestCommentText = previousStats.LatestCommentText
+                    };
+                }
+
                 _checklistStatsCache[pageId] = stats;
 
                 PersistentChecklistStats[pageId] =
@@ -1287,6 +1326,8 @@ namespace Anfeta.UI.Services.Notion
                     {
                         Total = stats.Total,
                         Completed = stats.Completed,
+                        CommentCount = stats.CommentCount,
+                        LatestCommentText = stats.LatestCommentText,
                         CompletedByDate = stats.CompletedByDate?
                             .ToDictionary(
                                 item => item.Key,
@@ -1365,7 +1406,9 @@ namespace Anfeta.UI.Services.Notion
                                 stored.Completed,
                                 0,
                                 Math.Max(0, stored.Total)),
-                            stored.CompletedByDate);
+                            stored.CompletedByDate,
+                            Math.Max(0, stored.CommentCount),
+                            stored.LatestCommentText ?? string.Empty);
 
                     _checklistStatsCache[activity.PageId] = stats;
                     ApplyChecklistStatsToActivity(activity, stats);
@@ -1473,6 +1516,8 @@ namespace Anfeta.UI.Services.Notion
             activity.ChecklistScanned = true;
             activity.ChecklistTotal = stats.Total;
             activity.ChecklistCompleted = stats.Completed;
+            activity.CommentCount = stats.CommentCount;
+            activity.LatestCommentText = stats.LatestCommentText;
         }
 
         private static async Task EnsurePersistentChecklistStatsLoadedAsync(
@@ -1640,7 +1685,12 @@ namespace Anfeta.UI.Services.Notion
                     {
                         if (activity.ChecklistScanned &&
                             activity.ChecklistTotal == stats.Total &&
-                            activity.ChecklistCompleted == stats.Completed)
+                            activity.ChecklistCompleted == stats.Completed &&
+                            activity.CommentCount == stats.CommentCount &&
+                            string.Equals(
+                                activity.LatestCommentText,
+                                stats.LatestCommentText,
+                                StringComparison.Ordinal))
                         {
                             continue;
                         }
@@ -1648,6 +1698,8 @@ namespace Anfeta.UI.Services.Notion
                         activity.ChecklistScanned = true;
                         activity.ChecklistTotal = stats.Total;
                         activity.ChecklistCompleted = stats.Completed;
+                        activity.CommentCount = stats.CommentCount;
+                        activity.LatestCommentText = stats.LatestCommentText;
                         changed = true;
                     }
                 }
@@ -1661,6 +1713,87 @@ namespace Anfeta.UI.Services.Notion
             finally
             {
                 CacheLock.Release();
+            }
+        }
+
+        private sealed record NotionCommentSummary(
+            int Count,
+            string LatestText);
+
+        private static async Task<NotionCommentSummary?>
+            TryReadCommentSummaryAsync(
+                HttpClient http,
+                string pageId,
+                CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var response =
+                    await SendGetWithRetryAsync(
+                        http,
+                        $"comments?block_id={Uri.EscapeDataString(pageId)}&page_size=100",
+                        cancellationToken);
+
+                if (!response.IsSuccessStatusCode)
+                    return null;
+
+                var json =
+                    await response.Content.ReadAsStringAsync(
+                        cancellationToken);
+
+                using var document = JsonDocument.Parse(json);
+
+                if (!document.RootElement.TryGetProperty(
+                        "results",
+                        out var results) ||
+                    results.ValueKind != JsonValueKind.Array)
+                {
+                    return new NotionCommentSummary(0, string.Empty);
+                }
+
+                var count = 0;
+                var commentTexts = new List<string>();
+
+                foreach (var comment in results.EnumerateArray())
+                {
+                    count++;
+
+                    if (!comment.TryGetProperty(
+                            "rich_text",
+                            out var richText) ||
+                        richText.ValueKind != JsonValueKind.Array)
+                    {
+                        continue;
+                    }
+
+                    var text = string.Concat(
+                        richText
+                            .EnumerateArray()
+                            .Select(item => ReadString(item, "plain_text")))
+                        .Trim();
+
+                    if (!string.IsNullOrWhiteSpace(text))
+                        commentTexts.Add(text);
+                }
+
+                // Se conserva el nombre LatestText por compatibilidad con la
+                // caché existente, pero el valor contiene el hilo visible
+                // completo para que el modal no oculte comentarios anteriores.
+                return new NotionCommentSummary(
+                    count,
+                    string.Join(
+                        "\n",
+                        commentTexts.Select(text => $"• {text}")));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[NOTION_COMMENTS] {pageId}: {ex.Message}");
+                return null;
             }
         }
 
@@ -1754,8 +1887,8 @@ namespace Anfeta.UI.Services.Notion
                             continue;
                         }
 
-                        var struckThrough =
-                            IsBlockRichTextStruckThrough(
+                        var excludedByCode =
+                            IsBlockRichTextCodeFormatted(
                                 block,
                                 type);
 
@@ -1763,10 +1896,10 @@ namespace Anfeta.UI.Services.Notion
                                 "to_do",
                                 StringComparison.OrdinalIgnoreCase))
                         {
-                            // Un checklist tachado suele pertenecer a una
-                            // sección histórica ya cerrada y no debe alterar el
-                            // porcentaje operativo actual.
-                            if (!struckThrough)
+                            // Convención ANFETA: un to_do con formato Código no
+                            // pertenece al checklist operativo. El tachado se
+                            // conserva como información visual y no lo excluye.
+                            if (!excludedByCode)
                             {
                                 total++;
 
@@ -1820,10 +1953,9 @@ namespace Anfeta.UI.Services.Notion
                             type.Equals(
                                 "child_database",
                                 StringComparison.OrdinalIgnoreCase) ||
-                            IsCompletedChecklistContainer(
+                            IsExcludedChecklistContainer(
                                 type,
-                                plainText,
-                                struckThrough))
+                                excludedByCode))
                         {
                             continue;
                         }
@@ -1914,7 +2046,7 @@ namespace Anfeta.UI.Services.Notion
             return archived || inTrash;
         }
 
-        private static bool IsBlockRichTextStruckThrough(
+        private static bool IsBlockRichTextCodeFormatted(
             JsonElement block,
             string type)
         {
@@ -1930,9 +2062,9 @@ namespace Anfeta.UI.Services.Notion
             }
 
             var meaningfulFragments = 0;
-            var struckFragments = 0;
+            var codeFragments = 0;
             var visibleCharacters = 0;
-            var struckVisibleCharacters = 0;
+            var codeVisibleCharacters = 0;
 
             foreach (var item in richText.EnumerateArray())
             {
@@ -1952,23 +2084,23 @@ namespace Anfeta.UI.Services.Notion
                 meaningfulFragments++;
                 visibleCharacters += visibleLength;
 
-                var isStruck =
+                var isCode =
                     item.TryGetProperty(
                         "annotations",
                         out var annotations) &&
                     annotations.ValueKind ==
                         JsonValueKind.Object &&
                     annotations.TryGetProperty(
-                        "strikethrough",
-                        out var struck) &&
-                    struck.ValueKind ==
+                        "code",
+                        out var code) &&
+                    code.ValueKind ==
                         JsonValueKind.True;
 
-                if (!isStruck)
+                if (!isCode)
                     continue;
 
-                struckFragments++;
-                struckVisibleCharacters += visibleLength;
+                codeFragments++;
+                codeVisibleCharacters += visibleLength;
             }
 
             if (meaningfulFragments == 0 ||
@@ -1977,20 +2109,19 @@ namespace Anfeta.UI.Services.Notion
                 return false;
             }
 
-            if (struckFragments == meaningfulFragments)
+            if (codeFragments == meaningfulFragments)
                 return true;
 
-            var struckRatio =
-                struckVisibleCharacters /
+            var codeRatio =
+                codeVisibleCharacters /
                 (double)visibleCharacters;
 
-            return struckRatio >= 0.80d;
+            return codeRatio >= 0.80d;
         }
 
-        private static bool IsCompletedChecklistContainer(
+        private static bool IsExcludedChecklistContainer(
             string type,
-            string plainText,
-            bool struckThrough)
+            bool codeFormatted)
         {
             var structuralContainer =
                 type.Equals(
@@ -2012,7 +2143,7 @@ namespace Anfeta.UI.Services.Notion
                     "callout",
                     StringComparison.OrdinalIgnoreCase);
 
-            var strikeAwareContainer =
+            var codeAwareContainer =
                 structuralContainer ||
                 type.Equals(
                     "paragraph",
@@ -2024,41 +2155,15 @@ namespace Anfeta.UI.Services.Notion
                     "numbered_list_item",
                     StringComparison.OrdinalIgnoreCase);
 
-            if (struckThrough &&
-                strikeAwareContainer)
+            if (codeFormatted &&
+                codeAwareContainer)
             {
                 return true;
             }
 
-            if (!structuralContainer)
-                return false;
-
-            var normalized =
-                Normalize(plainText);
-
-            if (string.IsNullOrWhiteSpace(normalized))
-                return false;
-
-            var completedTokens = new[]
-            {
-                "terminado",
-                "terminada",
-                "completado",
-                "completada",
-                "finalizado",
-                "finalizada",
-                "realizado",
-                "realizada",
-                "historico",
-                "historial",
-                "cerrado",
-                "cerrada"
-            };
-
-            return completedTokens.Any(token =>
-                normalized.Contains(
-                    token,
-                    StringComparison.OrdinalIgnoreCase));
+            // El texto, color o tachado del contenedor no define si sus checks
+            // cuentan. Solo la anotación Código excluye la rama completa.
+            return false;
         }
 
         public async Task<bool> UpdateActivityAutomationLockAsync(
@@ -3552,6 +3657,38 @@ namespace Anfeta.UI.Services.Notion
                     "La fecha visible podría provenir de una fórmula o rollup.");
             }
 
+            // Blindaje contra escrituras obsoletas. El calendario y los paneles
+            // conservan una copia local de la actividad; si alguien cambió la
+            // Fecha POR Hacer directamente en Notion después de abrir ANFETA,
+            // no debemos reemplazar ese cambio con la hora anterior (incluidos
+            // los rollbacks de operaciones por lote).
+            if (properties.TryGetProperty(
+                    propertyName,
+                    out var liveDateProperty) &&
+                TryReadDateRange(
+                    liveDateProperty,
+                    out var liveStart,
+                    out var liveEnd))
+            {
+                var expectedStart = activity.Start;
+                var expectedEnd = activity.End > activity.Start
+                    ? activity.End
+                    : activity.Start.AddHours(1);
+
+                var startChanged =
+                    Math.Abs((liveStart - expectedStart).TotalSeconds) > 2;
+                var endChanged =
+                    Math.Abs((liveEnd - expectedEnd).TotalSeconds) > 2;
+
+                if (startChanged || endChanged)
+                {
+                    throw new InvalidOperationException(
+                        "Notion cambió este horario después de que ANFETA lo leyó. " +
+                        $"Actual en Notion: {liveStart:dd/MM HH:mm}–{liveEnd:HH:mm}. " +
+                        "Actualiza el calendario antes de volver a moverlo; ANFETA no sobrescribió el cambio reciente.");
+                }
+            }
+
             var duration =
                 activity.End > activity.Start
                     ? activity.End - activity.Start
@@ -3640,6 +3777,8 @@ namespace Anfeta.UI.Services.Notion
                         activity.ChecklistTotal,
                     ChecklistCompleted =
                         activity.ChecklistCompleted,
+                    CommentCount = activity.CommentCount,
+                    LatestCommentText = activity.LatestCommentText,
                     Project = activity.Project,
                     Status = activity.Status,
                     StatusColor = activity.StatusColor,
@@ -4206,6 +4345,28 @@ namespace Anfeta.UI.Services.Notion
                     "La fecha visible podría provenir de una fórmula o rollup.");
             }
 
+            if (properties.TryGetProperty(
+                    propertyName,
+                    out var liveScheduleProperty) &&
+                TryReadDateRange(
+                    liveScheduleProperty,
+                    out var liveScheduleStart,
+                    out var liveScheduleEnd))
+            {
+                var expectedEnd = activity.End > activity.Start
+                    ? activity.End
+                    : activity.Start.AddHours(1);
+
+                if (Math.Abs((liveScheduleStart - activity.Start).TotalSeconds) > 2 ||
+                    Math.Abs((liveScheduleEnd - expectedEnd).TotalSeconds) > 2)
+                {
+                    throw new InvalidOperationException(
+                        "Notion cambió este horario después de que ANFETA lo leyó. " +
+                        $"Actual en Notion: {liveScheduleStart:dd/MM HH:mm}–{liveScheduleEnd:HH:mm}. " +
+                        "Actualiza el calendario; el cambio reciente quedó protegido.");
+                }
+            }
+
             var duration =
                 activity.End > activity.Start
                     ? activity.End - activity.Start
@@ -4388,6 +4549,8 @@ namespace Anfeta.UI.Services.Notion
                         activity.ChecklistTotal,
                     ChecklistCompleted =
                         activity.ChecklistCompleted,
+                    CommentCount = activity.CommentCount,
+                    LatestCommentText = activity.LatestCommentText,
                     Project = activity.Project,
                     Status = activity.Status,
                     StatusColor = activity.StatusColor,
@@ -4490,7 +4653,8 @@ namespace Anfeta.UI.Services.Notion
             string token,
             DateTimeOffset changedAfterUtc,
             CancellationToken cancellationToken = default,
-            IProgress<NotionCalendarProgress>? progress = null)
+            IProgress<NotionCalendarProgress>? progress = null,
+            bool forceNetworkCheck = false)
         {
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -4512,7 +4676,8 @@ namespace Anfeta.UI.Services.Notion
                          _lastIncrementalRefreshAnchorUtc)
                         .TotalSeconds);
 
-                if (_lastIncrementalRefreshCompletedUtc !=
+                if (!forceNetworkCheck &&
+                    _lastIncrementalRefreshCompletedUtc !=
                         DateTimeOffset.MinValue &&
                     now - _lastIncrementalRefreshCompletedUtc <=
                         IncrementalRefreshReuseWindow &&
@@ -4537,7 +4702,8 @@ namespace Anfeta.UI.Services.Notion
                         token,
                         changedAfterUtc,
                         cancellationToken,
-                        progress);
+                        progress,
+                        prioritizeUser: forceNetworkCheck);
 
                 _lastIncrementalRefreshAnchorUtc =
                     changedAfterUtc.ToUniversalTime();
@@ -4563,7 +4729,8 @@ namespace Anfeta.UI.Services.Notion
             string token,
             DateTimeOffset changedAfterUtc,
             CancellationToken cancellationToken = default,
-            IProgress<NotionCalendarProgress>? progress = null)
+            IProgress<NotionCalendarProgress>? progress = null,
+            bool prioritizeUser = false)
         {
             LastChangedPageIds = Array.Empty<string>();
 
@@ -4574,7 +4741,8 @@ namespace Anfeta.UI.Services.Notion
             // ejecuten sincronizaciones de calendario al mismo tiempo.
             using var fullSyncLease =
                 await NotionRequestCoordinator.EnterFullSyncAsync(
-                    cancellationToken);
+                    cancellationToken,
+                    prioritizeUser);
 
             await EnsureCacheLoadedAsync(
                 cancellationToken);
@@ -4762,7 +4930,8 @@ namespace Anfeta.UI.Services.Notion
             string token,
             DateTime localDate,
             CancellationToken cancellationToken = default,
-            IProgress<NotionCalendarProgress>? progress = null)
+            IProgress<NotionCalendarProgress>? progress = null,
+            bool prioritizeUser = false)
         {
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -4774,7 +4943,8 @@ namespace Anfeta.UI.Services.Notion
 
             using var fullSyncLease =
                 await NotionRequestCoordinator.EnterFullSyncAsync(
-                    cancellationToken);
+                    cancellationToken,
+                    prioritizeUser);
 
             await EnsureCacheLoadedAsync(
                 cancellationToken);
@@ -6257,7 +6427,9 @@ namespace Anfeta.UI.Services.Notion
                                 storedStats.Completed,
                                 0,
                                 Math.Max(0, storedStats.Total)),
-                            storedStats.CompletedByDate);
+                            storedStats.CompletedByDate,
+                            Math.Max(0, storedStats.CommentCount),
+                            storedStats.LatestCommentText ?? string.Empty);
 
                     _checklistStatsCache[pageId] =
                         cachedChecklist;
@@ -6271,6 +6443,8 @@ namespace Anfeta.UI.Services.Notion
                 ChecklistScanned = cachedChecklist != null,
                 ChecklistTotal = cachedChecklist?.Total ?? 0,
                 ChecklistCompleted = cachedChecklist?.Completed ?? 0,
+                CommentCount = cachedChecklist?.CommentCount ?? 0,
+                LatestCommentText = cachedChecklist?.LatestCommentText ?? string.Empty,
                 Title = title,
                 Person = people,
                 OriginalPerson = people,

@@ -8,10 +8,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.UI;
+using Windows.Storage;
 
 namespace Anfeta.UI.Views.DailyProgress
 {
@@ -44,7 +46,14 @@ namespace Anfeta.UI.Views.DailyProgress
         private DateTime _currentDate = DateTime.Today;
         private DailyProgressSnapshot? _snapshot;
         private WeeklyProgressSnapshot? _weeklySnapshot;
-        private bool _isWeeklyMode;
+        private enum ProgressScopeMode
+        {
+            Day,
+            Week,
+            DayAndWeek
+        }
+
+        private ProgressScopeMode _scopeMode = ProgressScopeMode.Day;
         private CancellationTokenSource? _loadCts;
         private DateTimeOffset _lastIncrementalCheckUtc =
             DateTimeOffset.MinValue;
@@ -56,6 +65,20 @@ namespace Anfeta.UI.Views.DailyProgress
             _trackingRefreshTimer;
 
         private bool _isLoading;
+        private bool _isActionDialogOpen;
+
+        private static readonly double[] TextZoomLevels =
+            { 1d, 1.15d, 1.30d, 1.45d };
+        private const string TextZoomSettingKey =
+            "DailyProgress.TextZoom.v1";
+        private int _textZoomIndex;
+        private bool _textZoomReady;
+        private sealed class OriginalTextSize
+        {
+            public double Value { get; init; }
+        }
+        private readonly ConditionalWeakTable<TextBlock, OriginalTextSize>
+            _originalTextSizes = new();
 
         private static readonly SolidColorBrush SurfaceBrush =
             Brush(255, 20, 28, 36);
@@ -93,6 +116,74 @@ namespace Anfeta.UI.Views.DailyProgress
         public DailyProgressView()
         {
             InitializeComponent();
+            RestoreTextZoom();
+            Loaded += (_, __) =>
+            {
+                _textZoomReady = true;
+                ApplyTextZoom();
+            };
+        }
+
+        private void RestoreTextZoom()
+        {
+            if (ApplicationData.Current.LocalSettings.Values[TextZoomSettingKey]
+                is int savedIndex &&
+                savedIndex >= 0 && savedIndex < TextZoomLevels.Length)
+            {
+                _textZoomIndex = savedIndex;
+            }
+
+            if (TextZoomPicker != null)
+                TextZoomPicker.SelectedIndex = _textZoomIndex;
+        }
+
+        private void TextZoomPicker_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (!_textZoomReady ||
+                TextZoomPicker == null ||
+                TextZoomPicker.SelectedIndex < 0 ||
+                TextZoomPicker.SelectedIndex >= TextZoomLevels.Length)
+            {
+                return;
+            }
+
+            _textZoomIndex = TextZoomPicker.SelectedIndex;
+            ApplicationData.Current.LocalSettings.Values[TextZoomSettingKey] =
+                _textZoomIndex;
+
+            ApplyTextZoom();
+            UpdatePeopleGridItemWidth(PeopleGrid.ActualWidth);
+
+            if (PersonModeToggle.IsChecked == true)
+                RenderSelectedPerson();
+        }
+
+        private void ApplyTextZoom()
+        {
+            ApplyTextZoomRecursive(this, TextZoomLevels[_textZoomIndex]);
+        }
+
+        private void ApplyTextZoomRecursive(DependencyObject parent, double scale)
+        {
+            var count = VisualTreeHelper.GetChildrenCount(parent);
+            for (var index = 0; index < count; index++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, index);
+                if (child is TextBlock text)
+                {
+                    var original = _originalTextSizes.GetValue(
+                        text,
+                        item => new OriginalTextSize
+                        {
+                            Value = item.FontSize
+                        });
+                    text.FontSize = Math.Round(original.Value * scale, 1);
+                }
+
+                ApplyTextZoomRecursive(child, scale);
+            }
         }
 
         public void Initialize(
@@ -129,10 +220,8 @@ namespace Anfeta.UI.Views.DailyProgress
                     DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(3));
             }
 
-            await LoadCurrentDateAsync(
-                forceRefresh: false);
-
-            StartTrackingRefreshTimer();
+            ApplyScopeLayout();
+            await LoadActiveScopeAsync(forceRefresh: false);
         }
 
         private async Task LoadCurrentDateAsync(
@@ -208,7 +297,8 @@ namespace Anfeta.UI.Views.DailyProgress
                         _token,
                         _lastIncrementalCheckUtc.Subtract(
                             TimeSpan.FromMinutes(2)),
-                        cancellationToken);
+                        cancellationToken,
+                        forceNetworkCheck: true);
 
                     // El solapamiento de dos minutos en la siguiente consulta
                     // protege contra retrasos de indexación de Notion.
@@ -231,99 +321,38 @@ namespace Anfeta.UI.Views.DailyProgress
                             .Select(group => group.First())
                             .ToList();
 
-                    IReadOnlyList<Anfeta.UI.Models.Notion.NotionCalendarActivity>
-                        checklistTargets;
+                    var changedIds =
+                        _calendarService.LastChangedPageIds.ToHashSet(
+                            StringComparer.OrdinalIgnoreCase);
 
-                    if (!quiet)
+                    var checklistTargets = visibleActivities
+                        .Where(activity => changedIds.Contains(activity.PageId))
+                        .ToList();
+
+                    // Notion puede actualizar un bloque hijo sin cambiar de
+                    // inmediato last_edited_time de la página. Conservamos un
+                    // sondeo rotativo muy pequeño para descubrir ese caso sin
+                    // volver a descargar todos los bodies visibles.
+                    if (visibleActivities.Count > 0)
                     {
-                        // En modo Por usuario solo se refrescan las cards que
-                        // realmente están en pantalla. Antes se tomaban todas
-                        // las páginas cargadas por el calendario (por ejemplo
-                        // 79) y la checklist relevante quedaba al final de una
-                        // cola limitada a dos lecturas simultáneas.
-                        if (PersonModeToggle.IsChecked == true &&
-                            _snapshot != null &&
-                            PersonPicker.SelectedItem is string selectedPerson)
+                        for (var index = 0;
+                             index < Math.Min(2, visibleActivities.Count);
+                             index++)
                         {
-                            var canonicalSelected =
-                                CanonicalPersonUi(selectedPerson);
+                            var activity = visibleActivities[
+                                (_checklistProbeOffset + index) % visibleActivities.Count];
 
-                            var selectedPageIds =
-                                _snapshot.People
-                                    .Where(person => string.Equals(
-                                        CanonicalPersonUi(person.Name),
-                                        canonicalSelected,
-                                        StringComparison.OrdinalIgnoreCase))
-                                    .SelectMany(person =>
-                                        person.Lagging
-                                            .Concat(person.Progress)
-                                            .Concat(person.AllActivities.Where(item =>
-                                                IsCarryOverItem(item) &&
-                                                !item.IsHistoricalSnapshot)))
-                                    .Select(item => item.PageId)
-                                    .Where(pageId => !string.IsNullOrWhiteSpace(pageId))
-                                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                            checklistTargets = visibleActivities
-                                .Where(activity => selectedPageIds.Contains(activity.PageId))
-                                .ToList();
-                        }
-                        else
-                        {
-                            var reportPageIds =
-                                (_snapshot?.People ??
-                                 Array.Empty<DailyProgressPersonSnapshot>())
-                                    .SelectMany(person =>
-                                        person.Lagging
-                                            .Concat(person.Progress)
-                                            .Concat(person.AllActivities.Where(item =>
-                                                IsCarryOverItem(item) &&
-                                                !item.IsHistoricalSnapshot)))
-                                    .Select(item => item.PageId)
-                                    .Where(pageId => !string.IsNullOrWhiteSpace(pageId))
-                                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                            checklistTargets = visibleActivities
-                                .Where(activity => reportPageIds.Contains(activity.PageId))
-                                .ToList();
-                        }
-                    }
-                    else
-                    {
-                        var changedIds =
-                            _calendarService.LastChangedPageIds.ToHashSet(
-                                StringComparer.OrdinalIgnoreCase);
-
-                        var targets = visibleActivities
-                            .Where(activity => changedIds.Contains(activity.PageId))
-                            .ToList();
-
-                        // Sondeo rotativo: dos checklists adicionales cada 30 s.
-                        // Así los cambios de bloques hijos se descubren sin
-                        // descargar todos los bodies en cada ciclo.
-                        if (visibleActivities.Count > 0)
-                        {
-                            for (var index = 0;
-                                 index < Math.Min(2, visibleActivities.Count);
-                                 index++)
+                            if (!checklistTargets.Any(item => string.Equals(
+                                    item.PageId,
+                                    activity.PageId,
+                                    StringComparison.OrdinalIgnoreCase)))
                             {
-                                var activity = visibleActivities[
-                                    (_checklistProbeOffset + index) % visibleActivities.Count];
-
-                                if (!targets.Any(item => string.Equals(
-                                        item.PageId,
-                                        activity.PageId,
-                                        StringComparison.OrdinalIgnoreCase)))
-                                {
-                                    targets.Add(activity);
-                                }
+                                checklistTargets.Add(activity);
                             }
-
-                            _checklistProbeOffset =
-                                (_checklistProbeOffset + 2) % visibleActivities.Count;
                         }
 
-                        checklistTargets = targets;
+                        _checklistProbeOffset =
+                            (_checklistProbeOffset + 2) % visibleActivities.Count;
                     }
 
                     if (checklistTargets.Count > 0)
@@ -547,6 +576,8 @@ namespace Anfeta.UI.Views.DailyProgress
             UpdatePeopleGridItemWidth(
                 PeopleGrid.ActualWidth);
 
+            DispatcherQueue.TryEnqueue(ApplyTextZoom);
+
             FeedEmptyState.Visibility =
                 snapshot.TotalActivities == 0
                     ? Visibility.Visible
@@ -565,6 +596,7 @@ namespace Anfeta.UI.Views.DailyProgress
         private void UpdateKpis(DailyProgressSnapshot snapshot)
         {
             CoverageKpiText.Text = $"{snapshot.CoveragePercentage}%";
+            CurrentProgressKpiText.Text = $"{snapshot.CurrentProgressPercentage}%";
             LaggingKpiText.Text = snapshot.LaggingCount.ToString(CultureInfo.InvariantCulture);
             ReviewKpiText.Text = snapshot.ReviewCount.ToString(CultureInfo.InvariantCulture);
             CompletedKpiText.Text = snapshot.CompletedCount.ToString(CultureInfo.InvariantCulture);
@@ -576,6 +608,7 @@ namespace Anfeta.UI.Views.DailyProgress
         private void UpdateKpis(DailyProgressPersonSnapshot person)
         {
             CoverageKpiText.Text = $"{person.CoveragePercentage}%";
+            CurrentProgressKpiText.Text = $"{person.CurrentProgressPercentage}%";
             LaggingKpiText.Text = person.Lagging.Count.ToString(CultureInfo.InvariantCulture);
             ReviewKpiText.Text = person.ReviewCount.ToString(CultureInfo.InvariantCulture);
             CompletedKpiText.Text = person.CompletedCount.ToString(CultureInfo.InvariantCulture);
@@ -600,7 +633,8 @@ namespace Anfeta.UI.Views.DailyProgress
 
             // El objetivo no es un número fijo: elegimos cuántas columnas caben
             // cómodamente y cada tarjeta ocupa el ancho real disponible.
-            const double minimumCardWidth = 330d;
+            var minimumCardWidth =
+                360d * TextZoomLevels[_textZoomIndex];
             const double gapAllowance = 12d;
 
             var usableWidth =
@@ -620,11 +654,11 @@ namespace Anfeta.UI.Views.DailyProgress
             columns =
                 Math.Min(
                     columns,
-                    4);
+                    3);
 
             var itemWidth =
                 Math.Max(
-                    280d,
+                    330d,
                     Math.Floor(
                         usableWidth / columns) -
                     gapAllowance);
@@ -658,7 +692,7 @@ namespace Anfeta.UI.Views.DailyProgress
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch,
                     Margin = new Thickness(0, 0, 10, 10),
-                    Padding = new Thickness(12),
+                    Padding = new Thickness(16),
                     Background = SurfaceBrush,
                     BorderBrush = BorderBrush,
                     BorderThickness = new Thickness(1),
@@ -668,7 +702,7 @@ namespace Anfeta.UI.Views.DailyProgress
             var stack =
                 new StackPanel
                 {
-                    Spacing = 9
+                    Spacing = 12
                 };
 
             var header =
@@ -761,7 +795,7 @@ namespace Anfeta.UI.Views.DailyProgress
                         CanonicalPersonUi(
                             person.Name)
                             .ToUpperInvariant(),
-                    FontSize = 13,
+                    FontSize = 15,
                     FontWeight =
                         Microsoft.UI.Text
                             .FontWeights.SemiBold,
@@ -834,8 +868,8 @@ namespace Anfeta.UI.Views.DailyProgress
                 new TextBlock
                 {
                     Text =
-                        $"{person.CoveragePercentage}%",
-                    FontSize = 12,
+                        $"Hoy {person.CoveragePercentage}% · Actual {person.CurrentProgressPercentage}%",
+                    FontSize = 12.5,
                     FontWeight =
                         Microsoft.UI.Text
                             .FontWeights.SemiBold,
@@ -1244,8 +1278,20 @@ namespace Anfeta.UI.Views.DailyProgress
                         item.ChecklistScanned
                             ? $"Hoy {item.TodayChecklistLabel} · Total {item.TotalChecklistLabel}"
                             : "Hoy … · Total …",
-                    FontSize = 8.5,
+                    FontSize = 11.5,
                     Foreground = MutedBrush,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                });
+
+            text.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        $"Presupuesto {FormatMinutes(item.BudgetMinutes)} · " +
+                        $"equivalente {FormatMinutes(item.EquivalentCompletedMinutes)} · " +
+                        $"restante {FormatMinutes(item.RemainingMinutes)}",
+                    FontSize = 9.5,
+                    Foreground = Brush(255, 186, 230, 253),
                     TextTrimming = TextTrimming.CharacterEllipsis
                 });
 
@@ -1458,6 +1504,20 @@ namespace Anfeta.UI.Views.DailyProgress
                         100)
                     : 0;
 
+            var currentWeight = all
+                .Where(item => !item.IsSuspended)
+                .Sum(item => Math.Max(1, item.ScheduledMinutes));
+            var currentProgress = currentWeight > 0
+                ? Math.Clamp(
+                    (int)Math.Round(
+                        all.Where(item => !item.IsSuspended)
+                            .Sum(item => Math.Max(1, item.ScheduledMinutes) *
+                                         Math.Clamp(item.ProgressPercentage, 0, 100)) *
+                        1d / currentWeight),
+                    0,
+                    100)
+                : 0;
+
             return new DailyProgressPersonSnapshot
             {
                 Name =
@@ -1468,6 +1528,8 @@ namespace Anfeta.UI.Views.DailyProgress
                         : canonicalName.Substring(0, 1).ToUpperInvariant(),
                 CoveragePercentage =
                     coverage,
+                CurrentProgressPercentage =
+                    currentProgress,
                 ScheduledMinutes =
                     scheduled,
                 ProgressMinutes =
@@ -1567,13 +1629,10 @@ namespace Anfeta.UI.Views.DailyProgress
                         carryOverItems.Count,
                         danger: false));
 
-                foreach (var item in carryOverItems)
-                {
-                    PersonDetailItems.Children.Add(
-                        BuildDetailActivityCard(
-                            item,
-                            danger: false));
-                }
+                PersonDetailItems.Children.Add(
+                    BuildDetailCardsGrid(
+                        carryOverItems,
+                        danger: false));
             }
 
             var historicalItems =
@@ -1592,13 +1651,10 @@ namespace Anfeta.UI.Views.DailyProgress
                         historicalItems.Count,
                         danger: false));
 
-                foreach (var item in historicalItems)
-                {
-                    PersonDetailItems.Children.Add(
-                        BuildDetailActivityCard(
-                            item,
-                            danger: false));
-                }
+                PersonDetailItems.Children.Add(
+                    BuildDetailCardsGrid(
+                        historicalItems,
+                        danger: false));
             }
 
             PersonDetailItems.Children.Add(
@@ -1615,13 +1671,10 @@ namespace Anfeta.UI.Views.DailyProgress
             }
             else
             {
-                foreach (var item in person.Lagging)
-                {
-                    PersonDetailItems.Children.Add(
-                        BuildDetailActivityCard(
-                            item,
-                            danger: true));
-                }
+                PersonDetailItems.Children.Add(
+                    BuildDetailCardsGrid(
+                        person.Lagging,
+                        danger: true));
             }
 
             PersonDetailItems.Children.Add(
@@ -1638,16 +1691,86 @@ namespace Anfeta.UI.Views.DailyProgress
             }
             else
             {
-                foreach (var item in person.Progress)
-                {
-                    PersonDetailItems.Children.Add(
-                        BuildDetailActivityCard(
-                            item,
-                            danger: false));
-                }
+                PersonDetailItems.Children.Add(
+                    BuildDetailCardsGrid(
+                        person.Progress,
+                        danger: false));
             }
 
             ShowPersonMode();
+            DispatcherQueue.TryEnqueue(ApplyTextZoom);
+        }
+
+        private UIElement BuildDetailCardsGrid(
+            IReadOnlyList<DailyProgressActivityItem> items,
+            bool danger)
+        {
+            var grid = new Grid
+            {
+                ColumnSpacing = 9,
+                RowSpacing = 9,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var columns =
+                _textZoomIndex >= 2
+                    ? 2
+                    : 3;
+            for (var column = 0; column < columns; column++)
+            {
+                grid.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(1, GridUnitType.Star)
+                    });
+            }
+
+            for (var index = 0; index < items.Count; index++)
+            {
+                var row = index / columns;
+                if (grid.RowDefinitions.Count <= row)
+                {
+                    grid.RowDefinitions.Add(
+                        new RowDefinition
+                        {
+                            Height = GridLength.Auto
+                        });
+                }
+
+                var card = BuildDetailActivityCard(items[index], danger);
+                if (card is FrameworkElement element)
+                {
+                    element.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    element.VerticalAlignment = VerticalAlignment.Stretch;
+                    Grid.SetColumn(element, index % columns);
+                    Grid.SetRow(element, row);
+                    grid.Children.Add(element);
+                }
+            }
+
+            return grid;
+        }
+
+        private static bool IsReviewOrCompletedActivity(
+            Anfeta.UI.Models.Notion.NotionCalendarActivity activity)
+        {
+            var title = activity?.Title ?? string.Empty;
+            var status = activity?.Status ?? string.Empty;
+
+            return Regex.IsMatch(
+                       title,
+                       @"(^|\s)rtuzrevision(?=\s|$)",
+                       RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+                   Regex.IsMatch(
+                       title,
+                       @"(^|\s)ztuzterminado(?=\s|$)",
+                       RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+                   status.Contains(
+                       "REVISAR REVISIONES",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   status.Contains(
+                       "TERMINADO",
+                       StringComparison.OrdinalIgnoreCase);
         }
 
         private UIElement BuildDetailSectionTitle(
@@ -1794,21 +1917,21 @@ namespace Anfeta.UI.Views.DailyProgress
             var grid =
                 new Grid
                 {
-                    ColumnSpacing = 12
+                    RowSpacing = 8
                 };
 
-            grid.ColumnDefinitions.Add(
-                new ColumnDefinition
+            grid.RowDefinitions.Add(
+                new RowDefinition
                 {
-                    Width = new GridLength(
+                    Height = new GridLength(
                         1,
                         GridUnitType.Star)
                 });
 
-            grid.ColumnDefinitions.Add(
-                new ColumnDefinition
+            grid.RowDefinitions.Add(
+                new RowDefinition
                 {
-                    Width = GridLength.Auto
+                    Height = GridLength.Auto
                 });
 
             var info =
@@ -1865,9 +1988,8 @@ namespace Anfeta.UI.Views.DailyProgress
                             225),
                     TextWrapping =
                         TextWrapping.Wrap,
-                    MaxLines = 2,
                     TextTrimming =
-                        TextTrimming.CharacterEllipsis
+                        TextTrimming.None
                 });
 
             info.Children.Add(
@@ -1890,6 +2012,37 @@ namespace Anfeta.UI.Views.DailyProgress
                     FontSize = 9.5,
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground = Brush(255, 186, 230, 253),
+                    TextWrapping = TextWrapping.Wrap
+                });
+
+            info.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        $"Presupuesto {FormatMinutes(item.BudgetMinutes)} · " +
+                        $"avance equivalente {FormatMinutes(item.EquivalentCompletedMinutes)} · " +
+                        $"restante {FormatMinutes(item.RemainingMinutes)}",
+                    FontSize = 10.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = Brush(255, 186, 230, 253),
+                    TextWrapping = TextWrapping.Wrap
+                });
+
+            info.Children.Add(
+                new TextBlock
+                {
+                    Text = item.CompletionForecastLabel,
+                    FontSize = 10.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground =
+                        item.RemainingMinutes <= 0
+                            ? CompletedBrush
+                            : item.Start.Date == DateTime.Today &&
+                              item.RemainingMinutes <= Math.Max(
+                                  0,
+                                  (int)Math.Floor((item.End - DateTime.Now).TotalMinutes))
+                                ? ProgressBrush
+                                : DangerBrush,
                     TextWrapping = TextWrapping.Wrap
                 });
 
@@ -1952,12 +2105,14 @@ namespace Anfeta.UI.Views.DailyProgress
                 {
                     Orientation =
                         Orientation.Horizontal,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Right,
                     VerticalAlignment =
-                        VerticalAlignment.Center,
+                        VerticalAlignment.Bottom,
                     Spacing = 6
                 };
 
-            Grid.SetColumn(
+            Grid.SetRow(
                 actions,
                 1);
 
@@ -2119,10 +2274,6 @@ namespace Anfeta.UI.Views.DailyProgress
                     moveTomorrowButton);
             }
 
-            Grid.SetColumn(
-                actions,
-                1);
-
             grid.Children.Add(
                 actions);
 
@@ -2239,26 +2390,18 @@ namespace Anfeta.UI.Views.DailyProgress
             PersonModeToggle.IsChecked =
                 false;
 
-            GeneralViewHost.Visibility =
-                _isWeeklyMode ? Visibility.Collapsed : Visibility.Visible;
-
-            PersonDetailHost.Visibility =
-                Visibility.Collapsed;
-
-            WeeklyReportHost.Visibility =
-                _isWeeklyMode ? Visibility.Visible : Visibility.Collapsed;
+            ApplyScopeLayout();
 
             FeedFooter.Visibility =
                 Visibility.Visible;
 
-            if (_isWeeklyMode && _weeklySnapshot != null)
-            {
-                RenderWeeklyReport(_weeklySnapshot);
-            }
-            else if (_snapshot != null)
+            if (_snapshot != null)
             {
                 UpdateKpis(_snapshot);
             }
+
+            if (_weeklySnapshot != null)
+                RenderWeeklyReport(_weeklySnapshot);
         }
 
         private void ShowPersonMode()
@@ -2269,18 +2412,14 @@ namespace Anfeta.UI.Views.DailyProgress
             PersonModeToggle.IsChecked =
                 true;
 
-            GeneralViewHost.Visibility =
-                Visibility.Collapsed;
-
-            PersonDetailHost.Visibility =
-                _isWeeklyMode ? Visibility.Collapsed : Visibility.Visible;
-
-            WeeklyReportHost.Visibility =
-                _isWeeklyMode ? Visibility.Visible : Visibility.Collapsed;
+            ApplyScopeLayout();
 
             // En detalle priorizamos el espacio vertical para actividades.
             FeedFooter.Visibility =
                 Visibility.Collapsed;
+
+            if (_weeklySnapshot != null)
+                RenderWeeklyReport(_weeklySnapshot);
         }
 
         private void GeneralMode_Click(
@@ -2294,16 +2433,6 @@ namespace Anfeta.UI.Views.DailyProgress
             object sender,
             RoutedEventArgs e)
         {
-            if (_isWeeklyMode)
-            {
-                if (_weeklySnapshot?.People.Count > 0 && PersonPicker.SelectedIndex < 0)
-                    PersonPicker.SelectedIndex = 0;
-                GeneralModeToggle.IsChecked = false;
-                PersonModeToggle.IsChecked = true;
-                RenderWeeklyReport(_weeklySnapshot);
-                return;
-            }
-
             if (_snapshot?.People.Count > 0 &&
                 PersonPicker.SelectedIndex < 0)
             {
@@ -2317,15 +2446,8 @@ namespace Anfeta.UI.Views.DailyProgress
             object sender,
             SelectionChangedEventArgs e)
         {
-            if (PersonPicker.SelectedItem == null)
+            if (_isLoading || PersonPicker.SelectedItem == null)
             {
-                return;
-            }
-
-            if (_isWeeklyMode)
-            {
-                if (PersonModeToggle.IsChecked == true)
-                    RenderWeeklyReport(_weeklySnapshot);
                 return;
             }
 
@@ -2335,6 +2457,9 @@ namespace Anfeta.UI.Views.DailyProgress
             {
                 RenderSelectedPerson();
             }
+
+            if (_weeklySnapshot != null)
+                RenderWeeklyReport(_weeklySnapshot);
         }
 
         private void PersonDetailButton_Click(
@@ -2347,10 +2472,18 @@ namespace Anfeta.UI.Views.DailyProgress
                 return;
             }
 
-            PersonPicker.SelectedItem =
-                personName;
+            var requested = CanonicalPersonUi(personName);
+            var current = CanonicalPersonUi(PersonPicker.SelectedItem as string);
 
-            RenderSelectedPerson();
+            if (string.Equals(requested, current, StringComparison.OrdinalIgnoreCase))
+            {
+                RenderSelectedPerson();
+                return;
+            }
+
+            // SelectionChanged realiza el render una sola vez. Antes se renderizaba
+            // también aquí y el cambio rápido entre tarjetas podía bloquear la UI.
+            PersonPicker.SelectedItem = personName;
         }
 
         private async void MoveTomorrow_Click(
@@ -2364,6 +2497,12 @@ namespace Anfeta.UI.Views.DailyProgress
             {
                 return;
             }
+
+            if (_isActionDialogOpen || _isLoading)
+                return;
+
+            _isActionDialogOpen = true;
+            button.IsEnabled = false;
 
             var sourceDate =
                 item.Source.Start.Date;
@@ -2384,14 +2523,30 @@ namespace Anfeta.UI.Views.DailyProgress
                     DefaultButton = ContentDialogButton.Primary
                 };
 
-            var result =
-                await confirm.ShowAsync();
+            ContentDialogResult result;
+
+            try
+            {
+                result = await confirm.ShowAsync();
+            }
+            catch (Exception ex)
+            {
+                FeedStatusText.Text =
+                    $"No se pudo abrir la confirmación → {ex.Message}";
+                button.IsEnabled = true;
+                _isActionDialogOpen = false;
+                return;
+            }
+            finally
+            {
+                _isActionDialogOpen = false;
+            }
 
             if (result != ContentDialogResult.Primary)
+            {
+                button.IsEnabled = true;
                 return;
-
-            button.IsEnabled =
-                false;
+            }
 
             FeedStatusText.Text =
                 $"Moviendo {item.Domain} a mañana…";
@@ -2477,7 +2632,7 @@ namespace Anfeta.UI.Views.DailyProgress
             _trackingRefreshTimer.Tick +=
                 async (_, __) =>
                 {
-                    if (_isWeeklyMode || Visibility != Visibility.Visible ||
+                    if (Visibility != Visibility.Visible ||
                         _isLoading)
                     {
                         return;
@@ -2513,28 +2668,34 @@ namespace Anfeta.UI.Views.DailyProgress
             object sender,
             RoutedEventArgs e)
         {
-            _currentDate = _currentDate.AddDays(_isWeeklyMode ? -7 : -1);
+            if (_isLoading)
+                return;
 
-            if (_isWeeklyMode) await LoadWeeklyAsync();
-            else await LoadCurrentDateAsync(forceRefresh: false);
+            _currentDate = _currentDate.AddDays(
+                _scopeMode == ProgressScopeMode.Week ? -7 : -1);
+            await LoadActiveScopeAsync(forceRefresh: false);
         }
 
         private async void NextDay_Click(
             object sender,
             RoutedEventArgs e)
         {
-            _currentDate = _currentDate.AddDays(_isWeeklyMode ? 7 : 1);
+            if (_isLoading)
+                return;
 
-            if (_isWeeklyMode) await LoadWeeklyAsync();
-            else await LoadCurrentDateAsync(forceRefresh: false);
+            _currentDate = _currentDate.AddDays(
+                _scopeMode == ProgressScopeMode.Week ? 7 : 1);
+            await LoadActiveScopeAsync(forceRefresh: false);
         }
 
         private async void Refresh_Click(
             object sender,
             RoutedEventArgs e)
         {
-            if (_isWeeklyMode) await LoadWeeklyAsync();
-            else await LoadCurrentDateAsync(forceRefresh: true);
+            if (_isLoading)
+                return;
+
+            await LoadActiveScopeAsync(forceRefresh: true);
         }
 
         private void Close_Click(
@@ -2558,43 +2719,119 @@ namespace Anfeta.UI.Views.DailyProgress
 
         private void UpdateDateHeader()
         {
-            if (_isWeeklyMode)
+            if (_scopeMode == ProgressScopeMode.Week)
             {
                 var offset = ((int)_currentDate.DayOfWeek + 6) % 7;
-                var monday = _currentDate.Date.AddDays(-offset);
+                var monday = _currentDate.AddDays(-offset).Date;
                 var sunday = monday.AddDays(6);
                 FeedDateText.Text = $"{monday:dd/MM}–{sunday:dd/MM/yyyy}";
-                FeedDateSubtitle.Text = "Reporte semanal · fotografías locales";
+                FeedDateSubtitle.Text = "Semana actual · lunes a domingo";
                 return;
             }
 
-            FeedDateText.Text =
-                _currentDate.ToString(
-                    "dd/MM/yyyy",
-                    CultureInfo.InvariantCulture);
-
-            FeedDateSubtitle.Text =
-                _currentDate.ToString(
-                    "dddd, d 'de' MMMM 'de' yyyy",
-                new CultureInfo("es-MX"));
+            FeedDateText.Text = _currentDate.ToString(
+                "dd/MM/yyyy", CultureInfo.InvariantCulture);
+            FeedDateSubtitle.Text = _currentDate.ToString(
+                "dddd, d 'de' MMMM 'de' yyyy", new CultureInfo("es-MX"));
         }
 
-        private async void WeeklyScope_Click(object sender, RoutedEventArgs e)
+        private async void ScopeDay_Click(object sender, RoutedEventArgs e)
         {
-            _isWeeklyMode = !_isWeeklyMode;
-            WeeklyScopeButton.Content = _isWeeklyMode ? "Día" : "Semana";
+            await SetScopeModeAsync(ProgressScopeMode.Day);
+        }
+
+        private async void ScopeWeek_Click(object sender, RoutedEventArgs e)
+        {
+            await SetScopeModeAsync(ProgressScopeMode.Week);
+        }
+
+        private async void ScopeCombined_Click(object sender, RoutedEventArgs e)
+        {
+            await SetScopeModeAsync(ProgressScopeMode.DayAndWeek);
+        }
+
+        private async Task SetScopeModeAsync(ProgressScopeMode mode)
+        {
+            if (_scopeMode == mode) return;
+
+            if (_isLoading)
+            {
+                // El selector siempre debe responder. Cancelamos la lectura anterior
+                // en vez de ignorar el clic y parecer bloqueado.
+                _loadCts?.Cancel();
+                for (var attempt = 0; attempt < 10 && _isLoading; attempt++)
+                    await Task.Delay(50);
+            }
+
+            _scopeMode = mode;
+            ApplyScopeLayout();
             UpdateScopeLabels();
-            if (_isWeeklyMode)
-            {
-                StopTrackingRefreshTimer();
+            UpdateDateHeader();
+            await LoadActiveScopeAsync(forceRefresh: false);
+        }
+
+        private async Task LoadActiveScopeAsync(bool forceRefresh)
+        {
+            if (_scopeMode != ProgressScopeMode.Week)
+                await LoadCurrentDateAsync(forceRefresh);
+
+            if (_scopeMode != ProgressScopeMode.Day)
                 await LoadWeeklyAsync();
-            }
+
+            if (_scopeMode == ProgressScopeMode.Week)
+                StopTrackingRefreshTimer();
             else
-            {
-                WeeklyReportHost.Visibility = Visibility.Collapsed;
-                await LoadCurrentDateAsync(forceRefresh: false);
                 StartTrackingRefreshTimer();
-            }
+        }
+
+        private void ApplyScopeLayout()
+        {
+            var showDay = _scopeMode != ProgressScopeMode.Week;
+            var showWeek = _scopeMode != ProgressScopeMode.Day;
+            var combined = _scopeMode == ProgressScopeMode.DayAndWeek;
+
+            WeeklyScopeButton.Content = _scopeMode switch
+            {
+                ProgressScopeMode.Week => "Vista: Semana ▾",
+                ProgressScopeMode.DayAndWeek => "Vista: Día + Semana ▾",
+                _ => "Vista: Día ▾"
+            };
+
+            DailyContentColumn.Width = combined
+                ? new GridLength(7, GridUnitType.Star)
+                : new GridLength(1, GridUnitType.Star);
+            WeeklyContentColumn.Width = combined
+                ? new GridLength(3, GridUnitType.Star)
+                : _scopeMode == ProgressScopeMode.Week
+                    ? new GridLength(1, GridUnitType.Star)
+                    : new GridLength(0);
+
+            DailyContentRow.Height = combined ? GridLength.Auto
+                : showDay ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+            WeeklyHeaderRow.Height = showWeek ? GridLength.Auto : new GridLength(0);
+            WeeklyContentRow.Height = showWeek ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+
+            Grid.SetColumn(GeneralViewHost, 0);
+            Grid.SetColumn(PersonDetailHost, 0);
+            Grid.SetRow(GeneralViewHost, 0);
+            Grid.SetRow(PersonDetailHost, 0);
+            Grid.SetRowSpan(GeneralViewHost, combined ? 3 : 1);
+            Grid.SetRowSpan(PersonDetailHost, combined ? 3 : 1);
+
+            Grid.SetColumn(WeeklyHeader, combined ? 1 : 0);
+            Grid.SetColumn(WeeklyReportHost, combined ? 1 : 0);
+            Grid.SetColumnSpan(WeeklyHeader, combined ? 1 : 2);
+            Grid.SetColumnSpan(WeeklyReportHost, combined ? 1 : 2);
+            Grid.SetRow(WeeklyHeader, combined ? 0 : 1);
+            Grid.SetRow(WeeklyReportHost, combined ? 1 : 2);
+            Grid.SetRowSpan(WeeklyReportHost, combined ? 2 : 1);
+
+            WeeklyHeader.Visibility = showWeek ? Visibility.Visible : Visibility.Collapsed;
+            WeeklyReportHost.Visibility = showWeek ? Visibility.Visible : Visibility.Collapsed;
+            GeneralViewHost.Visibility = showDay && GeneralModeToggle.IsChecked == true
+                ? Visibility.Visible : Visibility.Collapsed;
+            PersonDetailHost.Visibility = showDay && PersonModeToggle.IsChecked == true
+                ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private async Task LoadWeeklyAsync()
@@ -2623,45 +2860,36 @@ namespace Anfeta.UI.Views.DailyProgress
 
         private void UpdateScopeLabels()
         {
-            CoverageKpiLabel.Text = _isWeeklyMode ? "COBERTURA SEMANA" : "COBERTURA HOY";
-            ReviewKpiLabel.Text = _isWeeklyMode ? "R SEMANA" : "R HOY";
-            CompletedKpiLabel.Text = _isWeeklyMode ? "✓ Z SEMANA" : "✓ Z HOY";
-            ScheduledKpiLabel.Text = _isWeeklyMode
-                ? "AVANCE SEMANA / AGENDADO"
-                : "AVANCE HOY / AGENDADO";
+            var weekly = _scopeMode == ProgressScopeMode.Week;
+            CoverageKpiLabel.Text = weekly ? "COBERTURA SEMANA" : "COBERTURA HOY";
+            CurrentProgressKpiLabel.Text = weekly ? "PROGRESO SEMANA" : "PROGRESO ACTUAL";
+            ReviewKpiLabel.Text = weekly ? "R SEMANA" : "R HOY";
+            CompletedKpiLabel.Text = weekly ? "✓ Z SEMANA" : "✓ Z HOY";
+            ScheduledKpiLabel.Text = weekly ? "AVANCE / AGENDADO SEMANA" : "AVANCE HOY / AGENDADO";
         }
 
         private void RenderWeeklyReport(WeeklyProgressSnapshot? report)
         {
             if (report == null) return;
-            UpdateDateHeader();
-            GeneralViewHost.Visibility = Visibility.Collapsed;
-            PersonDetailHost.Visibility = Visibility.Collapsed;
-            WeeklyReportHost.Visibility = Visibility.Visible;
-            FeedFooter.Visibility = Visibility.Visible;
-            FeedSourceText.Text = "Auditoría local";
-            FeedStatusText.Text = report.DataNote;
+            WeeklyReportHost.Visibility = _scopeMode == ProgressScopeMode.Day
+                ? Visibility.Collapsed : Visibility.Visible;
+            WeeklyPeriodText.Text =
+                $"{report.WeekStart:dd/MM}–{report.WeekEnd:dd/MM/yyyy} · auditoría local";
 
-            var previous = CanonicalPersonUi(PersonPicker.SelectedItem as string);
-            var names = report.People.Select(item => CanonicalPersonUi(item.Name))
-                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            PersonPicker.ItemsSource = null;
-            PersonPicker.ItemsSource = names;
-            PersonPicker.SelectedItem = names.FirstOrDefault(item => string.Equals(
-                item, previous, StringComparison.OrdinalIgnoreCase));
-            if (PersonPicker.SelectedIndex < 0 && names.Count > 0) PersonPicker.SelectedIndex = 0;
+            if (_scopeMode == ProgressScopeMode.Week)
+            {
+                CoverageKpiText.Text = $"{report.CoveragePercentage}%";
+                CurrentProgressKpiText.Text = $"{report.CoveragePercentage}%";
+                LaggingKpiText.Text = report.LaggingCount.ToString(CultureInfo.InvariantCulture);
+                ReviewKpiText.Text = report.ReviewCount.ToString(CultureInfo.InvariantCulture);
+                CompletedKpiText.Text = report.CompletedCount.ToString(CultureInfo.InvariantCulture);
+                ScheduledKpiText.Text = $"{FormatMinutes(report.ProgressMinutes)} / {FormatMinutes(report.ScheduledMinutes)}";
+            }
 
             var selected = PersonModeToggle.IsChecked == true
                 ? report.People.FirstOrDefault(item => string.Equals(CanonicalPersonUi(item.Name),
                     CanonicalPersonUi(PersonPicker.SelectedItem as string), StringComparison.OrdinalIgnoreCase))
                 : null;
-            CoverageKpiText.Text = $"{selected?.CoveragePercentage ?? report.CoveragePercentage}%";
-            LaggingKpiText.Text = (selected?.LaggingCount ?? report.LaggingCount).ToString(CultureInfo.InvariantCulture);
-            ReviewKpiText.Text = (selected?.ReviewCount ?? report.ReviewCount).ToString(CultureInfo.InvariantCulture);
-            CompletedKpiText.Text = (selected?.CompletedCount ?? report.CompletedCount).ToString(CultureInfo.InvariantCulture);
-            ScheduledKpiText.Text = $"{FormatMinutes(selected?.ProgressMinutes ?? report.ProgressMinutes)} / " +
-                                    $"{FormatMinutes(selected?.ScheduledMinutes ?? report.ScheduledMinutes)}";
-
             WeeklyReportItems.Children.Clear();
             WeeklyReportItems.Children.Add(BuildWeeklyTextCard(
                 $"RESUMEN · {report.WeekStart:dd/MM}–{report.WeekEnd:dd/MM/yyyy}",

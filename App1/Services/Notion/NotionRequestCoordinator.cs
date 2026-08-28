@@ -20,6 +20,7 @@ namespace Anfeta.UI.Services.Notion
         private static readonly SemaphoreSlim RequestGate = new(1, 1);
         private static readonly SemaphoreSlim FullSyncGate = new(1, 1);
         private static readonly object StateLock = new();
+        private static int _interactiveFullSyncWaiters;
 
         private static readonly TimeSpan MinimumRequestSpacing =
             TimeSpan.FromMilliseconds(350);
@@ -59,10 +60,49 @@ namespace Anfeta.UI.Services.Notion
 
 
         public static async Task<IDisposable> EnterFullSyncAsync(
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            bool prioritizeUser = false)
         {
-            await FullSyncGate.WaitAsync(cancellationToken);
-            return new SemaphoreLease(FullSyncGate);
+            if (prioritizeUser)
+            {
+                Interlocked.Increment(
+                    ref _interactiveFullSyncWaiters);
+
+                try
+                {
+                    await FullSyncGate.WaitAsync(
+                        cancellationToken);
+                    return new SemaphoreLease(FullSyncGate);
+                }
+                finally
+                {
+                    Interlocked.Decrement(
+                        ref _interactiveFullSyncWaiters);
+                }
+            }
+
+            // Las precargas y comprobaciones automáticas ceden el siguiente
+            // turno cuando una acción explícita del usuario está esperando.
+            while (true)
+            {
+                while (Volatile.Read(
+                           ref _interactiveFullSyncWaiters) > 0)
+                {
+                    await Task.Delay(60, cancellationToken);
+                }
+
+                await FullSyncGate.WaitAsync(
+                    cancellationToken);
+
+                if (Volatile.Read(
+                        ref _interactiveFullSyncWaiters) == 0)
+                {
+                    return new SemaphoreLease(FullSyncGate);
+                }
+
+                FullSyncGate.Release();
+                await Task.Delay(60, cancellationToken);
+            }
         }
 
         private sealed class SemaphoreLease : IDisposable

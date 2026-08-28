@@ -1850,17 +1850,19 @@
                             CornerRadius="9">
                             <StackPanel Orientation="Horizontal" Spacing="5">
                                 <Button
+                                    x:Name="CalendarYesterdayButton"
                                     Style="{StaticResource CalendarNavButtonStyle}"
                                     Click="CalendarYesterday_Click"
                                     Content="Ayer" />
 
                                 <Button
+                                    x:Name="CalendarTodayButton"
                                     Style="{StaticResource CalendarNavButtonStyle}"
                                     Click="CalendarToday_Click"
-                                    Content="Hoy"
-                                    BorderBrush="#0EA5E9" />
+                                    Content="Hoy" />
 
                                 <Button
+                                    x:Name="CalendarTomorrowButton"
                                     Style="{StaticResource CalendarNavButtonStyle}"
                                     Click="CalendarTomorrow_Click"
                                     Content="Mañana" />

@@ -75,10 +75,13 @@ namespace Anfeta.UI.Services.Notion
             public DateTimeOffset? ReviewUpdatedAt { get; set; }
         }
 
-        // Jornada operativa de Avance Diario.
-        // Lo ocurrido antes de las 06:00 no se arrastra como avance del día
-        // y el corte termina exactamente a medianoche (00:00 del día siguiente).
-        private const int DailyProgressStartHour = 6;
+        // Jornada de captura: desde las 09:00 hasta el final del día.
+        // La ventana ejecutiva 09:30–18:00 se aplica a los KPIs de cobertura;
+        // las tarjetas posteriores siguen visibles para no perder trabajo real.
+        private const int DailyProgressStartHour = 9;
+        private const int ExecutiveWindowStartHour = 9;
+        private const int ExecutiveWindowStartMinute = 30;
+        private const int ExecutiveWindowEndHour = 18;
 
         private static readonly SemaphoreSlim TrackingGate =
             new(1, 1);
@@ -1218,6 +1221,11 @@ namespace Anfeta.UI.Services.Notion
                             item.Person))
                     .ToList();
 
+            var executiveAssignedUnique =
+                assignedUnique
+                    .Where(IsInsideExecutiveWindow)
+                    .ToList();
+
             var trackingStarted =
                 tracking.FirstCapturedAtUtc
                     .ToLocalTime();
@@ -1230,7 +1238,11 @@ namespace Anfeta.UI.Services.Notion
 
                     CoveragePercentage =
                         CalculateCoverage(
-                            assignedUnique),
+                            executiveAssignedUnique),
+
+                    CurrentProgressPercentage =
+                        CalculateCurrentProgress(
+                            executiveAssignedUnique),
 
                     TotalActivities =
                         unique.Count,
@@ -1253,11 +1265,11 @@ namespace Anfeta.UI.Services.Notion
 
                     ScheduledMinutes =
                         GetScheduledMinutes(
-                            assignedUnique),
+                            executiveAssignedUnique),
 
                     ProgressMinutes =
                         GetProgressMinutes(
-                            assignedUnique),
+                            executiveAssignedUnique),
 
                     MissingChecklistCount =
                         assignedUnique.Count(item =>
@@ -1453,6 +1465,13 @@ namespace Anfeta.UI.Services.Notion
                 isReviewMovement ||
                 isCompletedMovement;
 
+            // Progreso ACTUAL disponible para RTUZ/ZREVISION aunque ANFETA no
+            // haya presenciado la transición a revisión en esta ejecución.
+            var currentProgressRatio =
+                CalculateActivityProgressRatio(
+                    activity,
+                    state.Code);
+
             // REGLA 20/08:
             // Avance Hoy NO puede salir del porcentaje histórico actual.
             // Solo cuenta algo que ANFETA haya podido observar dentro del día:
@@ -1461,7 +1480,8 @@ namespace Anfeta.UI.Services.Notion
             // por lo que ambos indicadores pueden coexistir.
             var hasTodayMovement =
                 !isSuspended &&
-                observedMovement;
+                (observedMovement ||
+                 (isReview && currentProgressRatio > 0d));
 
             var duration =
                 activity.End > activity.Start
@@ -1473,13 +1493,6 @@ namespace Anfeta.UI.Services.Notion
                     1,
                     (int)Math.Round(
                         duration.TotalMinutes));
-
-            // Este ratio conserva el progreso ACTUAL de la actividad para los
-            // datos descriptivos/checklist. NO se usa para Cobertura Hoy.
-            var currentProgressRatio =
-                CalculateActivityProgressRatio(
-                    activity,
-                    state.Code);
 
             var checklistTodayRatio =
                 hasRealChecklist &&
@@ -1513,10 +1526,20 @@ namespace Anfeta.UI.Services.Notion
                     ? 1d
                     : 0d;
 
+            // RTUZ/ZREVISION representa trabajo operativo real aun cuando la
+            // transición ocurrió antes de abrir el reporte. En ese estado se
+            // usa su porcentaje actual (checklist o tiempo) y no se espera a Z.
+            var reviewCurrentRatio =
+                isReview
+                    ? currentProgressRatio
+                    : 0d;
+
             var todayProgressRatio =
-                observedMovement
+                hasTodayMovement
                     ? Math.Max(
-                        transitionTodayRatio,
+                        reviewCurrentRatio > 0d
+                            ? reviewCurrentRatio
+                            : transitionTodayRatio,
                         Math.Max(
                             checklistTodayRatio,
                             workedTodayRatio))
@@ -1570,10 +1593,9 @@ namespace Anfeta.UI.Services.Notion
                     ExtractDomain(
                         activity.Title),
                 Person =
-                    string.IsNullOrWhiteSpace(
-                        activity.Person)
-                            ? "Sin asignar"
-                            : activity.Person.Trim(),
+                    ResolveProgressPerson(
+                        activity,
+                        isReview),
 
                 StateCode =
                     state.Code,
@@ -1659,6 +1681,62 @@ namespace Anfeta.UI.Services.Notion
             };
         }
 
+        private static string ResolveProgressPerson(
+            NotionCalendarActivity activity,
+            bool isReview)
+        {
+            var current = string.IsNullOrWhiteSpace(activity.Person)
+                ? "Sin asignar"
+                : CanonicalFeedPerson(activity.Person.Trim());
+
+            if (!isReview)
+                return current;
+
+            var original = CanonicalFeedPerson(activity.OriginalPerson);
+            if (!string.IsNullOrWhiteSpace(original) &&
+                !string.Equals(original, "Sin asignar", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(original, current, StringComparison.OrdinalIgnoreCase))
+            {
+                return original;
+            }
+
+            // Cuando RTUZ se aplica directamente en Notion, el responsable
+            // puede cambiar al revisor antes de que ANFETA alcance a guardar
+            // OriginalPerson. El título conserva la ruta de tags; el último es
+            // el responsable actual y el anterior distinto es quien ejecutó.
+            var tagPeople = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["jjohn"] = "John", ["john"] = "John",
+                ["kkarl"] = "Karla", ["karl"] = "Karla",
+                ["iisai"] = "Isaias", ["isai"] = "Isaias",
+                ["ssote"] = "Sotelo", ["sote"] = "Sotelo",
+                ["eedua"] = "Sotelo", ["edua"] = "Sotelo",
+                ["aacal"] = "Acalli", ["acal"] = "Acalli",
+                ["aandr"] = "Andrade", ["andr"] = "Andrade",
+                ["eemma"] = "Emmanuel", ["emma"] = "Emmanuel",
+                ["bbria"] = "Brian", ["bria"] = "Brian",
+                ["ggena"] = "Genaro", ["gena"] = "Genaro",
+                ["nneft"] = "Neftali", ["neft"] = "Neftali"
+            };
+
+            var matches = Regex.Matches(
+                activity.Title ?? string.Empty,
+                @"(?<![\p{L}\p{Nd}_])(?<tag>[a-z]{4,5})\d*(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            for (var index = matches.Count - 1; index >= 0; index--)
+            {
+                var tag = matches[index].Groups["tag"].Value;
+                if (tagPeople.TryGetValue(tag, out var person) &&
+                    !string.Equals(person, current, StringComparison.OrdinalIgnoreCase))
+                {
+                    return person;
+                }
+            }
+
+            return current;
+        }
+
         private static IReadOnlyList<DailyProgressPersonSnapshot>
             BuildPeople(
                 IReadOnlyList<DailyProgressActivityItem> items)
@@ -1706,6 +1784,11 @@ namespace Anfeta.UI.Services.Notion
                                 !item.IsSuspended)
                             .ToList();
 
+                    var executiveActive =
+                        active
+                            .Where(IsInsideExecutiveWindow)
+                            .ToList();
+
                     var lagging =
                         active
                             .Where(item =>
@@ -1749,15 +1832,19 @@ namespace Anfeta.UI.Services.Notion
 
                         CoveragePercentage =
                             CalculateCoverage(
-                                active),
+                                executiveActive),
+
+                        CurrentProgressPercentage =
+                            CalculateCurrentProgress(
+                                executiveActive),
 
                         ScheduledMinutes =
                             GetScheduledMinutes(
-                                active),
+                                executiveActive),
 
                         ProgressMinutes =
                             GetProgressMinutes(
-                                active),
+                                executiveActive),
 
                         Lagging =
                             lagging,
@@ -1837,6 +1924,39 @@ namespace Anfeta.UI.Services.Notion
                 (int)Math.Round(
                     progress * 100d /
                     scheduled),
+                0,
+                100);
+        }
+
+        private static bool IsInsideExecutiveWindow(
+            DailyProgressActivityItem item)
+        {
+            var day = item.Start.Date;
+            var windowStart = day
+                .AddHours(ExecutiveWindowStartHour)
+                .AddMinutes(ExecutiveWindowStartMinute);
+            var windowEnd = day.AddHours(ExecutiveWindowEndHour);
+
+            return item.End > windowStart && item.Start < windowEnd;
+        }
+
+        private static int CalculateCurrentProgress(
+            IReadOnlyList<DailyProgressActivityItem> items)
+        {
+            var active = (items ?? Array.Empty<DailyProgressActivityItem>())
+                .Where(item => !item.IsSuspended)
+                .ToList();
+
+            var totalWeight = active.Sum(item => Math.Max(1, item.ScheduledMinutes));
+            if (totalWeight <= 0)
+                return 0;
+
+            var weighted = active.Sum(item =>
+                Math.Max(1, item.ScheduledMinutes) *
+                Math.Clamp(item.ProgressPercentage, 0, 100));
+
+            return Math.Clamp(
+                (int)Math.Round(weighted * 1d / totalWeight),
                 0,
                 100);
         }
@@ -2478,9 +2598,9 @@ namespace Anfeta.UI.Services.Notion
             if (string.IsNullOrWhiteSpace(value))
                 return "Actividad";
 
-            return value.Length <= 92
-                ? value
-                : value.Substring(0, 89).TrimEnd() + "…";
+            // La vista decide cómo envolver el texto según el ancho disponible.
+            // Recortarlo aquí dejaba huecos grandes dentro de las tarjetas.
+            return value;
         }
 
         private static List<string> SplitPeople(

@@ -91,6 +91,54 @@ namespace Anfeta.UI.Models.DailyProgress
         public int ProgressMinutes { get; init; }
         public int ProgressPercentage { get; init; }
 
+        // Presupuesto operativo de la actividad. Si existe una estimación
+        // persistida por cronómetro manda; en otro caso se usa la duración
+        // agendada. El avance equivalente total se reparte proporcionalmente
+        // entre todos los checks (ej. 50/100 de 2H = 1H).
+        public int BudgetMinutes =>
+            Source.EstimatedWorkMinutes > 0
+                ? Source.EstimatedWorkMinutes
+                : ScheduledMinutes;
+
+        public int EquivalentCompletedMinutes =>
+            Math.Clamp(
+                (int)Math.Round(
+                    BudgetMinutes *
+                    Math.Clamp(ProgressPercentage, 0, 100) /
+                    100d),
+                0,
+                Math.Max(0, BudgetMinutes));
+
+        public int RemainingMinutes =>
+            Math.Max(
+                0,
+                BudgetMinutes - EquivalentCompletedMinutes);
+
+        public string CompletionForecastLabel
+        {
+            get
+            {
+                if (RemainingMinutes <= 0)
+                    return "Terminada según avance actual";
+
+                if (Start.Date < DateTime.Today)
+                    return "No terminó en su día programado";
+
+                if (Start.Date > DateTime.Today)
+                    return "Programada para una fecha futura";
+
+                var availableToday =
+                    Math.Max(
+                        0,
+                        (int)Math.Floor(
+                            (End - DateTime.Now).TotalMinutes));
+
+                return RemainingMinutes <= availableToday
+                    ? "Sí puede terminar hoy dentro de su horario"
+                    : "En riesgo: el restante ya no cabe hoy";
+            }
+        }
+
         public string TimeLabel =>
             $"{Start:HH:mm}–{End:HH:mm}";
     }
@@ -101,6 +149,7 @@ namespace Anfeta.UI.Models.DailyProgress
         public string Initial { get; init; } = "?";
 
         public int CoveragePercentage { get; init; }
+        public int CurrentProgressPercentage { get; init; }
         public int ScheduledMinutes { get; init; }
         public int ProgressMinutes { get; init; }
 
@@ -131,6 +180,7 @@ namespace Anfeta.UI.Models.DailyProgress
             Array.Empty<DailyProgressPersonSnapshot>();
 
         public int CoveragePercentage { get; init; }
+        public int CurrentProgressPercentage { get; init; }
         public int TotalActivities { get; init; }
         public int LaggingCount { get; init; }
 

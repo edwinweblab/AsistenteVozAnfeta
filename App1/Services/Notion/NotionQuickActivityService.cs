@@ -20,6 +20,15 @@ namespace Anfeta.UI.Services.Notion
         string Title,
         string PageUrl);
 
+    public sealed record NotionQuickPropertyOption(
+        string Id,
+        string Name);
+
+    public sealed record NotionQuickPropertyCatalog(
+        string PropertyName,
+        string PropertyType,
+        IReadOnlyList<NotionQuickPropertyOption> Options);
+
     public sealed record NotionQuickActivityResult(
         string PageId,
         string PageUrl,
@@ -32,7 +41,8 @@ namespace Anfeta.UI.Services.Notion
         string TemplatePageId,
         string Title,
         DateTime Start,
-        DateTime End);
+        DateTime End,
+        IReadOnlyDictionary<string, string>? PropertyValues = null);
 
     public sealed record NotionQuickTemplateBatchProgress(
         int Current,
@@ -61,7 +71,8 @@ namespace Anfeta.UI.Services.Notion
 
         private sealed record QuickSchema(
             string TitleProperty,
-            string DateProperty);
+            string DateProperty,
+            IReadOnlyDictionary<string, string> PropertyTypes);
 
         private sealed record TemplateCatalogCacheEntry(
             DateTimeOffset StoredAtUtc,
@@ -70,11 +81,36 @@ namespace Anfeta.UI.Services.Notion
         private static readonly ConcurrentDictionary<string, TemplateCatalogCacheEntry>
             TemplateCatalogCache = new(StringComparer.OrdinalIgnoreCase);
 
+        private sealed record PropertyCatalogCacheEntry(
+            DateTimeOffset StoredAtUtc,
+            NotionQuickPropertyCatalog Catalog);
+
+        private static readonly ConcurrentDictionary<string, PropertyCatalogCacheEntry>
+            PropertyCatalogCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly TimeSpan PropertyCatalogCacheLifetime =
+            TimeSpan.FromMinutes(30);
+
+        // Cachea el data source real de cada página plantilla y su esquema.
+        // Acceso Dominio y Acceso Correo viven en bases propias; no debemos
+        // intentar leer sus selects/relaciones desde Revisiones.
+        private sealed record PropertySchemaCacheEntry(
+            DateTimeOffset StoredAtUtc,
+            JsonElement Properties);
+
+        private static readonly ConcurrentDictionary<string, string>
+            PageDataSourceCache =
+                new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly ConcurrentDictionary<string, PropertySchemaCacheEntry>
+            PropertySchemaCache =
+                new(StringComparer.OrdinalIgnoreCase);
+
         // Genaro: el catálogo se busca UNA sola vez por vista y después se usa
         // desde disco/memoria. Solo "Actualizar catálogo" vuelve a consultar
         // esa vista exacta.
         private const string TemplateCatalogCacheFileName =
-            "notion_quick_template_catalog_v3.json";
+            "notion_quick_template_catalog_v4.json";
 
         private sealed class PersistedTemplateCatalog
         {
@@ -649,6 +685,333 @@ namespace Anfeta.UI.Services.Notion
             }
         }
 
+        public async Task<string> GetPageDataSourceIdAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken = default)
+        {
+            var cleanPageId = NormalizeId(pageId);
+
+            if (string.IsNullOrWhiteSpace(cleanPageId))
+                return string.Empty;
+
+            if (PageDataSourceCache.TryGetValue(
+                    cleanPageId,
+                    out var cached) &&
+                !string.IsNullOrWhiteSpace(cached))
+            {
+                return cached;
+            }
+
+            using var http = CreateClient(token);
+
+            using var response = await NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"pages/{cleanPageId}"),
+                cancellationToken);
+
+            var json = await response.Content.ReadAsStringAsync(
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+                return string.Empty;
+
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+
+            if (!root.TryGetProperty(
+                    "parent",
+                    out var parent) ||
+                parent.ValueKind != JsonValueKind.Object)
+            {
+                return string.Empty;
+            }
+
+            var dataSourceId =
+                ReadString(parent, "data_source_id");
+
+            if (string.IsNullOrWhiteSpace(dataSourceId))
+                dataSourceId = ReadString(parent, "database_id");
+
+            dataSourceId = NormalizeId(dataSourceId);
+
+            if (!string.IsNullOrWhiteSpace(dataSourceId))
+                PageDataSourceCache[cleanPageId] = dataSourceId;
+
+            return dataSourceId;
+        }
+
+        private static async Task<JsonElement?> GetPropertySchemaAsync(
+            HttpClient http,
+            string dataSourceId,
+            CancellationToken cancellationToken)
+        {
+            var cleanId = NormalizeId(dataSourceId);
+
+            if (PropertySchemaCache.TryGetValue(
+                    cleanId,
+                    out var cached) &&
+                DateTimeOffset.UtcNow - cached.StoredAtUtc <
+                    PropertyCatalogCacheLifetime)
+            {
+                return cached.Properties.Clone();
+            }
+
+            using var schemaResponse =
+                await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () => new HttpRequestMessage(
+                        HttpMethod.Get,
+                        $"data_sources/{cleanId}"),
+                    cancellationToken);
+
+            var schemaJson =
+                await schemaResponse.Content.ReadAsStringAsync(
+                    cancellationToken);
+
+            if (!schemaResponse.IsSuccessStatusCode)
+            {
+                throw CreateNotionException(
+                    "consultar opciones de propiedades",
+                    schemaResponse,
+                    schemaJson);
+            }
+
+            using var schemaDocument = JsonDocument.Parse(schemaJson);
+
+            if (!schemaDocument.RootElement.TryGetProperty(
+                    "properties",
+                    out var properties) ||
+                properties.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var clone = properties.Clone();
+
+            PropertySchemaCache[cleanId] =
+                new PropertySchemaCacheEntry(
+                    DateTimeOffset.UtcNow,
+                    clone);
+
+            return clone;
+        }
+
+        public async Task<NotionQuickPropertyCatalog> GetPropertyCatalogAsync(
+            string token,
+            string dataSourceId,
+            IEnumerable<string> propertyAliases,
+            bool forceRefresh = false,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("Configura primero el token de Notion.");
+
+            if (string.IsNullOrWhiteSpace(dataSourceId))
+                throw new InvalidOperationException("No se pudo identificar la base de Revisiones.");
+
+            var aliases = (propertyAliases ?? Array.Empty<string>())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (aliases.Count == 0)
+                return new NotionQuickPropertyCatalog(string.Empty, string.Empty, Array.Empty<NotionQuickPropertyOption>());
+
+            var cacheKey = $"{NormalizeId(dataSourceId)}|{string.Join("|", aliases.Select(Normalize))}";
+
+            if (!forceRefresh &&
+                PropertyCatalogCache.TryGetValue(cacheKey, out var cached) &&
+                DateTimeOffset.UtcNow - cached.StoredAtUtc < PropertyCatalogCacheLifetime)
+            {
+                return cached.Catalog;
+            }
+
+            using var http = CreateClient(token);
+
+            var propertiesResult =
+                await GetPropertySchemaAsync(
+                    http,
+                    dataSourceId,
+                    cancellationToken);
+
+            if (!propertiesResult.HasValue)
+            {
+                return new NotionQuickPropertyCatalog(
+                    string.Empty,
+                    string.Empty,
+                    Array.Empty<NotionQuickPropertyOption>());
+            }
+
+            var properties = propertiesResult.Value;
+
+            JsonProperty? matchedProperty = null;
+            foreach (var alias in aliases)
+            {
+                var wanted = Normalize(alias);
+
+                foreach (var item in properties.EnumerateObject())
+                {
+                    if (Normalize(item.Name) == wanted)
+                    {
+                        matchedProperty = item;
+                        break;
+                    }
+                }
+
+                if (matchedProperty.HasValue)
+                    break;
+
+                foreach (var item in properties.EnumerateObject())
+                {
+                    if (Normalize(item.Name).StartsWith(
+                            wanted,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedProperty = item;
+                        break;
+                    }
+                }
+
+                if (matchedProperty.HasValue)
+                    break;
+
+                foreach (var item in properties.EnumerateObject())
+                {
+                    if (Normalize(item.Name).Contains(
+                            wanted,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedProperty = item;
+                        break;
+                    }
+                }
+
+                if (matchedProperty.HasValue)
+                    break;
+            }
+
+            if (!matchedProperty.HasValue)
+                return new NotionQuickPropertyCatalog(string.Empty, string.Empty, Array.Empty<NotionQuickPropertyOption>());
+
+            var propertyName = matchedProperty.Value.Name;
+            var property = matchedProperty.Value.Value;
+            var type = ReadString(property, "type");
+            var options = new List<NotionQuickPropertyOption>();
+
+            if ((type.Equals("select", StringComparison.OrdinalIgnoreCase) ||
+                 type.Equals("status", StringComparison.OrdinalIgnoreCase) ||
+                 type.Equals("multi_select", StringComparison.OrdinalIgnoreCase)) &&
+                property.TryGetProperty(type, out var optionConfig) &&
+                optionConfig.ValueKind == JsonValueKind.Object &&
+                optionConfig.TryGetProperty("options", out var optionArray) &&
+                optionArray.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var option in optionArray.EnumerateArray())
+                {
+                    var name = ReadString(option, "name");
+                    if (!string.IsNullOrWhiteSpace(name))
+                        options.Add(new NotionQuickPropertyOption(ReadString(option, "id"), name));
+                }
+            }
+            else if (type.Equals("relation", StringComparison.OrdinalIgnoreCase) &&
+                     property.TryGetProperty("relation", out var relation) &&
+                     relation.ValueKind == JsonValueKind.Object)
+            {
+                var relatedDataSourceId = ReadString(relation, "data_source_id");
+                if (string.IsNullOrWhiteSpace(relatedDataSourceId))
+                    relatedDataSourceId = ReadString(relation, "database_id");
+
+                // Algunas relaciones antiguas de Notion no exponen el destino
+                // en el schema aunque la UI sí muestre "BD CLIENTES (bien)".
+                // Para CLIENTES usamos la fuente conocida por ANFETA.
+                if (Normalize(propertyName).Contains(
+                        "clientes",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var clientsSource = NotionDataSources.Default
+                        .FirstOrDefault(source => source.Name.Equals(
+                            "Clientes",
+                            StringComparison.OrdinalIgnoreCase));
+
+                    if (clientsSource != null &&
+                        !string.IsNullOrWhiteSpace(clientsSource.DataSourceId))
+                    {
+                        relatedDataSourceId = clientsSource.DataSourceId;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(relatedDataSourceId))
+                {
+                    string? cursor = null;
+                    var hasMore = true;
+                    // Un selector inicial no necesita descargar toda la base.
+                    // Una página (100 clientes) mantiene la apertura del modal rápida.
+                    const int maximumRelationOptions = 100;
+
+                    while (hasMore && options.Count < maximumRelationOptions)
+                    {
+                        var payload = new Dictionary<string, object?> { ["page_size"] = 100 };
+                        if (!string.IsNullOrWhiteSpace(cursor))
+                            payload["start_cursor"] = cursor;
+
+                        using var response = await NotionRequestCoordinator.SendAsync(
+                            http,
+                            () => new HttpRequestMessage(
+                                HttpMethod.Post,
+                                $"data_sources/{NormalizeId(relatedDataSourceId)}/query")
+                            {
+                                Content = new StringContent(
+                                    JsonSerializer.Serialize(payload),
+                                    Encoding.UTF8,
+                                    "application/json")
+                            },
+                            cancellationToken);
+
+                        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                        if (!response.IsSuccessStatusCode)
+                            break;
+
+                        using var document = JsonDocument.Parse(json);
+                        var root = document.RootElement;
+                        if (root.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var page in results.EnumerateArray())
+                            {
+                                var id = ReadString(page, "id");
+                                var name = ReadPageTitle(page);
+                                if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name))
+                                    options.Add(new NotionQuickPropertyOption(id, name));
+
+                                if (options.Count >= maximumRelationOptions)
+                                    break;
+                            }
+                        }
+
+                        hasMore = ReadBoolean(root, "has_more");
+                        cursor = ReadNullableString(root, "next_cursor");
+                        if (string.IsNullOrWhiteSpace(cursor))
+                            hasMore = false;
+                    }
+                }
+            }
+
+            var catalog = new NotionQuickPropertyCatalog(
+                propertyName,
+                type,
+                options
+                    .GroupBy(item => string.IsNullOrWhiteSpace(item.Id) ? item.Name : item.Id, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList());
+
+            PropertyCatalogCache[cacheKey] = new PropertyCatalogCacheEntry(DateTimeOffset.UtcNow, catalog);
+            return catalog;
+        }
+
         public async Task SaveTemplatesAsync(
             string sourceViewUrl,
             IEnumerable<NotionQuickTemplateItem> items,
@@ -728,6 +1091,7 @@ namespace Anfeta.UI.Services.Notion
             string title,
             DateTime start,
             DateTime end,
+            IReadOnlyDictionary<string, string>? propertyValues = null,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(templatePageId))
@@ -758,6 +1122,7 @@ namespace Anfeta.UI.Services.Notion
                 title,
                 start,
                 end,
+                propertyValues,
                 cancellationToken);
         }
 
@@ -867,6 +1232,7 @@ namespace Anfeta.UI.Services.Notion
                             title,
                             start,
                             end,
+                            item.PropertyValues,
                             cancellationToken);
 
                     results.Add(
@@ -910,6 +1276,7 @@ namespace Anfeta.UI.Services.Notion
                 string title,
                 DateTime start,
                 DateTime end,
+                IReadOnlyDictionary<string, string>? propertyValues,
                 CancellationToken cancellationToken)
         {
             var sourceHasBody =
@@ -923,7 +1290,8 @@ namespace Anfeta.UI.Services.Notion
                     schema,
                     title,
                     start,
-                    end);
+                    end,
+                    propertyValues);
 
             var payload =
                 new Dictionary<string, object?>
@@ -1004,6 +1372,19 @@ namespace Anfeta.UI.Services.Notion
             // Reafirmamos solamente título + Fecha POR Hacer.
             if (!string.IsNullOrWhiteSpace(pageId))
             {
+                await PatchFinalPropertiesAsync(
+                    http,
+                    pageId,
+                    properties,
+                    cancellationToken);
+
+                // Notion puede terminar de aplicar el template después de que el
+                // BODY ya apareció y volver a colocar la fecha/hora del template.
+                // Una segunda reafirmación estabiliza TODOS los elementos del lote.
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(1200),
+                    cancellationToken);
+
                 await PatchFinalPropertiesAsync(
                     http,
                     pageId,
@@ -1324,12 +1705,13 @@ namespace Anfeta.UI.Services.Notion
             QuickSchema schema,
             string title,
             DateTime start,
-            DateTime end)
+            DateTime end,
+            IReadOnlyDictionary<string, string>? propertyValues = null)
         {
             var localStart = DateTime.SpecifyKind(start, DateTimeKind.Local);
             var localEnd = DateTime.SpecifyKind(end, DateTimeKind.Local);
 
-            return new Dictionary<string, object?>
+            var result = new Dictionary<string, object?>
             {
                 [schema.TitleProperty] = new Dictionary<string, object?>
                 {
@@ -1354,6 +1736,72 @@ namespace Anfeta.UI.Services.Notion
                     }
                 }
             };
+
+            foreach (var pair in propertyValues ??
+                     new Dictionary<string, string>())
+            {
+                var wanted = Normalize(pair.Key);
+                var actualName = schema.PropertyTypes.Keys.FirstOrDefault(name =>
+                    Normalize(name) == wanted) ??
+                    schema.PropertyTypes.Keys.FirstOrDefault(name =>
+                        Normalize(name).StartsWith(wanted, StringComparison.OrdinalIgnoreCase)) ??
+                    schema.PropertyTypes.Keys.FirstOrDefault(name =>
+                        Normalize(name).Contains(wanted, StringComparison.OrdinalIgnoreCase));
+                if (string.IsNullOrWhiteSpace(actualName) ||
+                    string.IsNullOrWhiteSpace(pair.Value))
+                    continue;
+
+                var type = schema.PropertyTypes[actualName];
+                result[actualName] = type switch
+                {
+                    "url" => new Dictionary<string, object?> { ["url"] = pair.Value.Trim() },
+                    "select" => new Dictionary<string, object?>
+                    {
+                        ["select"] = new Dictionary<string, object?> { ["name"] = pair.Value.Trim() }
+                    },
+                    "status" => new Dictionary<string, object?>
+                    {
+                        ["status"] = new Dictionary<string, object?> { ["name"] = pair.Value.Trim() }
+                    },
+                    "multi_select" => new Dictionary<string, object?>
+                    {
+                        ["multi_select"] = new object[]
+                        {
+                            new Dictionary<string, object?>
+                            {
+                                ["name"] = pair.Value.Trim()
+                            }
+                        }
+                    },
+                    "rich_text" => new Dictionary<string, object?>
+                    {
+                        ["rich_text"] = new object[]
+                        {
+                            new Dictionary<string, object?>
+                            {
+                                ["type"] = "text",
+                                ["text"] = new Dictionary<string, object?> { ["content"] = pair.Value.Trim() }
+                            }
+                        }
+                    },
+                    "relation" => new Dictionary<string, object?>
+                    {
+                        ["relation"] = new object[]
+                        {
+                            new Dictionary<string, object?>
+                            {
+                                ["id"] = NormalizeId(pair.Value)
+                            }
+                        }
+                    },
+                    _ => result.TryGetValue(actualName, out var existing) ? existing : null
+                };
+
+                if (result[actualName] == null)
+                    result.Remove(actualName);
+            }
+
+            return result;
         }
 
         private static void ValidateCreationInput(
@@ -1456,7 +1904,12 @@ namespace Anfeta.UI.Services.Notion
                     "No se encontró la propiedad editable Fecha POR Hacer en Revisiones.");
             }
 
-            return new QuickSchema(titleProperty, dateProperty);
+            var propertyTypes = properties.EnumerateObject().ToDictionary(
+                property => property.Name,
+                property => ReadString(property.Value, "type"),
+                StringComparer.OrdinalIgnoreCase);
+
+            return new QuickSchema(titleProperty, dateProperty, propertyTypes);
         }
 
         private static string ExtractViewId(string sourceViewUrl)

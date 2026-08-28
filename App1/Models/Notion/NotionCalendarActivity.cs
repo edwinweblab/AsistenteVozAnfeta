@@ -29,6 +29,15 @@ namespace Anfeta.UI.Models.Notion
         public int ChecklistTotal { get; set; }
         public int ChecklistCompleted { get; set; }
 
+        // Comentarios abiertos recuperados desde la API de Notion. Se guardan
+        // con la misma cache incremental del checklist para no consultar cada
+        // card de forma independiente.
+        public int CommentCount { get; set; }
+        public string LatestCommentText { get; set; } = "";
+
+        public bool HasComments =>
+            CommentCount > 0;
+
         public int ChecklistPending =>
             Math.Max(0, ChecklistTotal - ChecklistCompleted);
 

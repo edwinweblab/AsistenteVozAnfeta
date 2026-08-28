@@ -200,9 +200,16 @@
                     <Button
                         x:Name="WeeklyScopeButton"
                         Style="{StaticResource FeedButton}"
-                        Click="WeeklyScope_Click"
-                        Content="Semana"
-                        ToolTipService.ToolTip="Alternar entre el reporte diario y el reporte semanal local" />
+                        Content="Vista: Día ▾"
+                        ToolTipService.ToolTip="Elegir Día, Semana o Día + Semana">
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Text="Día" Click="ScopeDay_Click" />
+                                <MenuFlyoutItem Text="Semana" Click="ScopeWeek_Click" />
+                                <MenuFlyoutItem Text="Día + Semana" Click="ScopeCombined_Click" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
 
                     <Button
                         Style="{StaticResource FeedButton}"
@@ -239,6 +246,19 @@
                         Content="↻"
                         ToolTipService.ToolTip="Actualizar este día" />
 
+                    <ComboBox
+                        x:Name="TextZoomPicker"
+                        MinWidth="112"
+                        Height="34"
+                        SelectedIndex="0"
+                        SelectionChanged="TextZoomPicker_SelectionChanged"
+                        ToolTipService.ToolTip="Tamaño de texto de Avance Diario">
+                        <ComboBoxItem Content="Texto 100%" />
+                        <ComboBoxItem Content="Texto 115%" />
+                        <ComboBoxItem Content="Texto 130%" />
+                        <ComboBoxItem Content="Texto 145%" />
+                    </ComboBox>
+
                     <Button
                         Style="{StaticResource FeedButton}"
                         Click="Close_Click"
@@ -249,17 +269,21 @@
         </Border>
 
         <!-- KPIs compactos: una sola lectura ejecutiva. -->
-        <ScrollViewer
+        <Grid
             Grid.Row="1"
             Margin="8,0,8,5"
-            HorizontalScrollBarVisibility="Auto"
-            HorizontalScrollMode="Enabled"
-            VerticalScrollBarVisibility="Disabled"
-            VerticalScrollMode="Disabled">
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="1.35*" />
+            </Grid.ColumnDefinitions>
                 <Border
-                    MinWidth="155"
-                    Padding="10,6"
+                    Grid.Column="0"
+                    Padding="12,8"
                     Background="#0E1C24"
                     BorderBrush="#23516A"
                     BorderThickness="1"
@@ -282,8 +306,8 @@
                 </Border>
 
                 <Border
-                    MinWidth="145"
-                    Padding="10,6"
+                    Grid.Column="1"
+                    Padding="12,8"
                     Background="#211316"
                     BorderBrush="#67323B"
                     BorderThickness="1"
@@ -306,8 +330,8 @@
                 </Border>
 
                 <Border
-                    MinWidth="145"
-                    Padding="10,6"
+                    Grid.Column="2"
+                    Padding="12,8"
                     Background="#10202A"
                     BorderBrush="#245169"
                     BorderThickness="1"
@@ -330,8 +354,8 @@
                 </Border>
 
                 <Border
-                    MinWidth="145"
-                    Padding="10,6"
+                    Grid.Column="3"
+                    Padding="12,8"
                     Background="#102019"
                     BorderBrush="#275640"
                     BorderThickness="1"
@@ -354,8 +378,8 @@
                 </Border>
 
                 <Border
-                    MinWidth="210"
-                    Padding="10,6"
+                    Grid.Column="5"
+                    Padding="12,8"
                     Background="#171A20"
                     BorderBrush="#343C47"
                     BorderThickness="1"
@@ -376,13 +400,47 @@
                             Text="0H" />
                     </StackPanel>
                 </Border>
-            </StackPanel>
-        </ScrollViewer>
+
+                <Border
+                    Grid.Column="4"
+                    Padding="12,8"
+                    Background="#17152A"
+                    BorderBrush="#514A8A"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    ToolTipService.ToolTip="Progreso actual: porcentaje ponderado de las actividades de 09:30–18:00. Incluye PRTUZ, RTUZ/ZREVISION y Z; excluye suspendidas.">
+                    <StackPanel>
+                        <TextBlock
+                            x:Name="CurrentProgressKpiLabel"
+                            FontSize="9.5"
+                            Foreground="#C4B5FD"
+                            Text="PROGRESO ACTUAL" />
+                        <TextBlock
+                            x:Name="CurrentProgressKpiText"
+                            Margin="0,1,0,0"
+                            FontSize="20"
+                            FontWeight="SemiBold"
+                            Foreground="#EDE9FE"
+                            Text="0%" />
+                    </StackPanel>
+                </Border>
+        </Grid>
 
         <Grid Grid.Row="2" Margin="8,0,8,5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="DailyContentColumn" Width="*" />
+                <ColumnDefinition x:Name="WeeklyContentColumn" Width="0" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="DailyContentRow" Height="*" />
+                <RowDefinition x:Name="WeeklyHeaderRow" Height="0" />
+                <RowDefinition x:Name="WeeklyContentRow" Height="0" />
+            </Grid.RowDefinitions>
+
             <!-- Vista general -->
             <Grid
                 x:Name="GeneralViewHost"
+                Grid.Row="0"
                 Visibility="Visible">
                 <GridView
                     x:Name="PeopleGrid"
@@ -397,7 +455,7 @@
                         <ItemsPanelTemplate>
                             <ItemsWrapGrid
                                 Orientation="Horizontal"
-                                ItemWidth="360" />
+                                ItemWidth="430" />
                         </ItemsPanelTemplate>
                     </GridView.ItemsPanel>
                 </GridView>
@@ -406,6 +464,7 @@
             <!-- Vista por usuario -->
             <Grid
                 x:Name="PersonDetailHost"
+                Grid.Row="0"
                 Visibility="Collapsed">
                 <Grid RowSpacing="6">
                     <Grid.RowDefinitions>
@@ -481,9 +540,42 @@
                 </Grid>
             </Grid>
 
+            <!-- Día y semana permanecen juntos: este encabezado nunca sustituye
+                 la vista diaria superior. -->
+            <Border
+                x:Name="WeeklyHeader"
+                Grid.Row="1"
+                Margin="0,4,0,5"
+                Padding="10,6"
+                Background="#101820"
+                BorderBrush="#28516A"
+                BorderThickness="1"
+                CornerRadius="9"
+                Visibility="Collapsed">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Foreground="#7DD3FC"
+                        Text="AVANCE SEMANAL" />
+                    <TextBlock
+                        x:Name="WeeklyPeriodText"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontSize="10"
+                        Foreground="#8FA3B5"
+                        Text="Semana actual" />
+                </Grid>
+            </Border>
+
             <!-- Reporte semanal: se construye únicamente desde fotografías locales. -->
             <Grid
                 x:Name="WeeklyReportHost"
+                Grid.Row="2"
                 Visibility="Collapsed">
                 <ScrollViewer
                     HorizontalScrollBarVisibility="Disabled"
@@ -499,6 +591,7 @@
             <!-- Estado vacío -->
             <Border
                 x:Name="FeedEmptyState"
+                Grid.Row="0"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Padding="24,18"
@@ -526,6 +619,7 @@
             <!-- Loader no bloquea con pantalla en blanco: conserva el último Feed debajo. -->
             <Border
                 x:Name="FeedLoadingBadge"
+                Grid.Row="0"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
                 Margin="0,8,12,0"

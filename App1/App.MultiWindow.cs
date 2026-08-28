@@ -13,6 +13,30 @@ namespace Anfeta.UI
         public bool IsCalendarActivityWindowOpen =>
             _calendarActivityWindow != null;
 
+        /// <summary>
+        /// Activa la actividad fijada existente sin crear otra ventana.
+        /// Devuelve true cuando había una ventana que debía conservar el foco.
+        /// </summary>
+        public bool TryBringCalendarActivityWindowToFront()
+        {
+            var window = _calendarActivityWindow;
+
+            if (window == null)
+                return false;
+
+            try
+            {
+                window.BringToFront();
+            }
+            catch
+            {
+                // La referencia sigue siendo suficiente para bloquear la
+                // apertura de otro modal mientras termina el cierre real.
+            }
+
+            return true;
+        }
+
 
         /// <summary>
         /// Sincroniza el filtro SOLO si la ventana secundaria ya existe.
@@ -87,7 +111,8 @@ namespace Anfeta.UI
         public void OpenCalendarActivityWindow(
             FrameworkElement content,
             string? title = null,
-            Action? onClosed = null)
+            Action? onClosed = null,
+            Windows.UI.Color? themeColor = null)
         {
             if (content == null)
                 return;
@@ -101,6 +126,9 @@ namespace Anfeta.UI
                     content,
                     title);
 
+                if (themeColor.HasValue)
+                    _calendarActivityWindow.ApplyTheme(themeColor.Value);
+
                 _calendarActivityWindow.BringToFront();
                 return;
             }
@@ -108,7 +136,8 @@ namespace Anfeta.UI
             var window =
                 new CalendarActivityWindow(
                     content,
-                    title);
+                    title,
+                    themeColor);
 
             _calendarActivityWindow =
                 window;
@@ -155,6 +184,12 @@ namespace Anfeta.UI
             _calendarActivityWindow.SetContent(
                 content,
                 title);
+        }
+
+        public void UpdateCalendarActivityWindowTheme(
+            Windows.UI.Color color)
+        {
+            _calendarActivityWindow?.ApplyTheme(color);
         }
 
         public void CloseCalendarActivityWindow()

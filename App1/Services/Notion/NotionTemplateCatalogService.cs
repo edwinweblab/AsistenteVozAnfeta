@@ -29,6 +29,7 @@ namespace Anfeta.UI.Services.Notion
     /// - ADS  = título contiene token exacto aads
     /// - COBRO = título contiene token exacto ccobr
     /// - BIBL = título contiene token exacto bbibl
+    /// - ACTIVIDAD RÁPIDA = familia [ttipo-actividad] / [ttipo-actividad-rrapi rapido]
     ///
     /// El catálogo Fase1 completo se persiste localmente.
     /// </summary>
@@ -44,7 +45,7 @@ namespace Anfeta.UI.Services.Notion
             "Plantilla Fase1";
 
         private const string CacheFileName =
-            "notion_template_phase1_catalog_v1.json";
+            "notion_template_phase1_catalog_v2.json";
 
         // Fase1 debe ser mucho más pequeña que todo Plantilla Fases.
         // Dejamos un margen amplio sin permitir un recorrido accidental enorme.
@@ -524,9 +525,15 @@ namespace Anfeta.UI.Services.Notion
             return source
                 .Where(item =>
                     item != null &&
-                    TitleContainsExactToken(
-                        item.Title,
-                        token))
+                    (token == "rrapi"
+                        ? IsQuickActivityTemplateTitle(item.Title)
+                        : token == "aacce-ccorre"
+                            ? IsAccessTemplateTitle(item.Title, "ccorre")
+                            : token == "aacce-ddomi"
+                                ? IsAccessTemplateTitle(item.Title, "ddomi")
+                        : TitleContainsExactToken(
+                            item.Title,
+                            token)))
                 .OrderBy(item =>
                     ExtractOrder(
                         item.Title) ??
@@ -535,6 +542,33 @@ namespace Anfeta.UI.Services.Notion
                     item => item.Title,
                     StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private static bool IsQuickActivityTemplateTitle(
+            string title)
+        {
+            return !string.IsNullOrWhiteSpace(title) &&
+                Regex.IsMatch(
+                    title,
+                    @"\[ttipo-actividad(?:-rrapi\s+rapido)?\]",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+        }
+
+        private static bool IsAccessTemplateTitle(
+            string title,
+            string targetToken)
+        {
+            if (string.IsNullOrWhiteSpace(title) ||
+                !TitleContainsExactToken(title, "aacce"))
+                return false;
+
+            // Las plantillas reales no comparten todos los tokens intermedios:
+            // dominio usa aacce/ccont/ddomi y correo usa aacce/ccorr.
+            return targetToken.Equals("ddomi", StringComparison.OrdinalIgnoreCase)
+                ? TitleContainsExactToken(title, "ddomi")
+                : TitleContainsExactToken(title, "ccorr") ||
+                  TitleContainsExactToken(title, "ccorre");
         }
 
         private static bool TitleContainsExactToken(
@@ -596,6 +630,9 @@ namespace Anfeta.UI.Services.Notion
 
                 "393abd7d91b780209653000cd91dff96" =>
                     "bbibl",
+
+                "393abd7d91b7803e9921000c068624c5" =>
+                    "rrapi",
 
                 _ =>
                     string.Empty

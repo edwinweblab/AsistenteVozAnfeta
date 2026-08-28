@@ -593,13 +593,15 @@ namespace Anfeta.UI.Views
         private void SearchBox_GotFocus(object sender, RoutedEventArgs e)
         {
             RefreshQuickFlyoutContent();
-            ShowQuickCommandsInputFlyout();
+            // El foco automático al abrir una pestaña no debe desplegar el
+            // predictivo ni tapar el calendario. Se abre al escribir.
         }
 
         private void SearchBox_Tapped(object sender, TappedRoutedEventArgs e)
         {
             RefreshQuickFlyoutContent();
-            ShowQuickCommandsInputFlyout();
+            // Un clic solo coloca el cursor. Las sugerencias aparecen cuando
+            // existe entrada real del usuario.
         }
 
         private void RefreshQuickFlyoutContent(string? input = null)
