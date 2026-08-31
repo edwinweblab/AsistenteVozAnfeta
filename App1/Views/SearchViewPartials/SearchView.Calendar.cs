@@ -50,6 +50,13 @@ namespace Anfeta.UI.Views
         private const int CalendarPrimaryEndHour = 21;
         private const int CalendarEndHour = 22;
 
+        // Los encabezados sticky deben quedar SIEMPRE por encima de cards,
+        // overlays, actividades empalmadas y elementos arrastrados dentro
+        // del Canvas. Antes PAGOS/COBROS quedaban en Z=305 mientras sus cards
+        // podían llegar a Z=431 o más, por eso visualmente se iban "al fondo".
+        private const int CalendarStickyHeaderZIndex = 4000;
+        private const int CalendarStickyCornerZIndex = 4010;
+
         private const string LS_CalendarShowExtraHours =
             "Search.Calendar.ShowExtraHours";
 
@@ -474,6 +481,9 @@ namespace Anfeta.UI.Views
         private const string LS_CalendarShowCobros =
             "Search.Calendar.ShowCobros";
 
+        private const string LS_CalendarShowPagos =
+            "Search.Calendar.ShowPagos";
+
         // Posición persistente del carril global de Cobros. Es un slot entre
         // columnas: 0 = antes de la primera persona, Count = al final.
         // Así el usuario puede mover Cobros sin mezclarlo nuevamente con las
@@ -481,9 +491,15 @@ namespace Anfeta.UI.Views
         private const string LS_CalendarCobrosColumnSlot =
             "Search.Calendar.Cobros.ColumnSlot.v1";
 
+        private const string LS_CalendarPagosColumnSlot =
+            "Search.Calendar.Pagos.ColumnSlot.v1";
+
         private bool _calendarShowCobros;
         private bool _calendarCobrosPreferenceLoaded;
+        private bool _calendarShowPagos;
+        private bool _calendarPagosPreferenceLoaded;
         private int _calendarCobroColumnSlot = 1;
+        private int _calendarPagoColumnSlot = int.MaxValue;
 
         // Horario extra 21:00–22:00. Por defecto permanece contraído para
         // no alargar el calendario. El usuario puede desplegarlo desde la
@@ -500,11 +516,17 @@ namespace Anfeta.UI.Views
             _calendarCobroOverlayCache =
                 new(StringComparer.OrdinalIgnoreCase);
 
+        private readonly Dictionary<string, IReadOnlyList<CalendarCobroOverlayItem>>
+            _calendarPagoOverlayCache =
+                new(StringComparer.OrdinalIgnoreCase);
+
         // Cobros 2.1 usa UNA columna global independiente y movible.
         // Actividades, recordatorios y drag conservan exactamente sus anchos;
         // el Canvas solo agrega este carril en el slot elegido por el usuario.
         private double _calendarCobroRailWidth;
         private double _calendarCobroRailLeft;
+        private double _calendarPagoRailWidth;
+        private double _calendarPagoRailLeft;
 
         private bool _oneClickScheduleDialogOpen;
 
@@ -1044,6 +1066,7 @@ namespace Anfeta.UI.Views
                 CloseMessagesView();
 
             LoadCalendarCobrosPreference();
+            LoadCalendarPagosPreference();
             LoadCalendarPreferences();
             LoadCalendarExtraHoursPreference();
             EnsureCalendarWorkTimerLoaded();
@@ -1352,6 +1375,7 @@ namespace Anfeta.UI.Views
             // Recordatorios y cobros se refrescan aparte únicamente si cambió
             // App.LocalIndex. No fuerzan un DrawCalendar completo.
             RefreshCalendarExternalOverlaysIfNeeded();
+            RefreshPriority00Counts();
         }
 
         private void EnsureCalendarSizeHandler()
@@ -1605,6 +1629,7 @@ namespace Anfeta.UI.Views
             RoutedEventArgs e)
         {
             _calendarCobroOverlayCache.Clear();
+            _calendarPagoOverlayCache.Clear();
 
             // Una hidratación completa de checklist puede dejar decenas de
             // lecturas esperando turno. La actualización manual prioriza la
@@ -2718,6 +2743,7 @@ namespace Anfeta.UI.Views
         private void DrawCalendar(
             IReadOnlyList<NotionCalendarActivity> activities)
         {
+            RefreshPriority00Counts();
             ApplyCachedCalendarReviewFlow(activities);
 
             var expandedActivities =
@@ -2741,6 +2767,7 @@ namespace Anfeta.UI.Views
                     _calendarSearchQuery);
 
             CalendarCanvas.Children.Clear();
+            _priority00Buttons.Clear();
             _calendarActivityVisuals.Clear();
             _calendarPinnedOverlapActivityButton = null;
             _calendarActivityBaseZIndexes.Clear();
@@ -2749,9 +2776,12 @@ namespace Anfeta.UI.Views
             _calendarStickyCorner = null;
 
             var hasCobroOverlayEvents =
-                _calendarShowCobros &&
-                GetCalendarCobroItems(
-                    _calendarSelectedDate).Count > 0;
+                (_calendarShowCobros &&
+                 GetCalendarCobroItems(
+                     _calendarSelectedDate).Count > 0) ||
+                (_calendarShowPagos &&
+                 GetCalendarPagoItems(
+                     _calendarSelectedDate).Count > 0);
 
             CalendarEmptyState.Visibility =
                 visibleActivities.Count == 0 &&
@@ -2804,7 +2834,8 @@ namespace Anfeta.UI.Views
             var totalWidth =
                 CalendarTimeColumnWidth +
                 persons.Sum(GetResolvedCalendarColumnWidth) +
-                GetResolvedCalendarCobroRailWidth();
+                GetResolvedCalendarCobroRailWidth() +
+                GetResolvedCalendarPagoRailWidth();
 
             CalendarCanvas.Width =
                 Math.Max(
@@ -2849,7 +2880,7 @@ namespace Anfeta.UI.Views
 
             corner.Tag = "CalendarCorner";
             _calendarStickyCorner = corner;
-            Canvas.SetZIndex(corner, 310);
+            Canvas.SetZIndex(corner, CalendarStickyCornerZIndex);
 
             for (var personIndex = 0;
                  personIndex < persons.Count;
@@ -2919,6 +2950,7 @@ namespace Anfeta.UI.Views
                     {
                         Text = person,
                         FontSize = 13.5 * CalendarFontScale,
+                        Margin = new Thickness(0, 0, 48, 0),
                         FontWeight =
                             Microsoft.UI.Text.FontWeights.SemiBold,
                         TextTrimming = TextTrimming.CharacterEllipsis,
@@ -2975,8 +3007,10 @@ namespace Anfeta.UI.Views
 
                 ToolTipService.SetToolTip(
                     compactMetrics,
-                    $"Cobertura: {currentCoverage:0}%\n" +
-                    $"Progreso actual: {currentProgress:0}%");
+                    BuildCalendarHeaderMetricsTooltip(
+                        person,
+                        currentCoverage,
+                        currentProgress));
 
                 headerContent.Children.Add(compactMetrics);
 
@@ -2996,9 +3030,11 @@ namespace Anfeta.UI.Views
 
                 ToolTipService.SetToolTip(
                     headerButton,
-                    $"Ver actividades de {person}\n" +
-                    $"Cobertura: {currentCoverage:0}% · " +
-                    $"Actual: {currentProgress:0}%");
+                    BuildCalendarHeaderMetricsTooltip(
+                        person,
+                        currentCoverage,
+                        currentProgress,
+                        includeTitle: true));
 
                 // El encabezado completo reemplaza al antiguo botón del ojo.
                 headerButton.Click +=
@@ -3105,7 +3141,15 @@ namespace Anfeta.UI.Views
                     $"Más opciones de {person}");
 
                 Grid.SetColumn(headerButton, 0);
-                headerContainer.Children.Add(headerButton);
+                var nameAndPriority = new Grid();
+                nameAndPriority.Children.Add(headerButton);
+                var priorityButton = CreatePriority00Button(person);
+                priorityButton.HorizontalAlignment = HorizontalAlignment.Right;
+                priorityButton.VerticalAlignment = VerticalAlignment.Top;
+                priorityButton.Margin = new Thickness(0, 2, 0, 0);
+                nameAndPriority.Children.Add(priorityButton);
+                Grid.SetColumn(nameAndPriority, 0);
+                headerContainer.Children.Add(nameAndPriority);
 
                 Grid.SetColumn(notionCalendarButton, 1);
                 headerContainer.Children.Add(notionCalendarButton);
@@ -3118,7 +3162,7 @@ namespace Anfeta.UI.Views
 
                 Canvas.SetLeft(headerContainer, left + 2);
                 Canvas.SetTop(headerContainer, 2);
-                Canvas.SetZIndex(headerContainer, 300);
+                Canvas.SetZIndex(headerContainer, CalendarStickyHeaderZIndex);
                 CalendarCanvas.Children.Add(headerContainer);
                 _calendarStickyHeaders.Add(headerContainer);
 
@@ -3257,6 +3301,10 @@ namespace Anfeta.UI.Views
                     Width = cobroHeader.Width,
                     Height = cobroHeader.Height,
                     CornerRadius = new CornerRadius(6),
+                    // Base sólida: evita ver las cards que pasan por detrás
+                    // mientras el encabezado permanece pegado arriba.
+                    Background = new SolidColorBrush(
+                        Darken(_calendarThemeColor, 0.08)),
                     BorderBrush = new SolidColorBrush(
                         Color.FromArgb(115, 192, 132, 252)),
                     BorderThickness = new Thickness(1),
@@ -3268,7 +3316,7 @@ namespace Anfeta.UI.Views
                     GetResolvedCalendarCobroRailLeft() + 3);
 
                 Canvas.SetTop(cobroHeaderBorder, 4);
-                Canvas.SetZIndex(cobroHeaderBorder, 305);
+                Canvas.SetZIndex(cobroHeaderBorder, CalendarStickyHeaderZIndex);
                 CalendarCanvas.Children.Add(cobroHeaderBorder);
                 _calendarStickyHeaders.Add(cobroHeaderBorder);
 
@@ -3283,6 +3331,165 @@ namespace Anfeta.UI.Views
                     0,
                     headerHeight + bodyHeight,
                     Color.FromArgb(100, 168, 85, 247));
+            }
+
+            var globalPagoRailWidth =
+                GetResolvedCalendarPagoRailWidth();
+
+            if (globalPagoRailWidth > 0)
+            {
+                var pagoHeaderGrid = new Grid
+                {
+                    Width = Math.Max(20, globalPagoRailWidth - 6),
+                    Height = headerHeight - 8,
+                    Padding = new Thickness(4, 0, 4, 0),
+                    ColumnSpacing = 4,
+                    Background = new SolidColorBrush(
+                        Color.FromArgb(46, 14, 165, 233)),
+                    Tag = "CalendarPagosHeader"
+                };
+
+                pagoHeaderGrid.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = GridLength.Auto });
+                pagoHeaderGrid.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(1, GridUnitType.Star)
+                    });
+                pagoHeaderGrid.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = GridLength.Auto });
+                pagoHeaderGrid.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = GridLength.Auto });
+
+                var pagoLeftMoveButton = new Button
+                {
+                    Content = "‹",
+                    Width = 24,
+                    Height = Math.Max(24, headerHeight - 18),
+                    Padding = new Thickness(0),
+                    FontSize = 15 * CalendarFontScale,
+                    IsEnabled = Math.Clamp(
+                        _calendarPagoColumnSlot,
+                        0,
+                        persons.Count) > 0,
+                    Background = new SolidColorBrush(
+                        Color.FromArgb(38, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(
+                        Color.FromArgb(95, 125, 211, 252)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5)
+                };
+
+                pagoLeftMoveButton.Click += (_, __) =>
+                    MoveCalendarPagosColumn(-1);
+
+                var pagoHeaderText = new TextBlock
+                {
+                    Text = "💳 PAGOS",
+                    FontSize = Math.Max(8.5, 9.2 * CalendarFontScale),
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(
+                        Color.FromArgb(255, 224, 242, 254)),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    TextAlignment = TextAlignment.Center,
+                    MaxLines = 1
+                };
+
+                var pagoRightMoveButton = new Button
+                {
+                    Content = "›",
+                    Width = 24,
+                    Height = Math.Max(24, headerHeight - 18),
+                    Padding = new Thickness(0),
+                    FontSize = 15 * CalendarFontScale,
+                    IsEnabled = Math.Clamp(
+                        _calendarPagoColumnSlot,
+                        0,
+                        persons.Count) < persons.Count,
+                    Background = new SolidColorBrush(
+                        Color.FromArgb(38, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(
+                        Color.FromArgb(95, 125, 211, 252)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5)
+                };
+
+                pagoRightMoveButton.Click += (_, __) =>
+                    MoveCalendarPagosColumn(1);
+
+                var hidePagosButton = new Button
+                {
+                    Content = "×",
+                    Width = 24,
+                    Height = Math.Max(24, headerHeight - 18),
+                    Padding = new Thickness(0),
+                    FontSize = 13 * CalendarFontScale,
+                    Background = new SolidColorBrush(
+                        Color.FromArgb(34, 248, 113, 113)),
+                    BorderBrush = new SolidColorBrush(
+                        Color.FromArgb(90, 248, 113, 113)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5)
+                };
+
+                hidePagosButton.Click += (_, __) =>
+                {
+                    _calendarShowPagos = false;
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_CalendarShowPagos] = false;
+                    _calendarPagoOverlayCache.Clear();
+                    UpdateCalendarPagosToggleVisual();
+                    DrawCalendarPreservingView(
+                        _calendarActivities,
+                        force: true);
+                };
+
+                Grid.SetColumn(pagoLeftMoveButton, 0);
+                pagoHeaderGrid.Children.Add(pagoLeftMoveButton);
+
+                Grid.SetColumn(pagoHeaderText, 1);
+                pagoHeaderGrid.Children.Add(pagoHeaderText);
+
+                Grid.SetColumn(pagoRightMoveButton, 2);
+                pagoHeaderGrid.Children.Add(pagoRightMoveButton);
+
+                Grid.SetColumn(hidePagosButton, 3);
+                pagoHeaderGrid.Children.Add(hidePagosButton);
+
+                var pagoHeaderBorder = new Border
+                {
+                    Width = pagoHeaderGrid.Width,
+                    Height = pagoHeaderGrid.Height,
+                    CornerRadius = new CornerRadius(6),
+                    // Base sólida: PAGOS ya no deja transparentar las cards
+                    // que se desplazan por debajo del header sticky.
+                    Background = new SolidColorBrush(
+                        Darken(_calendarThemeColor, 0.08)),
+                    BorderBrush = new SolidColorBrush(
+                        Color.FromArgb(130, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    Child = pagoHeaderGrid
+                };
+
+                Canvas.SetLeft(
+                    pagoHeaderBorder,
+                    GetResolvedCalendarPagoRailLeft() + 3);
+                Canvas.SetTop(pagoHeaderBorder, 4);
+                Canvas.SetZIndex(pagoHeaderBorder, CalendarStickyHeaderZIndex);
+                CalendarCanvas.Children.Add(pagoHeaderBorder);
+                _calendarStickyHeaders.Add(pagoHeaderBorder);
+
+                AddVerticalLine(
+                    GetResolvedCalendarPagoRailLeft(),
+                    0,
+                    headerHeight + bodyHeight,
+                    Color.FromArgb(145, 56, 189, 248));
+                AddVerticalLine(
+                    GetResolvedCalendarPagoRailLeft() + globalPagoRailWidth,
+                    0,
+                    headerHeight + bodyHeight,
+                    Color.FromArgb(100, 56, 189, 248));
             }
 
             AddVerticalLine(
@@ -3496,6 +3703,10 @@ namespace Anfeta.UI.Views
                 headerHeight,
                 persons);
 
+            DrawCalendarPagoOverlays(
+                headerHeight,
+                persons);
+
             _calendarExternalOverlayIndexVersion =
                 App.LocalIndex.Version;
 
@@ -3525,10 +3736,19 @@ namespace Anfeta.UI.Views
                             _calendarSelectedDate).Count
                         : 0;
 
+                var visiblePagos =
+                    _calendarShowPagos
+                        ? GetCalendarPagoItems(
+                            _calendarSelectedDate).Count
+                        : 0;
+
                 CountText.Text =
                     $"{drawnActivityCount} visibles · {activities.Count} cargadas" +
                     (_calendarShowCobros
                         ? $" · {visibleCobros} cobro(s)"
+                        : string.Empty) +
+                    (_calendarShowPagos
+                        ? $" · {visiblePagos} pago(s)"
                         : string.Empty);
 
                 var phaseLabel =
@@ -3541,11 +3761,17 @@ namespace Anfeta.UI.Views
                         ? " · 💰 Cobros"
                         : string.Empty;
 
+                var pagosMode =
+                    _calendarShowPagos
+                        ? " · 💳 Pagos"
+                        : string.Empty;
+
                 ModeText.Text =
                     (string.IsNullOrWhiteSpace(_calendarSearchQuery)
                         ? $"Modo: Calendario · {phaseLabel}"
                         : $"Modo: Calendario · {phaseLabel} · {_calendarSearchQuery}") +
-                    cobrosMode;
+                    cobrosMode +
+                    pagosMode;
             }
 
             _calendarLastVisualFingerprint =
@@ -3567,6 +3793,9 @@ namespace Anfeta.UI.Views
 
         private ToggleButton? CalendarCobrosToggleControl =>
             FindName("CalendarCobrosToggle") as ToggleButton;
+
+        private ToggleButton? CalendarPagosToggleControl =>
+            FindName("CalendarPagosToggle") as ToggleButton;
 
         private ToggleButton? CalendarExtraHoursToggleControl =>
             FindName("CalendarExtraHoursToggle") as ToggleButton;
@@ -3973,7 +4202,14 @@ namespace Anfeta.UI.Views
                         "bbibl",
                         "https://app.notion.com/p/393abd7d91b7804993bdd14809e1b27b?v=393abd7d91b780209653000cd91dff96&source=copy_link",
                         60,
-                        "Plantillas reales de Bibliotecas.")
+                        "Plantillas reales de Bibliotecas."),
+                    new CalendarQuickTemplateDefinition(
+                        "programas",
+                        "Programas",
+                        "pprog",
+                        CalendarTemplateHubUrl,
+                        60,
+                        "Plantilla Fase1 con el tag exacto pprog. No se crean copias si no hay una plantilla real.")
                 };
 
         private const string CalendarTemplateHubUrl =
@@ -4805,14 +5041,14 @@ namespace Anfeta.UI.Views
             // también ContentDialogMinWidth/ContentDialogMaxWidth.
             var dialogWidth =
                 Math.Max(
-                    620d,
+                    1d,
                     Math.Min(
                         860d,
-                        rootWidth - 96d));
+                        rootWidth - 48d));
 
             var contentWidth =
                 Math.Max(
-                    500d,
+                    1d,
                     dialogWidth - 44d);
 
             // La altura siempre contiene filas completas. Así el borde inferior no
@@ -4866,11 +5102,11 @@ namespace Anfeta.UI.Views
                             HorizontalAlignment.Stretch,
                         Width =
                             Math.Max(
-                                440d,
+                                1d,
                                 contentWidth - 58d),
                         MaxWidth =
                             Math.Max(
-                                440d,
+                                1d,
                                 contentWidth - 58d),
                         ColumnSpacing = 10,
                         Padding = new Thickness(10, 7, 10, 7)
@@ -5219,7 +5455,14 @@ namespace Anfeta.UI.Views
                                 }
                         },
                         templateSearchBox,
-                        selectionBar,
+                        new ScrollViewer
+                        {
+                            Content = selectionBar,
+                            HorizontalScrollMode = ScrollMode.Enabled,
+                            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                            VerticalScrollMode = ScrollMode.Disabled,
+                            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
+                        },
                         list,
                         sourceButton
                     }
@@ -5231,7 +5474,13 @@ namespace Anfeta.UI.Views
                     XamlRoot = XamlRoot,
                     Title =
                         $"⚡ Plantillas masivas · {template.Label}",
-                    Content = panel,
+                    Content = new ScrollViewer
+                    {
+                        Content = panel,
+                        MaxHeight = Math.Max(1d, rootHeight - 180d),
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+                    },
                     MinWidth = dialogWidth,
                     MaxWidth = dialogWidth,
                     PrimaryButtonText =
@@ -5679,20 +5928,20 @@ namespace Anfeta.UI.Views
 
             var dialogWidth =
                 Math.Max(
-                    620d,
+                    1d,
                     Math.Min(
                         1040d,
                         rootWidth - 64d));
 
             var contentWidth =
                 Math.Max(
-                    560d,
+                    1d,
                     dialogWidth - 44d);
 
             var contentMaxHeight =
                 Math.Clamp(
                     rootHeight - 230d,
-                    440d,
+                    1d,
                     700d);
 
             var criteria =
@@ -6596,14 +6845,14 @@ namespace Anfeta.UI.Views
 
             var contentWidth =
                 Math.Clamp(
-                    rootWidth - 300d,
-                    500d,
+                    rootWidth - 96d,
+                    1d,
                     660d);
 
             var contentMaxHeight =
                 Math.Clamp(
                     rootHeight - 250d,
-                    420d,
+                    1d,
                     680d);
 
             var criteria =
@@ -7424,6 +7673,30 @@ namespace Anfeta.UI.Views
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
+        private static bool IsPagarIndexRow(
+            SearchResultRow row)
+        {
+            if (row == null || row.Source != SearchSource.Notion)
+                return false;
+
+            var source =
+                NormalizeCalendarSearchText(
+                    row.ExternalSourceName);
+
+            if (!source.Contains("cobrar", StringComparison.OrdinalIgnoreCase) &&
+                !source.Contains("pagar", StringComparison.OrdinalIgnoreCase) &&
+                !source.Contains("cobro", StringComparison.OrdinalIgnoreCase) &&
+                !source.Contains("pago", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(
+                row.DisplayName ?? string.Empty,
+                @"(?<![\p{L}\p{Nd}_])(?:sprtuz|prtuz|rtuz|z)?pagar(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
         private static bool TryParseCobroScheduledRange(
             SearchResultRow row,
             out DateTime start,
@@ -7557,6 +7830,55 @@ namespace Anfeta.UI.Views
             return items;
         }
 
+        private IReadOnlyList<CalendarCobroOverlayItem> GetCalendarPagoItems(
+            DateTime day)
+        {
+            if (!_calendarShowPagos)
+                return Array.Empty<CalendarCobroOverlayItem>();
+
+            var key = day.Date.ToString(
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture);
+
+            if (_calendarPagoOverlayCache.TryGetValue(key, out var cached))
+                return cached;
+
+            var dayStart = day.Date;
+            var dayEnd = dayStart.AddDays(1);
+
+            var items =
+                App.LocalIndex
+                    .GetAll()
+                    .Where(IsPagarIndexRow)
+                    .Select(row =>
+                    {
+                        if (!TryParseCobroScheduledRange(
+                                row,
+                                out var start,
+                                out var end) ||
+                            start >= dayEnd || end <= dayStart)
+                        {
+                            return null;
+                        }
+
+                        var title = row.DisplayName?.Trim() ?? string.Empty;
+                        var person = GetActiveCalendarPersonFromTitle(title);
+                        if (string.IsNullOrWhiteSpace(person))
+                            person = "Sin asignar";
+
+                        return new CalendarCobroOverlayItem(
+                            row, start, end, person, title);
+                    })
+                    .Where(item => item != null)
+                    .Cast<CalendarCobroOverlayItem>()
+                    .OrderBy(item => item.Start)
+                    .ThenBy(item => item.Title)
+                    .ToList();
+
+            _calendarPagoOverlayCache[key] = items;
+            return items;
+        }
+
         private void RefreshCalendarExternalOverlaysIfNeeded(
             bool force = false)
         {
@@ -7603,13 +7925,15 @@ namespace Anfeta.UI.Views
                         (element is Button button &&
                          button.Tag is MessageViewItem) ||
                         (element.Tag is SearchResultRow row &&
-                         IsCobrarPagarIndexRow(row)))
+                         (IsCobrarPagarIndexRow(row) ||
+                          IsPagarIndexRow(row))))
                     .ToList();
 
             foreach (var element in removable)
                 CalendarCanvas.Children.Remove(element);
 
             _calendarCobroOverlayCache.Clear();
+            _calendarPagoOverlayCache.Clear();
             _calendarCobroCacheIndexVersion = indexVersion;
 
             var persons =
@@ -7619,6 +7943,14 @@ namespace Anfeta.UI.Views
                     .ToList();
 
             DrawCalendarReminderOverlays(
+                CalendarHeaderHeight,
+                persons);
+
+            DrawCalendarCobroOverlays(
+                CalendarHeaderHeight,
+                persons);
+
+            DrawCalendarPagoOverlays(
                 CalendarHeaderHeight,
                 persons);
 
@@ -7667,7 +7999,8 @@ namespace Anfeta.UI.Views
         }
 
         private CalendarCobroDisplayInfo BuildCalendarCobroDisplayInfo(
-            CalendarCobroOverlayItem cobro)
+            CalendarCobroOverlayItem cobro,
+            bool isPago = false)
         {
             var row = cobro.Row;
 
@@ -7719,7 +8052,9 @@ namespace Anfeta.UI.Views
 
             concept = Regex.Replace(
                 concept,
-                @"(?<![\p{L}\p{Nd}_])(?:sprtuz|prtuz|rtuz|z)?cobrar(?![\p{L}\p{Nd}_])",
+                isPago
+                    ? @"(?<![\p{L}\p{Nd}_])(?:sprtuz|prtuz|rtuz|z)?pagar(?![\p{L}\p{Nd}_])"
+                    : @"(?<![\p{L}\p{Nd}_])(?:sprtuz|prtuz|rtuz|z)?cobrar(?![\p{L}\p{Nd}_])",
                 " ",
                 RegexOptions.IgnoreCase |
                 RegexOptions.CultureInvariant);
@@ -7791,7 +8126,9 @@ namespace Anfeta.UI.Views
                     "http",
                     StringComparison.OrdinalIgnoreCase))
             {
-                concept = "Pendiente de cobro";
+                concept = isPago
+                    ? "Pendiente de pago"
+                    : "Pendiente de cobro";
             }
 
             var status =
@@ -7806,12 +8143,15 @@ namespace Anfeta.UI.Views
 
         private static string BuildCalendarCobroTooltip(
             CalendarCobroOverlayItem cobro,
-            CalendarCobroDisplayInfo display)
+            CalendarCobroDisplayInfo display,
+            bool isPago = false)
         {
             var lines =
                 new List<string>
                 {
-                    $"💰 COBRO · {cobro.Start:dd/MM/yyyy HH:mm}–{cobro.End:HH:mm}"
+                    isPago
+                        ? $"💳 PAGO · {cobro.Start:dd/MM/yyyy HH:mm}–{cobro.End:HH:mm}"
+                        : $"💰 COBRO · {cobro.Start:dd/MM/yyyy HH:mm}–{cobro.End:HH:mm}"
                 };
 
             if (!string.IsNullOrWhiteSpace(display.Domain))
@@ -7832,14 +8172,38 @@ namespace Anfeta.UI.Views
             double headerHeight,
             IReadOnlyList<string> visiblePersons)
         {
-            if (!_calendarShowCobros || !_calendarViewActive ||
+            DrawCalendarFinancialOverlays(
+                headerHeight,
+                visiblePersons,
+                isPago: false);
+        }
+
+        private void DrawCalendarPagoOverlays(
+            double headerHeight,
+            IReadOnlyList<string> visiblePersons)
+        {
+            DrawCalendarFinancialOverlays(
+                headerHeight,
+                visiblePersons,
+                isPago: true);
+        }
+
+        private void DrawCalendarFinancialOverlays(
+            double headerHeight,
+            IReadOnlyList<string> visiblePersons,
+            bool isPago)
+        {
+            if ((isPago ? !_calendarShowPagos : !_calendarShowCobros) ||
+                !_calendarViewActive ||
                 CalendarCanvas == null || visiblePersons == null ||
                 visiblePersons.Count == 0)
             {
                 return;
             }
 
-            var cobros = GetCalendarCobroItems(_calendarSelectedDate);
+            var cobros = isPago
+                ? GetCalendarPagoItems(_calendarSelectedDate)
+                : GetCalendarCobroItems(_calendarSelectedDate);
             if (cobros.Count == 0)
                 return;
 
@@ -7863,10 +8227,14 @@ namespace Anfeta.UI.Views
                     .ToList();
 
             var railWidth =
-                GetResolvedCalendarCobroRailWidth();
+                isPago
+                    ? GetResolvedCalendarPagoRailWidth()
+                    : GetResolvedCalendarCobroRailWidth();
 
             var railLeft =
-                GetResolvedCalendarCobroRailLeft();
+                isPago
+                    ? GetResolvedCalendarPagoRailLeft()
+                    : GetResolvedCalendarCobroRailLeft();
 
             if (railWidth <= 0 || resolved.Count == 0)
                 return;
@@ -7924,7 +8292,8 @@ namespace Anfeta.UI.Views
 
                 var display =
                     BuildCalendarCobroDisplayInfo(
-                        cobro);
+                        cobro,
+                        isPago);
 
                 var cardGrid =
                     new Grid
@@ -7978,7 +8347,9 @@ namespace Anfeta.UI.Views
                     new TextBlock
                     {
                         Text =
-                            $"💰 COBRO · {localStart:HH:mm}",
+                            isPago
+                                ? $"💳 PAGO · {localStart:HH:mm}"
+                                : $"💰 COBRO · {localStart:HH:mm}",
                         FontSize =
                             Math.Max(
                                 8.5,
@@ -8087,7 +8458,9 @@ namespace Anfeta.UI.Views
                         Text =
                             string.IsNullOrWhiteSpace(
                                 display.Domain)
-                                ? "Cobro programado"
+                                ? isPago
+                                    ? "Pago programado"
+                                    : "Cobro programado"
                                 : display.Domain,
                         FontSize =
                             Math.Max(
@@ -8168,24 +8541,17 @@ namespace Anfeta.UI.Views
                         VerticalContentAlignment =
                             VerticalAlignment.Stretch,
 
-                        // Morado profundo + acento eléctrico. Se conserva
-                        // el lenguaje visual de Cobros pero con más contraste
-                        // y menos efecto de "tarjetas apiladas".
                         Background =
                             new SolidColorBrush(
-                                Color.FromArgb(
-                                    252,
-                                    42,
-                                    18,
-                                    70)),
+                                isPago
+                                    ? Color.FromArgb(252, 8, 47, 73)
+                                    : Color.FromArgb(252, 42, 18, 70)),
 
                         BorderBrush =
                             new SolidColorBrush(
-                                Color.FromArgb(
-                                    255,
-                                    192,
-                                    132,
-                                    252)),
+                                isPago
+                                    ? Color.FromArgb(255, 56, 189, 248)
+                                    : Color.FromArgb(255, 192, 132, 252)),
 
                         BorderThickness =
                             new Thickness(
@@ -8204,44 +8570,37 @@ namespace Anfeta.UI.Views
                 button.Resources[
                     "ButtonBackgroundPointerOver"] =
                         new SolidColorBrush(
-                            Color.FromArgb(
-                                255,
-                                58,
-                                25,
-                                96));
+                            isPago
+                                ? Color.FromArgb(255, 10, 65, 96)
+                                : Color.FromArgb(255, 58, 25, 96));
 
                 button.Resources[
                     "ButtonBorderBrushPointerOver"] =
                         new SolidColorBrush(
-                            Color.FromArgb(
-                                255,
-                                216,
-                                180,
-                                254));
+                            isPago
+                                ? Color.FromArgb(255, 125, 211, 252)
+                                : Color.FromArgb(255, 216, 180, 254));
 
                 button.Resources[
                     "ButtonBackgroundPressed"] =
                         new SolidColorBrush(
-                            Color.FromArgb(
-                                255,
-                                72,
-                                33,
-                                116));
+                            isPago
+                                ? Color.FromArgb(255, 12, 78, 112)
+                                : Color.FromArgb(255, 72, 33, 116));
 
                 button.Resources[
                     "ButtonBorderBrushPressed"] =
                         new SolidColorBrush(
-                            Color.FromArgb(
-                                255,
-                                233,
-                                213,
-                                255));
+                            isPago
+                                ? Color.FromArgb(255, 186, 230, 253)
+                                : Color.FromArgb(255, 233, 213, 255));
 
                 ToolTipService.SetToolTip(
                     button,
                     BuildCalendarCobroTooltip(
                         cobro,
-                        display));
+                        display,
+                        isPago));
 
                 button.Click += async (_, __) =>
                     await OpenCalendarCobroAsync(
@@ -8261,18 +8620,14 @@ namespace Anfeta.UI.Views
                             new CornerRadius(10),
                         Background =
                             new SolidColorBrush(
-                                Color.FromArgb(
-                                    28,
-                                    168,
-                                    85,
-                                    247)),
+                                isPago
+                                    ? Color.FromArgb(28, 14, 165, 233)
+                                    : Color.FromArgb(28, 168, 85, 247)),
                         BorderBrush =
                             new SolidColorBrush(
-                                Color.FromArgb(
-                                    74,
-                                    216,
-                                    180,
-                                    254)),
+                                isPago
+                                    ? Color.FromArgb(74, 125, 211, 252)
+                                    : Color.FromArgb(74, 216, 180, 254)),
                         BorderThickness =
                             new Thickness(1),
                         IsHitTestVisible = false,
@@ -16479,7 +16834,17 @@ namespace Anfeta.UI.Views
                 CalendarScrollViewer.VerticalOffset;
 
             foreach (var header in _calendarStickyHeaders)
+            {
                 Canvas.SetTop(header, vertical + 2);
+
+                // No basta con mover el header: las tarjetas de PAGOS/COBROS
+                // usan capas superiores a las que tenía el header original.
+                // Se reafirma la capa en cada scroll/zoom para que nunca pase
+                // visualmente detrás de una actividad.
+                Canvas.SetZIndex(
+                    header,
+                    CalendarStickyHeaderZIndex);
+            }
 
             foreach (var hour in _calendarStickyHours)
             {
@@ -16500,6 +16865,10 @@ namespace Anfeta.UI.Views
                 Canvas.SetTop(
                     _calendarStickyCorner,
                     vertical + 17 * _calendarZoom);
+
+                Canvas.SetZIndex(
+                    _calendarStickyCorner,
+                    CalendarStickyCornerZIndex);
             }
         }
 
@@ -16710,6 +17079,8 @@ namespace Anfeta.UI.Views
             _calendarResolvedColumnLefts.Clear();
             _calendarCobroRailWidth = 0;
             _calendarCobroRailLeft = CalendarTimeColumnWidth;
+            _calendarPagoRailWidth = 0;
+            _calendarPagoRailLeft = CalendarTimeColumnWidth;
 
             if (persons.Count == 0)
                 return;
@@ -16732,7 +17103,7 @@ namespace Anfeta.UI.Views
             // ofrece desplazamiento horizontal; "Grande" no debe terminar
             // visualmente convertido en "Normal" por una compresión automática.
             var minResolvedWidth =
-                CalendarMinPersonColumnWidth;
+                Math.Max(CalendarMinPersonColumnWidth, 110d + 110d * Math.Max(1d, CalendarFontScale));
 
             var maxResolvedWidth =
                 Math.Max(
@@ -16759,6 +17130,20 @@ namespace Anfeta.UI.Views
             if (hasCobros)
             {
                 _calendarCobroRailWidth =
+                    Math.Clamp(
+                        190d * _calendarZoom,
+                        160d,
+                        240d);
+            }
+
+            var hasPagos =
+                _calendarShowPagos &&
+                GetCalendarPagoItems(
+                    _calendarSelectedDate).Count > 0;
+
+            if (hasPagos)
+            {
+                _calendarPagoRailWidth =
                     Math.Clamp(
                         190d * _calendarZoom,
                         160d,
@@ -16805,9 +17190,15 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            var resolvedSlot =
+            var resolvedCobroSlot =
                 Math.Clamp(
                     _calendarCobroColumnSlot,
+                    0,
+                    persons.Count);
+
+            var resolvedPagoSlot =
+                Math.Clamp(
+                    _calendarPagoColumnSlot,
                     0,
                     persons.Count);
 
@@ -16816,10 +17207,17 @@ namespace Anfeta.UI.Views
             for (var index = 0; index < persons.Count; index++)
             {
                 if (_calendarCobroRailWidth > 0 &&
-                    index == resolvedSlot)
+                    index == resolvedCobroSlot)
                 {
                     _calendarCobroRailLeft = currentLeft;
                     currentLeft += _calendarCobroRailWidth;
+                }
+
+                if (_calendarPagoRailWidth > 0 &&
+                    index == resolvedPagoSlot)
+                {
+                    _calendarPagoRailLeft = currentLeft;
+                    currentLeft += _calendarPagoRailWidth;
                 }
 
                 var person = persons[index];
@@ -16831,9 +17229,17 @@ namespace Anfeta.UI.Views
             }
 
             if (_calendarCobroRailWidth > 0 &&
-                resolvedSlot == persons.Count)
+                resolvedCobroSlot == persons.Count)
             {
                 _calendarCobroRailLeft = currentLeft;
+                currentLeft += _calendarCobroRailWidth;
+            }
+
+            if (_calendarPagoRailWidth > 0 &&
+                resolvedPagoSlot == persons.Count)
+            {
+                _calendarPagoRailLeft = currentLeft;
+                currentLeft += _calendarPagoRailWidth;
             }
         }
 
@@ -16878,6 +17284,16 @@ namespace Anfeta.UI.Views
         private double GetResolvedCalendarCobroRailLeft()
         {
             return _calendarCobroRailLeft;
+        }
+
+        private double GetResolvedCalendarPagoRailWidth()
+        {
+            return Math.Max(0, _calendarPagoRailWidth);
+        }
+
+        private double GetResolvedCalendarPagoRailLeft()
+        {
+            return _calendarPagoRailLeft;
         }
 
         private bool TryGetCalendarProjectCachedContent(
@@ -17208,6 +17624,7 @@ namespace Anfeta.UI.Views
             var cancellationToken =
                 _calendarPersonPreviewCts.Token;
 
+            _priority00PanelTag = null;
             _calendarProjectPreviewActive = true;
             EnsureCalendarProjectCardZoomLoaded();
 
@@ -18075,6 +18492,7 @@ namespace Anfeta.UI.Views
         private void ShowCalendarPersonPreview(
             string person)
         {
+            _priority00PanelTag = null;
             _calendarProjectPreviewActive = false;
             _calendarProjectPreviewCriteria = null;
             _calendarProjectPreviewActivities =
@@ -19369,10 +19787,14 @@ namespace Anfeta.UI.Views
                     Math.Max(
                         27,
                         36 * cardScale),
-                Width =
-                    Math.Max(
-                        285,
-                        370 * cardScale)
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            actions.SizeChanged += (_, e) =>
+            {
+                var columns = Math.Max(1, Math.Min(3, (int)(e.NewSize.Width / Math.Max(116, 116 * cardScale))));
+                actions.MaximumRowsOrColumns = columns;
+                actions.ItemWidth = Math.Max(1, e.NewSize.Width / columns);
             };
 
             Button BuildCardActionButton(
@@ -19381,10 +19803,7 @@ namespace Anfeta.UI.Views
                 return new Button
                 {
                     Content = text,
-                    Width =
-                        Math.Max(
-                            84,
-                            110 * cardScale),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                     Height =
                         Math.Max(
                             25,
@@ -19783,7 +20202,7 @@ namespace Anfeta.UI.Views
                     (previewPanelWidth > 0
                         ? previewPanelWidth
                         : RootLayout?.ActualWidth ?? 700) - 54,
-                    350,
+                    1,
                     1800);
 
             var content = new StackPanel
@@ -19890,7 +20309,7 @@ namespace Anfeta.UI.Views
                         0));
             }
 
-            return new Border
+            var expandedContent = new Border
             {
                 HorizontalAlignment =
                     HorizontalAlignment.Stretch,
@@ -19913,6 +20332,185 @@ namespace Anfeta.UI.Views
                             255)),
                 Child = content
             };
+
+            // El contenido desplegado debe aprovechar el ancho del panel y
+            // leerse con la misma presencia que las tarjetas terminadas.
+            // Esta escala se convierte en la nueva base responsiva; los modos
+            // Grande/Extra grande/Máximo todavía pueden aumentarla después.
+            ScaleCalendarExpandedContentTypography(
+                expandedContent,
+                1.18d);
+
+            return expandedContent;
+        }
+
+        private void LoadCalendarPagosPreference()
+        {
+            if (!_calendarPagosPreferenceLoaded)
+            {
+                _calendarPagosPreferenceLoaded = true;
+
+                var stored =
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_CalendarShowPagos];
+
+                _calendarShowPagos =
+                    stored is bool enabled && enabled;
+
+                var storedSlot =
+                    ApplicationData.Current.LocalSettings.Values[
+                        LS_CalendarPagosColumnSlot];
+
+                if (storedSlot is int intSlot)
+                {
+                    _calendarPagoColumnSlot = Math.Max(0, intSlot);
+                }
+                else if (int.TryParse(
+                             storedSlot?.ToString(),
+                             NumberStyles.Integer,
+                             CultureInfo.InvariantCulture,
+                             out var parsedSlot))
+                {
+                    _calendarPagoColumnSlot = Math.Max(0, parsedSlot);
+                }
+            }
+
+            UpdateCalendarPagosToggleVisual();
+        }
+
+        private void UpdateCalendarPagosToggleVisual()
+        {
+            if (CalendarPagosToggleControl == null)
+                return;
+
+            CalendarPagosToggleControl.IsChecked = _calendarShowPagos;
+            CalendarPagosToggleControl.Content =
+                _calendarShowPagos ? "💳✓" : "💳";
+
+            ToolTipService.SetToolTip(
+                CalendarPagosToggleControl,
+                _calendarShowPagos
+                    ? "Ocultar columna independiente de PAGOS"
+                    : "Mostrar pagos con Due Fecha Recordatorio");
+        }
+
+        private async void CalendarPagosToggle_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            _calendarShowPagos =
+                sender is ToggleButton toggle
+                    ? toggle.IsChecked == true
+                    : !_calendarShowPagos;
+
+            ApplicationData.Current.LocalSettings.Values[
+                LS_CalendarShowPagos] = _calendarShowPagos;
+
+            _calendarPagoOverlayCache.Clear();
+            UpdateCalendarPagosToggleVisual();
+
+            if (_calendarViewActive)
+            {
+                RefreshCalendarExternalOverlaysIfNeeded(force: true);
+                DrawCalendarPreservingView(
+                    _calendarActivities,
+                    force: true);
+
+                StatusText.Text = _calendarShowPagos
+                    ? $"Estado: PAGOS visible ✅ ({GetCalendarPagoItems(_calendarSelectedDate).Count} evento(s) con hora)"
+                    : "Estado: PAGOS oculto ✅";
+            }
+
+            await Task.CompletedTask;
+        }
+
+        private void MoveCalendarPagosColumn(int delta)
+        {
+            if (!_calendarShowPagos || delta == 0)
+                return;
+
+            var visiblePeopleCount =
+                _calendarPeopleOrder.Count(person =>
+                    _calendarSelectedPeople.Contains(person));
+
+            var current = Math.Clamp(
+                _calendarPagoColumnSlot,
+                0,
+                Math.Max(0, visiblePeopleCount));
+
+            var next = Math.Clamp(
+                current + delta,
+                0,
+                Math.Max(0, visiblePeopleCount));
+
+            if (next == current)
+                return;
+
+            _calendarPagoColumnSlot = next;
+            ApplicationData.Current.LocalSettings.Values[
+                LS_CalendarPagosColumnSlot] = next;
+
+            DrawCalendarPreservingView(
+                _calendarActivities,
+                force: true);
+
+            StatusText.Text =
+                $"Estado: Columna Pagos movida · posición {next + 1} ✅";
+        }
+
+        private static void ScaleCalendarExpandedContentTypography(
+            UIElement element,
+            double scale)
+        {
+            if (element == null)
+                return;
+
+            if (element is TextBlock text && text.FontSize > 0)
+            {
+                text.FontSize = Math.Clamp(
+                    text.FontSize * scale,
+                    10.5d,
+                    28d);
+            }
+            else if (element is Control control &&
+                     control.FontSize > 0)
+            {
+                control.FontSize = Math.Clamp(
+                    control.FontSize * scale,
+                    10.5d,
+                    28d);
+            }
+
+            switch (element)
+            {
+                case Border border when border.Child is UIElement child:
+                    ScaleCalendarExpandedContentTypography(child, scale);
+                    break;
+
+                case ContentControl contentControl
+                    when contentControl.Content is UIElement child:
+                    ScaleCalendarExpandedContentTypography(child, scale);
+                    break;
+
+                case Panel panel:
+                    foreach (var child in panel.Children)
+                    {
+                        ScaleCalendarExpandedContentTypography(child, scale);
+                    }
+                    break;
+
+                case Expander expander:
+                    if (expander.Header is UIElement header)
+                        ScaleCalendarExpandedContentTypography(header, scale);
+
+                    if (expander.Content is UIElement expanderContent)
+                    {
+                        ScaleCalendarExpandedContentTypography(
+                            expanderContent,
+                            scale);
+                    }
+                    break;
+            }
         }
 
         private static FrameworkElement
@@ -19994,6 +20592,11 @@ namespace Anfeta.UI.Views
         private void RenderCalendarPersonPreviewItems(
             string person)
         {
+            if (_priority00PanelTag != null)
+            {
+                RenderPriority00Panel();
+                return;
+            }
             if (_calendarProjectPreviewActive)
             {
                 RenderCalendarProjectPreviewItems();
@@ -20045,6 +20648,7 @@ namespace Anfeta.UI.Views
         private void CloseCalendarPersonPreviewPanel(
             bool redrawCalendar = true)
         {
+            _priority00PanelTag = null;
             StopNotionPreviewSpeech();
             try
             {
@@ -21187,6 +21791,151 @@ namespace Anfeta.UI.Views
                     weightedProgress / totalMinutes,
                     0d,
                     100d);
+        }
+
+        private string BuildCalendarHeaderMetricsTooltip(
+            string person,
+            double coverage,
+            double progress,
+            bool includeTitle = false)
+        {
+            var day = _calendarSelectedDate.Date;
+            var windowStart = day.AddHours(9).AddMinutes(30);
+            var windowEnd = day.AddHours(18);
+            var normalizedPerson = NormalizeCalendarPerson(person);
+
+            var activities =
+                ExpandCalendarReviewActivities(_calendarActivities)
+                    .Where(activity =>
+                        activity != null &&
+                        !activity.IsReviewMirror &&
+                        !IsOneClickSuspendedActivity(activity) &&
+                        activity.End > windowStart &&
+                        activity.Start < windowEnd &&
+                        SplitPersons(activity.Person)
+                            .Select(NormalizeCalendarPerson)
+                            .Any(candidate =>
+                                string.Equals(
+                                    candidate,
+                                    normalizedPerson,
+                                    StringComparison.OrdinalIgnoreCase)))
+                    .GroupBy(
+                        activity => activity.PageId,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+
+            var coverageActivities =
+                GetOneClickScheduleActivities(person)
+                    .Where(activity =>
+                        activity.End > windowStart &&
+                        activity.Start < windowEnd)
+                    .ToList();
+
+            var intervals = coverageActivities
+                .Select(activity =>
+                    (
+                        Start: activity.Start > windowStart
+                            ? activity.Start
+                            : windowStart,
+                        End: activity.End < windowEnd
+                            ? activity.End
+                            : windowEnd))
+                .Where(interval => interval.End > interval.Start)
+                .OrderBy(interval => interval.Start)
+                .ThenBy(interval => interval.End)
+                .ToList();
+
+            var coveredMinutes = 0d;
+            if (intervals.Count > 0)
+            {
+                var mergedStart = intervals[0].Start;
+                var mergedEnd = intervals[0].End;
+
+                foreach (var interval in intervals.Skip(1))
+                {
+                    if (interval.Start <= mergedEnd)
+                    {
+                        if (interval.End > mergedEnd)
+                            mergedEnd = interval.End;
+                    }
+                    else
+                    {
+                        coveredMinutes +=
+                            (mergedEnd - mergedStart).TotalMinutes;
+                        mergedStart = interval.Start;
+                        mergedEnd = interval.End;
+                    }
+                }
+
+                coveredMinutes +=
+                    (mergedEnd - mergedStart).TotalMinutes;
+            }
+
+            var scheduledMinutes = intervals.Sum(interval =>
+                Math.Max(0, (interval.End - interval.Start).TotalMinutes));
+
+            var equivalentProgressMinutes =
+                activities.Sum(activity =>
+                {
+                    var start = activity.Start > windowStart
+                        ? activity.Start
+                        : windowStart;
+                    var end = activity.End < windowEnd
+                        ? activity.End
+                        : windowEnd;
+                    var minutes = Math.Max(
+                        0,
+                        (end - start).TotalMinutes);
+                    var percentage =
+                        activity.ChecklistScanned &&
+                        activity.ChecklistTotal > 0
+                            ? activity.ChecklistPercentage
+                            : HasExactCalendarPhase(activity, "zREVISION")
+                                ? 100d
+                                : activity.WorkPercentage;
+
+                    return minutes *
+                        Math.Clamp(percentage, 0d, 100d) /
+                        100d;
+                });
+
+            var checklistActivities = activities.Count(activity =>
+                activity.ChecklistScanned &&
+                activity.ChecklistTotal > 0);
+            var phaseCompletedActivities = activities.Count(activity =>
+                !(activity.ChecklistScanned && activity.ChecklistTotal > 0) &&
+                HasExactCalendarPhase(activity, "zREVISION"));
+            var propertyActivities = Math.Max(
+                0,
+                activities.Count - checklistActivities - phaseCompletedActivities);
+
+            var lines = new List<string>();
+
+            if (includeTitle)
+                lines.Add($"Ver actividades de {person}");
+
+            lines.Add($"C · COBERTURA: {coverage:0}%");
+            lines.Add("Horario base: 09:30–18:00 · total 8H 30M");
+            lines.Add(
+                $"Tiempo cubierto sin duplicar cruces: " +
+                $"{FormatCalendarWorkMinutes((int)Math.Round(coveredMinutes))}");
+            lines.Add(
+                $"Toma {coverageActivities.Count} actividad(es), sus propiedades Persona, " +
+                "Fecha POR Hacer (inicio/fin) y suspensión.");
+            lines.Add("Fórmula: minutos únicos cubiertos ÷ 510 minutos.");
+            lines.Add(string.Empty);
+            lines.Add($"A · ACTIVIDAD: {progress:0}%");
+            lines.Add(
+                $"Programado: {FormatCalendarWorkMinutes((int)Math.Round(scheduledMinutes))} · " +
+                $"avance equivalente: {FormatCalendarWorkMinutes((int)Math.Round(equivalentProgressMinutes))}");
+            lines.Add(
+                $"Fuentes: checklist/código {checklistActivities} · " +
+                $"terminadas {phaseCompletedActivities} · progreso de propiedad {propertyActivities}.");
+            lines.Add(
+                "Fórmula: progreso de cada actividad ponderado por su duración dentro de 09:30–18:00.");
+
+            return string.Join("\n", lines);
         }
 
         private static SolidColorBrush GetOneClickCoverageBrush(

@@ -477,7 +477,7 @@ namespace Anfeta.UI.Views
 
             var scope = ResolveNotionBaseScope(rawQuery);
             var queryForSearch = scope.HasBase ? scope.Remainder : rawQuery;
-            var executionQuery = NormalizeConvenienceSearchQuery(queryForSearch);
+            var executionQuery = IsPriority00FamilyQuery(rawQuery) ? string.Empty : NormalizeConvenienceSearchQuery(queryForSearch);
 
             SyncBaseChipsFromQuery(rawQuery);
             UpdateSearchBreadcrumb(rawQuery, scope, queryForSearch);
@@ -548,6 +548,7 @@ namespace Anfeta.UI.Views
             // ApplyChipFilters: solo actúa cuando el usuario clickea un chip
             // sin escribir query (p. ej. _extFilter viene del chip PDF, DOCX, etc.)
             items = ApplyChipFilters(items);
+            items = ApplyRequestedQuickFilters(items, rawQuery);
 
             if (!scope.HasBase)
                 items = ApplyNotionBaseFilter(items);
@@ -587,7 +588,7 @@ namespace Anfeta.UI.Views
 
             var scope = ResolveNotionBaseScope(rawQuery);
             var queryForSearch = scope.HasBase ? scope.Remainder : rawQuery;
-            var executionQuery = NormalizeConvenienceSearchQuery(queryForSearch);
+            var executionQuery = IsPriority00FamilyQuery(rawQuery) ? string.Empty : NormalizeConvenienceSearchQuery(queryForSearch);
 
             SyncBaseChipsFromQuery(rawQuery);
             UpdateSearchBreadcrumb(rawQuery, scope, queryForSearch);
@@ -647,6 +648,7 @@ namespace Anfeta.UI.Views
             }
 
             items = ApplyChipFilters(items);
+            items = ApplyRequestedQuickFilters(items, rawQuery);
 
             if (!scope.HasBase)
                 items = ApplyNotionBaseFilter(items);

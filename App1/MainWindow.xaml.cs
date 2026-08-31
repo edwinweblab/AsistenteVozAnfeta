@@ -859,10 +859,7 @@ namespace Anfeta.UI
                 (reminder.Target ?? string.Empty)
                     .Trim();
 
-            // Preferimos HTTPS para este botón rápido. Windows puede devolver
-            // true al lanzar notion:// aunque Notion Desktop no llegue a
-            // mostrar la página; eso dejaba el botón aparentemente "cargando"
-            // sin abrir nada visible.
+            // Normalizamos una URL web para el respaldo; Desktop se intenta primero.
             if (!string.IsNullOrWhiteSpace(rawTarget) &&
                 Uri.TryCreate(
                     rawTarget,
@@ -924,6 +921,9 @@ namespace Anfeta.UI
 
             if (webUri == null)
                 return false;
+
+            if (await Views.SearchView.TryOpenNotionDesktopOnlyAsync(webUri.AbsoluteUri))
+                return true;
 
             try
             {

@@ -120,6 +120,23 @@ namespace Anfeta.UI.Views
             return false;
         }
 
+        // Shared with the floating reminder's N button. Never opens a browser here:
+        // callers retain their existing web fallback and error UI.
+        internal static async Task<bool> TryOpenNotionDesktopOnlyAsync(string rawUrl)
+        {
+            if (!TryBuildNotionOpenUris(rawUrl, out _, out var desktopUri) ||
+                !IsNotionDesktopProtocolHandlerUsable())
+                return false;
+            try
+            {
+                if (await Launcher.QueryUriSupportAsync(desktopUri, LaunchQuerySupportType.Uri) != LaunchQuerySupportStatus.Available)
+                    return false;
+                return await Launcher.LaunchUriAsync(desktopUri) &&
+                    await WaitForNotionDesktopProcessAsync(TimeSpan.FromSeconds(4));
+            }
+            catch { return false; }
+        }
+
         private static bool TryBuildNotionOpenUris(
             string? rawUrl,
             out Uri webUri,

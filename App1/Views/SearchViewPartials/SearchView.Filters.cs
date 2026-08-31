@@ -655,6 +655,7 @@ namespace Anfeta.UI.Views
 
             if (scope.HasBase)
             {
+                _programasQuickFilter = false;
                 SetNotionBaseChipChecks(
                     scope.SourceName,
                     scope.TitleFilter);
@@ -672,6 +673,9 @@ namespace Anfeta.UI.Views
         {
             var selected = (sourceName ?? string.Empty).Trim();
             var payment = (paymentTitleFilter ?? string.Empty).Trim();
+
+            if (ChipProgramasRapido != null)
+                ChipProgramasRapido.IsChecked = _programasQuickFilter;
 
             if (ChipBaseAll != null)
                 ChipBaseAll.IsChecked = string.IsNullOrWhiteSpace(selected);
@@ -711,7 +715,7 @@ namespace Anfeta.UI.Views
             var rootWidth = XamlRoot?.Size.Width ?? 0;
 
             if (rootWidth > 0)
-                desiredWidth = Math.Min(desiredWidth, Math.Max(520, rootWidth - 48));
+                desiredWidth = Math.Min(desiredWidth, Math.Max(1, rootWidth - 48));
 
             QuickCommandsInputHost.Width = desiredWidth;
             QuickCommandsInputHost.MinWidth = desiredWidth;
@@ -2150,6 +2154,9 @@ namespace Anfeta.UI.Views
             if (sender is not ToggleButton clicked)
                 return;
 
+            _programasQuickFilter = false;
+            if (ChipProgramasRapido != null) ChipProgramasRapido.IsChecked = false;
+
             var selected =
                 (clicked.Tag?.ToString() ?? "all")
                 .Trim()
@@ -2265,6 +2272,7 @@ namespace Anfeta.UI.Views
         }
         private async void ChipBaseFilter_Click(object sender, RoutedEventArgs e)
         {
+            _programasQuickFilter = false;
             if (sender is not ToggleButton clicked)
                 return;
 

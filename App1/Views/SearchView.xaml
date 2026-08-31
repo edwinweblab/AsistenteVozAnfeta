@@ -313,7 +313,7 @@
 
             <ScrollViewer
                 Grid.Column="1"
-                MinWidth="300"
+                MinWidth="0"
                 MaxWidth="650"
                 HorizontalAlignment="Right"
                 HorizontalScrollBarVisibility="Auto"
@@ -367,6 +367,17 @@
                 ToolTipService.ToolTip="Capturar los resultados visibles y subirlos a Notion">
                         <FontIcon FontSize="14" Glyph="&#xE722;" />
                     </Button>
+
+                    <Button
+                        MinHeight="32"
+                        Padding="10,4"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                        BorderBrush="{StaticResource AnfetaBorderBrush}"
+                        Click="CalendarQuickTemplate_Click"
+                        Content="⚡ Plantillas"
+                        CornerRadius="9"
+                        ToolTipService.ToolTip="Crear desde una plantilla sin salir del buscador o de solo resultados" />
 
                     <!--  Ayuda  -->
                     <Button
@@ -829,8 +840,13 @@
                     Padding="10,0"
                     Click="ChipBaseFilter_Click"
                     Content="zProyectos"
+                    ToolTipService.ToolTip="Filtrar la base Programas y proyectos · zproyectos"
                     CornerRadius="13"
                     Tag="Programas y proyectos" />
+
+                    <ToggleButton x:Name="ChipProgramasRapido" MinHeight="25" Padding="10,0"
+                        Click="ChipProgramasRapido_Click" Content="Programas" CornerRadius="13"
+                        ToolTipService.ToolTip="Revisiones con el tag exacto pprog; no incluye programar ni publicaciones" />
 
                     <ToggleButton
                     x:Name="ChipBasePagar"
@@ -2028,6 +2044,16 @@
                                         Content="💰"
                                         CornerRadius="7"
                                         ToolTipService.ToolTip="Mostrar u ocultar eventos de BD COBRAR Y PAGAR" />
+
+                                        <ToggleButton
+                                        x:Name="CalendarPagosToggle"
+                                        Width="38"
+                                        MinHeight="32"
+                                        Padding="0"
+                                        Click="CalendarPagosToggle_Click"
+                                        Content="💳"
+                                        CornerRadius="7"
+                                        ToolTipService.ToolTip="Mostrar u ocultar pagos programados" />
 
                                         <ToggleButton
                                         x:Name="CalendarExtraHoursToggle"
@@ -3961,6 +3987,18 @@
 
 
             <!--  Accesos rápidos a Google Meet  -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <Button Content="Notion ▾" MinHeight="26" Padding="8,0" CornerRadius="7"
+                    ToolTipService.ToolTip="Buscar o abrir la IA de Notion Desktop">
+                <Button.Flyout>
+                    <MenuFlyout Opening="NotionShortcuts_Opening">
+                        <MenuFlyoutItem x:Name="NotionSearchShortcutItem" Text="Buscar · Ctrl+Shift+K" Tag="search" Click="NotionShortcut_Click" />
+                        <MenuFlyoutItem x:Name="NotionAiShortcutItem" Text="IA · Ctrl+Shift+J" Tag="ai" Click="NotionShortcut_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="Configurar atajos…" Click="ConfigureNotionShortcuts_Click" />
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
             <Button
                 x:Name="BtnMeetQuickLinks"
                 Grid.Column="2"
@@ -4013,6 +4051,7 @@
                 </Button.Flyout>
             </Button>
 
+            </StackPanel>
             <ComboBox
                 x:Name="CalendarPhaseFilterCombo"
                 Grid.Column="3"
