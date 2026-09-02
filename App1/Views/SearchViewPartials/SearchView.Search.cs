@@ -425,6 +425,9 @@ namespace Anfeta.UI.Views
 
         private async Task RunSearchAsync(string uiQuery, string? effectiveQuery = null)
         {
+            SetTabTitle(uiQuery);
+            NotifyWorkspaceChanged();
+            if (!_calendarViewActive) QueueCalendarWindowFilterSync(uiQuery);
             // Toda búsqueda, incluso una búsqueda vacía, representa la vista
             // global del índice. Esto evita conservar por error el estado de
             // navegación de una carpeta anterior.

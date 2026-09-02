@@ -90,6 +90,7 @@ namespace Anfeta.UI.Views
 
             ResultsList.SelectedItem = null;
             RefreshResultsListView();
+            NotifyWorkspaceChanged();
 
             StatusText.Text =
                 _resultGroupingMode == ResultGroupingMode.None
@@ -228,10 +229,16 @@ namespace Anfeta.UI.Views
         {
             if (filter is null) return;
 
+            CancelPendingSearch();
+            ApplySearchCriteria(filter.Criteria ?? new Anfeta.UI.Models.SearchCriteriaState());
+
             var options = _savedFiltersService.ToExecutionOptions(filter);
             _currentMatchOptions = options.Match ?? new QueryMatchOptions();
             _sortKey = string.IsNullOrWhiteSpace(options.SortKey) ? "name_asc" : options.SortKey;
             SearchBox.Text = options.Query ?? string.Empty;
+            SetTabTitle(SearchBox.Text);
+            NotifyWorkspaceChanged();
+            QueueCalendarWindowFilterSync(SearchBox.Text);
 
             await RunSearchAsync(options.Query ?? string.Empty);
         }
@@ -240,11 +247,21 @@ namespace Anfeta.UI.Views
 
         private async Task ShowCreateSavedFilterDialogAsync()
         {
-            var dialog = new SavedSearchFilterDialog { XamlRoot = this.XamlRoot };
+            var seed = new SavedSearchFilter
+            {
+                Name = CurrentSearchSaveName(),
+                Query = (SearchBox.Text ?? "").Trim(),
+                Criteria = CaptureSearchCriteria(),
+                SortBy = _sortKey,
+                MatchCase = _currentMatchOptions.MatchCase,
+                MatchPath = _currentMatchOptions.MatchPath
+            };
+            var dialog = new SavedSearchFilterDialog(seed) { XamlRoot = this.XamlRoot, Title = "Guardar filtro de búsqueda" };
             var result = await dialog.ShowAsync();
             if (result != ContentDialogResult.Primary) return;
 
             await _savedFiltersService.AddOrUpdateAsync(dialog.Filter);
+            NotifySearchPresetsChanged();
             await LoadSavedFiltersAsync();
             RefreshSavedFiltersUi();
         }
@@ -257,6 +274,7 @@ namespace Anfeta.UI.Views
             if (result != ContentDialogResult.Primary) return;
 
             await _savedFiltersService.AddOrUpdateAsync(dialog.Filter);
+            NotifySearchPresetsChanged();
             await LoadSavedFiltersAsync();
             RefreshSavedFiltersUi();
         }
@@ -265,6 +283,7 @@ namespace Anfeta.UI.Views
         {
             if (filter is null) return;
             await _savedFiltersService.DeleteAsync(filter.Id);
+            NotifySearchPresetsChanged();
             await LoadSavedFiltersAsync();
             RefreshSavedFiltersUi();
         }
@@ -417,6 +436,7 @@ namespace Anfeta.UI.Views
                 if (result != ContentDialogResult.Primary) return;
 
                 await _savedFiltersService.DeleteAllAsync();
+                NotifySearchPresetsChanged();
                 await LoadSavedFiltersAsync();
                 RefreshSavedFiltersUi();
                 StatusText.Text = "Estado: filtros eliminados";
@@ -509,6 +529,7 @@ namespace Anfeta.UI.Views
             public string Title { get; set; } = "";
             public string Description { get; set; } = "";
             public string Query { get; set; } = "";
+            public Anfeta.UI.Models.SearchCriteriaState? Criteria { get; set; }
         }
 
         private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _savedSearches = new();
@@ -571,8 +592,7 @@ namespace Anfeta.UI.Views
         {
             if (CommandsSidebarList.SelectedItem is SavedSearch cmd)
             {
-                SearchBox.Text = cmd.Query;
-                await RunSearchAsync(cmd.Query);
+                await ApplySavedQuickSearchAsync(cmd);
                 CommandsSidebarList.SelectedItem = null;
             }
         }
@@ -584,8 +604,7 @@ namespace Anfeta.UI.Views
         {
             if (e.ClickedItem is SavedSearch cmd)
             {
-                SearchBox.Text = cmd.Query;
-                await RunSearchAsync(cmd.Query);
+                await ApplySavedQuickSearchAsync(cmd);
                 CommandsSidebarList.SelectedItem = null;
             }
         }
@@ -593,15 +612,23 @@ namespace Anfeta.UI.Views
         private void SearchBox_GotFocus(object sender, RoutedEventArgs e)
         {
             RefreshQuickFlyoutContent();
-            // El foco automático al abrir una pestaña no debe desplegar el
-            // predictivo ni tapar el calendario. Se abre al escribir.
+
+            // Las búsquedas rápidas (PDF, prtuzREVISION, zClientes, etc.) deben
+            // estar disponibles desde el propio input aunque todavía esté vacío.
+            // Se difiere un tick para no pelear con el foco interno del AutoSuggestBox.
+            if (!_calendarViewActive)
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                    ShowQuickCommandsInputFlyout());
+            }
         }
 
         private void SearchBox_Tapped(object sender, TappedRoutedEventArgs e)
         {
             RefreshQuickFlyoutContent();
-            // Un clic solo coloca el cursor. Las sugerencias aparecen cuando
-            // existe entrada real del usuario.
+
+            if (!_calendarViewActive)
+                ShowQuickCommandsInputFlyout();
         }
 
         private void RefreshQuickFlyoutContent(string? input = null)
@@ -844,6 +871,7 @@ namespace Anfeta.UI.Views
 
         private void BindPredictiveSuggestions()
         {
+            AddQuickCriteriaSuggestions(SearchBox.Text ?? "");
             if (QuickPredictiveFlyoutList != null)
             {
                 QuickPredictiveFlyoutList.ItemsSource = null;
@@ -861,7 +889,7 @@ namespace Anfeta.UI.Views
                 var scope = ResolveNotionBaseScope(SearchBox?.Text ?? "");
                 QuickPredictiveHeaderText.Text = scope.HasBase
                     ? $"Sugerencias de {scope.PathLabel}"
-                    : "Sugerencias predictivas";
+                    : "Búsquedas rápidas";
                 QuickPredictiveHeaderText.Visibility = hasPredictive ? Visibility.Visible : Visibility.Collapsed;
             }
 
@@ -877,9 +905,29 @@ namespace Anfeta.UI.Views
             if (QuickFlyoutHintText != null)
             {
                 QuickFlyoutHintText.Text = hasPredictive || hasSaved
-                    ? "Clic para buscar · Clic derecho en guardadas para editar o eliminar"
+                    ? "Clic para agregar al buscador · Las búsquedas rápidas no cambian los chips superiores"
                     : "Escribe zrevision, zclientes, zdominios, zproyectos, zpagar o zcorreos";
             }
+        }
+
+        private async void SidebarQuickQuery_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element)
+                return;
+
+            var query =
+                (element.Tag?.ToString() ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(query))
+                return;
+
+            // Igual que las rápidas del flyout: agrega/combina texto visible
+            // en SearchBox y ejecuta el motor normal. No modifica chips.
+            await ExecuteQuickQueryAsync(
+                query,
+                hideFlyout: true);
         }
 
         private async void QuickCommandsFlyoutList_ItemClick(object sender, ItemClickEventArgs e)
@@ -887,7 +935,7 @@ namespace Anfeta.UI.Views
             if (e.ClickedItem is not SavedSearch cmd)
                 return;
 
-            await ExecuteQuickQueryAsync(cmd.Query);
+            await ApplySavedQuickSearchAsync(cmd);
         }
 
         private async void QuickPredictiveFlyoutList_ItemClick(object sender, ItemClickEventArgs e)
@@ -1192,7 +1240,7 @@ namespace Anfeta.UI.Views
             var run = new MenuFlyoutItem { Text = "Buscar" };
             run.Click += async (_, __) =>
             {
-                await ExecuteQuickQueryAsync(cmd.Query);
+                await ApplySavedQuickSearchAsync(cmd);
             };
 
             var edit = new MenuFlyoutItem { Text = "Editar" };
@@ -1909,7 +1957,7 @@ namespace Anfeta.UI.Views
                            ?? new System.Collections.Generic.List<SavedSearch>();
                 foreach (var it in list)
                 {
-                    if (string.IsNullOrWhiteSpace(it?.Query)) continue;
+                    if (it == null || (string.IsNullOrWhiteSpace(it.Query) && it.Criteria == null)) continue;
                     if (string.IsNullOrWhiteSpace(it.Title)) it.Title = it.Query;
                     _savedSearches.Add(it);
                 }
@@ -1927,6 +1975,7 @@ namespace Anfeta.UI.Views
             var list = _savedSearches.ToList();
             var raw = JsonSerializer.Serialize(list);
             ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = raw;
+            NotifySearchPresetsChanged();
         }
 
         private void RefreshSavedSearchesUi()
@@ -1989,13 +2038,14 @@ namespace Anfeta.UI.Views
             var newQuery = (queryBox.Text ?? "").Trim();
             var newDesc = (descBox.Text ?? "").Trim();
 
-            if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newQuery))
+            if (string.IsNullOrWhiteSpace(newTitle) || (string.IsNullOrWhiteSpace(newQuery) && existing.Criteria == null))
             {
                 StatusText.Text = "Estado: Título y Query son obligatorios.";
                 return;
             }
             if (_savedSearches.Any(x => x.Id != existing.Id &&
-                string.Equals(x.Query, newQuery, StringComparison.OrdinalIgnoreCase)))
+                string.Equals(x.Query, newQuery, StringComparison.OrdinalIgnoreCase) &&
+                JsonSerializer.Serialize(x.Criteria) == JsonSerializer.Serialize(existing.Criteria)))
             {
                 StatusText.Text = "Estado: Ya existe otro comando con esa búsqueda.";
                 return;
@@ -2012,16 +2062,20 @@ namespace Anfeta.UI.Views
 
         private void BtnSaveSearch_Click(object sender, RoutedEventArgs e)
         {
+            LoadSavedSearches();
             var currentQuery = (SearchBox.Text ?? "").Trim();
+            var saveName = CurrentSearchSaveName();
+            var criteria = CaptureSearchCriteria();
 
-            if (string.IsNullOrWhiteSpace(currentQuery))
+            if (string.IsNullOrWhiteSpace(saveName))
             {
                 StatusText.Text = "Estado: Escribe una búsqueda antes de guardar.";
                 return;
             }
 
             var exists = _savedSearches.Any(x =>
-                string.Equals(x.Query, currentQuery, StringComparison.OrdinalIgnoreCase));
+                string.Equals(x.Query, currentQuery, StringComparison.OrdinalIgnoreCase) &&
+                JsonSerializer.Serialize(x.Criteria) == JsonSerializer.Serialize(criteria));
 
             if (exists)
             {
@@ -2031,15 +2085,16 @@ namespace Anfeta.UI.Views
 
             _savedSearches.Add(new SavedSearch
             {
-                Title = BuildQuickSearchTitle(currentQuery),
+                Title = BuildQuickSearchTitle(saveName),
                 Description = "",
-                Query = currentQuery
+                Query = currentQuery,
+                Criteria = criteria
             });
 
             SaveSavedSearches();
             RefreshSavedSearchesUi();
 
-            StatusText.Text = $"Estado: Búsqueda guardada ✅ {currentQuery}";
+            StatusText.Text = $"Estado: Guardada en sugerencias y Comandos del lateral ✅ {saveName}";
         }
         private static string BuildQuickSearchTitle(string query)
         {
@@ -2055,20 +2110,16 @@ namespace Anfeta.UI.Views
 
         private void LoadSidebarExpandedStates()
         {
-            var ls = ApplicationData.Current.LocalSettings.Values;
-            if (ls.TryGetValue(LS_CommandsExpanded, out var c) && c is bool cb) CommandsExpander.IsExpanded = cb;
-            if (ls.TryGetValue(LS_ExcludedExpanded, out var ex) && ex is bool eb) ExcludedExpander.IsExpanded = eb;
-
-            CommandsExpander.Expanding += (_, __) => SaveSidebarExpandedStates();
-            CommandsExpander.Collapsed += (_, __) => SaveSidebarExpandedStates();
-            ExcludedExpander.Collapsed += (_, __) => SaveSidebarExpandedStates();
+            // "Guardadas" ahora es una sección fija dentro de BÚSQUEDAS RÁPIDAS,
+            // no un Expander. Se conserva este método porque forma parte del
+            // pipeline de inicialización existente, pero ya no necesita restaurar
+            // estado visual de CommandsExpander.
         }
 
         private void SaveSidebarExpandedStates()
         {
-            var ls = ApplicationData.Current.LocalSettings.Values;
-            ls[LS_CommandsExpanded] = CommandsExpander.IsExpanded;
-            ls[LS_ExcludedExpanded] = ExcludedExpander.IsExpanded;
+            // Compatibilidad con llamadas antiguas. La sección de búsquedas
+            // guardadas ya no es desplegable.
         }
 
         private void CommandRow_RightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -2306,6 +2357,18 @@ namespace Anfeta.UI.Views
             SetNotionBaseChipChecks(
                 _activeNotionBaseFilter,
                 _activePaymentBaseTitleFilter);
+
+            // A directly selected base replaces any previous base prefix;
+            // otherwise the query scope would silently override the new chip.
+            var previousScope = ResolveNotionBaseScope(SearchBox.Text ?? string.Empty);
+            if (previousScope.HasBase)
+            {
+                _suppressSuggest = true;
+                try { SearchBox.Text = previousScope.Remainder ?? string.Empty; }
+                finally { _suppressSuggest = false; }
+                SetTabTitle(SearchBox.Text);
+                QueueCalendarWindowFilterSync(SearchBox.Text);
+            }
 
             await RunLocalSearchAsync(
                 (SearchBox.Text ?? string.Empty).Trim());

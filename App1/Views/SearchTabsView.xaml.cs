@@ -95,6 +95,7 @@ namespace Anfeta.UI.Views
 
             if (args.Tab?.Content is SearchView closingView)
             {
+                (Application.Current as App)?.ReleaseCalendarSearchOwner(closingView);
                 closingView.SuspendAsBackgroundTab();
                 _pendingTabStates.Remove(closingView);
                 _tabHeaderVisuals.Remove(closingView);
@@ -125,7 +126,13 @@ namespace Anfeta.UI.Views
             view.TabModeChanged += (_, mode) =>
             {
                 if (_tabHeaderVisuals.TryGetValue(view, out var current))
-                    ApplyTabModeVisual(current, mode);
+                    ApplyTabModeVisual(current, view.ControlsCalendarSearch ? "linked-calendar" : mode);
+            };
+
+            view.CalendarSearchOwnerChanged += (_, __) =>
+            {
+                if (_tabHeaderVisuals.TryGetValue(view, out var current))
+                    ApplyTabModeVisual(current, view.ControlsCalendarSearch ? "linked-calendar" : view.CurrentTabMode);
             };
 
             view.WorkspaceChanged += (_, __) => SaveWorkspace();
@@ -182,11 +189,11 @@ namespace Anfeta.UI.Views
 
             visual.Icon.Glyph = isCalendar
                 ? "\uE787"   // Calendar
-                : "\uE721";  // Search
+                : mode == "linked-calendar" ? "\uE787" : "\uE721";
 
             ToolTipService.SetToolTip(
                 visual.Root,
-                isCalendar
+                mode == "linked-calendar" ? "Buscador vinculado: solo esta pestaña filtra el calendario independiente" : isCalendar
                     ? "Esta pestaña está en Calendario"
                     : "Esta pestaña está en Resultados / Buscador");
         }
@@ -351,6 +358,8 @@ namespace Anfeta.UI.Views
             // el contenido pesado del tab activo.
             await Task.Yield();
             await RestoreWorkspaceAsync();
+            if (Tabs.TabItems.Count > 0 && Tabs.TabItems[0] is TabViewItem first && first.Content is SearchView primary)
+                (Application.Current as App)?.RegisterCalendarSearchOwner(primary);
         }
 
         private async void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)

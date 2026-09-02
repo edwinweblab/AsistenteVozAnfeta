@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -286,28 +286,55 @@ namespace Anfeta.UI.Views
             return block.Kind switch
             {
                 NotionPreviewBlockKind.Heading1 =>
-                    CreatePreviewText(
-                        block.Text,
-                        15,
-                        FontWeights.Bold,
-                        1.0,
-                        indent),
+                    new Border
+                    {
+                        Margin = new Thickness(indent, 10, 0, 4),
+                        Padding = new Thickness(10, 6, 10, 6),
+                        CornerRadius = new CornerRadius(6),
+                        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 0, 168, 255)),
+                        BorderThickness = new Thickness(3, 0, 0, 0),
+                        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255)),
+                        Child = CreatePreviewText(
+                            $"📌 {block.Text}",
+                            14.5,
+                            FontWeights.Bold,
+                            1.0,
+                            0)
+                    },
 
                 NotionPreviewBlockKind.Heading2 =>
-                    CreatePreviewText(
-                        block.Text,
-                        13,
-                        FontWeights.SemiBold,
-                        1.0,
-                        indent),
+                    new Border
+                    {
+                        Margin = new Thickness(indent, 8, 0, 3),
+                        Padding = new Thickness(8, 4, 8, 4),
+                        CornerRadius = new CornerRadius(5),
+                        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 0, 200, 255)),
+                        BorderThickness = new Thickness(2.5, 0, 0, 0),
+                        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 200, 255)),
+                        Child = CreatePreviewText(
+                            $"🔹 {block.Text}",
+                            13,
+                            FontWeights.SemiBold,
+                            0.98,
+                            0)
+                    },
 
                 NotionPreviewBlockKind.Heading3 =>
-                    CreatePreviewText(
-                        block.Text,
-                        12,
-                        FontWeights.SemiBold,
-                        0.95,
-                        indent),
+                    new Border
+                    {
+                        Margin = new Thickness(indent, 6, 0, 2),
+                        Padding = new Thickness(6, 3, 6, 3),
+                        CornerRadius = new CornerRadius(4),
+                        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 168, 85, 247)),
+                        BorderThickness = new Thickness(2, 0, 0, 0),
+                        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(220, 168, 85, 247)),
+                        Child = CreatePreviewText(
+                            $"▪ {block.Text}",
+                            12,
+                            FontWeights.SemiBold,
+                            0.95,
+                            0)
+                    },
 
                 NotionPreviewBlockKind.BulletedListItem =>
                     CreatePreviewText(
@@ -455,10 +482,10 @@ namespace Anfeta.UI.Views
             return new TextBlock
             {
                 Text = text,
-                FontSize = 10,
-                FontWeight = FontWeights.SemiBold,
-                Opacity = 0.55,
-                Margin = new Thickness(0, 4, 0, 0)
+                FontSize = 10.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 100, 200, 255)),
+                Margin = new Thickness(0, 8, 0, 4)
             };
         }
 
@@ -466,38 +493,78 @@ namespace Anfeta.UI.Views
             NotionPreviewBlock block,
             double indent)
         {
-            var panel = new StackPanel
+            var card = new Border
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 6,
-                Margin = new Thickness(
-                    indent,
-                    0,
-                    0,
-                    0)
+                Margin = new Thickness(indent, 2, 0, 2),
+                Padding = new Thickness(8, 5, 8, 5),
+                CornerRadius = new CornerRadius(6),
+                Background = block.IsChecked
+                    ? new SolidColorBrush(Windows.UI.Color.FromArgb(20, 0, 230, 118))
+                    : new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
+                BorderBrush = block.IsChecked
+                    ? new SolidColorBrush(Windows.UI.Color.FromArgb(50, 0, 230, 118))
+                    : new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                BorderThickness = new Thickness(1)
             };
 
-            panel.Children.Add(
-                new CheckBox
-                {
-                    IsChecked = block.IsChecked,
-                    IsEnabled = false,
-                    VerticalAlignment =
-                        VerticalAlignment.Top
-                });
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            panel.Children.Add(
-                new TextBlock
-                {
-                    Text = block.Text,
-                    FontSize = 11,
-                    Opacity =
-                        block.IsChecked ? 0.55 : 0.90,
-                    TextWrapping = TextWrapping.Wrap,
-                    MaxWidth = 420
-                });
+            var check = new CheckBox
+            {
+                IsChecked = block.IsChecked,
+                IsEnabled = false,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+                MinWidth = 24
+            };
+            Grid.SetColumn(check, 0);
+            grid.Children.Add(check);
 
-            return panel;
+            var tb = new TextBlock
+            {
+                Text = block.Text,
+                FontSize = 11,
+                Opacity = block.IsChecked ? 0.60 : 0.95,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            if (block.IsChecked || block.IsStrikethrough)
+            {
+                tb.TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough;
+            }
+
+            Grid.SetColumn(tb, 1);
+            grid.Children.Add(tb);
+
+            if (block.IsChecked)
+            {
+                var badge = new Border
+                {
+                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 0, 230, 118)),
+                    BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 0, 230, 118)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(6, 1, 6, 1),
+                    Margin = new Thickness(6, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = "✓ Hecho",
+                        FontSize = 9.5,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 230, 118))
+                    }
+                };
+                Grid.SetColumn(badge, 2);
+                grid.Children.Add(badge);
+            }
+
+            card.Child = grid;
+            return card;
         }
 
         private static UIElement CreateQuoteElement(
@@ -508,25 +575,28 @@ namespace Anfeta.UI.Views
             {
                 Margin = new Thickness(
                     indent,
+                    3,
                     0,
-                    0,
-                    0),
+                    3),
                 Padding = new Thickness(
-                    8,
-                    5,
+                    10,
                     6,
-                    5),
+                    8,
+                    6),
+                CornerRadius = new CornerRadius(4),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
                 BorderThickness =
-                    new Thickness(2, 0, 0, 0),
+                    new Thickness(3, 0, 0, 0),
                 BorderBrush =
                     Application.Current.Resources[
                         "SystemControlHighlightAccentBrush"]
-                    as Brush,
+                    as Brush
+                    ?? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255)),
                 Child = CreatePreviewText(
                     text,
-                    11,
+                    11.5,
                     FontWeights.Normal,
-                    0.88,
+                    0.92,
                     0)
             };
         }
@@ -539,20 +609,21 @@ namespace Anfeta.UI.Views
             {
                 Margin = new Thickness(
                     indent,
+                    3,
                     0,
-                    0,
-                    0),
-                Padding = new Thickness(8),
-                CornerRadius = new CornerRadius(5),
+                    3),
+                Padding = new Thickness(10, 8, 10, 8),
+                CornerRadius = new CornerRadius(6),
                 Background =
-                    Application.Current.Resources[
-                        "ControlAltFillColorSecondaryBrush"]
-                    as Brush,
+                    new SolidColorBrush(Windows.UI.Color.FromArgb(35, 255, 176, 32)),
+                BorderBrush =
+                    new SolidColorBrush(Windows.UI.Color.FromArgb(80, 255, 176, 32)),
+                BorderThickness = new Thickness(1),
                 Child = CreatePreviewText(
                     $"💡 {text}",
-                    11,
+                    11.5,
                     FontWeights.Normal,
-                    0.90,
+                    0.95,
                     0)
             };
         }
@@ -563,45 +634,73 @@ namespace Anfeta.UI.Views
         {
             var panel = new StackPanel
             {
-                Spacing = 4
+                Spacing = 5
             };
 
-            if (!string.IsNullOrWhiteSpace(
-                    block.Language))
+            var header = new Grid();
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var langText = new TextBlock
             {
-                panel.Children.Add(
-                    CreatePreviewText(
-                        block.Language.ToUpperInvariant(),
-                        9,
-                        FontWeights.SemiBold,
-                        0.50,
-                        0));
-            }
+                Text = string.IsNullOrWhiteSpace(block.Language) ? "CODE" : block.Language.ToUpperInvariant(),
+                FontSize = 9.5,
+                FontWeight = FontWeights.SemiBold,
+                Opacity = 0.65,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(langText, 0);
+            header.Children.Add(langText);
+
+            var copyBtn = new Button
+            {
+                Content = "Copiar",
+                FontSize = 9.5,
+                Padding = new Thickness(8, 2, 8, 2),
+                CornerRadius = new CornerRadius(4),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            copyBtn.Click += (_, __) =>
+            {
+                try
+                {
+                    var dp = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                    dp.SetText(block.Text ?? string.Empty);
+                    Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+                    copyBtn.Content = "✓ Copiado";
+                }
+                catch { }
+            };
+            Grid.SetColumn(copyBtn, 1);
+            header.Children.Add(copyBtn);
+
+            panel.Children.Add(header);
 
             panel.Children.Add(
                 new TextBlock
                 {
                     Text = block.Text,
                     FontFamily =
-                        new FontFamily("Consolas"),
-                    FontSize = 10,
+                        new FontFamily("Consolas, Cascadia Code"),
+                    FontSize = 10.5,
                     TextWrapping = TextWrapping.Wrap,
-                    Opacity = 0.90
+                    Opacity = 0.95
                 });
 
             return new Border
             {
                 Margin = new Thickness(
                     indent,
+                    4,
                     0,
-                    0,
-                    0),
-                Padding = new Thickness(8),
-                CornerRadius = new CornerRadius(5),
+                    4),
+                Padding = new Thickness(10, 8, 10, 8),
+                CornerRadius = new CornerRadius(6),
                 Background =
-                    Application.Current.Resources[
-                        "ControlAltFillColorSecondaryBrush"]
-                    as Brush,
+                    new SolidColorBrush(Windows.UI.Color.FromArgb(200, 22, 27, 34)),
+                BorderBrush =
+                    new SolidColorBrush(Windows.UI.Color.FromArgb(200, 48, 54, 61)),
+                BorderThickness = new Thickness(1),
                 Child = panel
             };
         }
@@ -654,63 +753,118 @@ namespace Anfeta.UI.Views
             string text,
             double indent)
         {
-            return new Border
+            var cells = (text ?? string.Empty).Split(new[] { "  |  " }, StringSplitOptions.None);
+            if (cells.Length <= 1)
             {
-                Margin = new Thickness(indent, 0, 0, 0),
-                Padding = new Thickness(8, 5, 8, 5),
-                BorderBrush =
-                    Application.Current.Resources[
-                        "DividerStrokeColorDefaultBrush"] as Brush,
-                BorderThickness = new Thickness(1),
-                Child = CreatePreviewText(
-                    text,
-                    10,
-                    FontWeights.Normal,
-                    0.90,
-                    0)
+                return new Border
+                {
+                    Margin = new Thickness(indent, 2, 0, 2),
+                    Padding = new Thickness(8, 4, 8, 4),
+                    BorderBrush =
+                        Application.Current.Resources[
+                            "DividerStrokeColorDefaultBrush"] as Brush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Child = CreatePreviewText(
+                        text,
+                        10.5,
+                        FontWeights.Normal,
+                        0.90,
+                        0)
+                };
+            }
+
+            var grid = new Grid
+            {
+                Margin = new Thickness(indent, 2, 0, 2),
+                ColumnSpacing = 6
             };
+
+            for (int i = 0; i < cells.Length; i++)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var cellBorder = new Border
+                {
+                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(20, 255, 255, 255)),
+                    BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(50, 255, 255, 255)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(6, 4, 6, 4),
+                    Child = CreatePreviewText(cells[i].Trim(), 10, FontWeights.Normal, 0.90, 0)
+                };
+                Grid.SetColumn(cellBorder, i);
+                grid.Children.Add(cellBorder);
+            }
+
+            return grid;
         }
 
         private UIElement CreateResourceElement(
             NotionPreviewBlock block,
             double indent)
         {
-            var kindLabel = block.Kind switch
+            var (kindLabel, icon) = block.Kind switch
             {
-                NotionPreviewBlockKind.Image => "Imagen",
-                NotionPreviewBlockKind.Pdf => "PDF",
-                NotionPreviewBlockKind.Audio => "Audio",
-                NotionPreviewBlockKind.Video => "Video",
-                NotionPreviewBlockKind.Bookmark => "Enlace",
-                NotionPreviewBlockKind.LinkPreview => "Vista de enlace",
-                NotionPreviewBlockKind.Embed => "Contenido insertado",
-                _ => "Archivo"
+                NotionPreviewBlockKind.Image => ("Imagen", "🖼️"),
+                NotionPreviewBlockKind.Pdf => ("PDF", "📄"),
+                NotionPreviewBlockKind.Audio => ("Audio", "🎵"),
+                NotionPreviewBlockKind.Video => ("Video", "🎬"),
+                NotionPreviewBlockKind.Bookmark => ("Enlace guardado", "🔗"),
+                NotionPreviewBlockKind.LinkPreview => ("Vista de enlace", "🌐"),
+                NotionPreviewBlockKind.Embed => ("Contenido embebido", "📦"),
+                _ => ("Archivo adjunto", "📎")
             };
-
-            var panel = new StackPanel
-            {
-                Spacing = 4,
-                Margin = new Thickness(
-                    indent,
-                    0,
-                    0,
-                    0)
-            };
-
-            panel.Children.Add(
-                CreatePreviewText(
-                    $"📎 {kindLabel}",
-                    11,
-                    FontWeights.SemiBold,
-                    0.90,
-                    0));
 
             var label =
                 !string.IsNullOrWhiteSpace(block.Caption)
                     ? block.Caption
                     : !string.IsNullOrWhiteSpace(block.Text)
                         ? block.Text
-                        : "Abrir recurso";
+                        : $"Abrir {kindLabel.ToLowerInvariant()}";
+
+            var card = new Border
+            {
+                Margin = new Thickness(indent, 3, 0, 3),
+                Padding = new Thickness(10, 7, 10, 7),
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 0, 168, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(60, 0, 168, 255)),
+                BorderThickness = new Thickness(1)
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var iconText = new TextBlock
+            {
+                Text = icon,
+                FontSize = 14,
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(iconText, 0);
+            grid.Children.Add(iconText);
+
+            var textStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            textStack.Children.Add(new TextBlock
+            {
+                Text = kindLabel.ToUpperInvariant(),
+                FontSize = 9,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 120, 205, 255))
+            });
+            textStack.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 11,
+                FontWeight = FontWeights.Medium,
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.95
+            });
+            Grid.SetColumn(textStack, 1);
+            grid.Children.Add(textStack);
 
             if (!string.IsNullOrWhiteSpace(block.Url) &&
                 Uri.TryCreate(
@@ -718,13 +872,14 @@ namespace Anfeta.UI.Views
                     UriKind.Absolute,
                     out var uri))
             {
-                var button = new HyperlinkButton
+                var button = new Button
                 {
-                    Content = label,
-                    Padding = new Thickness(0),
+                    Content = "↗ Abrir",
                     FontSize = 10,
-                    HorizontalAlignment =
-                        HorizontalAlignment.Left
+                    Padding = new Thickness(8, 3, 8, 3),
+                    CornerRadius = new CornerRadius(5),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(8, 0, 0, 0)
                 };
 
                 button.Click += async (_, __) =>
@@ -740,20 +895,12 @@ namespace Anfeta.UI.Views
                     }
                 };
 
-                panel.Children.Add(button);
-            }
-            else
-            {
-                panel.Children.Add(
-                    CreatePreviewText(
-                        label,
-                        10,
-                        FontWeights.Normal,
-                        0.65,
-                        0));
+                Grid.SetColumn(button, 2);
+                grid.Children.Add(button);
             }
 
-            return panel;
+            card.Child = grid;
+            return card;
         }
 
         private static bool IsLocalImagePreviewSupported(string? path)

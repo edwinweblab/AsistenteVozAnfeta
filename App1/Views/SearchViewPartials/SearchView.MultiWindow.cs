@@ -6,6 +6,13 @@ namespace Anfeta.UI.Views
 {
     public sealed partial class SearchView
     {
+        public bool ControlsCalendarSearch { get; private set; }
+        public event EventHandler? CalendarSearchOwnerChanged;
+        public void SetCalendarSearchOwner(bool value)
+        {
+            ControlsCalendarSearch = value;
+            CalendarSearchOwnerChanged?.Invoke(this, EventArgs.Empty);
+        }
         // Evita que una ventana secundaria intente inicializar dos veces
         // el mismo SearchView si WinUI dispara Loaded más de una vez.
         private bool _standaloneCalendarInitialized;
@@ -23,6 +30,7 @@ namespace Anfeta.UI.Views
         private void QueueCalendarWindowFilterSync(
             string? filter)
         {
+            if (Application.Current is not App current || !current.IsCalendarSearchOwner(this)) return;
             _pendingCalendarWindowFilter =
                 (filter ?? string.Empty)
                     .Trim();
@@ -44,7 +52,7 @@ namespace Anfeta.UI.Views
                         if (Application.Current is App app)
                         {
                             app.SyncOpenCalendarWindowFilter(
-                                _pendingCalendarWindowFilter);
+                                _pendingCalendarWindowFilter, this);
                         }
                     };
             }
@@ -195,9 +203,11 @@ namespace Anfeta.UI.Views
                     .Trim();
 
             app.OpenCalendarWindow(
-                currentFilter);
+                currentFilter, this);
 
-            StatusText.Text =
+            StatusText.Text = !app.IsCalendarSearchOwner(this)
+                ? "Estado: Calendario abierto; conserva el filtro de su buscador vinculado."
+                :
                 string.IsNullOrWhiteSpace(currentFilter)
                     ? "Estado: Calendario abierto en ventana independiente ✅"
                     : $"Estado: Calendario abierto con filtro “{currentFilter}” ✅";

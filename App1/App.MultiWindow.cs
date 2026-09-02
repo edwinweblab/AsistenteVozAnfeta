@@ -6,6 +6,26 @@ namespace Anfeta.UI
     public partial class App
     {
         private CalendarWindow? _calendarWindow;
+        private WeakReference<Views.SearchView>? _calendarSearchOwner;
+
+        public bool IsCalendarSearchOwner(Views.SearchView view) =>
+            _calendarSearchOwner?.TryGetTarget(out var owner) == true && ReferenceEquals(owner, view);
+
+        public void RegisterCalendarSearchOwner(Views.SearchView view)
+        {
+            if (_calendarSearchOwner?.TryGetTarget(out _) == true) return;
+            _calendarSearchOwner = new WeakReference<Views.SearchView>(view);
+            view.SetCalendarSearchOwner(true);
+        }
+
+        public void ReleaseCalendarSearchOwner(Views.SearchView view)
+        {
+            if (!IsCalendarSearchOwner(view)) return;
+            _calendarSearchOwner = null;
+            view.SetCalendarSearchOwner(false);
+            // Calendar stays open with its last filter. Another view must link
+            // explicitly via the calendar-window button, not steal ownership.
+        }
         private CalendarActivityWindow? _calendarActivityWindow;
         private Action? _calendarActivityWindowClosedCallback;
 
@@ -44,9 +64,9 @@ namespace Anfeta.UI
         /// el Buscador nunca debe abrir otra ventana por sí solo.
         /// </summary>
         public void SyncOpenCalendarWindowFilter(
-            string? filter)
+            string? filter, Views.SearchView sender)
         {
-            if (_calendarWindow == null)
+            if (_calendarWindow == null || !IsCalendarSearchOwner(sender))
                 return;
 
             _ = _calendarWindow
@@ -60,13 +80,17 @@ namespace Anfeta.UI
         /// La referencia se conserva para que el GC no destruya la Window.
         /// </summary>
         public void OpenCalendarWindow(
-            string? initialFilter = null)
+            string? initialFilter = null, Views.SearchView? sender = null)
         {
+            if (sender != null) RegisterCalendarSearchOwner(sender);
+            var mayFilter = sender != null && IsCalendarSearchOwner(sender);
+            if (!mayFilter && _calendarSearchOwner?.TryGetTarget(out var owner) == true)
+                initialFilter = owner.GetTabState().Query;
             if (_calendarWindow != null)
             {
                 _calendarWindow.BringToFront();
 
-                _ = _calendarWindow
+                if (mayFilter) _ = _calendarWindow
                     .CalendarView
                     .ApplyStandaloneCalendarFilterAsync(
                         initialFilter);

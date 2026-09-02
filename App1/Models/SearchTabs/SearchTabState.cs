@@ -7,6 +7,7 @@ namespace Anfeta.UI.Models
         public string Header { get; set; } = "Buscar";
         public string Query { get; set; } = "";
         public string CurrentFolder { get; set; } = "";
+        public SearchCriteriaState? Criteria { get; set; }
     }
 
     public sealed class SearchTabsWorkspace

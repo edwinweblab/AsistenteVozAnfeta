@@ -44,7 +44,7 @@ namespace Anfeta.UI.Views.Dialogs
             string name = (NameTextBox.Text ?? string.Empty).Trim();
             string query = (QueryTextBox.Text ?? string.Empty).Trim();
 
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(query))
+            if (string.IsNullOrWhiteSpace(name) || (string.IsNullOrWhiteSpace(query) && Filter.Criteria == null))
             {
                 args.Cancel = true;
                 return;
@@ -100,6 +100,7 @@ namespace Anfeta.UI.Views.Dialogs
                 Name = source.Name,
                 Description = source.Description,
                 Query = source.Query,
+                Criteria = source.Criteria,
 
                 MatchCase = source.MatchCase,
                 MatchWholeWord = source.MatchWholeWord,

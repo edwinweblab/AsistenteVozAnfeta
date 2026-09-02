@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Services.Notion;
+using Anfeta.UI.Services.Notion;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
@@ -242,9 +243,9 @@ namespace Anfeta.UI.Views
         {
             var titleBox = new TextBox
             {
-                Header = "Título",
+                Header = "Título de la nueva página en Notion",
                 PlaceholderText =
-                    "Escribe el título de la nueva actividad…",
+                    "Ej: dominio.com sseo jjuli Descripción de la actividad…",
                 Text = string.Empty,
                 HorizontalAlignment =
                     HorizontalAlignment.Stretch
@@ -252,12 +253,12 @@ namespace Anfeta.UI.Views
 
             var bodyBox = new TextBox
             {
-                Header = "Descripción / BODY",
+                Header = "Contenido / BODY (Texto pegado del portapapeles)",
                 Text = clipboardText ?? string.Empty,
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
-                MinHeight = 240,
-                MaxHeight = 430,
+                MinHeight = 200,
+                MaxHeight = 360,
                 HorizontalAlignment =
                     HorizontalAlignment.Stretch
             };
@@ -266,24 +267,175 @@ namespace Anfeta.UI.Views
                 bodyBox,
                 ScrollBarVisibility.Auto);
 
-            var info = new TextBlock
+            var guideCard = new Border
             {
-                Text =
-                    "Ctrl+V detectó texto. El contenido se guardará dentro del BODY de la página; " +
-                    "el título inicia vacío para que escribas únicamente lo que corresponda.",
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.78,
-                FontSize = 11
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(35, 0, 168, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(70, 0, 168, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 9, 12, 9)
             };
+
+            var guideStack = new StackPanel { Spacing = 3 };
+            guideStack.Children.Add(new TextBlock
+            {
+                Text = "💡 Convención recomendada de título:",
+                FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 130, 215, 255))
+            });
+            guideStack.Children.Add(new TextBlock
+            {
+                Text = "[dominio.com] → [Tipo: sseo | aapli | aads | wwebs] → [Persona/Mes: jjuli | jjohn] → [Descripción]",
+                FontSize = 10.5,
+                Opacity = 0.88,
+                TextWrapping = TextWrapping.Wrap
+            });
+            guideCard.Child = guideStack;
+
+            var variant00Check = new CheckBox
+            {
+                Content = "Variante 00 (agrega sufijo '00' al final del tag, ej: prtuzREVISION00)",
+                IsChecked = false,
+                FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+
+            void AppendTagToTitle(string tag)
+            {
+                var cleanTag = (tag ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(cleanTag)) return;
+
+                if (variant00Check.IsChecked == true && !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
+                {
+                    cleanTag += "00";
+                }
+
+                var current = (titleBox.Text ?? string.Empty).Trim();
+                var tokens = current.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+                if (tokens.Any(x => string.Equals(x, cleanTag, StringComparison.OrdinalIgnoreCase)))
+                    return;
+
+                titleBox.Text = string.IsNullOrWhiteSpace(current) ? cleanTag : $"{cleanTag} {current}";
+                titleBox.SelectionStart = titleBox.Text.Length;
+            }
+
+            void Toggle00InTitle(bool is00)
+            {
+                var text = (titleBox.Text ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(text)) return;
+
+                var allTags = NotionUploadQuickTags.Concat(NotionUploadPersonTags).ToArray();
+                var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+                bool modified = false;
+
+                for (int i = 0; i < tokens.Count; i++)
+                {
+                    var token = tokens[i];
+                    foreach (var baseTag in allTags)
+                    {
+                        if (is00 && string.Equals(token, baseTag, StringComparison.OrdinalIgnoreCase))
+                        {
+                            tokens[i] = baseTag + "00";
+                            modified = true;
+                            break;
+                        }
+                        else if (!is00 && string.Equals(token, baseTag + "00", StringComparison.OrdinalIgnoreCase))
+                        {
+                            tokens[i] = baseTag;
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (modified)
+                {
+                    titleBox.Text = string.Join(" ", tokens);
+                    titleBox.SelectionStart = titleBox.Text.Length;
+                }
+            }
+
+            variant00Check.Checked += (_, __) => Toggle00InTitle(true);
+            variant00Check.Unchecked += (_, __) => Toggle00InTitle(false);
+
+            var tagsStack = new StackPanel { Spacing = 7 };
+            tagsStack.Children.Add(new TextBlock
+            {
+                Text = "🏷️ Etiquetas y Estados (Tags):",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                FontSize = 12
+            });
+
+            // Checkbox Variante 00
+            tagsStack.Children.Add(variant00Check);
+
+            // Tags principales
+            var mainTagsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            mainTagsRow.Children.Add(new TextBlock
+            {
+                Text = "Principales:",
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = 0.8
+            });
+            foreach (var tag in NotionUploadQuickTags)
+            {
+                var btn = new Button
+                {
+                    Content = tag,
+                    Padding = new Thickness(8, 3, 8, 3),
+                    CornerRadius = new CornerRadius(5)
+                };
+                btn.Click += (_, __) => AppendTagToTitle(tag);
+                mainTagsRow.Children.Add(btn);
+            }
+            tagsStack.Children.Add(mainTagsRow);
+
+            // Personas
+            var personCombo = new ComboBox
+            {
+                PlaceholderText = "TAGS de persona (ej. jjohn, nneft...)",
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            foreach (var tag in NotionUploadPersonTags)
+            {
+                personCombo.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{GetNotionPersonDisplayName(tag)} ({tag})",
+                    Tag = tag
+                });
+            }
+            personCombo.SelectionChanged += (_, __) =>
+            {
+                if (personCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+                {
+                    AppendTagToTitle(tag);
+                    personCombo.SelectedItem = null;
+                }
+            };
+            tagsStack.Children.Add(personCombo);
+
+            var tagsCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12)
+            };
+            tagsCard.Child = tagsStack;
 
             var content = new StackPanel
             {
                 Width = 680,
-                Spacing = 10
+                Spacing = 12
             };
 
-            content.Children.Add(info);
+            content.Children.Add(guideCard);
             content.Children.Add(titleBox);
+            content.Children.Add(tagsCard);
             content.Children.Add(bodyBox);
 
             var dialog = new ContentDialog

@@ -432,7 +432,16 @@ namespace Anfeta.UI.Views
             if (sender is not TextBlock tb) return;
 
             if (args.NewValue is SearchResultRow row)
+            {
+                var state = GetWorkflowState(row.Name);
+                tb.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(state switch
+                {
+                    0 => Windows.UI.Color.FromArgb(255, 255, 107, 119),
+                    4 => Windows.UI.Color.FromArgb(255, 155, 165, 177),
+                    _ => Windows.UI.Color.FromArgb(255, 242, 242, 242)
+                });
                 ApplyHighlightToTextBlock(tb, row.DisplayName ?? "");
+            }
             else
                 tb.Text = "";
         }

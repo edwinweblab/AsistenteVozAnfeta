@@ -9,6 +9,7 @@ namespace Anfeta.UI.Models.Search
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Query { get; set; } = string.Empty;
+        public Anfeta.UI.Models.SearchCriteriaState? Criteria { get; set; }
 
         public bool MatchCase { get; set; }
         public bool MatchWholeWord { get; set; }

@@ -1,4 +1,5 @@
-﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models;
+using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Notion;
@@ -381,6 +382,129 @@ namespace Anfeta.UI.Views
 
             StatusText.Text =
                 $"Estado: Dominio copiado ✅ {domain}";
+        }
+
+        private async void CtxCopyContent_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+            if (row == null)
+            {
+                StatusText.Text = "Estado: Selecciona un resultado para copiar su contenido.";
+                return;
+            }
+
+            try
+            {
+                string content = string.Empty;
+
+                if (IsNotionRow(row))
+                {
+                    var pageId = (row.ExternalId ?? string.Empty).Trim();
+
+                    // Si ya está cargada la vista previa para esta misma página, usamos el contenido actual
+                    if (NotionPreviewContent != null &&
+                        !string.IsNullOrWhiteSpace(pageId) &&
+                        string.Equals(_activePreviewPageId, pageId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var lines = new List<string>();
+                        CollectNotionPreviewText(NotionPreviewContent, lines);
+                        content = string.Join(
+                            Environment.NewLine,
+                            lines.Where(l => !string.IsNullOrWhiteSpace(l)).Select(l => l.Trim()));
+                    }
+
+                    // Si no está cargada aún, obtenemos los bloques de Notion directamente
+                    if (string.IsNullOrWhiteSpace(content) &&
+                        !string.IsNullOrWhiteSpace(pageId) &&
+                        _notionPreviewService != null)
+                    {
+                        var token = (ApplicationData.Current.LocalSettings.Values["Notion.Token"] as string ?? string.Empty).Trim();
+                        if (!string.IsNullOrWhiteSpace(token))
+                        {
+                            StatusText.Text = "Obteniendo contenido de Notion...";
+                            var blocks = await _notionPreviewService.GetPagePreviewAsync(token, pageId, CancellationToken.None);
+                            if (blocks != null && blocks.Count > 0)
+                            {
+                                var blockLines = new List<string>();
+                                foreach (var b in blocks)
+                                {
+                                    if (string.IsNullOrWhiteSpace(b.Text) && string.IsNullOrWhiteSpace(b.Url)) continue;
+                                    var prefix = b.Kind switch
+                                    {
+                                        NotionPreviewBlockKind.Heading1 => "# ",
+                                        NotionPreviewBlockKind.Heading2 => "## ",
+                                        NotionPreviewBlockKind.Heading3 => "### ",
+                                        NotionPreviewBlockKind.BulletedListItem => "• ",
+                                        NotionPreviewBlockKind.NumberedListItem => "1. ",
+                                        NotionPreviewBlockKind.ToDo => b.IsChecked ? "[x] " : "[ ] ",
+                                        NotionPreviewBlockKind.Quote => "> ",
+                                        NotionPreviewBlockKind.Callout => "💡 ",
+                                        _ => ""
+                                    };
+                                    var txt = !string.IsNullOrWhiteSpace(b.Text) ? b.Text : b.Url;
+                                    blockLines.Add($"{prefix}{txt}");
+                                }
+                                content = string.Join(Environment.NewLine, blockLines);
+                            }
+                        }
+                    }
+
+                    // Fallback a Description si no se obtuvieron bloques
+                    if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(row.Description))
+                    {
+                        content = row.Description.Trim();
+                    }
+                }
+                else
+                {
+                    // Archivo local
+                    var path = row.FullPath ?? row.Target ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                    {
+                        var fileInfo = new FileInfo(path);
+                        if (fileInfo.Length <= 5 * 1024 * 1024) // < 5MB
+                        {
+                            content = await File.ReadAllTextAsync(path);
+                        }
+                    }
+
+                    if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(row.Description))
+                    {
+                        content = row.Description.Trim();
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    StatusText.Text = "Estado: No hay contenido de texto disponible para copiar.";
+                    if (NotionPreviewStatus != null)
+                    {
+                        NotionPreviewStatus.Text = "No hay contenido cargado para copiar.";
+                    }
+                    return;
+                }
+
+                var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                package.SetText(content);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+                Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+
+                StatusText.Text = $"Contenido copiado al portapapeles ✅ ({content.Length:N0} caracteres)";
+                if (NotionPreviewStatus != null)
+                {
+                    NotionPreviewStatus.Text = $"Contenido copiado ✅ · {content.Length:N0} caracteres";
+                }
+                if (BtnCopyNotionPreviewContent != null)
+                {
+                    BtnCopyNotionPreviewContent.Content = "Copiado ✓";
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Error al copiar contenido: {ex.Message}";
+            }
         }
 
         private async void CtxOpenDomain_Click(
@@ -1104,6 +1228,15 @@ namespace Anfeta.UI.Views
             "bbilb"
         };
 
+        private static readonly string[] NotionUploadQuickTags00 =
+        {
+            "00prtuzREVISION",
+            "00prtuzCOBRAR",
+            "00prtuzPAGAR",
+            "00bbilb",
+            "00"
+        };
+
         private static readonly string[] NotionUploadPersonTags =
         {
             "jjohn",
@@ -1178,7 +1311,8 @@ namespace Anfeta.UI.Views
         private enum NotionUploadLayout
         {
             SinglePage,
-            SeparatePages
+            SeparatePages,
+            DropboxOnly
         }
 
         private sealed record NotionUploadOptions(
@@ -1354,13 +1488,6 @@ namespace Anfeta.UI.Views
                 ApplicationData.Current.LocalSettings.Values[
                     notionTokenKey] as string;
 
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                StatusText.Text =
-                    "Estado: Configura y guarda primero el token de Notion en Configuración.";
-                return;
-            }
-
             var validFiles = (files ??
                     Array.Empty<StorageFile>())
                 .Where(file =>
@@ -1399,6 +1526,17 @@ namespace Anfeta.UI.Views
 
             if (options == null)
                 return;
+
+            if (options.Layout == NotionUploadLayout.DropboxOnly)
+            {
+                await ChooseDropboxUploadDestinationAsync(options.Files);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text = "Estado: Configura el token de Notion para este destino, o elige Solo Dropbox.";
+                return;
+            }
 
             validFiles = options.Files
                 .Where(file =>
@@ -2325,27 +2463,42 @@ namespace Anfeta.UI.Views
 
             var titleSection = new StackPanel
             {
-                Spacing = 6
+                Spacing = 8
             };
 
-            titleSection.Children.Add(
-                new TextBlock
-                {
-                    Text = "Título de la página:",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold
-                });
+            var titleGuideCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(35, 0, 168, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(70, 0, 168, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 9, 12, 9)
+            };
 
-            titleSection.Children.Add(
-                new TextBlock
-                {
-                    Text =
-                        "(dominio.com → Tipo proyecto = sseo aapli aads wwebs → jjuli → Título Descripción Detalles)",
-                    FontSize = 11,
-                    Opacity = 0.72,
-                    TextWrapping = TextWrapping.Wrap
-                });
+            var titleGuideStack = new StackPanel { Spacing = 3 };
+            titleGuideStack.Children.Add(new TextBlock
+            {
+                Text = "💡 Convención recomendada de título:",
+                FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 130, 215, 255))
+            });
+            titleGuideStack.Children.Add(new TextBlock
+            {
+                Text = "[dominio.com] → [Tipo: sseo | aapli | aads | wwebs] → [Persona/Mes: jjuli | jjohn] → [Descripción]",
+                FontSize = 10.5,
+                Opacity = 0.88,
+                TextWrapping = TextWrapping.Wrap
+            });
+            titleGuideCard.Child = titleGuideStack;
 
+            titleSection.Children.Add(new TextBlock
+            {
+                Text = "Título de la página:",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                FontSize = 12.5
+            });
+            titleSection.Children.Add(titleGuideCard);
             titleSection.Children.Add(titleBox);
             titleSection.Children.Add(titleSuggestionsLabel);
             titleSection.Children.Add(titleSuggestionsPanel);
@@ -2354,6 +2507,14 @@ namespace Anfeta.UI.Views
                 new HashSet<string>(
                     StringComparer.OrdinalIgnoreCase);
 
+            var variant00Check = new CheckBox
+            {
+                Content = "Variante 00 (agrega sufijo '00' al final del tag, ej: prtuzREVISION00)",
+                IsChecked = false,
+                FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+
             void AppendTagToTextBox(
                 TextBox editor,
                 string tag)
@@ -2361,6 +2522,11 @@ namespace Anfeta.UI.Views
                 var cleanTag = (tag ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(cleanTag))
                     return;
+
+                if (variant00Check.IsChecked == true && !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
+                {
+                    cleanTag += "00";
+                }
 
                 var current = (editor.Text ?? string.Empty).Trim();
                 var tokens = current.Split(
@@ -2396,18 +2562,100 @@ namespace Anfeta.UI.Views
                 }
             }
 
+            void Toggle00InEditor(TextBox editor, bool is00)
+            {
+                var text = (editor.Text ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(text)) return;
+
+                var allTags = NotionUploadQuickTags.Concat(NotionUploadPersonTags).ToArray();
+                var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+                bool modified = false;
+
+                for (int i = 0; i < tokens.Count; i++)
+                {
+                    var token = tokens[i];
+                    foreach (var baseTag in allTags)
+                    {
+                        if (is00 && string.Equals(token, baseTag, StringComparison.OrdinalIgnoreCase))
+                        {
+                            tokens[i] = baseTag + "00";
+                            modified = true;
+                            break;
+                        }
+                        else if (!is00 && string.Equals(token, baseTag + "00", StringComparison.OrdinalIgnoreCase))
+                        {
+                            tokens[i] = baseTag;
+                            modified = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (modified)
+                {
+                    editor.Text = string.Join(" ", tokens);
+                    editor.SelectionStart = editor.Text.Length;
+                }
+            }
+
+            variant00Check.Checked += (_, __) =>
+            {
+                if (separatePagesOption.IsChecked == true)
+                {
+                    foreach (var ed in titleEditors) Toggle00InEditor(ed, true);
+                }
+                else
+                {
+                    Toggle00InEditor(titleBox, true);
+                }
+            };
+
+            variant00Check.Unchecked += (_, __) =>
+            {
+                if (separatePagesOption.IsChecked == true)
+                {
+                    foreach (var ed in titleEditors) Toggle00InEditor(ed, false);
+                }
+                else
+                {
+                    Toggle00InEditor(titleBox, false);
+                }
+            };
+
             var quickTagsPanel = new StackPanel
             {
-                Spacing = 7
+                Spacing = 9
             };
 
             quickTagsPanel.Children.Add(
                 new TextBlock
                 {
-                    Text = "Tags más utilizados:",
+                    Text = "🏷️ Etiquetas y Estados (Tags):",
                     FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    FontSize = 12.5
                 });
+
+            quickTagsPanel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Haz clic en un tag para insertarlo al inicio del título:",
+                    FontSize = 10.5,
+                    Opacity = 0.72
+                });
+
+            // Checkbox Variante 00
+            quickTagsPanel.Children.Add(variant00Check);
+
+            // Tags principales
+            var standardTagsHeader = new TextBlock
+            {
+                Text = "Tags principales:",
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Opacity = 0.85
+            };
+            quickTagsPanel.Children.Add(standardTagsHeader);
 
             var quickTagButtons = new StackPanel
             {
@@ -2421,7 +2669,8 @@ namespace Anfeta.UI.Views
                 {
                     Content = tag,
                     Padding = new Thickness(9, 4, 9, 4),
-                    Tag = tag
+                    Tag = tag,
+                    CornerRadius = new CornerRadius(6)
                 };
 
                 button.Click += (_, __) =>
@@ -2432,9 +2681,10 @@ namespace Anfeta.UI.Views
 
             quickTagsPanel.Children.Add(quickTagButtons);
 
+            // Personas
             var personTagCombo = new ComboBox
             {
-                PlaceholderText = "TAGS (personas)",
+                PlaceholderText = "TAGS de persona (ej. jjohn, nneft...)",
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
@@ -2443,7 +2693,7 @@ namespace Anfeta.UI.Views
                 personTagCombo.Items.Add(
                     new ComboBoxItem
                     {
-                        Content = tag,
+                        Content = $"{GetNotionPersonDisplayName(tag)} ({tag})",
                         Tag = tag
                     });
             }
@@ -2581,6 +2831,12 @@ namespace Anfeta.UI.Views
                 TextWrapping = TextWrapping.Wrap
             };
 
+            reminderPanel.Children.Add(new TextBlock
+            {
+                Text = "⏰ Programación de Recordatorio (Opcional):",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                FontSize = 12.5
+            });
             reminderPanel.Children.Add(reminderCheck);
             reminderPanel.Children.Add(
                 new TextBlock
@@ -2684,7 +2940,8 @@ namespace Anfeta.UI.Views
                     var button = new Button
                     {
                         Content = tag,
-                        Padding = new Thickness(8, 3, 8, 3)
+                        Padding = new Thickness(8, 3, 8, 3),
+                        CornerRadius = new CornerRadius(5)
                     };
 
                     button.Click += (_, __) =>
@@ -2698,13 +2955,22 @@ namespace Anfeta.UI.Views
 
             var content = new StackPanel
             {
-                Width = 660,
-                Spacing = 10
+                MaxWidth = 660,
+                Spacing = 14
             };
 
-            content.Children.Add(filesCountText);
-
-            content.Children.Add(
+            // Sección 1: Archivos
+            var filesCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12)
+            };
+            var filesStack = new StackPanel { Spacing = 8 };
+            filesStack.Children.Add(filesCountText);
+            filesStack.Children.Add(
                 new ScrollViewer
                 {
                     Content = fileListPanel,
@@ -2712,42 +2978,92 @@ namespace Anfeta.UI.Views
                     VerticalScrollBarVisibility =
                         ScrollBarVisibility.Auto
                 });
-
-            content.Children.Add(
+            filesStack.Children.Add(
                 new TextBlock
                 {
                     Text = "Adjuntos adicionales:",
                     FontWeight =
                         Microsoft.UI.Text.FontWeights.SemiBold
                 });
+            filesStack.Children.Add(attachmentDropZone);
+            filesStack.Children.Add(attachmentStatusText);
+            filesCard.Child = filesStack;
+            content.Children.Add(filesCard);
 
-            content.Children.Add(attachmentDropZone);
-            content.Children.Add(attachmentStatusText);
-
-            content.Children.Add(
+            // Sección 2: Destino y Organización
+            var orgCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12)
+            };
+            var orgStack = new StackPanel { Spacing = 8 };
+            var dropboxOnlyOption = new RadioButton
+            {
+                Content = "Solo Dropbox · sin crear página en Notion",
+                GroupName = "NotionUploadLayout"
+            };
+            orgStack.Children.Add(
                 new TextBlock
                 {
-                    Text =
-                        "Destino: Notion → Revisiones",
+                    Text = "📋 Destino: Notion → Revisiones / Solo Dropbox",
                     FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold
+                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    FontSize = 12.5
                 });
-
-            content.Children.Add(
+            orgStack.Children.Add(
                 new TextBlock
                 {
-                    Text =
-                        "¿Cómo deseas organizar los archivos?",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold
+                    Text = "¿Cómo deseas organizar los archivos?",
+                    FontSize = 11,
+                    Opacity = 0.75
                 });
+            orgStack.Children.Add(onePageOption);
+            orgStack.Children.Add(separatePagesOption);
+            orgStack.Children.Add(dropboxOnlyOption);
+            orgCard.Child = orgStack;
+            content.Children.Add(orgCard);
 
-            content.Children.Add(onePageOption);
-            content.Children.Add(separatePagesOption);
-            content.Children.Add(titleSection);
-            content.Children.Add(separateTitlesPanel);
-            content.Children.Add(quickTagsPanel);
-            content.Children.Add(reminderPanel);
+            // Sección 3: Título
+            var titleCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12)
+            };
+            var titleCardStack = new StackPanel { Spacing = 8 };
+            titleCardStack.Children.Add(titleSection);
+            titleCardStack.Children.Add(separateTitlesPanel);
+            titleCard.Child = titleCardStack;
+            content.Children.Add(titleCard);
+
+            // Sección 4: Tags
+            var tagsCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12)
+            };
+            tagsCard.Child = quickTagsPanel;
+            content.Children.Add(tagsCard);
+
+            // Sección 5: Recordatorio
+            var reminderCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12)
+            };
+            reminderCard.Child = reminderPanel;
+            content.Children.Add(reminderCard);
 
             var contentScroll = new ScrollViewer
             {
@@ -2767,8 +3083,8 @@ namespace Anfeta.UI.Views
             {
                 XamlRoot = this.XamlRoot,
                 Title = files.Count == 1
-                    ? "Subir archivo a Notion"
-                    : "Subir varios archivos a Notion",
+                    ? "Subir archivo"
+                    : "Subir varios archivos",
                 Content = contentScroll,
                 PrimaryButtonText = "Continuar y subir",
                 CloseButtonText = "Cancelar",
@@ -2785,10 +3101,13 @@ namespace Anfeta.UI.Views
                 "ContentDialogMaxWidth"] = 760d;
 
             dialog.Resources[
-                "ContentDialogMinWidth"] = 760d;
+                "ContentDialogMinWidth"] = Math.Min(420d, Math.Max(240d, (XamlRoot?.Size.Width ?? 760) - 80));
 
             refreshDialogState = () =>
             {
+                var onlyDropbox = dropboxOnlyOption.IsChecked == true;
+                titleCard.Visibility = tagsCard.Visibility = reminderCard.Visibility =
+                    onlyDropbox ? Visibility.Collapsed : Visibility.Visible;
                 var separate =
                     separatePagesOption.IsChecked == true;
 
@@ -2827,7 +3146,7 @@ namespace Anfeta.UI.Views
                      customDelayValid);
 
                 dialog.IsPrimaryButtonEnabled =
-                    titlesValid && reminderValid;
+                    selectedFiles.Count > 0 && (onlyDropbox || (titlesValid && reminderValid));
             };
 
             titleBox.TextChanged +=
@@ -2845,6 +3164,7 @@ namespace Anfeta.UI.Views
 
             onePageOption.Checked +=
                 (_, __) => refreshDialogState();
+            dropboxOnlyOption.Checked += (_, __) => refreshDialogState();
 
             separatePagesOption.Checked +=
                 (_, __) => refreshDialogState();
@@ -2890,6 +3210,9 @@ namespace Anfeta.UI.Views
 
             var singleTitle =
                 (titleBox.Text ?? string.Empty).Trim();
+
+            if (dropboxOnlyOption.IsChecked == true)
+                return new NotionUploadOptions(NotionUploadLayout.DropboxOnly, "", Array.Empty<string>(), selectedFiles.ToList());
 
             if (reminderCheck.IsChecked == true &&
                 reminderRecipientCombo.SelectedItem is ComboBoxItem recipientItem)
@@ -3115,6 +3438,30 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            await UploadSelectedFilesToDropboxAsync(validFiles, destinationLocal, destinationRemote);
+        }
+
+        private async Task ChooseDropboxUploadDestinationAsync(IReadOnlyList<StorageFile> files)
+        {
+            try
+            {
+                var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+                picker.FileTypeFilter.Add("*");
+                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(App.MainWindowInstance));
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder == null) return;
+                if (!_dropboxPathMapper.TryToDropboxPath(DROPBOX_ROOT, folder.Path, out var remote, out var error))
+                {
+                    StatusText.Text = $"Estado: {error}";
+                    return;
+                }
+                await UploadSelectedFilesToDropboxAsync(files, folder.Path, remote);
+            }
+            catch (Exception ex) { StatusText.Text = $"Estado: No se pudo subir a Dropbox: {ex.Message}"; }
+        }
+
+        private async Task UploadSelectedFilesToDropboxAsync(IReadOnlyList<StorageFile> validFiles, string destinationLocal, string destinationRemote)
+        {
             var uploadedCount = 0;
             var skippedCount = 0;
             var failedCount = 0;
@@ -4780,6 +5127,11 @@ namespace Anfeta.UI.Views
                 ? "Copiar link de Notion"
                 : "Copiar link";
 
+            CtxMenuCopyContentItem.Text = isNotion
+                ? "Copiar contenido de Notion"
+                : "Copiar contenido";
+            CtxMenuCopyContentItem.IsEnabled = row != null;
+
             var detectedDomain = row == null
                 ? string.Empty
                 : TryExtractFirstDomain(row);
@@ -5909,11 +6261,13 @@ namespace Anfeta.UI.Views
 
         public SearchTabState GetTabState()
         {
+            if (_stagedSearchState != null) return _stagedSearchState;
             return new SearchTabState
             {
                 Header = "",
                 Query = (SearchBox?.Text ?? "").Trim(),
-                CurrentFolder = _currentFolderPath ?? ""
+                CurrentFolder = _currentFolderPath ?? "",
+                Criteria = CaptureSearchCriteria()
             };
         }
 
@@ -5922,6 +6276,8 @@ namespace Anfeta.UI.Views
             if (s == null) return;
 
             _currentFolderPath = (s.CurrentFolder ?? "").Trim();
+            ApplySearchCriteria(s.Criteria);
+            _defaultTagAppliedOnce = true;
             _allowProgrammaticSearch = true;
             SearchBox.Text = s.Query ?? "";
             _allowProgrammaticSearch = false;
@@ -5938,8 +6294,7 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(DROPBOX_ROOT) && Directory.Exists(DROPBOX_ROOT))
-                await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+            await RunSearchAsync(s.Query ?? "");
         }
 
         private async Task RunSearchImmediateAsync(string query)

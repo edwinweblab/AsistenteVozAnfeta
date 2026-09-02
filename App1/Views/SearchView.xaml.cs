@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models;
 using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Search;
 using Anfeta.UI.Models.Weblab;
@@ -371,6 +371,7 @@ namespace Anfeta.UI.Views
         public SearchView()
         {
             InitializeComponent();
+            PresetViews.Add(new WeakReference<SearchView>(this));
 
             // El indicador de Fecha por hacer es independiente de los
             // ordenamientos existentes por nombre y fecha modificada.
@@ -534,7 +535,10 @@ namespace Anfeta.UI.Views
             }
 
             DetachMessagesNavigationBridge();
-            CloseMessagesView();
+            // Unloaded also occurs when switching tabs, not only when closing.
+            _messagesRefreshTimer?.Stop();
+            _messagesConversationCts?.Cancel();
+            CancelPendingSearch();
             StopFastNotionResultsRefreshWatcher();
             StopNotionChangeWatcher();
             StopDropboxChangeWatcher();
@@ -597,6 +601,7 @@ namespace Anfeta.UI.Views
         {
             if (state == null)
                 return;
+            _stagedSearchState = state;
 
             DeferInitialIndexPaint = true;
             _deferredIndexPaintPending = true;
@@ -620,6 +625,7 @@ namespace Anfeta.UI.Views
             // La pestaña ya se mostró visualmente antes de ejecutar este bloque.
             // Aquí se materializa solo cuando realmente queda seleccionada.
             await EnsureSearchViewRuntimeInitializedAsync();
+            await RefreshSharedSearchPresetsAsync();
 
             if (Interlocked.CompareExchange(
                     ref _sharedVoiceInitStarted,
@@ -643,6 +649,7 @@ namespace Anfeta.UI.Views
 
             if (state != null)
             {
+                _stagedSearchState = null;
                 _deferredIndexPaintPending = false;
                 await RestoreTabStateAsync(state);
                 await ApplyDefaultTagIfEmptyAsync();
@@ -656,7 +663,8 @@ namespace Anfeta.UI.Views
 
                 // Volver a una pestaña NO repinta miles de resultados si el
                 // índice compartido no cambió desde la última vez que se vio.
-                if (_lastPaintedIndexVersion != App.LocalIndex.Version)
+                if (_lastPaintedIndexVersion != App.LocalIndex.Version ||
+                    !string.Equals(_lastCompletedSearchQuery, SearchBox.Text, StringComparison.Ordinal))
                     await PaintLoadedIndexAsync();
             }
 
@@ -670,6 +678,7 @@ namespace Anfeta.UI.Views
         /// </summary>
         public void SuspendAsBackgroundTab()
         {
+            CancelPendingSearch();
             DeferInitialIndexPaint = true;
             _deferredIndexPaintPending = true;
 
@@ -922,6 +931,7 @@ namespace Anfeta.UI.Views
 
         private void FinishUi()
         {
+            NotifyWorkspaceChanged();
             ForceHideLoadingState();
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             CountText.Text = $"{Results.Count} resultados";
@@ -930,6 +940,8 @@ namespace Anfeta.UI.Views
         #endregion
         private void RefreshResultsListView()
         {
+            _lastCompletedSearchQuery = SearchBox.Text;
+            NotifyWorkspaceChanged();
             // Prepara únicamente metadatos VISUALES de Dropbox.
             // Target conserva la ruta local absoluta que usan abrir/renombrar/eliminar.
             foreach (var row in Results)
@@ -983,11 +995,19 @@ namespace Anfeta.UI.Views
                 return Enumerable.Empty<SearchResultGroup>();
             }
 
-            return rows
+            var projects = rows
                 .GroupBy(row => GetResultGroupName(row, null))
                 .OrderBy(group => IsFallbackGroup(group.Key) ? 1 : 0)
-                .ThenBy(group => group.Key)
-                .Select(group => new SearchResultGroup(group.Key, group));
+                .ThenBy(group => group.Key);
+
+            if (_resultGroupingMode == ResultGroupingMode.Domain)
+                return projects.SelectMany(project => project
+                    .GroupBy(row => GetWorkflowState(row.Name))
+                    .OrderBy(state => state.Key)
+                    .Select(state => new SearchResultGroup(
+                        $"{project.Key} · {GetWorkflowStateLabel(state.Key)}", state)));
+
+            return projects.Select(group => new SearchResultGroup(group.Key, group));
         }
 
         private string GetResultGroupName(
@@ -1700,6 +1720,22 @@ namespace Anfeta.UI.Views
             ApplyTextScaleToVisualTree();
         }
 
+        private void ResultsList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.ItemContainer != null)
+            {
+                ApplyTextScaleRecursive(args.ItemContainer);
+            }
+        }
+
+        private void ResultsThumbnailGrid_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.ItemContainer != null)
+            {
+                ApplyTextScaleRecursive(args.ItemContainer);
+            }
+        }
+
         private void ApplyTextScaleToVisualTree()
         {
             if (RootLayout == null)
@@ -1709,6 +1745,30 @@ namespace Anfeta.UI.Views
 
             if (QuickCommandsInputHost != null)
                 ApplyTextScaleRecursive(QuickCommandsInputHost);
+
+            if (ResultsList != null)
+            {
+                ApplyTextScaleRecursive(ResultsList);
+                for (int i = 0; i < ResultsList.Items.Count; i++)
+                {
+                    if (ResultsList.ContainerFromIndex(i) is DependencyObject container)
+                    {
+                        ApplyTextScaleRecursive(container);
+                    }
+                }
+            }
+
+            if (ResultsThumbnailGrid != null)
+            {
+                ApplyTextScaleRecursive(ResultsThumbnailGrid);
+                for (int i = 0; i < ResultsThumbnailGrid.Items.Count; i++)
+                {
+                    if (ResultsThumbnailGrid.ContainerFromIndex(i) is DependencyObject container)
+                    {
+                        ApplyTextScaleRecursive(container);
+                    }
+                }
+            }
         }
 
         private void ApplyTextScaleRecursive(DependencyObject node)

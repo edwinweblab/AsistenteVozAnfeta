@@ -4,11 +4,11 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Title="Edit Filter"
-    MinWidth="720"
-    CloseButtonText="Cancel"
+    Title="Editar filtro de búsqueda"
+    MinWidth="280"
+    CloseButtonText="Cancelar"
     DefaultButton="Primary"
-    PrimaryButtonText="Save"
+    PrimaryButtonText="Guardar"
     mc:Ignorable="d">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -17,7 +17,7 @@
             <TextBlock
                 FontSize="16"
                 FontWeight="SemiBold"
-                Text="Filter Identity" />
+                Text="Nombre y búsqueda" />
 
             <Grid ColumnSpacing="12" RowSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -34,7 +34,7 @@
                     Grid.Row="0"
                     Grid.Column="0"
                     VerticalAlignment="Center"
-                    Text="Name" />
+                    Text="Nombre" />
                 <TextBox
                     x:Name="NameTextBox"
                     Grid.Row="0"
@@ -45,7 +45,7 @@
                     Grid.Row="1"
                     Grid.Column="0"
                     VerticalAlignment="Center"
-                    Text="Description" />
+                    Text="Descripción" />
                 <TextBox
                     x:Name="DescriptionTextBox"
                     Grid.Row="1"
@@ -57,7 +57,7 @@
                     Grid.Column="0"
                     Margin="0,8,0,0"
                     VerticalAlignment="Top"
-                    Text="Search" />
+                    Text="Búsqueda" />
                 <TextBox
                     x:Name="QueryTextBox"
                     Grid.Row="2"
@@ -72,7 +72,7 @@
                 Margin="0,8,0,0"
                 FontSize="16"
                 FontWeight="SemiBold"
-                Text="Matching Options" />
+                Text="Opciones de coincidencia" />
 
             <Grid ColumnSpacing="24" RowSpacing="10">
                 <Grid.ColumnDefinitions>
@@ -91,14 +91,14 @@
                     x:Name="MatchCaseCheckBox"
                     Grid.Row="0"
                     Grid.Column="0"
-                    Content="Match case" />
+                    Content="Distinguir mayúsculas" />
 
 
                 <CheckBox
                     x:Name="MatchPathCheckBox"
                     Grid.Row="1"
                     Grid.Column="0"
-                    Content="Match path" />
+                    Content="Buscar en ruta" />
 
             </Grid>
 
@@ -106,7 +106,7 @@
                 Margin="0,8,0,0"
                 FontSize="16"
                 FontWeight="SemiBold"
-                Text="Sort" />
+                Text="Ordenamiento" />
 
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -117,7 +117,7 @@
                 <TextBlock
                     Grid.Column="0"
                     VerticalAlignment="Center"
-                    Text="Sort by" />
+                    Text="Ordenar por" />
 
                 <ComboBox
                     x:Name="SortByComboBox"
