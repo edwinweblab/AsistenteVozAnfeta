@@ -738,14 +738,23 @@ namespace Anfeta.UI.Views
             if (QuickCommandsInputHost == null || SearchBox == null)
                 return;
 
-            var desiredWidth = Math.Max(760, SearchBox.ActualWidth);
             var rootWidth = XamlRoot?.Size.Width ?? 0;
+            var searchWidth = SearchBox.ActualWidth;
 
-            if (rootWidth > 0)
-                desiredWidth = Math.Min(desiredWidth, Math.Max(1, rootWidth - 48));
+            // Antes el flyout obligaba mínimo 760 px. En ventanas pequeñas o
+            // con zoom 130–150% eso provocaba tarjetas cortadas.
+            // Ahora toma el ancho disponible real, con un mínimo compacto.
+            var availableWidth = rootWidth > 0
+                ? Math.Max(320, rootWidth - 32)
+                : Math.Max(320, searchWidth);
+
+            var desiredWidth = Math.Clamp(
+                Math.Max(320, searchWidth),
+                320,
+                Math.Min(1100, availableWidth));
 
             QuickCommandsInputHost.Width = desiredWidth;
-            QuickCommandsInputHost.MinWidth = desiredWidth;
+            QuickCommandsInputHost.MinWidth = Math.Min(320, desiredWidth);
             QuickCommandsInputHost.MaxWidth = desiredWidth;
         }
 
@@ -1762,16 +1771,9 @@ namespace Anfeta.UI.Views
             if (string.IsNullOrWhiteSpace(value))
                 return Array.Empty<string>();
 
-            const string pattern =
-                @"(?<![\w@])(?:https?://)?(?:www\.)?" +
-                @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
-                @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
-                @"com|mx|org|net|io|co|app|dev))" +
-                @"(?=$|[/:?#\s)\]}>.,;!])";
-
             return Regex.Matches(
                     value,
-                    pattern,
+                    ResultDomainPattern,
                     RegexOptions.IgnoreCase |
                     RegexOptions.CultureInvariant)
                 .Cast<Match>()

@@ -1,4 +1,4 @@
-using Anfeta.UI.Models;
+﻿using Anfeta.UI.Models;
 using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Search;
 using Anfeta.UI.Models.Weblab;
@@ -59,6 +59,16 @@ namespace Anfeta.UI.Views
             Domain,
             Name
         }
+
+        // Dominio completo para resultados/predictivo.
+        // - Permite dominio después de @: contacto@mhad.com.mx -> mhad.com.mx
+        // - Impide arrancar después de un punto: mhad.com.mx NO puede -> com.mx
+        private const string ResultDomainPattern =
+            @"(?<![\w.-])(?:https?://)?(?:www\.)?" +
+            @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
+            @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
+            @"com|mx|org|net|io|co|app|dev))" +
+            @"(?=$|[/:?#\s)\]}>.,;!])";
 
         private ViewMode _mode = ViewMode.Explorer;
         private SearchSourceScope _activeSourceScope = SearchSourceScope.All;
@@ -1001,13 +1011,99 @@ namespace Anfeta.UI.Views
                 .ThenBy(group => group.Key);
 
             if (_resultGroupingMode == ResultGroupingMode.Domain)
+            {
+                // Dentro de cada proyecto el Key numérico impone
+                // exactamente A -> P -> R -> Z -> Otros -> Cobros/Pagos.
                 return projects.SelectMany(project => project
-                    .GroupBy(row => GetWorkflowState(row.Name))
+                    .GroupBy(GetWorkflowGroupState)
                     .OrderBy(state => state.Key)
                     .Select(state => new SearchResultGroup(
-                        $"{project.Key} · {GetWorkflowStateLabel(state.Key)}", state)));
+                        $"{project.Key} · {GetWorkflowStateLabel(state.Key)}",
+                        OrderWorkflowRows(state))));
+            }
 
             return projects.Select(group => new SearchResultGroup(group.Key, group));
+        }
+
+        private static int GetWorkflowGroupState(
+            SearchResultRow row)
+        {
+            if (row == null)
+                return WorkflowOther;
+
+            var title =
+                (row.DisplayName ?? row.Name ?? string.Empty).Trim();
+
+            var source =
+                (row.ExternalSourceName ?? string.Empty).Trim();
+
+            // Las bases auxiliares (Dominios, Correos y Cobrar/Pagar) son
+            // referencias operativas del proyecto. John pidió que no compitan
+            // con las actividades A/P/R y que queden al final.
+            if (string.Equals(
+                    source,
+                    "Cobrar y pagar",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    source,
+                    "Dominios",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    source,
+                    "Correos Contraseñas",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return WorkflowBillingReferences;
+            }
+
+            // También detectamos COBRAR/PAGAR dentro de Revisiones. Se exige
+            // token completo para no clasificar palabras que solo lo contengan.
+            if (Regex.IsMatch(
+                    title,
+                    @"(?<![\p{L}\p{Nd}_])(?:a?prtuz|sprtuz|rtuz|z)?(?:COBRAR|PAGAR)(?![\p{L}\p{Nd}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant))
+            {
+                return WorkflowBillingReferences;
+            }
+
+            return GetWorkflowState(title);
+        }
+
+        private static IEnumerable<SearchResultRow> OrderWorkflowRows(
+            IEnumerable<SearchResultRow> rows)
+        {
+            // Dentro de cada bloque preservamos primero lo más reciente por
+            // Fecha por hacer / modificada cuando exista; como fallback usamos
+            // el título para que el orden sea estable.
+            return rows
+                .OrderByDescending(row =>
+                    ParseResultOrderDate(row.ScheduledDate))
+                .ThenByDescending(row =>
+                    ParseResultOrderDate(row.ServerModified))
+                .ThenBy(row =>
+                    row.DisplayName ?? row.Name ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static DateTime ParseResultOrderDate(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return DateTime.MinValue;
+
+            return DateTime.TryParse(
+                    value,
+                    System.Globalization.CultureInfo.CurrentCulture,
+                    System.Globalization.DateTimeStyles.AllowWhiteSpaces,
+                    out var current)
+                ? current
+                : DateTime.TryParse(
+                    value,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AllowWhiteSpaces,
+                    out var invariant)
+                    ? invariant
+                    : DateTime.MinValue;
         }
 
         private string GetResultGroupName(
@@ -1024,20 +1120,35 @@ namespace Anfeta.UI.Views
 
         private static string GetDomainGroupName(SearchResultRow row)
         {
-            var name = (row.DisplayName ?? row.Name ?? string.Empty).Trim();
+            if (row == null)
+                return "Sin dominio";
+
+            // No depender únicamente del título visible. En zCORREOS/zDOMINIOS
+            // el dominio puede venir dentro de un correo, SearchText o Target.
+            var sourceText = string.Join(
+                " ",
+                new[]
+                {
+                    row.DisplayName,
+                    row.Name,
+                    row.PathColumn,
+                    row.SearchText,
+                    row.Description,
+                    row.Target
+                }.Where(value =>
+                    !string.IsNullOrWhiteSpace(value)));
 
             var match = Regex.Match(
-                name,
-                @"(?<![\w@])(?:https?://)?(?:www\.)?" +
-                @"(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+" +
-                @"(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|" +
-                @"com|mx|org|net|io|co|app|dev))" +
-                @"(?=$|[/:?#\s)\]}>.,;!])",
+                sourceText,
+                ResultDomainPattern,
                 RegexOptions.IgnoreCase |
                 RegexOptions.CultureInvariant);
 
             return match.Success
-                ? match.Groups["domain"].Value.Trim().TrimEnd('.').ToLowerInvariant()
+                ? match.Groups["domain"].Value
+                    .Trim()
+                    .TrimEnd('.')
+                    .ToLowerInvariant()
                 : "Sin dominio";
         }
 

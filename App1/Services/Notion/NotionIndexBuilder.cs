@@ -376,6 +376,41 @@ namespace Anfeta.UI.Services.Notion
             JsonElement props,
             string sourceName)
         {
+            // PRIORIDAD REAL DE NOTION:
+            // Antes de revisar textos de seguimiento/actualización, busca
+            // directamente la propiedad visual "Estado opcion multiple".
+            // Esto no depende del nombre de la fuente y funciona para
+            // status, select, multi_select o fórmula textual.
+            foreach (var property in props.EnumerateObject())
+            {
+                var normalizedName =
+                    NormalizePropertyName(
+                        property.Name);
+
+                var isDirectStatus =
+                    normalizedName ==
+                        "estado opcion multiple" ||
+                    normalizedName ==
+                        "bien estado opcion multiple" ||
+                    normalizedName ==
+                        "estado opcion multiple revisiones" ||
+                    normalizedName ==
+                        "bien estado opcion multiple revisiones";
+
+                if (!isDirectStatus)
+                    continue;
+
+                var directStatus =
+                    ExtractUsefulStatusText(
+                        property.Value);
+
+                if (IsUsefulProjectStatus(
+                        directStatus))
+                {
+                    return directStatus.Trim();
+                }
+            }
+
             var normalizedSource =
                 NormalizePropertyName(
                     sourceName);

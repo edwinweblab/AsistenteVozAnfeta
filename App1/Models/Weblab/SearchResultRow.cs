@@ -85,7 +85,22 @@ namespace Anfeta.UI.Models.Weblab
         public string ExternalUrl { get; set; } = "";
         public string SearchText { get; set; } = "";
         public string Description { get; set; } = "";
-        public string ProjectUpdateStatus { get; set; } = "";
+
+        private string _projectUpdateStatus = "";
+        public string ProjectUpdateStatus
+        {
+            get => _projectUpdateStatus;
+            set
+            {
+                var clean = value ?? "";
+                if (_projectUpdateStatus == clean) return;
+
+                _projectUpdateStatus = clean;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ResultNameBrush));
+            }
+        }
+
         public string ScheduledDate { get; set; } = "";
         public string ExternalSourceName { get; set; } = "";
 
@@ -100,6 +115,7 @@ namespace Anfeta.UI.Models.Weblab
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(DisplayName));
                 OnPropertyChanged(nameof(ResultSummary));
+                OnPropertyChanged(nameof(ResultNameBrush));
             }
         }
 
@@ -170,6 +186,33 @@ namespace Anfeta.UI.Models.Weblab
 
         [JsonIgnore]
         public string ResultSummary => BuildResultSummary();
+
+        /// <summary>
+        /// Color del nombre según el estado de revisión.
+        /// rtuzREVISION = rojo fuerte; zREVISION = tenue; resto = normal.
+        /// La detección usa límites para no confundir prtuzREVISION con rtuzREVISION.
+        /// </summary>
+        [JsonIgnore]
+        public Brush ResultNameBrush
+        {
+            get
+            {
+                var workflowText = string.Join(
+                    " ",
+                    ProjectUpdateStatus ?? string.Empty,
+                    SearchText ?? string.Empty,
+                    Description ?? string.Empty,
+                    Name ?? string.Empty);
+
+                if (HasWorkflowToken(workflowText, "rtuzREVISION"))
+                    return BuildResultBrush(248, 113, 113);
+
+                if (HasWorkflowToken(workflowText, "zREVISION"))
+                    return BuildResultBrush(148, 163, 184);
+
+                return BuildResultBrush(242, 242, 242);
+            }
+        }
 
         // Ruta visual relativa a la raíz de Dropbox.
         // Target conserva SIEMPRE la ruta local absoluta para operaciones reales.
@@ -451,6 +494,20 @@ namespace Anfeta.UI.Models.Weblab
         private static bool IsVideoExtension(string extension)
             => extension is "mp4" or "mov" or "avi" or "mkv" or
                 "webm" or "wmv" or "m4v" or "mpeg" or "mpg";
+
+        private static bool HasWorkflowToken(string? value, string token)
+        {
+            if (string.IsNullOrWhiteSpace(value) ||
+                string.IsNullOrWhiteSpace(token))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(
+                value,
+                $@"(?<![A-Za-z0-9_]){Regex.Escape(token)}(?![A-Za-z0-9_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
 
         private static Brush BuildResultBrush(
             byte red,

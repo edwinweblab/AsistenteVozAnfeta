@@ -187,6 +187,16 @@ namespace Anfeta.UI.Views
         private IReadOnlyList<NotionCalendarActivity> _calendarActivities =
             Array.Empty<NotionCalendarActivity>();
 
+        // Resumen lateral de proyectos con actividad programada HOY.
+        // Se construye desde la caché del calendario; no consulta Notion.
+        private sealed record ActiveTodayProjectSummary(
+            string Domain,
+            int ActivityCount);
+
+        private IReadOnlyList<ActiveTodayProjectSummary>
+            _activeTodayProjects =
+                Array.Empty<ActiveTodayProjectSummary>();
+
         private readonly List<FrameworkElement> _calendarStickyHeaders = new();
         private readonly List<FrameworkElement> _calendarStickyHours = new();
         private FrameworkElement? _calendarStickyCorner;
@@ -764,6 +774,289 @@ namespace Anfeta.UI.Views
             Math.Max(48d, 54d * _calendarZoom);
         private double CalendarFontScale => Math.Clamp(_calendarZoom, 0.70, 1.35);
 
+        private void UpdateActiveTodayProjects(
+            IReadOnlyList<NotionCalendarActivity>? activities)
+        {
+            var source =
+                activities ??
+                Array.Empty<NotionCalendarActivity>();
+
+            var projects =
+                source
+                    .Where(activity =>
+                        activity != null &&
+                        !activity.IsReviewMirror &&
+                        activity.Start.Date == DateTime.Today)
+                    .Select(activity =>
+                    {
+                        var domain =
+                            TryExtractFirstDomain(
+                                BuildCalendarSearchRow(activity));
+
+                        domain =
+                            NormalizeCalendarProjectDomain(
+                                domain);
+
+                        return new
+                        {
+                            Activity = activity,
+                            Domain = domain
+                        };
+                    })
+                    .Where(item =>
+                        !string.IsNullOrWhiteSpace(
+                            item.Domain))
+                    .GroupBy(
+                        item => item.Domain,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(group =>
+                        new ActiveTodayProjectSummary(
+                            group.Key,
+                            group
+                                .Select(item =>
+                                    string.IsNullOrWhiteSpace(
+                                        item.Activity.PageId)
+                                        ? item.Activity.Title
+                                        : item.Activity.PageId)
+                                .Where(value =>
+                                    !string.IsNullOrWhiteSpace(
+                                        value))
+                                .Distinct(
+                                    StringComparer.OrdinalIgnoreCase)
+                                .Count()))
+                    .OrderByDescending(item =>
+                        item.ActivityCount)
+                    .ThenBy(item =>
+                        item.Domain,
+                        StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            _activeTodayProjects =
+                projects;
+
+            if (ActiveTodayProjectsPanel == null ||
+                ActiveTodayProjectsCountText == null ||
+                ActiveTodayProjectsHintText == null)
+            {
+                return;
+            }
+
+            ActiveTodayProjectsPanel.Children.Clear();
+
+            ActiveTodayProjectsCountText.Text =
+                projects.Count.ToString(
+                    CultureInfo.InvariantCulture);
+
+            if (projects.Count == 0)
+            {
+                ActiveTodayProjectsHintText.Text =
+                    "No hay proyectos con dominio programados para hoy.";
+                ActiveTodayProjectsHintText.Visibility =
+                    Visibility.Visible;
+                return;
+            }
+
+            ActiveTodayProjectsHintText.Text =
+                projects.Count == 1
+                    ? "1 proyecto con actividad hoy · clic para buscarlo"
+                    : $"{projects.Count} proyectos con actividad hoy · clic para buscar";
+            ActiveTodayProjectsHintText.Visibility =
+                Visibility.Visible;
+
+            foreach (var project in projects)
+            {
+                var button =
+                    new Button
+                    {
+                        Tag = project.Domain,
+                        MinWidth = 0,
+                        MinHeight = 29,
+                        Padding = new Thickness(
+                            7, 3, 6, 3),
+                        HorizontalAlignment =
+                            HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment =
+                            HorizontalAlignment.Stretch,
+                        Background =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    24, 56, 189, 248)),
+                        BorderBrush =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    80, 56, 189, 248)),
+                        BorderThickness =
+                            new Thickness(1),
+                        CornerRadius =
+                            new CornerRadius(7)
+                    };
+
+                var row =
+                    new Grid
+                    {
+                        ColumnSpacing = 6
+                    };
+
+                row.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width =
+                            new GridLength(
+                                1,
+                                GridUnitType.Star)
+                    });
+
+                row.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width =
+                            GridLength.Auto
+                    });
+
+                var domainText =
+                    new TextBlock
+                    {
+                        Text = project.Domain,
+                        FontSize = 8.6,
+                        FontWeight =
+                            Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    255, 220, 241, 252)),
+                        VerticalAlignment =
+                            VerticalAlignment.Center,
+                        TextTrimming =
+                            TextTrimming.CharacterEllipsis,
+                        MaxLines = 1
+                    };
+
+                var countBadge =
+                    new Border
+                    {
+                        MinWidth = 21,
+                        Height = 19,
+                        Padding =
+                            new Thickness(
+                                5, 0, 5, 0),
+                        CornerRadius =
+                            new CornerRadius(9.5),
+                        Background =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    78, 14, 165, 233)),
+                        BorderBrush =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    125, 56, 189, 248)),
+                        BorderThickness =
+                            new Thickness(1),
+                        Child =
+                            new TextBlock
+                            {
+                                Text =
+                                    project.ActivityCount
+                                        .ToString(
+                                            CultureInfo.InvariantCulture),
+                                FontSize = 8.2,
+                                FontWeight =
+                                    Microsoft.UI.Text.FontWeights.Bold,
+                                Foreground =
+                                    new SolidColorBrush(
+                                        Color.FromArgb(
+                                            255, 224, 242, 254)),
+                                HorizontalAlignment =
+                                    HorizontalAlignment.Center,
+                                VerticalAlignment =
+                                    VerticalAlignment.Center
+                            }
+                    };
+
+                Grid.SetColumn(
+                    domainText,
+                    0);
+
+                Grid.SetColumn(
+                    countBadge,
+                    1);
+
+                row.Children.Add(
+                    domainText);
+
+                row.Children.Add(
+                    countBadge);
+
+                button.Content =
+                    row;
+
+                ToolTipService.SetToolTip(
+                    button,
+                    $"{project.Domain} · " +
+                    $"{project.ActivityCount} actividad(es) hoy · " +
+                    "clic para buscar este proyecto");
+
+                button.Click +=
+                    ActiveTodayProject_Click;
+
+                ActiveTodayProjectsPanel.Children.Add(
+                    button);
+            }
+        }
+
+        private async void ActiveTodayProject_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element)
+                return;
+
+            var domain =
+                (element.Tag?.ToString() ??
+                 string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(domain))
+                return;
+
+            if (_calendarViewActive)
+                CloseCalendarView();
+
+            if (_remindersCalendarViewActive)
+                CloseRemindersCalendarView();
+
+            if (_messagesViewActive)
+                CloseMessagesView();
+
+            SaveLastSearchSubView(
+                "results");
+
+            _suppressSuggest = true;
+            SearchBox.Text =
+                domain;
+            _suppressSuggest = false;
+
+            SearchBox.IsSuggestionListOpen =
+                false;
+
+            SyncBaseChipsFromQuery(
+                domain);
+
+            SetTabTitle(
+                domain);
+
+            NotifyWorkspaceChanged();
+
+            StatusText.Text =
+                $"Estado: Buscando proyecto activo · {domain}";
+
+            await RunSearchAsync(
+                domain);
+
+            SearchBox.Focus(
+                FocusState.Programmatic);
+
+            MoveSearchBoxCaretToEnd();
+        }
+
         private void StartCalendarStartupPipeline()
         {
             if (_calendarStartupPipelineStarted)
@@ -915,6 +1208,11 @@ namespace Anfeta.UI.Views
                         .TryGetCachedDayAsync(
                             DateTime.Today,
                             CancellationToken.None);
+
+                // Alimenta el lateral "Proyectos activos hoy" con la misma
+                // caché que ya se obtuvo para el calendario.
+                UpdateActiveTodayProjects(
+                    todayActivities);
 
                 if (todayActivities != null &&
                     todayActivities.Count > 0)
@@ -2745,6 +3043,13 @@ namespace Anfeta.UI.Views
         {
             RefreshPriority00Counts();
             ApplyCachedCalendarReviewFlow(activities);
+
+            if (_calendarSelectedDate.Date ==
+                DateTime.Today)
+            {
+                UpdateActiveTodayProjects(
+                    activities);
+            }
 
             var expandedActivities =
                 ExpandCalendarReviewActivities(activities);
@@ -7836,6 +8141,18 @@ namespace Anfeta.UI.Views
             if (!_calendarShowPagos)
                 return Array.Empty<CalendarCobroOverlayItem>();
 
+            // Igual que COBROS: PAGOS depende de App.LocalIndex.
+            // Si el índice se reconstruyó, no se deben reutilizar filas viejas
+            // porque pueden conservar Estado/URL anteriores.
+            var indexVersion =
+                App.LocalIndex.Version;
+
+            if (_calendarCobroCacheIndexVersion != indexVersion)
+            {
+                _calendarPagoOverlayCache.Clear();
+                _calendarCobroCacheIndexVersion = indexVersion;
+            }
+
             var key = day.Date.ToString(
                 "yyyy-MM-dd",
                 CultureInfo.InvariantCulture);
@@ -7903,9 +8220,13 @@ namespace Anfeta.UI.Views
             // activar/desactivar Cobros o cambiar el índice, hace falta
             // recalcular el layout completo una sola vez. No es una consulta a
             // Notion: usa los datos/caché ya cargados en memoria.
-            if (force || _calendarShowCobros)
+            if (force || _calendarShowCobros || _calendarShowPagos)
             {
+                // COBROS y PAGOS nacen del mismo índice financiero.
+                // Un refresh/reindex debe invalidar ambos para que ninguna
+                // columna conserve Estado, URL o propiedades anteriores.
                 _calendarCobroOverlayCache.Clear();
+                _calendarPagoOverlayCache.Clear();
                 _calendarCobroCacheIndexVersion =
                     indexVersion;
 
@@ -7996,6 +8317,108 @@ namespace Anfeta.UI.Views
             return match.Success
                 ? match.Groups["domain"].Value.Trim().ToLowerInvariant()
                 : string.Empty;
+        }
+
+        private static string NormalizeCalendarFinancialStatusLabel(
+            string? rawStatus,
+            string? rawTitle,
+            bool isPago)
+        {
+            var status =
+                Regex.Replace(
+                    (rawStatus ?? string.Empty).Trim(),
+                    @"\s+",
+                    " ");
+
+            var title =
+                rawTitle ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                var normalized =
+                    NormalizeCalendarSearchText(
+                        status);
+
+                // Estados finales financieros:
+                // se muestran SIEMPRE compactos, sin prefijos técnicos
+                // Z / TERMINADO ni combinaciones largas de Notion.
+                //
+                // PAGADO tiene prioridad porque en COBROS existen estados
+                // históricos como "Z COBRADO PAGADO TERMINADO" que antes
+                // visualmente se mostraban simplemente como PAGADO.
+                if (normalized.Contains("pagado"))
+                    return "PAGADO";
+
+                if (normalized.Contains("cobrado"))
+                    return "COBRADO";
+
+                if (normalized.Contains("suspend") ||
+                    normalized.Contains("pausad"))
+                {
+                    return "PAUSADO";
+                }
+
+                if (normalized.Contains("revisar"))
+                    return "REVISAR";
+
+                if (normalized.Contains("terminado proyecto"))
+                    return "TERMINADO";
+
+                if (normalized.Contains("pend") &&
+                    (normalized.Contains("pagar") ||
+                     normalized.Contains("cobrar") ||
+                     normalized.Contains("cobro")))
+                {
+                    return "PENDIENTE";
+                }
+
+                if (normalized.Contains("arrancar") &&
+                    normalized.Contains("asignar"))
+                {
+                    return "PENDIENTE";
+                }
+
+                // Respaldo conservador para un estado nuevo/desconocido:
+                // elimina únicamente ruido técnico evidente.
+                status = Regex.Replace(
+                    status,
+                    @"^\s*z\s+",
+                    string.Empty,
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+                status = Regex.Replace(
+                    status,
+                    @"\s+TERMINADO\s*$",
+                    string.Empty,
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant);
+
+                return status.Trim();
+            }
+
+            // Respaldo visual cuando ProjectUpdateStatus todavía no llegó.
+            if (isPago &&
+                Regex.IsMatch(
+                    title,
+                    @"(?<![\p{L}\p{Nd}_])zPAGAR(?![\p{L}\p{Nd}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant))
+            {
+                return "PAGADO";
+            }
+
+            if (!isPago &&
+                Regex.IsMatch(
+                    title,
+                    @"(?<![\p{L}\p{Nd}_])zCOBRAR(?![\p{L}\p{Nd}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant))
+            {
+                return "COBRADO";
+            }
+
+            return string.Empty;
         }
 
         private CalendarCobroDisplayInfo BuildCalendarCobroDisplayInfo(
@@ -8132,8 +8555,10 @@ namespace Anfeta.UI.Views
             }
 
             var status =
-                (row?.ProjectUpdateStatus ?? string.Empty)
-                .Trim();
+                NormalizeCalendarFinancialStatusLabel(
+                    row?.ProjectUpdateStatus,
+                    rawTitle,
+                    isPago);
 
             return new CalendarCobroDisplayInfo(
                 domain,
@@ -20406,14 +20831,15 @@ namespace Anfeta.UI.Views
             ApplicationData.Current.LocalSettings.Values[
                 LS_CalendarShowPagos] = _calendarShowPagos;
 
+            // PAGOS solo cambia visibilidad. No reconstruye la BD al encenderse:
+            // la columna ya usa App.LocalIndex y su caché propia.
             _calendarPagoOverlayCache.Clear();
+
             UpdateCalendarPagosToggleVisual();
 
             if (_calendarViewActive)
             {
-                RefreshCalendarExternalOverlaysIfNeeded(force: true);
-                DrawCalendarPreservingView(
-                    _calendarActivities,
+                RefreshCalendarExternalOverlaysIfNeeded(
                     force: true);
 
                 StatusText.Text = _calendarShowPagos

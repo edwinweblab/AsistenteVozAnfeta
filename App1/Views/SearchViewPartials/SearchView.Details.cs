@@ -433,17 +433,84 @@ namespace Anfeta.UI.Views
 
             if (args.NewValue is SearchResultRow row)
             {
-                var state = GetWorkflowState(row.Name);
-                tb.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(state switch
-                {
-                    0 => Windows.UI.Color.FromArgb(255, 255, 107, 119),
-                    4 => Windows.UI.Color.FromArgb(255, 155, 165, 177),
-                    _ => Windows.UI.Color.FromArgb(255, 242, 242, 242)
-                });
-                ApplyHighlightToTextBlock(tb, row.DisplayName ?? "");
+                // El color visual NO depende del número interno de GetWorkflowState.
+                // Detectamos el token técnico exacto para evitar que
+                // prtuzREVISION/sprtuzREVISION se confundan con rtuzREVISION.
+                var rawName = (row.Name ?? string.Empty).Trim();
+
+                var isRtuzRevision =
+                    HasExactWorkflowToken(rawName, "rtuzREVISION");
+
+                var isZRevision =
+                    HasExactWorkflowToken(rawName, "zREVISION");
+
+                tb.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    isRtuzRevision
+                        ? Windows.UI.Color.FromArgb(255, 255, 80, 92)
+                        : isZRevision
+                            ? Windows.UI.Color.FromArgb(255, 155, 165, 177)
+                            : Windows.UI.Color.FromArgb(255, 242, 242, 242));
+
+                // El resaltado de la búsqueda (por ejemplo el dominio en azul)
+                // se conserva; los Runs sin color propio heredan el rojo/blanco
+                // establecido arriba.
+                ApplyHighlightToTextBlock(
+                    tb,
+                    row.DisplayName ?? string.Empty);
             }
             else
+            {
                 tb.Text = "";
+            }
+        }
+
+        private static bool HasExactWorkflowToken(
+            string? text,
+            string token)
+        {
+            if (string.IsNullOrWhiteSpace(text) ||
+                string.IsNullOrWhiteSpace(token))
+            {
+                return false;
+            }
+
+            var source = text.Trim();
+
+            var index = source.IndexOf(
+                token,
+                StringComparison.OrdinalIgnoreCase);
+
+            while (index >= 0)
+            {
+                var beforeOk =
+                    index == 0 ||
+                    !IsWorkflowTokenCharacter(
+                        source[index - 1]);
+
+                var afterIndex =
+                    index + token.Length;
+
+                var afterOk =
+                    afterIndex >= source.Length ||
+                    !IsWorkflowTokenCharacter(
+                        source[afterIndex]);
+
+                if (beforeOk && afterOk)
+                    return true;
+
+                index = source.IndexOf(
+                    token,
+                    index + 1,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
+        }
+
+        private static bool IsWorkflowTokenCharacter(char value)
+        {
+            return char.IsLetterOrDigit(value) ||
+                   value == '_';
         }
 
         private static string SafeFileName(string fullPath)

@@ -129,15 +129,17 @@
                         <Flyout.FlyoutPresenterStyle>
                             <Style TargetType="FlyoutPresenter">
                                 <Setter Property="Padding" Value="0" />
-                                <Setter Property="MinWidth" Value="760" />
-                                <Setter Property="MaxWidth" Value="1600" />
+                                <Setter Property="MinWidth" Value="320" />
+                                <Setter Property="MaxWidth" Value="1100" />
                             </Style>
                         </Flyout.FlyoutPresenterStyle>
 
                         <Border
                             x:Name="QuickCommandsInputHost"
                             Width="760"
-                            MaxHeight="360"
+                            MinWidth="320"
+                            MaxWidth="1100"
+                            MaxHeight="420"
                             Padding="10"
                             Background="#0F151C"
                             BorderBrush="#2A526B"
@@ -145,7 +147,7 @@
                             CornerRadius="12">
 
                             <ScrollViewer
-                                MaxHeight="330"
+                                MaxHeight="390"
                                 HorizontalScrollBarVisibility="Disabled"
                                 VerticalScrollBarVisibility="Auto">
 
@@ -161,7 +163,7 @@
 
                                         <GridView
                                             x:Name="QuickPredictiveFlyoutList"
-                                            MaxHeight="165"
+                                            MaxHeight="220"
                                             IsItemClickEnabled="True"
                                             ItemClick="QuickPredictiveFlyoutList_ItemClick"
                                             SelectionMode="None">
@@ -188,8 +190,10 @@
                                             <GridView.ItemTemplate>
                                                 <DataTemplate>
                                                     <Border
-                                                        Width="152"
-                                                        Padding="8,5"
+                                                        MinWidth="128"
+                                                        MaxWidth="168"
+                                                        MinHeight="48"
+                                                        Padding="7,4"
                                                         Background="#12202B"
                                                         BorderBrush="#2B526A"
                                                         BorderThickness="1"
@@ -203,26 +207,30 @@
                                                                     Glyph="{Binding IconGlyph}" />
 
                                                                 <TextBlock
-                                                                    MaxWidth="112"
+                                                                    MaxWidth="126"
                                                                     VerticalAlignment="Center"
                                                                     FontFamily="Segoe UI"
-                                                                    FontSize="11"
+                                                                    FontSize="10"
                                                                     FontWeight="SemiBold"
                                                                     Foreground="White"
                                                                     Text="{Binding Title}"
+                                                                    TextWrapping="Wrap"
+                                                                    MaxLines="2"
                                                                     TextTrimming="CharacterEllipsis"
-                                                                    TextWrapping="NoWrap" />
+                                                                    />
                                                             </StackPanel>
 
                                                             <TextBlock
                                                                 MaxWidth="124"
                                                                 Margin="15,0,0,0"
                                                                 FontFamily="Segoe UI"
-                                                                FontSize="9"
+                                                                FontSize="8.5"
                                                                 Foreground="#AFC2D6"
                                                                 Text="{Binding Subtitle}"
-                                                                TextTrimming="CharacterEllipsis"
-                                                                TextWrapping="NoWrap" />
+                                                                TextWrapping="Wrap"
+                                                                    MaxLines="2"
+                                                                    TextTrimming="CharacterEllipsis"
+                                                                />
                                                         </StackPanel>
                                                     </Border>
                                                 </DataTemplate>
@@ -2510,7 +2518,10 @@
                                         ItemWidth="94"
                                         ItemHeight="32" />
 
-                                    <Grid ColumnSpacing="6" RowSpacing="6">
+                                    <Grid
+                                        x:Name="QuickSidebarButtonsGrid"
+                                        ColumnSpacing="4"
+                                        RowSpacing="4">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="*" />
@@ -2523,35 +2534,143 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
 
-                                        <Button Grid.Row="0" Grid.Column="0" Content="PDF" Tag="ext:pdf" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="0" Grid.Column="1" Content="DOCX" Tag="ext:doc;docx" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
+                                        <!--
+                                            Estos botones son deliberadamente compactos.
+                                            A 130–150% siguen cabiendo en dos columnas
+                                            sin depender del tamaño de fuente global.
+                                        -->
+                                        <Button Grid.Row="0" Grid.Column="0" Content="PDF" Tag="ext:pdf" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="0" Grid.Column="1" Content="DOCX" Tag="ext:doc;docx" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
 
-                                        <Button Grid.Row="1" Grid.Column="0" Content="XLSX" Tag="ext:xls;xlsx" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="1" Grid.Column="1" Content="Imágenes" Tag="ext:png;jpg;jpeg;webp;gif;bmp" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="1" Grid.Column="0" Content="XLSX" Tag="ext:xls;xlsx" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="1" Grid.Column="1" Content="Imágenes" Tag="ext:png;jpg;jpeg;webp;gif;bmp" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
 
-                                        <Button Grid.Row="2" Grid.Column="0" Content="Pendientes" Tag="prtuzREVISION" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="2" Grid.Column="1" Content="Revisión" Tag="rtuzREVISION" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="2" Grid.Column="0" Content="Pendientes" Tag="prtuzREVISION" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="2" Grid.Column="1" Content="Revisión" Tag="rtuzREVISION" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
 
-                                        <Button Grid.Row="3" Grid.Column="0" Content="Terminados" Tag="zREVISION" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="3" Grid.Column="1" Content="Programas" Tag="pprog" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="3" Grid.Column="0" Content="Terminados" Tag="zREVISION" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="3" Grid.Column="1" Content="Programas" Tag="pprog" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
 
-                                        <Button Grid.Row="4" Grid.Column="0" Content="Revisiones" Tag="revisiones" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="4" Grid.Column="1" Content="zClientes" Tag="zclientes" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="4" Grid.Column="0" Content="Biblioteca" Tag="bbibl" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="4" Grid.Column="1" Content="Respuesta" Tag="[RESPUESTA]" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
 
-                                        <Button Grid.Row="5" Grid.Column="0" Content="zDominios" Tag="zdominios" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="5" Grid.Column="1" Content="zProyectos" Tag="zproyectos" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="5" Grid.Column="0" Content="Revisiones" Tag="revisiones" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="5" Grid.Column="1" Content="zClientes" Tag="zclientes" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
 
-                                        <Button Grid.Row="6" Grid.Column="0" Content="zPAGAR" Tag="zpagar" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="6" Grid.Column="1" Content="zCOBRAR" Tag="zcobrar" Click="SidebarQuickQuery_Click" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="6" Grid.Column="0" Content="zDominios" Tag="zdominios" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="6" Grid.Column="1" Content="zProyectos" Tag="zproyectos" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+
+                                        <Button Grid.Row="7" Grid.Column="0" Content="zPAGAR" Tag="zpagar" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="7" Grid.Column="1" Content="zCOBRAR" Tag="zcobrar" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+
+                                        <Button Grid.Row="8" Grid.Column="0" Content="Brian" Tag="bbria" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="8" Grid.Column="1" Content="Genaro" Tag="ggena" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+
+                                        <Button Grid.Row="9" Grid.Column="0" Content="Isaias" Tag="iisai" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="9" Grid.Column="1" Content="Karla" Tag="kKarl" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+
+                                        <Button Grid.Row="10" Grid.Column="0" Content="Neftali" Tag="nNeft" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <Button Grid.Row="10" Grid.Column="1" Content="zCorreos" Tag="zcorreos" Click="SidebarQuickQuery_Click"
+                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
                                     </Grid>
 
-                                    <Button
-                                        Content="zCorreos"
-                                        Tag="zcorreos"
-                                        Click="SidebarQuickQuery_Click"
-                                        HorizontalAlignment="Stretch" />
+                                    <!--
+                                        PROYECTOS ACTIVOS HOY
+                                        Se alimenta exclusivamente con la caché del calendario de HOY.
+                                        No dispara consultas adicionales a Notion.
+                                    -->
+                                    <Border
+                                        x:Name="ActiveTodayProjectsCard"
+                                        Margin="0,4,0,0"
+                                        Padding="8"
+                                        Background="#101A22"
+                                        BorderBrush="#27485B"
+                                        BorderThickness="1"
+                                        CornerRadius="9">
+                                        <StackPanel Spacing="6">
+                                            <Grid ColumnSpacing="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel
+                                                    Grid.Column="0"
+                                                    Orientation="Horizontal"
+                                                    Spacing="5">
+                                                    <TextBlock
+                                                        VerticalAlignment="Center"
+                                                        FontSize="10"
+                                                        Text="🔥" />
+                                                    <TextBlock
+                                                        VerticalAlignment="Center"
+                                                        FontSize="9.5"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="#E8F5FF"
+                                                        Text="PROYECTOS ACTIVOS HOY"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+
+                                                <Border
+                                                    Grid.Column="1"
+                                                    MinWidth="22"
+                                                    Height="20"
+                                                    Padding="6,0"
+                                                    Background="#24384A"
+                                                    BorderBrush="#3D617A"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10">
+                                                    <TextBlock
+                                                        x:Name="ActiveTodayProjectsCountText"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        FontSize="8.5"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="#BFE8FF"
+                                                        Text="0" />
+                                                </Border>
+                                            </Grid>
+
+                                            <TextBlock
+                                                x:Name="ActiveTodayProjectsHintText"
+                                                FontSize="8.5"
+                                                Opacity="0.58"
+                                                Text="Cargando proyectos del día…"
+                                                TextWrapping="Wrap" />
+
+                                            <StackPanel
+                                                x:Name="ActiveTodayProjectsPanel"
+                                                HorizontalAlignment="Stretch"
+                                                Spacing="4" />
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
 
                                 <Border
@@ -3293,7 +3412,7 @@
                                             FontFamily="Segoe UI"
                                             FontSize="12"
                                             FontWeight="SemiBold"
-                                            Foreground="#F2F2F2"
+                                            Foreground="{x:Bind ResultNameBrush, Mode=OneWay}"
                                             MaxLines="1"
                                             TextTrimming="CharacterEllipsis"
                                             TextWrapping="NoWrap" />
@@ -3550,6 +3669,7 @@
                                         HorizontalAlignment="Stretch"
                                         FontSize="11"
                                         FontWeight="SemiBold"
+                                        Foreground="{x:Bind ResultNameBrush, Mode=OneWay}"
                                         MaxLines="2"
                                         DataContextChanged="NameText_DataContextChanged"
                                         Text="{x:Bind DisplayName, Mode=OneWay}"

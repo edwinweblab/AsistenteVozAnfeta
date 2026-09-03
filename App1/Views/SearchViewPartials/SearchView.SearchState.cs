@@ -109,24 +109,39 @@ namespace Anfeta.UI.Views
             @"^\s*(?:\[[^\]]+\]\s*)?(?<tag>aprtuz|prtuz|rtuz|ztuz|z)REVISION\b|^\s*(?<tag>aprtuz|prtuz|rtuz|ztuz)\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Orden solicitado en reunión por John:
+        // A -> P -> R -> Z -> Otros -> Cobros/Pagos/Referencias.
+        // sprtuz no se reclasifica sin una regla explícita: permanece en OTROS.
+        internal const int WorkflowAprtuz = 0;
+        internal const int WorkflowPrtuz = 1;
+        internal const int WorkflowRtuz = 2;
+        internal const int WorkflowFinished = 3;
+        internal const int WorkflowOther = 4;
+        internal const int WorkflowBillingReferences = 5;
+
         internal static int GetWorkflowState(string? title)
         {
             var match = WorkflowPrefix.Match(title ?? "");
+
             return match.Groups["tag"].Value.ToLowerInvariant() switch
             {
-                "rtuz" => 0,
-                "prtuz" or "aprtuz" => 1,
-                "ztuz" or "z" => 4,
-                _ => 3
+                "aprtuz" => WorkflowAprtuz,
+                "prtuz" => WorkflowPrtuz,
+                "rtuz" => WorkflowRtuz,
+                "ztuz" or "z" => WorkflowFinished,
+                _ => WorkflowOther
             };
         }
 
         private static string GetWorkflowStateLabel(int state) => state switch
         {
-            0 => "SOLICITUDES DE REVISIÓN",
-            1 => "PENDIENTES",
-            4 => "TERMINADOS",
-            _ => "OTROS / COBROS Y REFERENCIAS"
+            WorkflowAprtuz => "A · PRIORIDAD / APRTU",
+            WorkflowPrtuz => "P · PENDIENTES / PRTU",
+            WorkflowRtuz => "R · SOLICITUDES DE REVISIÓN",
+            WorkflowFinished => "Z · TERMINADOS",
+            WorkflowOther => "OTROS",
+            WorkflowBillingReferences => "COBROS / PAGOS / REFERENCIAS",
+            _ => "OTROS"
         };
 
         private void AddQuickCriteriaSuggestions(string query)
@@ -147,7 +162,15 @@ namespace Anfeta.UI.Views
                 (Title: "Pendientes", Query: "prtuzREVISION", Subtitle: "Agregar prtuzREVISION"),
                 (Title: "Solicitudes de revisión", Query: "rtuzREVISION", Subtitle: "Agregar rtuzREVISION"),
                 (Title: "Terminados", Query: "zREVISION", Subtitle: "Agregar zREVISION"),
-                (Title: "Programas", Query: "pprog", Subtitle: "Agregar tag pprog")
+                (Title: "Programas", Query: "pprog", Subtitle: "Agregar tag pprog"),
+                (Title: "Biblioteca", Query: "bbibl", Subtitle: "Agregar tag bbibl"),
+                (Title: "Respuesta", Query: "[RESPUESTA]", Subtitle: "Agregar [RESPUESTA]"),
+
+                (Title: "Brian", Query: "bbria", Subtitle: "Buscar actividades de Brian"),
+                (Title: "Genaro", Query: "ggena", Subtitle: "Buscar actividades de Genaro"),
+                (Title: "Isaias", Query: "iisai", Subtitle: "Buscar actividades de Isaias"),
+                (Title: "Karla", Query: "kKarl", Subtitle: "Buscar actividades de Karla"),
+                (Title: "Neftali", Query: "nNeft", Subtitle: "Buscar actividades de Neftali")
             };
 
             var currentTerms = SplitAutoAndTerms(current)
