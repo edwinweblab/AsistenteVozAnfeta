@@ -2823,6 +2823,8 @@ namespace Anfeta.UI.Views
 
         private sealed class NewMessageComposerContext
         {
+            public string SuggestedBody { get; init; } = string.Empty;
+            public bool SingleRecipientOnly { get; init; }
             public string RecipientTag { get; init; } = string.Empty;
             public string RecipientName { get; init; } = string.Empty;
             public string Domain { get; init; } = string.Empty;
@@ -3015,7 +3017,7 @@ namespace Anfeta.UI.Views
             var cleanBody =
                 (body ?? string.Empty).Trim();
 
-            if (context == null)
+            if (context == null || context.SingleRecipientOnly)
                 return cleanBody;
 
             var reference =
@@ -3595,6 +3597,12 @@ namespace Anfeta.UI.Views
                     560d,
                     composerDialogWidth - 56d);
 
+            if (context?.SingleRecipientOnly == true)
+            {
+                composerDialogWidth = Math.Max(280, Math.Min(620, rootWidth - 40));
+                composerContentWidth = composerDialogWidth - 56;
+            }
+
             var composerContentHeight =
                 Math.Clamp(
                     rootHeight - 190d,
@@ -3604,10 +3612,11 @@ namespace Anfeta.UI.Views
             var recipientCombo =
                 BuildMessagesPersonCombo(
                     context?.RecipientTag ?? string.Empty,
-                    includeAll: true);
+                    includeAll: context?.SingleRecipientOnly != true);
 
             recipientCombo.Header =
                 "Destinatario";
+            if (context?.SingleRecipientOnly == true) recipientCombo.MinWidth = 0;
 
             if (context != null &&
                 string.IsNullOrWhiteSpace(
@@ -3724,6 +3733,7 @@ namespace Anfeta.UI.Views
             var messageBox =
                 new TextBox
                 {
+                    Text = context?.SuggestedBody ?? string.Empty,
                     Header = "Mensaje",
                     PlaceholderText =
                         context == null
@@ -4119,6 +4129,15 @@ namespace Anfeta.UI.Views
             panel.Children.Add(uploadProgressText);
             panel.Children.Add(status);
 
+            if (context?.SingleRecipientOnly == true)
+            {
+                messageTypeCombo.Visibility = Visibility.Collapsed;
+                contextGrid.Visibility = Visibility.Collapsed;
+                activityReference.Visibility = Visibility.Collapsed;
+                audioComposer.View.Visibility = Visibility.Collapsed;
+                attach.Visibility = Visibility.Collapsed;
+            }
+
             var dialogScroll =
                 new ScrollViewer
                 {
@@ -4139,7 +4158,7 @@ namespace Anfeta.UI.Views
                 new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    Title = context == null
+                    Title = context?.SingleRecipientOnly == true ? "Invitar a Meet" : context == null
                         ? "Nuevo mensaje"
                         : "Enviar mensaje desde calendario",
                     Content = dialogScroll,
@@ -4226,6 +4245,12 @@ namespace Anfeta.UI.Views
                         selectedRecipient.Tag?
                             .ToString() ??
                         string.Empty;
+
+                    if (context?.SingleRecipientOnly == true && IsGroupMessageRecipient(selectedRecipientTag))
+                    {
+                        status.Text = "Elige una sola persona para esta invitación.";
+                        return;
+                    }
 
                     var authorTag =
                         GetCurrentMessagesUserTag();
@@ -5483,6 +5508,9 @@ namespace Anfeta.UI.Views
                         FontSize = 11.5,
                         TextWrapping = TextWrapping.Wrap
                     });
+                foreach (var word in entry.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Distinct())
+                    if (TryGetMeetUri(word, out var meetUri))
+                        panel.Children.Add(new HyperlinkButton { Content = "Abrir Meet", NavigateUri = meetUri });
             }
 
             if (entry.Attachments != null &&

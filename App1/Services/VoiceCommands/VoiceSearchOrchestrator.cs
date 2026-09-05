@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Threading;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Speech;
@@ -24,12 +26,18 @@ namespace Anfeta.UI.Services.VoiceCommands
         }
         public async Task<VoiceListenResult> ListenAndExecuteAsync(
     ISearchCommandSink sink,
-    CancellationToken ct = default)
+    CancellationToken ct = default, Action? onReady = null, IReadOnlyList<string>? localCommands = null)
         {
             await _stt.InitializeAsync(_stt.GetCurrentLanguage());
-            await _engine.EnsureLoadedAsync();
-
-            var phrase = await _stt.RecognizeOnceAsync(ct);
+            string? phrase;
+            if (localCommands != null)
+            {
+                if (_stt is not ICommandSpeechToTextService local)
+                    throw new InvalidOperationException("El servicio actual no admite comandos locales. Selecciona Dictado si deseas usar el servicio en línea.");
+                await _engine.EnsureLoadedAsync();
+                phrase = await local.RecognizeCommandsAsync(localCommands.Concat(_engine.GetLocalPhrases()).Distinct().ToArray(), ct, onReady);
+            }
+            else phrase = await _stt.RecognizeOnceAsync(ct, onReady);
 
             if (string.IsNullOrWhiteSpace(phrase))
             {
@@ -42,6 +50,11 @@ namespace Anfeta.UI.Services.VoiceCommands
                 };
             }
 
+            ct.ThrowIfCancellationRequested();
+            if (await sink.TryExecuteDailyActionAsync(phrase))
+                return new VoiceListenResult { Phrase = phrase, Matched = true, CommandName = "Acción diaria", Token = "acción" };
+
+            await _engine.EnsureLoadedAsync();
             var parsed = _engine.TryParse(phrase);
 
             var isAbrir = parsed is not null &&
@@ -88,6 +101,18 @@ namespace Anfeta.UI.Services.VoiceCommands
 
             if (multi is null)
             {
+                if (localCommands == null)
+                {
+                    var query = phrase.Trim();
+                    foreach (var prefix in new[] { "buscar ", "busca ", "búscame ", "buscame " })
+                        if (query.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { query = query[prefix.Length..].Trim(); break; }
+                    if (query.Length > 0)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        await sink.ExecuteSearchTextAsync(query);
+                        return new VoiceListenResult { Phrase = phrase, Matched = true, CommandName = "Búsqueda por dictado", Token = query, ExecutedSearchText = query };
+                    }
+                }
                 return new VoiceListenResult
                 {
                     Phrase = phrase,

@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Notion;
@@ -774,19 +774,84 @@ namespace Anfeta.UI.Views
             Math.Max(48d, 54d * _calendarZoom);
         private double CalendarFontScale => Math.Clamp(_calendarZoom, 0.70, 1.35);
 
+        private IReadOnlyList<NotionCalendarActivity> _activeTodayProjectSource = Array.Empty<NotionCalendarActivity>();
+        private string _activeTodayProjectState = "";
+        private bool _updatingActiveTodayProjectFilter;
+        private bool _activeTodayProjectPaintQueued;
+
+        private static bool IsActiveTodayProjectUnassigned(NotionCalendarActivity activity) =>
+            !SplitPersons(activity.Person ?? "").Select(NormalizeCalendarPerson)
+                .Any(person => !string.IsNullOrWhiteSpace(person) &&
+                    !string.Equals(person, "Sin asignar", StringComparison.OrdinalIgnoreCase));
+
+        private void ActiveTodayProjectStateFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_updatingActiveTodayProjectFilter ||
+                sender is not ComboBox { SelectedItem: ComboBoxItem selected }) return;
+            var state = selected.Tag?.ToString() ?? "";
+            if (state == _activeTodayProjectState) return;
+            _activeTodayProjectState = state;
+            if (_activeTodayProjectPaintQueued) return;
+            _activeTodayProjectPaintQueued = true;
+            // Never clear/repopulate the ComboBox while WinUI is committing a selection.
+            if (!DispatcherQueue.TryEnqueue(() =>
+                {
+                    _activeTodayProjectPaintQueued = false;
+                    UpdateActiveTodayProjects(_activeTodayProjectSource, refreshFilterOptions: false);
+                }))
+                _activeTodayProjectPaintQueued = false;
+        }
+
         private void UpdateActiveTodayProjects(
-            IReadOnlyList<NotionCalendarActivity>? activities)
+            IReadOnlyList<NotionCalendarActivity>? activities,
+            bool refreshFilterOptions = true)
         {
             var source =
                 activities ??
                 Array.Empty<NotionCalendarActivity>();
 
-            var projects =
-                source
+            _activeTodayProjectSource = source.ToList();
+            var today = source
                     .Where(activity =>
                         activity != null &&
                         !activity.IsReviewMirror &&
-                        activity.Start.Date == DateTime.Today)
+                        activity.Start != default &&
+                        activity.Start.Date == DateTime.Today).ToList();
+            if (refreshFilterOptions && ActiveTodayProjectStateFilter != null)
+            {
+                _updatingActiveTodayProjectFilter = true;
+                try
+                {
+                    var previousLabel = (ActiveTodayProjectStateFilter.SelectedItem as ComboBoxItem)?.Content?.ToString();
+                    var options = today.Select(GetCalendarProjectPhaseInfo).Where(phase => phase != null)
+                        .GroupBy(phase => phase!.Token).Select(group => group.First()!)
+                        .OrderBy(phase => phase.Order).ToList();
+                    var desired = new List<(string Tag, string Label)> { ("", "Todos los estados") };
+                    foreach (var phase in options)
+                        desired.Add((phase.Token, phase.Label));
+                    if (today.Any(IsActiveTodayProjectUnassigned))
+                        desired.Add(("unassigned", "POR ASIGNAR"));
+                    if (!desired.Any(item => item.Tag == _activeTodayProjectState))
+                        desired.Add((_activeTodayProjectState, previousLabel ?? _activeTodayProjectState));
+                    var existing = ActiveTodayProjectStateFilter.Items.OfType<ComboBoxItem>()
+                        .Select(item => (Tag: item.Tag?.ToString() ?? "", Label: item.Content?.ToString() ?? ""));
+                    if (!existing.SequenceEqual(desired))
+                    {
+                        ActiveTodayProjectStateFilter.Items.Clear();
+                        foreach (var item in desired)
+                            ActiveTodayProjectStateFilter.Items.Add(new ComboBoxItem { Tag = item.Tag, Content = item.Label });
+                    }
+                    var selectedItem = ActiveTodayProjectStateFilter.Items.OfType<ComboBoxItem>()
+                        .First(item => item.Tag?.ToString() == _activeTodayProjectState);
+                    if (!ReferenceEquals(ActiveTodayProjectStateFilter.SelectedItem, selectedItem))
+                        ActiveTodayProjectStateFilter.SelectedItem = selectedItem;
+                }
+                finally { _updatingActiveTodayProjectFilter = false; }
+            }
+            var projects = today
+                    .Where(activity => _activeTodayProjectState.Length == 0 ||
+                        (_activeTodayProjectState == "unassigned" ? IsActiveTodayProjectUnassigned(activity) :
+                         GetCalendarProjectPhaseInfo(activity)?.Token == _activeTodayProjectState))
                     .Select(activity =>
                     {
                         var domain =
@@ -824,11 +889,11 @@ namespace Anfeta.UI.Views
                                 .Distinct(
                                     StringComparer.OrdinalIgnoreCase)
                                 .Count()))
-                    .OrderByDescending(item =>
-                        item.ActivityCount)
-                    .ThenBy(item =>
+                    .OrderBy(item =>
                         item.Domain,
                         StringComparer.OrdinalIgnoreCase)
+                    .ThenByDescending(item =>
+                        item.ActivityCount)
                     .ToList();
 
             _activeTodayProjects =
@@ -850,7 +915,9 @@ namespace Anfeta.UI.Views
             if (projects.Count == 0)
             {
                 ActiveTodayProjectsHintText.Text =
-                    "No hay proyectos con dominio programados para hoy.";
+                    _activeTodayProjectState.Length == 0
+                        ? "No hay proyectos con dominio programados para hoy."
+                        : "No hay proyectos con actividades de hoy que coincidan con este estado.";
                 ActiveTodayProjectsHintText.Visibility =
                     Visibility.Visible;
                 return;
@@ -993,10 +1060,12 @@ namespace Anfeta.UI.Views
                     button,
                     $"{project.Domain} · " +
                     $"{project.ActivityCount} actividad(es) hoy · " +
-                    "clic para buscar este proyecto");
+                    "clic izquierdo: buscar · clic derecho: abrir sitio web · " +
+                    (_activeTodayProjectState.Length == 0 ? "todas las actividades de hoy" : "conteo del estado seleccionado hoy"));
 
                 button.Click +=
                     ActiveTodayProject_Click;
+                button.RightTapped += ActiveTodayProject_RightTapped;
 
                 ActiveTodayProjectsPanel.Children.Add(
                     button);
@@ -1199,18 +1268,38 @@ namespace Anfeta.UI.Views
                             CancellationToken.None,
                             progress);
 
-                // Con el dia ya preparado, resuelve tambien los grupos de
-                // proyecto visibles HOY. No descarga bodies extra aqui: solo
-                // deja listas las asociaciones para que el primer clic/hover
-                // no tenga que empezar la busqueda desde cero.
+                // Antes de construir "Proyectos activos hoy", reconciliamos
+                // explícitamente HOY contra Notion. La caché persistente puede
+                // contener páginas que antes estaban en este día pero luego fueron
+                // movidas/eliminadas. El filtro Start.Date == Today no detecta
+                // por sí solo una fecha vieja guardada en caché.
+                try
+                {
+                    await _notionCalendarService
+                        .ReconcileDayAsync(
+                            token,
+                            DateTime.Today,
+                            CancellationToken.None,
+                            progress,
+                            prioritizeUser: false);
+                }
+                catch (Exception ex)
+                {
+                    // La sección sigue siendo best-effort. Si Notion está en
+                    // cooldown conservamos la caché actual y la próxima
+                    // reconciliación del calendario volverá a intentarlo.
+                    Debug.WriteLine(
+                        $"[ACTIVE_TODAY_RECONCILE] {ex.Message}");
+                }
+
+                // Con HOY ya reconciliado, construimos la lista lateral usando
+                // únicamente las actividades que realmente siguen en el día.
                 var todayActivities =
                     await _notionCalendarService
                         .TryGetCachedDayAsync(
                             DateTime.Today,
                             CancellationToken.None);
 
-                // Alimenta el lateral "Proyectos activos hoy" con la misma
-                // caché que ya se obtuvo para el calendario.
                 UpdateActiveTodayProjects(
                     todayActivities);
 
@@ -2381,6 +2470,15 @@ namespace Anfeta.UI.Views
                         "Pulsa Actualizar para realizar una recarga completa del día.",
                         success: false);
                     return;
+                }
+
+                // Sincroniza SIEMPRE "Proyectos activos hoy" con la caché
+                // recién reconciliada. No depende de DrawCalendar ni de que
+                // cambie el fingerprint visual.
+                if (requestedDate.Date == DateTime.Today)
+                {
+                    UpdateActiveTodayProjects(
+                        activities);
                 }
 
                 if (anyChanges)
@@ -4563,7 +4661,7 @@ namespace Anfeta.UI.Views
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
-            foreach (var candidatePerson in ActiveCalendarPeople)
+            foreach (var candidatePerson in OrderRecentCalendarPeople(ActiveCalendarPeople))
             {
                 personCombo.Items.Add(
                     new ComboBoxItem
@@ -4631,6 +4729,28 @@ namespace Anfeta.UI.Views
                     ? durationIndex
                     : 3;
 
+            var quickDateButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            foreach (var dayOffset in new[] { 0, 1 })
+            {
+                var dayButton = new Button { Content = dayOffset == 0 ? "Hoy" : "Mañana" };
+                dayButton.Click += (_, __) => datePicker.Date = new DateTimeOffset(DateTime.Today.AddDays(dayOffset));
+                quickDateButtons.Children.Add(dayButton);
+            }
+
+            var applyTitleDate = new Button { Content = "Aplicar fecha del título", HorizontalAlignment = HorizontalAlignment.Stretch };
+            ToolTipService.SetToolTip(applyTitleDate, "Ejemplo: mañana 10 am Revisar propuesta. Aplica la fecha y conserva el título limpio; no crea nada hasta confirmar.");
+            applyTitleDate.Click += (_, __) =>
+            {
+                if (!TryParseNaturalReminderCommand(titleBox.Text, DateTime.Now, out var parsed))
+                {
+                    StatusText.Text = "Estado: Usa un inicio como mañana 10 am Revisar propuesta.";
+                    return;
+                }
+                datePicker.Date = new DateTimeOffset(parsed.ReminderAt.Date);
+                timePicker.Time = parsed.ReminderAt.TimeOfDay;
+                titleBox.Text = parsed.CleanTitle;
+            };
+
             var detectedText = new TextBlock
             {
                 Text =
@@ -4670,9 +4790,22 @@ namespace Anfeta.UI.Views
             fields.Children.Add(timePicker);
             fields.Children.Add(durationCombo);
 
+            if ((XamlRoot?.Size.Width ?? 900) < 760)
+            {
+                fields.ColumnDefinitions.Clear();
+                fields.ColumnDefinitions.Add(new ColumnDefinition());
+                for (var rowIndex = 0; rowIndex < fields.Children.Count; rowIndex++)
+                {
+                    fields.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                    Grid.SetColumn((FrameworkElement)fields.Children[rowIndex], 0);
+                    Grid.SetRow((FrameworkElement)fields.Children[rowIndex], rowIndex);
+                }
+                fields.RowSpacing = 6;
+            }
+
             var panel = new StackPanel
             {
-                Width = 610,
+                Width = Math.Max(240, Math.Min(610, (XamlRoot?.Size.Width ?? 720) - 100)),
                 MaxWidth = 610,
                 Spacing = 10,
                 Children =
@@ -4690,6 +4823,8 @@ namespace Anfeta.UI.Views
                     },
                     titleBox,
                     personCombo,
+                    quickDateButtons,
+                    applyTitleDate,
                     fields,
                     new TextBlock
                     {
@@ -4707,18 +4842,18 @@ namespace Anfeta.UI.Views
             {
                 XamlRoot = XamlRoot,
                 Title = "➕ Crear actividad desde este hueco",
-                Content = panel,
+                Content = new ScrollViewer { Content = panel, MaxHeight = Math.Max(180, (XamlRoot?.Size.Height ?? 900) - 210), VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
                 PrimaryButtonText = "Crear actividad",
                 SecondaryButtonText = "⚡ Usar plantilla",
                 CloseButtonText = "Cancelar",
                 DefaultButton = ContentDialogButton.Primary,
                 IsPrimaryButtonEnabled = false,
-                MinWidth = 650,
-                MaxWidth = 650
+                MinWidth = panel.Width + 40,
+                MaxWidth = panel.Width + 40
             };
 
-            dialog.Resources["ContentDialogMinWidth"] = 650d;
-            dialog.Resources["ContentDialogMaxWidth"] = 650d;
+            dialog.Resources["ContentDialogMinWidth"] = panel.Width + 40;
+            dialog.Resources["ContentDialogMaxWidth"] = panel.Width + 40;
 
             titleBox.TextChanged +=
                 (_, __) =>
@@ -4817,6 +4952,8 @@ namespace Anfeta.UI.Views
                     token,
                     selectedDate,
                     cts.Token);
+
+                SaveNotionUploadRecentTags(new[] { GetCalendarMessageRecipientTag(person) });
 
                 StatusText.Text =
                     $"Estado: Actividad creada ✅ · {person} · " +
@@ -6345,7 +6482,7 @@ namespace Anfeta.UI.Views
                 });
 
             foreach (var candidatePerson in
-                     ActiveCalendarPeople.Where(person =>
+                     OrderRecentCalendarPeople(ActiveCalendarPeople).Where(person =>
                          !string.Equals(
                              person,
                              "Sin asignar",
@@ -6969,6 +7106,9 @@ namespace Anfeta.UI.Views
                             item.Success)
                         .ToList();
 
+                if (succeeded.Count > 0 && personCombo.SelectedItem is ComboBoxItem recentPerson)
+                    SaveNotionUploadRecentTags(new[] { GetCalendarMessageRecipientTag(recentPerson.Tag?.ToString() ?? "") });
+
                 var failed =
                     batchResults
                         .Where(item =>
@@ -7316,7 +7456,7 @@ namespace Anfeta.UI.Views
                     Tag = string.Empty
                 });
 
-            foreach (var candidatePerson in ActiveCalendarPeople
+            foreach (var candidatePerson in OrderRecentCalendarPeople(ActiveCalendarPeople)
                          .Where(candidatePerson =>
                              !string.Equals(
                                  candidatePerson,
@@ -7878,6 +8018,9 @@ namespace Anfeta.UI.Views
                             end,
                             singlePropertyValues,
                             cts.Token);
+
+                if (personCombo.SelectedItem is ComboBoxItem recentPerson)
+                    SaveNotionUploadRecentTags(new[] { GetCalendarMessageRecipientTag(recentPerson.Tag?.ToString() ?? "") });
 
                 // La copia ya existe: abrirla inmediatamente sin esperar a que
                 // la consulta incremental la indexe y la pinte en el calendario.
@@ -9030,6 +9173,16 @@ namespace Anfeta.UI.Views
                 button.Click += async (_, __) =>
                     await OpenCalendarCobroAsync(
                         cobro.Row);
+                if (isPago)
+                {
+                    var paymentMenu = new MenuFlyout();
+                    var tomorrow = new MenuFlyoutItem { Text = "Mover al siguiente día…" };
+                    var chooseDate = new MenuFlyoutItem { Text = "Cambiar fecha…" };
+                    tomorrow.Click += async (_, __) => await MovePaymentDateAsync(cobro.Row, true);
+                    chooseDate.Click += async (_, __) => await MovePaymentDateAsync(cobro.Row, false);
+                    paymentMenu.Items.Add(tomorrow); paymentMenu.Items.Add(chooseDate);
+                    button.ContextFlyout = paymentMenu;
+                }
 
                 var cobroLeft =
                     railLeft + 5;
@@ -13547,6 +13700,8 @@ namespace Anfeta.UI.Views
                     CalendarContextReassignApproved_Click);
             }
 
+            if (!activity.IsReviewMirror && !HasExactCalendarPhase(activity, "zREVISION"))
+                AddItem("T · Terminar…", CalendarContextComplete_Click);
             AddItem(
                 "Mover a papelera…",
                 CalendarContextTrash_Click);
@@ -32741,7 +32896,7 @@ namespace Anfeta.UI.Views
         }
 
         private async Task<bool> CompleteCalendarProjectActivityAsync(
-            NotionCalendarActivity activity)
+            NotionCalendarActivity activity, XamlRoot? dialogRoot = null)
         {
             if (activity == null ||
                 activity.IsReviewMirror)
@@ -32761,7 +32916,7 @@ namespace Anfeta.UI.Views
             var dialog =
                 new ContentDialog
                 {
-                    XamlRoot = XamlRoot,
+                    XamlRoot = dialogRoot ?? XamlRoot,
                     Title = "Terminar actividad",
                     Content =
                         new TextBlock
@@ -35792,7 +35947,7 @@ namespace Anfeta.UI.Views
                 new TextBlock
                 {
                     Text =
-                        "R = revisión   ·   F = terminar   ·   apunta a una actividad para ver acciones   ·   🎯 = localizar",
+                        "R = revisión   ·   T = terminar   ·   apunta a una actividad para ver acciones   ·   🎯 = localizar",
                     FontSize = 9.5,
                     TextWrapping =
                         TextWrapping.Wrap,
@@ -35814,6 +35969,33 @@ namespace Anfeta.UI.Views
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch
                 };
+
+            var contentTargets = new List<(NotionCalendarActivity Activity, Button Button, ContentControl Host)>();
+            var expandAll = new Button { Content = "Desplegar todos los contenidos", HorizontalAlignment = HorizontalAlignment.Stretch };
+            var expanding = false;
+            var stopExpanding = false;
+            expandAll.Unloaded += (_, __) => stopExpanding = true;
+            expandAll.Click += async (_, __) =>
+            {
+                if (expanding) { stopExpanding = true; expandAll.Content = "Deteniendo…"; return; }
+                expanding = true; stopExpanding = false;
+                try
+                {
+                    foreach (var group in listRoot.Children.OfType<Expander>()) group.IsExpanded = true;
+                    var processed = 0;
+                    foreach (var target in contentTargets)
+                    {
+                        if (stopExpanding) break;
+                        expandAll.Content = $"Detener · {processed}/{contentTargets.Count}";
+                        if (target.Host.Visibility != Visibility.Visible)
+                            await ToggleCalendarPersonActivityContentAsync(target.Activity, target.Button, target.Host, "▾", "▴");
+                        processed++;
+                    }
+                }
+                catch (Exception ex) { StatusText.Text = $"Estado: No se pudieron abrir todos los contenidos → {ex.Message}"; }
+                finally { expanding = false; expandAll.Content = "Desplegar todos los contenidos"; }
+            };
+            listRoot.Children.Add(expandAll);
 
             FrameworkElement BuildActivitiesHeader(
                 bool includeCount)
@@ -36350,11 +36532,11 @@ namespace Anfeta.UI.Views
                         var finishButton =
                             BuildCalendarProjectMiniActionButton(
                                 finishDone
-                                    ? "F✓"
-                                    : "F",
+                                    ? "T✓"
+                                    : "T",
                                 finishDone
-                                    ? "F = La actividad ya está terminada."
-                                    : "F = Terminar actividad y pasarla a zREVISION.",
+                                    ? "T = La actividad ya está terminada."
+                                    : "T = Terminar actividad y pasarla a zREVISION.",
                                 activity,
                                 width: 30);
 
@@ -36377,7 +36559,7 @@ namespace Anfeta.UI.Views
                             {
                                 var changed =
                                     await CompleteCalendarProjectActivityAsync(
-                                        activity);
+                                        activity, finishButton.XamlRoot);
 
                                 if (!changed)
                                     return;
@@ -37007,6 +37189,7 @@ namespace Anfeta.UI.Views
                                     collapsedLabel: "▾",
                                     expandedLabel: "▴");
                             };
+                        contentTargets.Add((activity, contentButton, activityContentHost));
 
                         var minusButton =
                             BuildCalendarProjectMiniActionButton(
@@ -37379,8 +37562,7 @@ namespace Anfeta.UI.Views
                 header.Children.Add(
                     count);
 
-                listRoot.Children.Add(
-                    new Expander
+                var phaseView = new Expander
                     {
                         Header = header,
                         Content = phaseContent,
@@ -37397,7 +37579,8 @@ namespace Anfeta.UI.Views
                             HorizontalAlignment.Stretch,
                         HorizontalContentAlignment =
                             HorizontalAlignment.Stretch
-                    });
+                    };
+                listRoot.Children.Add(phaseView);
             }
 
             if (phaseGroups.Count == 0)
@@ -37444,6 +37627,9 @@ namespace Anfeta.UI.Views
                       StringComparison.OrdinalIgnoreCase) &&
                   (RootLayout?.ActualWidth ?? 0) >= 1250));
 
+            var previewWidth = _calendarActivityPreviewScrollViewer?.ActualWidth ?? 0;
+            if (previewWidth <= 0) previewWidth = _calendarActivityPreviewPopupCard?.Width ?? 0;
+            useWideLayout = useWideLayout && previewWidth >= 1100 * GetCalendarActivityPreviewUiScale();
             if (!useWideLayout)
             {
                 root.Children.Add(
@@ -40910,6 +41096,20 @@ namespace Anfeta.UI.Views
 
                 scheduleGrid.Children.Add(
                     editorDuration);
+                scheduleGrid.SizeChanged += (_, __) =>
+                {
+                    var compact = scheduleGrid.ActualWidth < 520 * GetCalendarActivityPreviewUiScale();
+                    if ((scheduleGrid.RowDefinitions.Count > 0) == compact) return;
+                    scheduleGrid.ColumnDefinitions.Clear(); scheduleGrid.RowDefinitions.Clear();
+                    for (var i = 0; i < (compact ? 1 : 3); i++) scheduleGrid.ColumnDefinitions.Add(new ColumnDefinition());
+                    for (var i = 0; i < scheduleGrid.Children.Count; i++)
+                    {
+                        if (compact) scheduleGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                        Grid.SetColumn((FrameworkElement)scheduleGrid.Children[i], compact ? 0 : i);
+                        Grid.SetRow((FrameworkElement)scheduleGrid.Children[i], compact ? i : 0);
+                    }
+                    scheduleGrid.RowSpacing = compact ? 6 : 0;
+                };
 
                 editorSave =
                     new Button
@@ -40978,6 +41178,12 @@ namespace Anfeta.UI.Views
 
                 saveRow.Children.Add(
                     editorStatus);
+                saveRow.ColumnDefinitions.Clear();
+                saveRow.ColumnDefinitions.Add(new ColumnDefinition());
+                saveRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                saveRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                Grid.SetColumn(editorStatus, 0);
+                Grid.SetRow(editorStatus, 1);
 
                 var editorPanel =
                     new StackPanel
@@ -41381,6 +41587,13 @@ namespace Anfeta.UI.Views
                     reassignButton);
             }
 
+            if (!activity.IsReviewMirror && !HasExactCalendarPhase(activity, "zREVISION"))
+            {
+                var terminate = new Button { Content = "T · Terminar…", Width = actionButtonWidth,
+                    Height = actionButtonHeight, Margin = new Thickness(0, 0, 8, 6), Tag = activity };
+                terminate.Click += CalendarContextComplete_Click;
+                actionsPanel.Children.Add(terminate);
+            }
             var messageButton =
                 new Button
                 {

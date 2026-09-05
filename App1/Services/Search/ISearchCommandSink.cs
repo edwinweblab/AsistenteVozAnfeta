@@ -5,4 +5,5 @@ namespace Anfeta.UI.Services.Search;
 public interface ISearchCommandSink
 {
     Task ExecuteSearchTextAsync(string text);
+    Task<bool> TryExecuteDailyActionAsync(string phrase) => Task.FromResult(false);
 }

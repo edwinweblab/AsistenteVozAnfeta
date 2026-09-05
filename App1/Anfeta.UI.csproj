@@ -8,7 +8,8 @@
 		<Platforms>x86;x64;ARM64</Platforms>
 		<RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
 		<PublishProfile>win-$(Platform).pubxml</PublishProfile>
-		<UseWinUI>true</UseWinUI>
+		<PlatformTarget>x64</PlatformTarget>
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		<EnableMsixTooling>true</EnableMsixTooling>
 		<Nullable>enable</Nullable>
 		<Version>1.0.12.0</Version>
@@ -179,5 +180,6 @@
 		<Page Update="Views\DailyProgress\DailyProgressView.xaml">
 			<Generator>MSBuild:Compile</Generator>
 		</Page>
+		<Compile Remove="scratch\TestExtract.cs" />
 	</ItemGroup>
 </Project>

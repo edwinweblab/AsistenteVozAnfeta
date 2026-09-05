@@ -23,7 +23,7 @@ namespace Anfeta.UI.Services.Search
         string SenderName,
         string PageId);
 
-    public sealed class IndexedFileReminderService : IDisposable
+    public sealed partial class IndexedFileReminderService : IDisposable
     {
         private const string LS_FiredReminders =
             "Search.IndexedReminders.Fired.v1";
@@ -166,6 +166,8 @@ namespace Anfeta.UI.Services.Search
         {
             if (!_started || _disposed)
                 return;
+
+            ScanAssignmentChanges();
 
             var rows = GetParsedReminderRows();
 

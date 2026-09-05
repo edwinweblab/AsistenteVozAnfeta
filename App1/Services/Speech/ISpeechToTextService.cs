@@ -5,6 +5,11 @@ using System.Threading.Tasks;
 
 namespace Anfeta.UI.Services.Speech
 {
+    public interface ICommandSpeechToTextService
+    {
+        Task<string?> RecognizeCommandsAsync(IReadOnlyList<string> commands, CancellationToken ct = default, Action? onReady = null);
+    }
+
     public interface ISpeechToTextService : IDisposable
     {
         Task InitializeAsync(string languageTag = "es-MX");

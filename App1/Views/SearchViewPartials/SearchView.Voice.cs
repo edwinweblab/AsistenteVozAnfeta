@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Media.Core;
@@ -14,6 +15,33 @@ namespace Anfeta.UI.Views
     public sealed partial class SearchView
     {
         #region ===== Comandos de Voz =====
+
+        private bool _voiceUseDictation;
+        private async void VoiceMenu_Mode_Click(object sender, RoutedEventArgs e)
+        {
+            if (_voiceCts != null) return;
+            _voiceUseDictation = (sender as FrameworkElement)?.Tag?.ToString() == "dictation";
+            await StartVoiceAsync();
+        }
+
+        private async void VoiceMenu_Settings_Click(object sender, RoutedEventArgs e)
+        {
+            try { await Windows.System.Launcher.LaunchUriAsync(new Uri((sender as FrameworkElement)?.Tag?.ToString() ?? "ms-settings:privacy-microphone")); }
+            catch (Exception ex) { VoiceDebugText.Text = ex.Message; }
+        }
+
+        private IReadOnlyList<string> GetLocalVoiceCommands()
+        {
+            var phrases = new List<string> { "proyectos activos hoy", "consultar proyectos activos hoy", "crear actividad", "crear actividad hoy", "crear actividad mañana", "abrir Meet uno", "abrir Meet dos", "abrir Meet tres", "abrir Meet OMP" };
+            foreach (var person in ActiveCalendarPeople)
+            {
+                phrases.Add($"actividades de {person}");
+                phrases.Add($"crear actividad para {person}");
+                phrases.Add($"crear actividad para {person} hoy");
+                phrases.Add($"crear actividad para {person} mañana");
+            }
+            return phrases.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
 
         public Task ExecuteSearchTextFromExternalAsync(string text)
         {
@@ -56,7 +84,8 @@ namespace Anfeta.UI.Views
             {
                 VoiceSplit.Background = _voiceSplitDefaultBg;
                 VoiceSplit.Foreground = _voiceSplitDefaultFg;
-                StatusText.Text = "Estado: Listo";
+                if (StatusText.Text == "Estado: 🎙 Escuchando…")
+                    StatusText.Text = "Estado: Listo";
             }
         }
 
@@ -78,28 +107,38 @@ namespace Anfeta.UI.Views
 
         private async Task StartVoiceAsync()
         {
-            if (_isListening) return;
+            if (_voiceCts != null) return;
 
             _isListening = true;
             _voiceCts?.Dispose();
             _voiceCts = new CancellationTokenSource();
 
             SetListeningUi(true);
-            VoiceDebugText.Text = "🎙️ Escuchando...";
+            VoiceDebugText.Text = "Preparando micrófono… espera la indicación para hablar.";
+            StatusText.Text = "Estado: Preparando micrófono…";
 
             try
             {
-                var res = await _voiceOrchestrator.ListenAndExecuteAsync(this, _voiceCts.Token);
+                var res = await _voiceOrchestrator.ListenAndExecuteAsync(this, _voiceCts.Token, () =>
+                {
+                    SetListeningUi(true);
+                    VoiceDebugText.Text = _voiceUseDictation ? "🎙 Habla ahora · dictado en línea" : "🎙 Habla ahora · comandos locales";
+                }, localCommands: _voiceUseDictation ? null : GetLocalVoiceCommands());
 
                 VoiceDebugText.Text = string.IsNullOrWhiteSpace(res?.Phrase)
-                    ? "🎙️ Sin resultado"
+                    ? "No se reconoció voz. Pulsa Voz y habla cuando indique ‘Habla ahora’."
                     : (res.Matched
                         ? $"✅ '{res.Phrase}' → {res.CommandName} ({res.Token})"
-                        : $"❓ '{res.Phrase}' (sin match)");
+                        : $"Se entendió '{res.Phrase}', pero no coincide con un comando. Para búsqueda libre usa Dictado en la flecha de Voz.");
             }
             catch (OperationCanceledException)
             {
                 VoiceDebugText.Text = "🎙️ Cancelado";
+            }
+            catch (Exception ex)
+            {
+                VoiceDebugText.Text = $"Voz: {ex.Message}";
+                StatusText.Text = $"Estado: Voz no disponible (0x{ex.HResult:X8}). Revisa permisos e idioma de reconocimiento.";
             }
             finally
             {
@@ -125,8 +164,6 @@ namespace Anfeta.UI.Views
                 _isListening = false;
                 SetListeningUi(false);
                 VoiceDebugText.Text = "🎙️ Cancelado";
-                _voiceCts?.Dispose();
-                _voiceCts = null;
             }
         }
 

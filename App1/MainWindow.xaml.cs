@@ -1243,6 +1243,8 @@ namespace Anfeta.UI
             body.Children.Add(message);
             body.Children.Add(schedule);
             body.Children.Add(actions);
+            if (reminder.Message.Contains("meet", StringComparison.OrdinalIgnoreCase))
+                body.Children.Add(CreateMeetReminderAction(reminder));
 
             var card =
                 new Border
@@ -1600,6 +1602,9 @@ namespace Anfeta.UI
                 }
 
                 ContentDialog? reminderDialog = null;
+
+                if (reminder.Message.Contains("meet", StringComparison.OrdinalIgnoreCase))
+                    content.Children.Add(CreateMeetReminderAction(reminder));
 
                 var actionStatus =
                     new TextBlock

@@ -2504,8 +2504,7 @@ namespace Anfeta.UI.Views
             titleSection.Children.Add(titleSuggestionsPanel);
 
             var selectedUploadTags =
-                new HashSet<string>(
-                    StringComparer.OrdinalIgnoreCase);
+                new List<string>();
 
             var variant00Check = new CheckBox
             {
@@ -2546,7 +2545,8 @@ namespace Anfeta.UI.Views
                     : $"{cleanTag} {current}";
 
                 editor.SelectionStart = editor.Text.Length;
-                selectedUploadTags.Add(cleanTag);
+                selectedUploadTags.RemoveAll(x => string.Equals(x, cleanTag, StringComparison.OrdinalIgnoreCase));
+                selectedUploadTags.Insert(0, cleanTag);
             }
 
             void AppendTagToActiveTitles(string tag)
@@ -2688,12 +2688,16 @@ namespace Anfeta.UI.Views
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
-            foreach (var tag in NotionUploadPersonTags)
+            var recentPeople = LoadNotionUploadRecentTags()
+                .Select(tag => tag.EndsWith("00", StringComparison.OrdinalIgnoreCase) ? tag[..^2] : tag)
+                .Where(tag => NotionUploadPersonTags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var tag in recentPeople.Concat(NotionUploadPersonTags).Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 personTagCombo.Items.Add(
                     new ComboBoxItem
                     {
-                        Content = $"{GetNotionPersonDisplayName(tag)} ({tag})",
+                        Content = $"{GetNotionPersonDisplayName(tag)} ({tag})" + (recentPeople.Contains(tag, StringComparer.OrdinalIgnoreCase) ? " · Reciente" : ""),
                         Tag = tag
                     });
             }
@@ -2929,17 +2933,19 @@ namespace Anfeta.UI.Views
                         Opacity = 0.70
                     });
 
-                var recentPanel = new StackPanel
+                var recentPanel = new VariableSizedWrapGrid
                 {
                     Orientation = Orientation.Horizontal,
-                    Spacing = 6
+                    MaximumRowsOrColumns = 3,
+                    ItemWidth = 150,
+                    ItemHeight = 38
                 };
 
                 foreach (var tag in recentTags.Take(5))
                 {
                     var button = new Button
                     {
-                        Content = tag,
+                        Content = GetNotionPersonDisplayName(tag),
                         Padding = new Thickness(8, 3, 8, 3),
                         CornerRadius = new CornerRadius(5)
                     };
@@ -5108,6 +5114,11 @@ namespace Anfeta.UI.Views
                       ResultsList.SelectedItem as SearchResultRow;
 
             var isNotion = row != null && IsNotionRow(row);
+
+            CtxActivityState.Visibility = isNotion ? Visibility.Visible : Visibility.Collapsed;
+            CtxActivityState.IsEnabled = isNotion && !string.IsNullOrWhiteSpace(row?.ExternalId);
+            CtxActivityReview.Tag = row;
+            CtxActivityComplete.Tag = row;
 
             CtxMenuOpenItem.Text = isNotion
                 ? "Abrir en Notion"

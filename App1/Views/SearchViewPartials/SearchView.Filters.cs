@@ -82,6 +82,7 @@ namespace Anfeta.UI.Views
             {
                 "domain" => ResultGroupingMode.Domain,
                 "name" => ResultGroupingMode.Name,
+                "area" => ResultGroupingMode.Area,
                 _ => ResultGroupingMode.None
             };
 
@@ -105,6 +106,7 @@ namespace Anfeta.UI.Views
             {
                 ResultGroupingMode.Domain => "dominio",
                 ResultGroupingMode.Name => "persona asignada",
+                ResultGroupingMode.Area => "tipo / área",
                 _ => "ninguno"
             };
         }

@@ -57,7 +57,8 @@ namespace Anfeta.UI.Views
         {
             None,
             Domain,
-            Name
+            Name,
+            Area
         }
 
         // Dominio completo para resultados/predictivo.
@@ -196,6 +197,8 @@ namespace Anfeta.UI.Views
                 string.Equals(mode, "calendar", StringComparison.OrdinalIgnoreCase)
                     ? "calendar"
                     : "results");
+            // actualizar flag que indica si la búsqueda debe limitarse a actividades del calendario
+            _soloActividadesCalendario = string.Equals(mode, "calendar", StringComparison.OrdinalIgnoreCase);
         }
 
         // dictado
@@ -289,6 +292,7 @@ namespace Anfeta.UI.Views
         private CancellationTokenSource? _calendarCts;
         private DateTime _calendarSelectedDate = DateTime.Today;
         private bool _calendarViewActive;
+        private bool _soloActividadesCalendario;
         private Color _calendarThemeColor =
             Color.FromArgb(255, 21, 21, 21);
 
@@ -1022,6 +1026,13 @@ namespace Anfeta.UI.Views
                         OrderWorkflowRows(state))));
             }
 
+            if (_resultGroupingMode == ResultGroupingMode.Area)
+            {
+                return projects.Select(group => new SearchResultGroup(
+                    group.Key,
+                    group.OrderBy(row => row.VisualTitle, StringComparer.OrdinalIgnoreCase)));
+            }
+
             return projects.Select(group => new SearchResultGroup(group.Key, group));
         }
 
@@ -1114,6 +1125,7 @@ namespace Anfeta.UI.Views
             {
                 ResultGroupingMode.Domain => GetDomainGroupName(row),
                 ResultGroupingMode.Name => GetAssignedPersonGroupName(row),
+                ResultGroupingMode.Area => row?.AreaGroupName ?? "Otros",
                 _ => "Resultados"
             };
         }
@@ -1574,6 +1586,7 @@ namespace Anfeta.UI.Views
                 {
                     "domain" => ResultGroupingMode.Domain,
                     "name" => ResultGroupingMode.Name,
+                    "area" => ResultGroupingMode.Area,
                     _ => ResultGroupingMode.None
                 };
 
@@ -1836,6 +1849,18 @@ namespace Anfeta.UI.Views
             if (args.ItemContainer != null)
             {
                 ApplyTextScaleRecursive(args.ItemContainer);
+                ApplyResultColumnWidthsRecursive(args.ItemContainer);
+
+                // Al refrescar, WinUI puede notificar el contenedor antes de
+                // insertar su DataTemplate. Repetimos una vez en la cola para
+                // que la fila recién materializada tome los mismos anchos del
+                // encabezado sin que el usuario tenga que mover un splitter.
+                var materializedContainer = args.ItemContainer;
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    ApplyTextScaleRecursive(materializedContainer);
+                    ApplyResultColumnWidthsRecursive(materializedContainer);
+                });
             }
         }
 

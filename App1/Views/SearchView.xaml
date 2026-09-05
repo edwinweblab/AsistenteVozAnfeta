@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:models="using:Anfeta.UI.Models.Weblab"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
+    xmlns:primitives="using:Microsoft.UI.Xaml.Controls.Primitives"
     xmlns:searchModels="using:Anfeta.UI.Models.Search"
     xmlns:daily="using:Anfeta.UI.Views.DailyProgress"
     Loaded="SearchView_Loaded"
@@ -991,6 +992,7 @@
                         <ComboBoxItem Content="Ninguno" Tag="none" />
                         <ComboBoxItem Content="Proyecto / estado" Tag="domain" />
                         <ComboBoxItem Content="Nombre asignado" Tag="name" />
+                        <ComboBoxItem Content="Tipo / área" Tag="area" />
                     </ComboBox>
 
                     <TextBlock
@@ -1059,8 +1061,6 @@
             <StackPanel Visibility="Collapsed">
                 <!-- Controles de voz conservados fuera de la UI para no romper
                      compatibilidad con el flujo existente. -->
-                <muxc:SplitButton x:Name="VoiceSplit" />
-                <ProgressRing x:Name="VoiceRing" IsActive="False" />
                 <ToggleButton x:Name="ChipPdf" />
                 <ToggleButton x:Name="ChipDocx" />
                 <ToggleButton x:Name="ChipXlsx" />
@@ -2620,7 +2620,6 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-
                                                 <StackPanel
                                                     Grid.Column="0"
                                                     Orientation="Horizontal"
@@ -2665,6 +2664,15 @@
                                                 Text="Cargando proyectos del día…"
                                                 TextWrapping="Wrap" />
 
+                                            <Button Content="Resumen del día · IA" Click="DailyAiSummary_Click"
+                                                HorizontalAlignment="Stretch" MinWidth="0"
+                                                ToolTipService.ToolTip="Resumen local y análisis opcional con OpenAI de las actividades cargadas de hoy." />
+                                            <ComboBox x:Name="ActiveTodayProjectStateFilter"
+                                                Header="Estado de actividades de hoy"
+                                                PlaceholderText="Todos los estados"
+                                                MinWidth="0" HorizontalAlignment="Stretch"
+                                                SelectionChanged="ActiveTodayProjectStateFilter_SelectionChanged"
+                                                ToolTipService.ToolTip="Muestra dominios con actividades de hoy en el estado seleccionado. No cambia la búsqueda ni el estado del proyecto." />
                                             <StackPanel
                                                 x:Name="ActiveTodayProjectsPanel"
                                                 HorizontalAlignment="Stretch"
@@ -3090,7 +3098,7 @@
                                 FontSize="11"
                                 FontWeight="SemiBold"
                                 Foreground="#D6D6D6"
-                                Text="Name" />
+                                Text="Nombre" />
                             <TextBlock
                                 x:Name="NameSortArrow"
                                 FontSize="10"
@@ -3301,7 +3309,7 @@
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="Padding" Value="0" />
-                                <Setter Property="MinHeight" Value="28" />
+                                <Setter Property="MinHeight" Value="34" />
                                 <Setter Property="VerticalContentAlignment" Value="Stretch" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                 <Setter Property="BorderThickness" Value="0" />
@@ -3312,19 +3320,18 @@
                             <GroupStyle>
                                 <GroupStyle.HeaderTemplate>
                                     <DataTemplate>
-                                        <Border
-                                            Margin="0,7,0,2"
-                                            Padding="10,6"
-                                            Background="#26000000"
-                                            BorderBrush="#40FFFFFF"
-                                            BorderThickness="0,0,0,1"
-                                            CornerRadius="4">
-                                            <TextBlock
-                                                FontSize="12"
-                                                FontWeight="SemiBold"
-                                                Opacity="0.92"
-                                                Text="{Binding HeaderText}"
-                                                TextTrimming="CharacterEllipsis" />
+                                        <Border Margin="0,7,0,3" Background="#D9162636"
+                                            BorderBrush="#593A779B" BorderThickness="0,0,0,1" CornerRadius="5">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="4" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Grid.Column="0" Background="#28B8F5" CornerRadius="4,0,0,4" />
+                                                <TextBlock Grid.Column="1" Margin="10,7" FontSize="12"
+                                                    FontWeight="SemiBold" Foreground="#E5F1FA"
+                                                    Text="{Binding HeaderText}" TextTrimming="CharacterEllipsis" />
+                                            </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </GroupStyle.HeaderTemplate>
@@ -3334,8 +3341,8 @@
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchResultRow">
                                 <Grid
-                                    MinHeight="22"
-                                    Padding="8,2"
+                                    MinHeight="32"
+                                    Padding="8,4"
                                     ColumnSpacing="0"
                                     Tag="ResultColumns">
                                     <Grid.ColumnDefinitions>
@@ -3356,7 +3363,7 @@
                                         VerticalAlignment="Center"
                                         FontFamily="Segoe UI"
                                         FontSize="12"
-                                        Foreground="#B8B8B8"
+                                        Foreground="#74808B"
                                         MaxLines="1"
                                         Text="{x:Bind PathColumn, Mode=OneWay}"
                                         TextTrimming="CharacterEllipsis"
@@ -3366,10 +3373,12 @@
                                     <Grid
                                         Grid.Column="2"
                                         VerticalAlignment="Center"
-                                        ColumnSpacing="7">
+                                        ColumnSpacing="4">
                                         <Grid.ColumnDefinitions>
-                                            <!-- Igual que en el diseño anterior que se veía bien -->
-                                            <ColumnDefinition Width="Auto" />
+                                            <!-- Columnas internas invisibles: si falta un dato, su celda queda vacía. -->
+                                            <ColumnDefinition Width="20" />
+                                            <ColumnDefinition Width="58" />
+                                            <ColumnDefinition Width="140" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
@@ -3406,7 +3415,7 @@
 
                                         <TextBlock
                                             x:Name="NameText"
-                                            Grid.Column="1"
+                                            Grid.Column="3"
                                             VerticalAlignment="Center"
                                             DataContextChanged="NameText_DataContextChanged"
                                             FontFamily="Segoe UI"
@@ -3417,8 +3426,26 @@
                                             TextTrimming="CharacterEllipsis"
                                             TextWrapping="NoWrap" />
 
+                                        <Border Grid.Column="1" MaxWidth="53" Padding="5,2" CornerRadius="7"
+                                            HorizontalAlignment="Left"
+                                            Background="#241D4E68" BorderBrush="#7356BEEB" BorderThickness="1"
+                                            Visibility="{x:Bind AreaChipVisibility, Mode=OneWay}"
+                                            ToolTipService.ToolTip="{x:Bind AreaChipText, Mode=OneWay}">
+                                            <TextBlock FontSize="8" FontWeight="SemiBold" Foreground="#8EDBFF"
+                                                Text="{x:Bind AreaChipText, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                        </Border>
+
+                                        <Border Grid.Column="2" MaxWidth="136" Padding="6,2" CornerRadius="7"
+                                            HorizontalAlignment="Left"
+                                            Background="#1F0EA5E9" BorderBrush="#6356BEEB" BorderThickness="1"
+                                            Visibility="{x:Bind DomainChipVisibility, Mode=OneWay}"
+                                            ToolTipService.ToolTip="{x:Bind DomainChipText, Mode=OneWay}">
+                                            <TextBlock FontSize="8" Foreground="#9EDCFA" Text="{x:Bind DomainChipText, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                        </Border>
+
                                         <Border
-                                            Grid.Column="2"
+                                            Grid.Column="4"
                                             Margin="5,0,0,0"
                                             Padding="6,1"
                                             VerticalAlignment="Center"
@@ -3426,6 +3453,7 @@
                                             BorderBrush="{x:Bind ResultAccentBrush, Mode=OneWay}"
                                             BorderThickness="1"
                                             CornerRadius="7"
+                                            HorizontalAlignment="Right"
                                             Visibility="{x:Bind ResultKindBadgeVisibility, Mode=OneWay}">
                                             <TextBlock
                                                 FontSize="8"
@@ -3435,18 +3463,35 @@
                                         </Border>
                                     </Grid>
 
-                                    <!--  Estado texto actualización proyecto  -->
-                                    <TextBlock
+                                    <!-- Fase visual + estado original de Notion, ambos en su columna correcta. -->
+                                    <Grid
                                         Grid.Column="4"
                                         VerticalAlignment="Center"
-                                        FontFamily="Segoe UI"
-                                        FontSize="11"
-                                        Foreground="#D4D4D4"
-                                        MaxLines="1"
-                                        Text="{x:Bind ProjectUpdateStatus, Mode=OneWay, FallbackValue='—'}"
-                                        TextTrimming="CharacterEllipsis"
-                                        TextWrapping="NoWrap"
-                                        ToolTipService.ToolTip="{x:Bind ProjectUpdateStatus, Mode=OneWay}" />
+                                        ColumnSpacing="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" MaxWidth="82" Padding="4,2" CornerRadius="7"
+                                            HorizontalAlignment="Left" Background="#282E3A47"
+                                            BorderBrush="#697E93A8" BorderThickness="1"
+                                            Visibility="{x:Bind WorkflowChipVisibility, Mode=OneWay}"
+                                            ToolTipService.ToolTip="{x:Bind WorkflowChipText, Mode=OneWay}">
+                                            <StackPanel Orientation="Horizontal" Spacing="3">
+                                                <Ellipse Width="6" Height="6" VerticalAlignment="Center"
+                                                    Fill="{x:Bind WorkflowChipAccentBrush, Mode=OneWay}" />
+                                                <TextBlock FontSize="7.5" FontWeight="SemiBold"
+                                                    Foreground="{x:Bind WorkflowChipAccentBrush, Mode=OneWay}"
+                                                    Text="{x:Bind WorkflowChipText, Mode=OneWay}"
+                                                    TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                            FontFamily="Segoe UI" FontSize="10" Foreground="#D4D4D4"
+                                            MaxLines="1" Text="{x:Bind WorkflowFallbackText, Mode=OneWay}"
+                                            TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                            ToolTipService.ToolTip="{x:Bind ProjectUpdateStatus, Mode=OneWay}" />
+                                    </Grid>
 
                                     <!--  Fecha por hacer  -->
                                     <TextBlock
@@ -3479,6 +3524,10 @@
 
                         <ListView.ContextFlyout>
                             <MenuFlyout x:Name="ResultsContextFlyout" Opening="ResultsContextFlyout_Opening">
+                                <MenuFlyoutSubItem x:Name="CtxActivityState" Text="Cambiar estado">
+                                    <MenuFlyoutItem x:Name="CtxActivityReview" Text="Enviar a revisión…" Click="ResultsActivityState_Click" />
+                                    <MenuFlyoutItem x:Name="CtxActivityComplete" Text="T · Terminar…" Click="ResultsActivityState_Click" />
+                                </MenuFlyoutSubItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuOpenItem"
@@ -4169,6 +4218,8 @@
                     Text="Estado: Dropbox" />
                 <TextBlock
                     x:Name="VoiceDebugText"
+                    MaxWidth="220"
+                    ToolTipService.ToolTip="{Binding Text, ElementName=VoiceDebugText}"
                     VerticalAlignment="Center"
                     FontSize="11"
                     Opacity="0.5"
@@ -4211,6 +4262,30 @@
 
             <!--  Accesos rápidos a Google Meet  -->
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <muxc:SplitButton x:Name="VoiceSplit" Click="VoiceSplit_Click"
+                    MinHeight="30" Padding="8,0" AutomationProperties.Name="Comandos de voz"
+                    ToolTipService.ToolTip="Escuchar un comando de voz; pulsa otra vez para cancelar. Abre la flecha para ver ejemplos.">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <FontIcon Glyph="&#xE720;" FontSize="14" />
+                        <TextBlock Text="Voz" VerticalAlignment="Center" />
+                        <ProgressRing x:Name="VoiceRing" Width="16" Height="16" IsActive="False" Visibility="Collapsed" />
+                    </StackPanel>
+                    <muxc:SplitButton.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="Escuchar / cancelar" Click="VoiceMenu_Listen_Click" />
+                            <MenuFlyoutItem Text="Comandos locales · sin internet" Tag="local" Click="VoiceMenu_Mode_Click" />
+                            <MenuFlyoutItem Text="Dictado libre · servicio de Windows en línea" Tag="dictation" Click="VoiceMenu_Mode_Click" />
+                            <MenuFlyoutItem Text="Permisos del micrófono…" Tag="ms-settings:privacy-microphone" Click="VoiceMenu_Settings_Click" />
+                            <MenuFlyoutItem Text="Reconocimiento en línea…" Tag="ms-settings:privacy-speech" Click="VoiceMenu_Settings_Click" />
+                            <MenuFlyoutItem Text="Configurar comandos…" Click="VoiceMenu_Config_Click" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="Di: proyectos activos hoy" IsEnabled="False" />
+                            <MenuFlyoutItem Text="Di: actividades de Brian" IsEnabled="False" />
+                            <MenuFlyoutItem Text="Di: abrir Meet dos" IsEnabled="False" />
+                            <MenuFlyoutItem Text="Di: crear actividad para Brian mañana" IsEnabled="False" />
+                        </MenuFlyout>
+                    </muxc:SplitButton.Flyout>
+                </muxc:SplitButton>
                 <Button Content="Notion ▾" MinHeight="26" Padding="8,0" CornerRadius="7"
                     ToolTipService.ToolTip="Buscar o abrir la IA de Notion Desktop">
                     <Button.Flyout>
@@ -4266,6 +4341,7 @@
                             Click="OpenMeetQuickLink_Click"
                             Tag="https://meet.google.com/vhv-vyjf-ten"
                             Text="Meet 3 · vhv-vyjf-ten" />
+                            <MenuFlyoutItem Click="InviteMeet_Click" Text="Enviar invitación a una persona…" />
                             <MenuFlyoutSeparator />
                             <MenuFlyoutItem
                             Click="ConfigureMeetBrowser_Click"

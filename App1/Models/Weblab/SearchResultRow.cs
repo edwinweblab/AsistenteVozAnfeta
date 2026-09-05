@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Text.Json.Serialization;
@@ -97,11 +98,18 @@ namespace Anfeta.UI.Models.Weblab
 
                 _projectUpdateStatus = clean;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(WorkflowChipText));
+                OnPropertyChanged(nameof(WorkflowChipVisibility));
+                OnPropertyChanged(nameof(WorkflowChipAccentBrush));
+                OnPropertyChanged(nameof(WorkflowFallbackText));
                 OnPropertyChanged(nameof(ResultNameBrush));
             }
         }
 
         public string ScheduledDate { get; set; } = "";
+        public int AssignmentDataVersion { get; set; }
+        public string[] AssignmentKeys { get; set; } = Array.Empty<string>();
+        public DateTimeOffset? NotionEditedUtc { get; set; }
         public string ExternalSourceName { get; set; } = "";
 
         private string _name = "";
@@ -114,6 +122,17 @@ namespace Anfeta.UI.Models.Weblab
                 _name = value ?? "";
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(DisplayName));
+                OnPropertyChanged(nameof(VisualTitle));
+                OnPropertyChanged(nameof(WorkflowChipText));
+                OnPropertyChanged(nameof(WorkflowChipVisibility));
+                OnPropertyChanged(nameof(WorkflowChipAccentBrush));
+                OnPropertyChanged(nameof(AreaChipText));
+                OnPropertyChanged(nameof(AreaChipVisibility));
+                OnPropertyChanged(nameof(ExtraTagsText));
+                OnPropertyChanged(nameof(ExtraTagsVisibility));
+                OnPropertyChanged(nameof(DomainChipText));
+                OnPropertyChanged(nameof(DomainChipVisibility));
+                OnPropertyChanged(nameof(AreaGroupName));
                 OnPropertyChanged(nameof(ResultSummary));
                 OnPropertyChanged(nameof(ResultNameBrush));
             }
@@ -183,6 +202,73 @@ namespace Anfeta.UI.Models.Weblab
 
         [JsonIgnore]
         public string DisplayName => BuildDisplayName();
+
+        // Proyección exclusivamente visual. Name y SearchText permanecen intactos
+        // para búsqueda, filtros, apertura, menús y acciones.
+        [JsonIgnore]
+        public string VisualTitle => GetVisualParts().Title;
+
+        [JsonIgnore]
+        public string WorkflowChipText =>
+            ResolveStatusWorkflowChip(ProjectUpdateStatus) is { Length: > 0 } statusChip
+                ? statusChip
+                : GetVisualParts().Workflow;
+
+        [JsonIgnore]
+        public string WorkflowFallbackText =>
+            string.IsNullOrWhiteSpace(WorkflowChipText)
+                ? ProjectUpdateStatus ?? string.Empty
+                : string.Empty;
+
+        [JsonIgnore]
+        public Visibility WorkflowChipVisibility =>
+            string.IsNullOrWhiteSpace(WorkflowChipText) ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public Brush WorkflowChipAccentBrush =>
+            WorkflowChipText switch
+            {
+                "PENDIENTE" => BuildResultBrush(251, 191, 36),
+                "EN REVISIÓN" => BuildResultBrush(248, 80, 80),
+                "SUSPENDIDA" => BuildResultBrush(250, 204, 21),
+                "POR HACER" => BuildResultBrush(192, 132, 252),
+                "TERMINADA" => BuildResultBrush(148, 190, 220),
+                _ => BuildResultBrush(148, 163, 184)
+            };
+
+        [JsonIgnore]
+        public string AreaChipText
+        {
+            get
+            {
+                var area = GetVisualParts().Area;
+                return Source == SearchSource.Notion && string.IsNullOrWhiteSpace(area)
+                    ? "S/T"
+                    : area;
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility AreaChipVisibility =>
+            string.IsNullOrWhiteSpace(AreaChipText) ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public string ExtraTagsText => GetVisualParts().ExtraTags;
+
+        [JsonIgnore]
+        public Visibility ExtraTagsVisibility =>
+            string.IsNullOrWhiteSpace(ExtraTagsText) ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public string DomainChipText => GetVisualParts().Domain;
+
+        [JsonIgnore]
+        public Visibility DomainChipVisibility =>
+            string.IsNullOrWhiteSpace(DomainChipText) ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public string AreaGroupName =>
+            string.IsNullOrWhiteSpace(GetVisualParts().Area) ? "Otros" : GetVisualParts().Area;
 
         [JsonIgnore]
         public string ResultSummary => BuildResultSummary();
@@ -691,6 +777,142 @@ namespace Anfeta.UI.Models.Weblab
 
             return clean.Trim();
         }
+
+        private sealed record VisualParts(
+            string Title,
+            string Workflow,
+            string Area,
+            string ExtraTags,
+            string Domain);
+
+        private VisualParts GetVisualParts()
+        {
+            var display = BuildDisplayName();
+            if (Source != SearchSource.Notion || string.IsNullOrWhiteSpace(display))
+                return new VisualParts(display, string.Empty, string.Empty, string.Empty, string.Empty);
+
+            var workflowMatch = Regex.Match(
+                display,
+                @"(?<![\p{L}\p{Nd}_])(?<value>sprtuzREVISION|aprtuzREVISION|prtuzREVISION|rtuzREVISION|zREVISION)(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            var workflow = workflowMatch.Success
+                ? NormalizeWorkflowChip(workflowMatch.Groups["value"].Value)
+                : string.Empty;
+
+            var withoutWorkflow = workflowMatch.Success
+                ? display.Remove(workflowMatch.Index, workflowMatch.Length)
+                : display;
+
+            var encodedAreaMatch = Regex.Match(
+                withoutWorkflow,
+                @"(?<![\p{L}\p{Nd}_])(?<area>sseo|wwebs|aads|aapli|pprog|ddise|rrede|mmaps)(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            var encodedArea = encodedAreaMatch.Success
+                ? NormalizeEncodedArea(encodedAreaMatch.Groups["area"].Value)
+                : string.Empty;
+            if (encodedAreaMatch.Success)
+                withoutWorkflow = withoutWorkflow.Remove(encodedAreaMatch.Index, encodedAreaMatch.Length);
+
+            var domainMatch = Regex.Match(
+                withoutWorkflow,
+                @"(?<![\w.-])(?:https?://)?(?:www\.)?(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev))(?=$|[/:?#\s)\]}>.,;!])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            var domain = domainMatch.Success
+                ? domainMatch.Groups["domain"].Value.ToLowerInvariant()
+                : string.Empty;
+            var titleSource = domainMatch.Success
+                ? withoutWorkflow.Remove(domainMatch.Index, domainMatch.Length)
+                : withoutWorkflow;
+
+            // Solo extraemos tags iniciales inequívocos. No quitamos palabras
+            // semánticas que aparezcan dentro del título (p. ej. "Auditoría SEO").
+            var tagMatch = Regex.Match(
+                titleSource,
+                @"^\s*(?:(?:\([^)]*\)|\d+(?:\.\d+)?)\s+)*(?<tags>(?:(?:APLICACI[ÓO]N|PROGRAMAS?|CLIENTE|ADS|REDES|WEBS?|SEO|MAPS|COTI|BIBLIA|COBROS?|PAGOS?)\s+){1,4})",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            var tags = tagMatch.Success
+                ? Regex.Matches(tagMatch.Groups["tags"].Value, @"[\p{L}]+", RegexOptions.CultureInvariant)
+                    .Select(match => NormalizeArea(match.Value))
+                    .Where(value => value.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(4)
+                    .ToList()
+                : new System.Collections.Generic.List<string>();
+
+            var area = encodedArea.Length > 0
+                ? encodedArea
+                : tags.FirstOrDefault() ?? FindAreaPrefix(titleSource);
+            var extras = string.Join(" · ", tags.Skip(1).Take(3));
+            var title = tagMatch.Success
+                ? titleSource.Remove(tagMatch.Groups["tags"].Index, tagMatch.Groups["tags"].Length)
+                : titleSource;
+            title = Regex.Replace(title, @"\s{2,}", " ").Trim(' ', '-', '–', '—', '|', ':');
+            if (string.IsNullOrWhiteSpace(title)) title = display;
+
+            return new VisualParts(title, workflow, area, extras, domain);
+        }
+
+        private static string NormalizeWorkflowChip(string value)
+        {
+            if (value.Equals("prtuzREVISION", StringComparison.OrdinalIgnoreCase)) return "PENDIENTE";
+            if (value.Equals("rtuzREVISION", StringComparison.OrdinalIgnoreCase)) return "EN REVISIÓN";
+            if (value.Equals("zREVISION", StringComparison.OrdinalIgnoreCase)) return "TERMINADA";
+            if (value.Equals("sprtuzREVISION", StringComparison.OrdinalIgnoreCase)) return "SUSPENDIDA";
+            if (value.Equals("aprtuzREVISION", StringComparison.OrdinalIgnoreCase)) return "POR HACER";
+            return value;
+        }
+
+        private static string ResolveStatusWorkflowChip(string? value)
+        {
+            var status = (value ?? string.Empty).Trim();
+            if (status.Contains("cobrado terminado", StringComparison.OrdinalIgnoreCase) ||
+                status.Contains("pendiente cobrar", StringComparison.OrdinalIgnoreCase))
+                return "TERMINADA";
+            if (status.Contains("revisar revisiones", StringComparison.OrdinalIgnoreCase) ||
+                status.Contains("terminado rev cobro", StringComparison.OrdinalIgnoreCase))
+                return "EN REVISIÓN";
+            if (status.Contains("suspex", StringComparison.OrdinalIgnoreCase))
+                return "SUSPENDIDA";
+            if (status.Contains("arrancar asignar", StringComparison.OrdinalIgnoreCase))
+                return "POR HACER";
+            if (status.Contains("prtuz por hacer", StringComparison.OrdinalIgnoreCase))
+                return "PENDIENTE";
+            return string.Empty;
+        }
+
+        private static string FindAreaPrefix(string value)
+        {
+            var match = Regex.Match(value ?? string.Empty,
+                @"^\s*(?:(?:\([^)]*\)|\d+(?:\.\d+)?)\s+)*(?<area>APLICACI[ÓO]N|PROGRAMAS?|CLIENTE|ADS|REDES|WEBS?|SEO|MAPS|COTI|BIBLIA|COBROS?|PAGOS?)(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            return match.Success ? NormalizeArea(match.Groups["area"].Value) : string.Empty;
+        }
+
+        private static string NormalizeArea(string value)
+        {
+            var upper = (value ?? string.Empty).Trim().ToUpperInvariant();
+            if (upper is "WEB" or "WEBS") return "WEB";
+            if (upper is "COBRO" or "COBROS") return "COBROS";
+            if (upper is "PAGO" or "PAGOS") return "PAGOS";
+            if (upper is "PROGRAMA" or "PROGRAMAS") return "PROGRAMAS";
+            return upper;
+        }
+
+        private static string NormalizeEncodedArea(string value) =>
+            (value ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "sseo" => "SEO",
+                "wwebs" => "WEB",
+                "aads" => "ADS",
+                "aapli" => "APLICACIÓN",
+                "pprog" => "PROGRAMACIÓN",
+                "ddise" => "DISEÑO",
+                "rrede" => "REDES",
+                "mmaps" => "MAPS",
+                _ => string.Empty
+            };
 
         private static string StripReminderMetadata(string value)
         {

@@ -43,6 +43,9 @@ public sealed class VoiceCommandEngine
         await ReloadAsync();
     }
 
+    public IReadOnlyList<string> GetLocalPhrases() => _synIndex.Keys
+        .Where(key => !string.Equals(_synIndex[key].Token, "__open__", StringComparison.OrdinalIgnoreCase)).ToArray();
+
     // Compatibilidad: lo viejo sigue funcionando
     public VoiceCommand? TryResolve(string phrase)
     {

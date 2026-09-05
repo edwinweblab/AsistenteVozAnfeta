@@ -354,8 +354,33 @@ namespace Anfeta.UI.Services.Notion
                 Description = description,
                 ProjectUpdateStatus = projectUpdateStatus,
                 ScheduledDate = scheduledDate,
+                AssignmentDataVersion = 1,
+                AssignmentKeys = hasProps ? ReadAssignmentKeys(props, title) : Array.Empty<string>(),
+                NotionEditedUtc = DateTimeOffset.TryParse(lastEdited, out var editedAt) ? editedAt : null,
                 SearchText = string.Join(" ", searchParts.Where(x => !string.IsNullOrWhiteSpace(x)))
             };
+        }
+
+        internal static string[] ReadAssignmentKeys(JsonElement props, string title)
+        {
+            // Nunca usar "Asignado por": es el emisor, no el responsable.
+            foreach (var alias in new[] { "Assignee/Ejecutor Principal", "Asignee/Ejecutor Principal", "Assignee / Ejecutor Principal", "Equipo weblab" })
+            {
+                var property = props.EnumerateObject().FirstOrDefault(p => NormalizePropertyName(p.Name) == NormalizePropertyName(alias));
+                if (property.Value.ValueKind != JsonValueKind.Object) continue;
+                var type = GetString(property.Value, "type");
+                if ((type == "relation" || type == "people") && property.Value.TryGetProperty(type, out var entries) && entries.ValueKind == JsonValueKind.Array)
+                {
+                    return entries.EnumerateArray().SelectMany(entry => new[] { GetString(entry, "id"), GetString(entry, "name"),
+                        entry.TryGetProperty("person", out var person) && person.ValueKind == JsonValueKind.Object ? GetString(person, "email") : "" })
+                        .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+                }
+                var value = ExtractPropertyText(property.Value);
+                return value.Split(new[] { ',', ';', '\n' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            }
+            // Páginas antiguas sin Assignee: sólo el último tag activo del título.
+            var tags = Regex.Matches(title ?? "", @"(?<![\p{L}\p{N}])(?:jjohn|kkarl|iisaia|iisai|eedua|aacal|aandr|eemma|bbria|ggena|nneft)(?:00\d*)?(?![\p{L}\p{N}])", RegexOptions.IgnoreCase);
+            return tags.Count == 0 ? Array.Empty<string>() : new[] { Regex.Replace(tags[^1].Value.ToLowerInvariant(), @"00\d*$", "") };
         }
 
         private static string FormatDisplayName(string title, string sourceName)

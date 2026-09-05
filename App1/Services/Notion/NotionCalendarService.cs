@@ -3581,7 +3581,8 @@ namespace Anfeta.UI.Services.Notion
             string token,
             NotionCalendarActivity activity,
             DateTime targetDate,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            bool updateActivityCaches = true)
         {
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -3793,6 +3794,9 @@ namespace Anfeta.UI.Services.Notion
                     Start = newStart,
                     End = newEnd
                 };
+
+            // Los pagos pertenecen al índice externo, no al calendario de actividades.
+            if (!updateActivityCaches) return updated;
 
             await RemoveActivityFromCacheAsync(
                 activity.PageId,
@@ -6312,11 +6316,36 @@ namespace Anfeta.UI.Services.Notion
                        activity.Title);
         }
 
+        public async Task<NotionCalendarActivity?> GetActivityByIdAsync(
+            string token, string pageId, CancellationToken cancellationToken = default,
+            string? datePropertyAlias = null)
+        {
+            if (!Guid.TryParse(pageId, out _) || string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("Página o acceso de Notion no válido.");
+            using var http = CreateClient(token);
+            var page = await ReadPageAsync(http, pageId, cancellationToken);
+            if (!page.HasValue || !page.Value.TryGetProperty("properties", out var properties)) return null;
+            var title = properties.EnumerateObject().FirstOrDefault(p => ReadString(p.Value, "type") == "title").Name;
+            if (string.IsNullOrWhiteSpace(title)) return null;
+            var dateProperties = FindDatePropertyCandidates(properties);
+            if (!string.IsNullOrWhiteSpace(datePropertyAlias))
+            {
+                var exactDate = properties.EnumerateObject().FirstOrDefault(p =>
+                    Normalize(p.Name) == Normalize(datePropertyAlias) && ReadString(p.Value, "type") == "date").Name;
+                if (string.IsNullOrWhiteSpace(exactDate))
+                    throw new InvalidOperationException($"No se encontró la fecha editable {datePropertyAlias}.");
+                dateProperties = new[] { exactDate };
+            }
+            return await MapPageAsync(http, page.Value,
+                new SchemaInfo(dateProperties, title), cancellationToken, allowMissingDate: true);
+        }
+
         private async Task<NotionCalendarActivity?> MapPageAsync(
             HttpClient http,
             JsonElement page,
             SchemaInfo schema,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool allowMissingDate = false)
         {
             if (IsPageArchivedOrTrashed(page))
                 return null;
@@ -6334,10 +6363,10 @@ namespace Anfeta.UI.Services.Notion
                     out var end,
                     out var datePropertyName))
             {
-                return null;
+                if (!allowMissingDate) return null;
             }
 
-            if (end <= start)
+            if (start != default && end <= start)
                 end = start.AddHours(1);
 
             var title = ExtractPropertyText(
@@ -6585,6 +6614,14 @@ namespace Anfeta.UI.Services.Notion
             return string.IsNullOrWhiteSpace(activePerson)
                 ? "Sin asignar"
                 : activePerson;
+        }
+
+        public async Task<string> ResolveAssignmentPersonAsync(string token, string pageId, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token) || !Guid.TryParse(pageId, out _)) return string.Empty;
+            using var http = CreateClient(token);
+            var title = await ResolveRelatedTitleAsync(http, pageId, cancellationToken);
+            return string.IsNullOrWhiteSpace(title) ? string.Empty : NormalizePersonLabel(title);
         }
 
         private async Task<string> ResolveRelatedTitleAsync(

@@ -657,6 +657,23 @@ namespace Anfeta.UI.Views
                 items = ApplyNotionBaseFilter(items);
 
             items = ApplySortKey(items);
+            if (_soloActividadesCalendario &&
+                _activeTodayProjectSource != null &&
+                _activeTodayProjectSource.Any())
+            {
+                var ids =
+                    new HashSet<string>(
+                        _activeTodayProjectSource
+                            .Where(a =>
+                                a != null &&
+                                !string.IsNullOrWhiteSpace(a.PageId))
+                            .Select(a => a.PageId),
+                        StringComparer.OrdinalIgnoreCase);
+
+                items = items.Where(i =>
+                    !string.IsNullOrWhiteSpace(i.NodeId) &&
+                    ids.Contains(i.NodeId));
+            }
 
             var nextResults = items.Take(500).ToList();
 

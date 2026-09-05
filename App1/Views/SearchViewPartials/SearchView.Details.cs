@@ -456,7 +456,7 @@ namespace Anfeta.UI.Views
                 // establecido arriba.
                 ApplyHighlightToTextBlock(
                     tb,
-                    row.DisplayName ?? string.Empty);
+                    row.VisualTitle ?? string.Empty);
             }
             else
             {
