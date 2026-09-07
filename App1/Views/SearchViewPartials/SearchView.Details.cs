@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Search;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -256,7 +256,13 @@ namespace Anfeta.UI.Views
 
         private void ResultsList_RightTapped(object sender, RightTappedRoutedEventArgs e)
         {
-            // El ContextFlyout ya existe en XAML
+            if ((e.OriginalSource as FrameworkElement)?.DataContext is SearchResultRow clickedRow)
+            {
+                if (!ResultsList.SelectedItems.Contains(clickedRow))
+                {
+                    ResultsList.SelectedItem = clickedRow;
+                }
+            }
         }
 
         private void BtnDetailsInfo_Click(object sender, RoutedEventArgs e) { }

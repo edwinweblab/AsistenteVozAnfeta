@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using System;
@@ -133,6 +133,10 @@ namespace Anfeta.UI.Models.Weblab
                 OnPropertyChanged(nameof(DomainChipText));
                 OnPropertyChanged(nameof(DomainChipVisibility));
                 OnPropertyChanged(nameof(AreaGroupName));
+                OnPropertyChanged(nameof(MonthChipText));
+                OnPropertyChanged(nameof(MonthChipVisibility));
+                OnPropertyChanged(nameof(OrderChipText));
+                OnPropertyChanged(nameof(OrderChipVisibility));
                 OnPropertyChanged(nameof(ResultSummary));
                 OnPropertyChanged(nameof(ResultNameBrush));
             }
@@ -265,6 +269,33 @@ namespace Anfeta.UI.Models.Weblab
         [JsonIgnore]
         public Visibility DomainChipVisibility =>
             string.IsNullOrWhiteSpace(DomainChipText) ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public string MonthChipText => GetVisualParts().MonthCode;
+
+        [JsonIgnore]
+        public Visibility MonthChipVisibility =>
+            string.IsNullOrWhiteSpace(MonthChipText) ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public string OrderChipText => GetVisualParts().OrderCode;
+
+        [JsonIgnore]
+        public Visibility OrderChipVisibility =>
+            string.IsNullOrWhiteSpace(OrderChipText) ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public double OrderNumericRank
+        {
+            get
+            {
+                var order = GetVisualParts().OrderCode;
+                if (string.IsNullOrWhiteSpace(order)) return double.MaxValue;
+                return double.TryParse(order, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num)
+                    ? num
+                    : double.MaxValue;
+            }
+        }
 
         [JsonIgnore]
         public string AreaGroupName =>
@@ -783,13 +814,15 @@ namespace Anfeta.UI.Models.Weblab
             string Workflow,
             string Area,
             string ExtraTags,
-            string Domain);
+            string Domain,
+            string MonthCode,
+            string OrderCode);
 
         private VisualParts GetVisualParts()
         {
             var display = BuildDisplayName();
             if (Source != SearchSource.Notion || string.IsNullOrWhiteSpace(display))
-                return new VisualParts(display, string.Empty, string.Empty, string.Empty, string.Empty);
+                return new VisualParts(display, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
 
             var workflowMatch = Regex.Match(
                 display,
@@ -804,9 +837,25 @@ namespace Anfeta.UI.Models.Weblab
                 ? display.Remove(workflowMatch.Index, workflowMatch.Length)
                 : display;
 
+            // Extraer Mes/Fecha si existe (ej. 26-[08AGO], [08AGO], (2609SEPT), 26-[09SEP], etc.)
+            var monthMatch = Regex.Match(
+                withoutWorkflow,
+                @"(?<![\p{L}\p{Nd}_])(?:\d{2}-)?\[(?<month>\d{1,2}[A-Za-z]{3,4})\](?:\s*-\s*|\s+)?|" +
+                @"(?<![\p{L}\p{Nd}_])\((?:\d{2})?(?<month>\d{2}[A-Za-z]{3,4})\)(?:\s*-\s*|\s+)?|" +
+                @"(?<![\p{L}\p{Nd}_])(?:\d{2}-)(?<month>\d{1,2}[A-Za-z]{3,4})(?:\s*-\s*|\s+)?",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            string monthCode = string.Empty;
+            if (monthMatch.Success && monthMatch.Index < 50)
+            {
+                monthCode = NormalizeMonthCode(monthMatch.Groups["month"].Value);
+                withoutWorkflow = withoutWorkflow.Remove(monthMatch.Index, monthMatch.Length);
+            }
+
+            // Extraer área codificada de Notion (ej. sseo, wwebs, aads, bbibl, etc.)
             var encodedAreaMatch = Regex.Match(
                 withoutWorkflow,
-                @"(?<![\p{L}\p{Nd}_])(?<area>sseo|wwebs|aads|aapli|pprog|ddise|rrede|mmaps)(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?<area>sseo|wwebs|aads|aapli|pprog|ddise|rrede|mmaps|bbibl)(?![\p{L}\p{Nd}_])",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             var encodedArea = encodedAreaMatch.Success
                 ? NormalizeEncodedArea(encodedAreaMatch.Groups["area"].Value)
@@ -814,19 +863,62 @@ namespace Anfeta.UI.Models.Weblab
             if (encodedAreaMatch.Success)
                 withoutWorkflow = withoutWorkflow.Remove(encodedAreaMatch.Index, encodedAreaMatch.Length);
 
-            var domainMatch = Regex.Match(
+            // Extraer dominio del proyecto (ej. anfeta.com, fortelite.com, mhad.com.mx)
+            // Soporta dominios con corchetes envolventes ej. [dominio.com], [anfeta.com], (anfeta.com)
+            var bracketDomainMatch = Regex.Match(
                 withoutWorkflow,
-                @"(?<![\w.-])(?:https?://)?(?:www\.)?(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev))(?=$|[/:?#\s)\]}>.,;!])",
+                @"(?:\[|\()\s*(?<![\w.-])(?:https?://)?(?:www\.)?(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev))\s*(?:\]|\))",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            var domain = domainMatch.Success
+
+            var domainMatch = bracketDomainMatch.Success
+                ? bracketDomainMatch
+                : Regex.Match(
+                    withoutWorkflow,
+                    @"(?<![\w.-])(?:https?://)?(?:www\.)?(?<domain>(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev))(?=$|[/:?#\s)\]}>.,;!])",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            var rawDomain = domainMatch.Success
                 ? domainMatch.Groups["domain"].Value.ToLowerInvariant()
                 : string.Empty;
+
+            // Ignorar dominios de plantilla/ejemplo como dominio.com, ejemplo.com, etc.
+            var domain = IsPlaceholderDomain(rawDomain) ? string.Empty : rawDomain;
+
             var titleSource = domainMatch.Success
                 ? withoutWorkflow.Remove(domainMatch.Index, domainMatch.Length)
                 : withoutWorkflow;
 
-            // Solo extraemos tags iniciales inequívocos. No quitamos palabras
-            // semánticas que aparezcan dentro del título (p. ej. "Auditoría SEO").
+            // Extraer Código/Número de orden si existe (ej. mes1.00, mes 1.00, 1.00, 2.00, 0.01, 50.0, 4.00, etc.)
+            string orderCode = string.Empty;
+
+            // Caso A: Con prefijo identificador pegado o separado (ej. mes1.00, mes 1.00, m1.00, num1.00, orden1.00, #1.00, act1.00)
+            var orderKeyMatch = Regex.Match(
+                titleSource,
+                @"(?i)(?<![\p{L}\p{Nd}_])(?:mes|orden|ord|num|no|act|m|#)\s*(?<order>\d{1,3}(?:\.\d{1,2})?)(?!\d)(?:\s*-\s*|\s+)?",
+                RegexOptions.CultureInvariant);
+
+            if (orderKeyMatch.Success && orderKeyMatch.Index < 60)
+            {
+                orderCode = FormatOrderCode(orderKeyMatch.Groups["order"].Value);
+                titleSource = titleSource.Remove(orderKeyMatch.Index, orderKeyMatch.Length);
+            }
+
+            // Caso B: Código decimal directo de orden (ej. 1.00, 2.00, 50.0, 4.00, 0.01)
+            if (string.IsNullOrWhiteSpace(orderCode))
+            {
+                var directOrderMatch = Regex.Match(
+                    titleSource,
+                    @"(?<![\p{L}\p{Nd}_])(?:\(|\[)?(?<order>\d{1,3}\.\d{1,2})(?:\)|\])?(?!\d)(?:\s*-\s*|\s+)?",
+                    RegexOptions.CultureInvariant);
+
+                if (directOrderMatch.Success && directOrderMatch.Index < 60)
+                {
+                    orderCode = FormatOrderCode(directOrderMatch.Groups["order"].Value);
+                    titleSource = titleSource.Remove(directOrderMatch.Index, directOrderMatch.Length);
+                }
+            }
+
+            // Extraer tags textuales iniciales (APLICACIÓN, SEO, ADS, etc.)
             var tagMatch = Regex.Match(
                 titleSource,
                 @"^\s*(?:(?:\([^)]*\)|\d+(?:\.\d+)?)\s+)*(?<tags>(?:(?:APLICACI[ÓO]N|PROGRAMAS?|CLIENTE|ADS|REDES|WEBS?|SEO|MAPS|COTI|BIBLIA|COBROS?|PAGOS?)\s+){1,4})",
@@ -848,10 +940,105 @@ namespace Anfeta.UI.Models.Weblab
             var title = tagMatch.Success
                 ? titleSource.Remove(tagMatch.Groups["tags"].Index, tagMatch.Groups["tags"].Length)
                 : titleSource;
+
+            // Segunda pasada para número de orden si venía después de tags
+            if (string.IsNullOrWhiteSpace(orderCode))
+            {
+                var secondaryOrderMatch = Regex.Match(
+                    title,
+                    @"(?i)(?<![\p{L}\p{Nd}_])(?:(?:mes|orden|ord|num|no|act|m|#)\s*)?(?<order>\d{1,3}\.\d{1,2})(?!\d)(?:\s*-\s*|\s+)?",
+                    RegexOptions.CultureInvariant);
+
+                if (secondaryOrderMatch.Success && secondaryOrderMatch.Index < 40)
+                {
+                    orderCode = FormatOrderCode(secondaryOrderMatch.Groups["order"].Value);
+                    title = title.Remove(secondaryOrderMatch.Index, secondaryOrderMatch.Length);
+                }
+            }
+
+            // Segunda pasada para mes si venía después de tags
+            if (string.IsNullOrWhiteSpace(monthCode))
+            {
+                var secondaryMonthMatch = Regex.Match(
+                    title,
+                    @"^\s*(?:(?:\d{2}-)?\[(?<month>\d{1,2}[A-Za-z]{3,4})\]|\((?:\d{2})?(?<month>\d{2}[A-Za-z]{3,4})\))(?:\s*-\s*|\s+)?",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+                if (secondaryMonthMatch.Success)
+                {
+                    monthCode = NormalizeMonthCode(secondaryMonthMatch.Groups["month"].Value);
+                    title = title.Remove(secondaryMonthMatch.Index, secondaryMonthMatch.Length);
+                }
+            }
+
+            // Limpieza de prefijos técnicos residuales al inicio del título
+            // ej. bbibl, rrapi, wwebs, sseo, aads, aapli, pprog, ddise, rrede, mmaps, ccon, pproy, mes
+            title = Regex.Replace(
+                title,
+                @"^\s*(?:bbibl|rrapi|wwebs|sseo|aads|aapli|pprog|ddise|rrede|mmaps|ccon|pproy|mes)\s+",
+                "",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            // Limpieza de corchetes vacíos [] o () residuales
+            title = Regex.Replace(title, @"\[\s*\]|\(\s*\)", "");
             title = Regex.Replace(title, @"\s{2,}", " ").Trim(' ', '-', '–', '—', '|', ':');
             if (string.IsNullOrWhiteSpace(title)) title = display;
 
-            return new VisualParts(title, workflow, area, extras, domain);
+            return new VisualParts(title, workflow, area, extras, domain, monthCode, orderCode);
+        }
+
+        public static bool IsPlaceholderDomain(string? domain)
+        {
+            if (string.IsNullOrWhiteSpace(domain)) return true;
+            var clean = domain.Trim().ToLowerInvariant();
+            return clean is "dominio.com" or "dominio.com.mx" or "dominio.mx" or "dominio.org" or "dominio.net"
+                or "ejemplo.com" or "ejemplo.com.mx" or "ejemplo.mx"
+                or "example.com" or "example.org" or "example.net"
+                or "tudominio.com" or "midominio.com" or "midominio.com.mx";
+        }
+
+        private static string FormatOrderCode(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            var clean = raw.Trim();
+            if (double.TryParse(clean, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num))
+            {
+                // Asegura al menos 2 dígitos enteros y 2 decimales: 01.00, 04.00, 10.00, 90.00
+                // Esto garantiza que 04.00 siempre anteceda alfabética y numéricamente a 90.00.
+                return num.ToString("00.00", System.Globalization.CultureInfo.InvariantCulture);
+            }
+            return clean;
+        }
+
+        private static string NormalizeMonthCode(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            var clean = raw.Trim().ToUpperInvariant();
+            var m = Regex.Match(clean, @"(?<day>\d{1,2})?(?<name>[A-Z]{3,4})");
+            if (!m.Success) return clean;
+
+            var day = m.Groups["day"].Value;
+            var name = m.Groups["name"].Value;
+            if (day.Length == 1) day = "0" + day;
+
+            name = name switch
+            {
+                "SEPT" => "SEP",
+                "SEPTI" => "SEP",
+                "AGOS" => "AGO",
+                "ENERO" => "ENE",
+                "FEBR" => "FEB",
+                "ABRI" => "ABR",
+                "MAYO" => "MAY",
+                "JUNI" => "JUN",
+                "JULI" => "JUL",
+                "OCTU" => "OCT",
+                "NOVI" => "NOV",
+                "DICI" => "DIC",
+                _ => name.Length > 3 ? name.Substring(0, 3) : name
+            };
+
+            return string.IsNullOrEmpty(day) ? name : $"{day}{name}";
         }
 
         private static string NormalizeWorkflowChip(string value)
@@ -903,6 +1090,7 @@ namespace Anfeta.UI.Models.Weblab
         private static string NormalizeEncodedArea(string value) =>
             (value ?? string.Empty).Trim().ToLowerInvariant() switch
             {
+                "bbibl" => "BIBLIA",
                 "sseo" => "SEO",
                 "wwebs" => "WEB",
                 "aads" => "ADS",

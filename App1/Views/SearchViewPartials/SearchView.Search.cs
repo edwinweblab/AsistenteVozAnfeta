@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.Search;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
@@ -982,38 +982,44 @@ namespace Anfeta.UI.Views
             {
                 "name_desc" => items
                     .OrderBy(x => GetPathOrderRank(x))
-                    .ThenByDescending(x => x.DisplayName ?? x.Name),
+                    .ThenByDescending(x => GetSortableName(x)),
 
                 "mod_desc" => items
                     .OrderBy(x => GetPathOrderRank(x))
                     .ThenByDescending(x => ParseModifiedForSort(x.ServerModified))
-                    .ThenBy(x => x.DisplayName ?? x.Name),
+                    .ThenBy(x => GetSortableName(x)),
 
                 "mod_asc" => items
                     .OrderBy(x => GetPathOrderRank(x))
                     .ThenBy(x => ParseModifiedForSort(x.ServerModified))
-                    .ThenBy(x => x.DisplayName ?? x.Name),
+                    .ThenBy(x => GetSortableName(x)),
 
                 "scheduled_asc" => items
                     .OrderBy(x => HasScheduledDateForSort(x) ? 0 : 1)
                     .ThenBy(x => ParseScheduledDateForSort(x.ScheduledDate))
                     .ThenBy(x => GetPathOrderRank(x))
-                    .ThenBy(x => x.DisplayName ?? x.Name),
+                    .ThenBy(x => GetSortableName(x)),
 
                 "scheduled_desc" => items
                     .OrderBy(x => HasScheduledDateForSort(x) ? 0 : 1)
                     .ThenByDescending(x => ParseScheduledDateForSort(x.ScheduledDate))
                     .ThenBy(x => GetPathOrderRank(x))
-                    .ThenBy(x => x.DisplayName ?? x.Name),
+                    .ThenBy(x => GetSortableName(x)),
 
                 _ => items
                     .OrderBy(x => GetPathOrderRank(x))
-                    .ThenBy(x => x.DisplayName ?? x.Name)
+                    .ThenBy(x => GetSortableName(x))
             };
         }
 
         private static string GetSortableName(Anfeta.UI.Models.Weblab.SearchResultRow row)
         {
+            if (row == null) return string.Empty;
+            var rank = row.OrderNumericRank;
+            if (rank < double.MaxValue)
+            {
+                return $"{rank:0000.00} {row.VisualTitle}";
+            }
             return (row.DisplayName ?? row.Name ?? string.Empty).Trim();
         }
 

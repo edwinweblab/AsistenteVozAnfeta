@@ -3996,6 +3996,158 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private async void CtxDuplicate_Click(object sender, RoutedEventArgs e)
+        {
+            var row = GetCtxRowFromFlyout(sender) ?? ResultsList.SelectedItem as SearchResultRow;
+            if (row == null)
+            {
+                StatusText.Text = "Estado: Selecciona un elemento para duplicar.";
+                return;
+            }
+
+            if (IsNotionRow(row))
+            {
+                await DuplicateNotionPageAsync(row);
+            }
+            else
+            {
+                await DuplicateLocalFileAsync(row);
+            }
+        }
+
+        private async Task DuplicateNotionPageAsync(SearchResultRow row)
+        {
+            if (!TryResolveNotionDataSource(row, out var dataSourceId, out var sourceName))
+            {
+                StatusText.Text = "Estado: No se pudo identificar la base de Notion.";
+                return;
+            }
+
+            var token = GetSavedNotionToken();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text = "Estado: Configura y guarda primero el token de Notion.";
+                return;
+            }
+
+            var currentTitle = row.DisplayName;
+            var suggestedTitle = $"{currentTitle} (Copia)";
+            var newTitle = await PromptNotionRenameAsync(suggestedTitle, sourceName);
+            if (string.IsNullOrWhiteSpace(newTitle))
+            {
+                return;
+            }
+
+            try
+            {
+                ShowLoadingState($"Estado: Duplicando página en {sourceName}...", row.DisplayName);
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                var actions = new NotionPageActionsService();
+
+                var dupResult = await actions.DuplicatePageWithoutBodyAsync(
+                    token,
+                    row.ExternalId,
+                    dataSourceId,
+                    newTitle.Trim(),
+                    cts.Token);
+
+                var duplicatedRow = new SearchResultRow
+                {
+                    Source = SearchSource.Notion,
+                    Type = "NOTION_PAGE",
+                    ExternalId = dupResult.PageId,
+                    ExternalUrl = dupResult.PageUrl,
+                    ExternalSourceName = sourceName,
+                    Name = $"[{sourceName}] {newTitle.Trim()}",
+                    Target = dupResult.PageUrl,
+                    Description = row.Description,
+                    SearchText = string.Join(" ", new[] { sourceName, newTitle.Trim(), row.Description }.Where(s => !string.IsNullOrWhiteSpace(s))),
+                    ServerModified = DateTime.Now.ToString("yyyy-MM-dd HH:mm")
+                };
+
+                var snapshot = App.LocalIndex.GetAll().ToList();
+                snapshot.Insert(0, duplicatedRow);
+                App.LocalIndex.Set(snapshot);
+                await PersistCombinedIndexIfPossibleAsync(snapshot);
+
+                Results.Insert(0, duplicatedRow);
+                RefreshResultsListView();
+                ResultsList.SelectedItem = duplicatedRow;
+
+                StatusText.Text = $"Estado: Página duplicada exitosamente en {sourceName} ✅";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text = "Estado: Notion tardó demasiado en responder al duplicar.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error al duplicar página → {ex.Message}";
+            }
+            finally
+            {
+                HideLoadingState();
+            }
+        }
+
+        private async Task DuplicateLocalFileAsync(SearchResultRow row)
+        {
+            if (string.IsNullOrWhiteSpace(row.Target))
+                return;
+
+            try
+            {
+                if (File.Exists(row.Target))
+                {
+                    var dir = Path.GetDirectoryName(row.Target) ?? DROPBOX_ROOT;
+                    var ext = Path.GetExtension(row.Target);
+                    var nameNoExt = Path.GetFileNameWithoutExtension(row.Target);
+                    var newName = $"{nameNoExt} (Copia){ext}";
+                    var destPath = Path.Combine(dir, newName);
+                    int counter = 2;
+                    while (File.Exists(destPath))
+                    {
+                        newName = $"{nameNoExt} (Copia {counter}){ext}";
+                        destPath = Path.Combine(dir, newName);
+                        counter++;
+                    }
+
+                    File.Copy(row.Target, destPath);
+
+                    var newRow = new SearchResultRow
+                    {
+                        Source = row.Source,
+                        Type = row.Type,
+                        Name = newName,
+                        Target = destPath,
+                        Size = new FileInfo(destPath).Length,
+                        ServerModified = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+                        SearchText = $"{newName} {destPath}"
+                    };
+
+                    var snapshot = App.LocalIndex.GetAll().ToList();
+                    snapshot.Insert(0, newRow);
+                    App.LocalIndex.Set(snapshot);
+                    await PersistCombinedIndexIfPossibleAsync(snapshot);
+
+                    Results.Insert(0, newRow);
+                    RefreshResultsListView();
+                    ResultsList.SelectedItem = newRow;
+
+                    StatusText.Text = $"Estado: Archivo duplicado como '{newName}' ✅";
+                }
+                else
+                {
+                    StatusText.Text = "Estado: El archivo local no existe o no se puede duplicar.";
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error al duplicar archivo → {ex.Message}";
+            }
+        }
+
         private async Task RenameNotionPageAsync(SearchResultRow row)
         {
             if (!TryResolveNotionDataSource(
@@ -4771,6 +4923,15 @@ namespace Anfeta.UI.Views
                             newTitles[index],
                             cts.Token);
 
+                        row.ExternalSourceName = sourceName;
+                        row.Name = $"[{sourceName}] {newTitles[index]}";
+                        row.SearchText = string.Join(
+                            " ",
+                            new[] { sourceName, newTitles[index], row.Description }
+                                .Where(x => !string.IsNullOrWhiteSpace(x)));
+                        row.ServerModified =
+                            DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+
                         var indexedRow = snapshot.FirstOrDefault(x =>
                             x.Source == SearchSource.Notion &&
                             string.Equals(
@@ -5169,7 +5330,13 @@ namespace Anfeta.UI.Views
 
             CtxMenuUploadNotionFileItem.IsEnabled = hasNotionToken;
 
-            CtxMenuRenameItem.Text = isNotion
+                        CtxMenuDuplicateItem.Text = isNotion
+                ? "Duplicar página…"
+                : "Duplicar…";
+            CtxMenuDuplicateItem.IsEnabled = row != null;
+            CtxMenuDuplicateItem.Visibility = Visibility.Visible;
+
+CtxMenuRenameItem.Text = isNotion
                 ? "Renombrar página..."
                 : "Renombrar...";
 
@@ -5274,16 +5441,32 @@ namespace Anfeta.UI.Views
             var requestedSourceName =
                 (row.ExternalSourceName ?? string.Empty).Trim();
 
-            sourceName = requestedSourceName;
-
             if (string.IsNullOrWhiteSpace(requestedSourceName))
-                return false;
+            {
+                if (!string.IsNullOrWhiteSpace(row.Name) && row.Name.StartsWith("["))
+                {
+                    var closeBracket = row.Name.IndexOf(']');
+                    if (closeBracket > 1)
+                    {
+                        requestedSourceName = row.Name.Substring(1, closeBracket - 1).Trim();
+                    }
+                }
+            }
+
+            sourceName = requestedSourceName;
 
             var source = NotionDataSources.Default.FirstOrDefault(x =>
                 string.Equals(
                     x.Name,
                     requestedSourceName,
                     StringComparison.OrdinalIgnoreCase));
+
+            if (source == null || string.IsNullOrWhiteSpace(source.DataSourceId))
+            {
+                source = NotionDataSources.Default.FirstOrDefault(x =>
+                    string.Equals(x.Name, "Revisiones", StringComparison.OrdinalIgnoreCase))
+                    ?? NotionDataSources.Default.FirstOrDefault();
+            }
 
             if (source == null ||
                 string.IsNullOrWhiteSpace(source.DataSourceId))
@@ -5319,6 +5502,21 @@ namespace Anfeta.UI.Views
                     new[] { sourceName, newTitle, row.Description }
                         .Where(x => !string.IsNullOrWhiteSpace(x)));
                 row.ServerModified =
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+            }
+
+            var inResults = Results.FirstOrDefault(x =>
+                x.Source == SearchSource.Notion &&
+                string.Equals(x.ExternalId, pageId, StringComparison.OrdinalIgnoreCase));
+            if (inResults != null)
+            {
+                inResults.ExternalSourceName = sourceName;
+                inResults.Name = $"[{sourceName}] {newTitle}";
+                inResults.SearchText = string.Join(
+                    " ",
+                    new[] { sourceName, newTitle, inResults.Description }
+                        .Where(x => !string.IsNullOrWhiteSpace(x)));
+                inResults.ServerModified =
                     DateTime.Now.ToString("yyyy-MM-dd HH:mm");
             }
 

@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models;
 using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Search;
 using Anfeta.UI.Models.Weblab;
@@ -57,8 +57,11 @@ namespace Anfeta.UI.Views
         {
             None,
             Domain,
+            DomainNoBilling,
+            Month,
             Name,
-            Area
+            Area,
+            AreaNoBilling
         }
 
         // Dominio completo para resultados/predictivo.
@@ -237,6 +240,18 @@ namespace Anfeta.UI.Views
         private const string LS_ResultDateColumnWidth = "Search.ResultColumns.Date";
         private const string LS_ResultStatusColumnWidth = "Search.ResultColumns.Status";
         private const string LS_ResultScheduledDateColumnWidth = "Search.ResultColumns.ScheduledDate";
+        private const string LS_ResultColPathVisible = "Search.ResultColumns.Path.Visible";
+        private const string LS_ResultColStatusVisible = "Search.ResultColumns.Status.Visible";
+        private const string LS_ResultColScheduledDateVisible = "Search.ResultColumns.ScheduledDate.Visible";
+        private const string LS_ResultColDateVisible = "Search.ResultColumns.Date.Visible";
+        private bool _colPathVisible = true;
+        private bool _colStatusVisible = true;
+        private bool _colScheduledDateVisible = true;
+        private bool _colDateVisible = true;
+        private double _savedPathWidth = 150;
+        private double _savedStatusWidth = 180;
+        private double _savedScheduledDateWidth = 155;
+        private double _savedDateWidth = 145;
         private const string LS_DetailsPaneWidth = "Search.DetailsPane.Width";
         private const double DETAILS_PANE_MIN = 260;
         private const double DETAILS_PANE_DEFAULT = 380;
@@ -952,6 +967,73 @@ namespace Anfeta.UI.Views
         }
 
         #endregion
+        private string _selectedMonthFilter = "all";
+        private bool _isUpdatingMonthFilterCombo;
+
+        private void UpdateMonthFilterComboItems()
+        {
+            if (MonthFilterCombo == null || _isUpdatingMonthFilterCombo)
+                return;
+
+            _isUpdatingMonthFilterCombo = true;
+            try
+            {
+                var availableMonths = Results
+                    .Select(r => r.MonthChipText)
+                    .Where(m => !string.IsNullOrWhiteSpace(m))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(m => m)
+                    .ToList();
+
+                var currentTag = (MonthFilterCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? _selectedMonthFilter;
+
+                MonthFilterCombo.Items.Clear();
+
+                var allItem = new ComboBoxItem { Content = "Todos", Tag = "all" };
+                MonthFilterCombo.Items.Add(allItem);
+
+                ComboBoxItem selectedItemToSet = allItem;
+
+                foreach (var month in availableMonths)
+                {
+                    var item = new ComboBoxItem { Content = month, Tag = month };
+                    MonthFilterCombo.Items.Add(item);
+                    if (string.Equals(currentTag, month, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedItemToSet = item;
+                    }
+                }
+
+                if (Results.Any(r => string.IsNullOrWhiteSpace(r.MonthChipText)))
+                {
+                    var noMonthItem = new ComboBoxItem { Content = "Sin mes", Tag = "nomonth" };
+                    MonthFilterCombo.Items.Add(noMonthItem);
+                    if (string.Equals(currentTag, "nomonth", StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedItemToSet = noMonthItem;
+                    }
+                }
+
+                MonthFilterCombo.SelectedItem = selectedItemToSet;
+                _selectedMonthFilter = (selectedItemToSet.Tag?.ToString() ?? "all").Trim();
+            }
+            finally
+            {
+                _isUpdatingMonthFilterCombo = false;
+            }
+        }
+
+        private List<SearchResultRow> GetFilteredResultsForDisplay()
+        {
+            if (string.Equals(_selectedMonthFilter, "all", StringComparison.OrdinalIgnoreCase))
+                return Results.ToList();
+
+            if (string.Equals(_selectedMonthFilter, "nomonth", StringComparison.OrdinalIgnoreCase))
+                return Results.Where(r => string.IsNullOrWhiteSpace(r.MonthChipText)).ToList();
+
+            return Results.Where(r => string.Equals(r.MonthChipText, _selectedMonthFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
         private void RefreshResultsListView()
         {
             _lastCompletedSearchQuery = SearchBox.Text;
@@ -961,18 +1043,22 @@ namespace Anfeta.UI.Views
             foreach (var row in Results)
                 ApplyDropboxDisplayMetadata(row);
 
+            UpdateMonthFilterComboItems();
+
+            var displayRows = GetFilteredResultsForDisplay();
+
             if (_resultGroupingMode == ResultGroupingMode.None)
             {
                 _groupedResultsViewSource = null;
                 _resultGroups.Clear();
                 ResultsList.ItemsSource = null;
-                ResultsList.ItemsSource = Results;
+                ResultsList.ItemsSource = displayRows;
             }
             else
             {
                 _resultGroups.Clear();
 
-                foreach (var group in BuildResultGroups(Results.ToList()))
+                foreach (var group in BuildResultGroups(displayRows))
                     _resultGroups.Add(group);
 
                 _groupedResultsViewSource = new CollectionViewSource
@@ -988,7 +1074,7 @@ namespace Anfeta.UI.Views
             {
                 ResultsThumbnailGrid.ItemsSource =
                     _resultGroupingMode == ResultGroupingMode.None
-                        ? Results
+                        ? displayRows
                         : _groupedResultsViewSource?.View;
             }
 
@@ -1014,11 +1100,20 @@ namespace Anfeta.UI.Views
                 .OrderBy(group => IsFallbackGroup(group.Key) ? 1 : 0)
                 .ThenBy(group => group.Key);
 
-            if (_resultGroupingMode == ResultGroupingMode.Domain)
+            if (_resultGroupingMode is ResultGroupingMode.Domain or ResultGroupingMode.DomainNoBilling)
             {
+                var targetRows = _resultGroupingMode == ResultGroupingMode.DomainNoBilling
+                    ? rows.Where(r => GetWorkflowGroupState(r) != WorkflowBillingReferences).ToList()
+                    : rows;
+
+                var domainProjects = targetRows
+                    .GroupBy(row => GetResultGroupName(row, null))
+                    .OrderBy(group => IsFallbackGroup(group.Key) ? 1 : 0)
+                    .ThenBy(group => group.Key);
+
                 // Dentro de cada proyecto el Key numérico impone
                 // exactamente A -> P -> R -> Z -> Otros -> Cobros/Pagos.
-                return projects.SelectMany(project => project
+                return domainProjects.SelectMany(project => project
                     .GroupBy(GetWorkflowGroupState)
                     .OrderBy(state => state.Key)
                     .Select(state => new SearchResultGroup(
@@ -1026,11 +1121,33 @@ namespace Anfeta.UI.Views
                         OrderWorkflowRows(state))));
             }
 
-            if (_resultGroupingMode == ResultGroupingMode.Area)
+            if (_resultGroupingMode == ResultGroupingMode.Month)
             {
-                return projects.Select(group => new SearchResultGroup(
+                var monthGroups = rows
+                    .GroupBy(row => string.IsNullOrWhiteSpace(row.MonthChipText) ? "Sin mes" : row.MonthChipText)
+                    .OrderBy(group => group.Key == "Sin mes" ? 1 : 0)
+                    .ThenByDescending(group => group.Key);
+
+                return monthGroups.Select(group => new SearchResultGroup(
+                    $"Mes: {group.Key}",
+                    OrderWorkflowRows(group)));
+            }
+
+            if (_resultGroupingMode is ResultGroupingMode.Area or ResultGroupingMode.AreaNoBilling)
+            {
+                var targetRows = _resultGroupingMode == ResultGroupingMode.AreaNoBilling
+                    ? rows.Where(r => GetWorkflowGroupState(r) != WorkflowBillingReferences).ToList()
+                    : rows;
+
+                var areaGroups = targetRows
+                    .GroupBy(row => row?.AreaGroupName ?? "Otros")
+                    .OrderBy(group => IsFallbackGroup(group.Key) ? 1 : 0)
+                    .ThenBy(group => group.Key);
+
+                return areaGroups.Select(group => new SearchResultGroup(
                     group.Key,
-                    group.OrderBy(row => row.VisualTitle, StringComparer.OrdinalIgnoreCase)));
+                    group.OrderBy(row => row.OrderNumericRank)
+                        .ThenBy(row => row.VisualTitle, StringComparer.OrdinalIgnoreCase)));
             }
 
             return projects.Select(group => new SearchResultGroup(group.Key, group));
@@ -1084,11 +1201,12 @@ namespace Anfeta.UI.Views
         private static IEnumerable<SearchResultRow> OrderWorkflowRows(
             IEnumerable<SearchResultRow> rows)
         {
-            // Dentro de cada bloque preservamos primero lo más reciente por
-            // Fecha por hacer / modificada cuando exista; como fallback usamos
+            // Dentro de cada bloque preservamos orden numérico si existe,
+            // luego lo más reciente por Fecha por hacer / modificada; como fallback usamos
             // el título para que el orden sea estable.
             return rows
-                .OrderByDescending(row =>
+                .OrderBy(row => row.OrderNumericRank)
+                .ThenByDescending(row =>
                     ParseResultOrderDate(row.ScheduledDate))
                 .ThenByDescending(row =>
                     ParseResultOrderDate(row.ServerModified))
@@ -1124,8 +1242,11 @@ namespace Anfeta.UI.Views
             return _resultGroupingMode switch
             {
                 ResultGroupingMode.Domain => GetDomainGroupName(row),
+                ResultGroupingMode.DomainNoBilling => GetDomainGroupName(row),
+                ResultGroupingMode.Month => string.IsNullOrWhiteSpace(row?.MonthChipText) ? "Sin mes" : row.MonthChipText,
                 ResultGroupingMode.Name => GetAssignedPersonGroupName(row),
                 ResultGroupingMode.Area => row?.AreaGroupName ?? "Otros",
+                ResultGroupingMode.AreaNoBilling => row?.AreaGroupName ?? "Otros",
                 _ => "Resultados"
             };
         }
@@ -1134,6 +1255,12 @@ namespace Anfeta.UI.Views
         {
             if (row == null)
                 return "Sin dominio";
+
+            if (!string.IsNullOrWhiteSpace(row.DomainChipText) &&
+                !SearchResultRow.IsPlaceholderDomain(row.DomainChipText))
+            {
+                return row.DomainChipText;
+            }
 
             // No depender únicamente del título visible. En zCORREOS/zDOMINIOS
             // el dominio puede venir dentro de un correo, SearchText o Target.
@@ -1156,12 +1283,18 @@ namespace Anfeta.UI.Views
                 RegexOptions.IgnoreCase |
                 RegexOptions.CultureInvariant);
 
-            return match.Success
-                ? match.Groups["domain"].Value
+            if (match.Success)
+            {
+                var candidate = match.Groups["domain"].Value
                     .Trim()
                     .TrimEnd('.')
-                    .ToLowerInvariant()
-                : "Sin dominio";
+                    .ToLowerInvariant();
+
+                if (!SearchResultRow.IsPlaceholderDomain(candidate))
+                    return candidate;
+            }
+
+            return "Sin dominio";
         }
 
         private static string GetAssignedPersonGroupName(
@@ -1585,8 +1718,11 @@ namespace Anfeta.UI.Views
                 _resultGroupingMode = savedGroupingMode switch
                 {
                     "domain" => ResultGroupingMode.Domain,
+                    "domain_nobilling" => ResultGroupingMode.DomainNoBilling,
+                    "month" => ResultGroupingMode.Month,
                     "name" => ResultGroupingMode.Name,
                     "area" => ResultGroupingMode.Area,
+                    "area_nobilling" => ResultGroupingMode.AreaNoBilling,
                     _ => ResultGroupingMode.None
                 };
 
@@ -2030,7 +2166,7 @@ namespace Anfeta.UI.Views
 
         #endregion
 
-        #region ===== Result column widths =====
+        #region ===== Result column widths & visibility =====
 
         private void LoadResultColumnWidths()
         {
@@ -2042,25 +2178,18 @@ namespace Anfeta.UI.Views
 
             var values = ApplicationData.Current.LocalSettings.Values;
 
-            HeaderPathColumn.Width = new GridLength(
-                ReadColumnWidth(LS_ResultPathColumnWidth, 150, RESULT_PATH_MIN, RESULT_PATH_MAX));
+            _savedPathWidth = ReadColumnWidth(LS_ResultPathColumnWidth, 150, RESULT_PATH_MIN, RESULT_PATH_MAX);
+            _savedStatusWidth = ReadColumnWidth(LS_ResultStatusColumnWidth, 180, RESULT_STATUS_MIN, RESULT_STATUS_MAX);
+            _savedScheduledDateWidth = ReadColumnWidth(LS_ResultScheduledDateColumnWidth, 155, RESULT_SCHEDULED_DATE_MIN, RESULT_SCHEDULED_DATE_MAX);
+            _savedDateWidth = ReadColumnWidth(LS_ResultDateColumnWidth, 145, RESULT_DATE_MIN, RESULT_DATE_MAX);
 
-            HeaderStatusColumn.Width = new GridLength(
-                ReadColumnWidth(
-                    LS_ResultStatusColumnWidth,
-                    180,
-                    RESULT_STATUS_MIN,
-                    RESULT_STATUS_MAX));
+            _colPathVisible = values.TryGetValue(LS_ResultColPathVisible, out var pv) && pv is bool pb ? pb : true;
+            _colStatusVisible = values.TryGetValue(LS_ResultColStatusVisible, out var sv) && sv is bool sb ? sb : true;
+            _colScheduledDateVisible = values.TryGetValue(LS_ResultColScheduledDateVisible, out var sdv) && sdv is bool sdb ? sdb : true;
+            _colDateVisible = values.TryGetValue(LS_ResultColDateVisible, out var dv) && dv is bool db ? db : true;
 
-            HeaderScheduledDateColumn.Width = new GridLength(
-                ReadColumnWidth(
-                    LS_ResultScheduledDateColumnWidth,
-                    155,
-                    RESULT_SCHEDULED_DATE_MIN,
-                    RESULT_SCHEDULED_DATE_MAX));
-
-            HeaderDateColumn.Width = new GridLength(
-                ReadColumnWidth(LS_ResultDateColumnWidth, 145, RESULT_DATE_MIN, RESULT_DATE_MAX));
+            UpdateColumnVisibilityFlyoutChecks();
+            ApplyColumnVisibilityToHeaders();
 
             HeaderNameColumn.Width = new GridLength(1, GridUnitType.Star);
             ApplyResultColumnWidthsToVisualTree();
@@ -2094,12 +2223,108 @@ namespace Anfeta.UI.Views
             return Math.Clamp(parsed, minimum, maximum);
         }
 
+        private void ApplyColumnVisibilityToHeaders()
+        {
+            if (HeaderPathColumn == null || HeaderStatusColumn == null ||
+                HeaderScheduledDateColumn == null || HeaderDateColumn == null)
+                return;
+
+            HeaderPathColumn.Width = _colPathVisible ? new GridLength(_savedPathWidth) : new GridLength(0);
+            HeaderStatusColumn.Width = _colStatusVisible ? new GridLength(_savedStatusWidth) : new GridLength(0);
+            HeaderScheduledDateColumn.Width = _colScheduledDateVisible ? new GridLength(_savedScheduledDateWidth) : new GridLength(0);
+            HeaderDateColumn.Width = _colDateVisible ? new GridLength(_savedDateWidth) : new GridLength(0);
+
+            if (HeaderPathTextBlock != null) HeaderPathTextBlock.Visibility = _colPathVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (PathNameSplitter != null) PathNameSplitter.Visibility = _colPathVisible ? Visibility.Visible : Visibility.Collapsed;
+
+            if (HeaderStatusTextBlock != null) HeaderStatusTextBlock.Visibility = _colStatusVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (NameStatusSplitter != null) NameStatusSplitter.Visibility = _colStatusVisible ? Visibility.Visible : Visibility.Collapsed;
+
+            if (HeaderScheduledDateSortButton != null) HeaderScheduledDateSortButton.Visibility = _colScheduledDateVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (StatusDateSplitter != null) StatusDateSplitter.Visibility = _colScheduledDateVisible ? Visibility.Visible : Visibility.Collapsed;
+
+            if (HeaderModifiedSortButton != null) HeaderModifiedSortButton.Visibility = _colDateVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (ScheduledDateDateSplitter != null) ScheduledDateDateSplitter.Visibility = _colDateVisible ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void UpdateColumnVisibilityFlyoutChecks()
+        {
+            if (ColTogglePath != null) ColTogglePath.IsChecked = _colPathVisible;
+            if (ColToggleStatus != null) ColToggleStatus.IsChecked = _colStatusVisible;
+            if (ColToggleScheduledDate != null) ColToggleScheduledDate.IsChecked = _colScheduledDateVisible;
+            if (ColToggleDate != null) ColToggleDate.IsChecked = _colDateVisible;
+        }
+
+        private void ColTogglePath_Click(object sender, RoutedEventArgs e)
+        {
+            _colPathVisible = ColTogglePath?.IsChecked ?? !_colPathVisible;
+            ApplyColumnVisibilityToHeaders();
+            SaveResultColumnWidths();
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void ColToggleStatus_Click(object sender, RoutedEventArgs e)
+        {
+            _colStatusVisible = ColToggleStatus?.IsChecked ?? !_colStatusVisible;
+            ApplyColumnVisibilityToHeaders();
+            SaveResultColumnWidths();
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void ColToggleScheduledDate_Click(object sender, RoutedEventArgs e)
+        {
+            _colScheduledDateVisible = ColToggleScheduledDate?.IsChecked ?? !_colScheduledDateVisible;
+            ApplyColumnVisibilityToHeaders();
+            SaveResultColumnWidths();
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void ColToggleDate_Click(object sender, RoutedEventArgs e)
+        {
+            _colDateVisible = ColToggleDate?.IsChecked ?? !_colDateVisible;
+            ApplyColumnVisibilityToHeaders();
+            SaveResultColumnWidths();
+            ApplyResultColumnWidthsToVisualTree();
+        }
+
+        private void ColMaximizeName_Click(object sender, RoutedEventArgs e)
+        {
+            // Oculta todas las columnas secundarias para que el Nombre ocupe el 100%
+            _colPathVisible = false;
+            _colStatusVisible = false;
+            _colScheduledDateVisible = false;
+            _colDateVisible = false;
+            UpdateColumnVisibilityFlyoutChecks();
+            ApplyColumnVisibilityToHeaders();
+            SaveResultColumnWidths();
+            ApplyResultColumnWidthsToVisualTree();
+            StatusText.Text = "Estado: Columna Nombre maximizada al 100% ✅";
+        }
+
+        private void ColResetAll_Click(object sender, RoutedEventArgs e)
+        {
+            _colPathVisible = true;
+            _colStatusVisible = true;
+            _colScheduledDateVisible = true;
+            _colDateVisible = true;
+            _savedPathWidth = 150;
+            _savedStatusWidth = 180;
+            _savedScheduledDateWidth = 155;
+            _savedDateWidth = 145;
+            UpdateColumnVisibilityFlyoutChecks();
+            ApplyColumnVisibilityToHeaders();
+            SaveResultColumnWidths();
+            ApplyResultColumnWidthsToVisualTree();
+            StatusText.Text = "Estado: Columnas restablecidas por defecto ✅";
+        }
+
         private void PathNameSplitter_DragDelta(object sender, DragDeltaEventArgs e)
         {
+            if (!_colPathVisible) return;
             var current = HeaderPathColumn.Width.Value;
-            HeaderPathColumn.Width = new GridLength(
-                Math.Clamp(current + e.HorizontalChange, RESULT_PATH_MIN, RESULT_PATH_MAX));
-
+            var next = Math.Clamp(current + e.HorizontalChange, RESULT_PATH_MIN, RESULT_PATH_MAX);
+            _savedPathWidth = next;
+            HeaderPathColumn.Width = new GridLength(next);
             ApplyResultColumnWidthsToVisualTree();
         }
 
@@ -2107,16 +2332,11 @@ namespace Anfeta.UI.Views
             object sender,
             DragDeltaEventArgs e)
         {
-            var current =
-                HeaderStatusColumn.Width.Value;
-
-            HeaderStatusColumn.Width =
-                new GridLength(
-                    Math.Clamp(
-                        current - e.HorizontalChange,
-                        RESULT_STATUS_MIN,
-                        RESULT_STATUS_MAX));
-
+            if (!_colStatusVisible) return;
+            var current = HeaderStatusColumn.Width.Value;
+            var next = Math.Clamp(current - e.HorizontalChange, RESULT_STATUS_MIN, RESULT_STATUS_MAX);
+            _savedStatusWidth = next;
+            HeaderStatusColumn.Width = new GridLength(next);
             ApplyResultColumnWidthsToVisualTree();
         }
 
@@ -2124,11 +2344,10 @@ namespace Anfeta.UI.Views
             object sender,
             DragDeltaEventArgs e)
         {
-            var currentStatus =
-                HeaderStatusColumn.Width.Value;
+            if (!_colStatusVisible || !_colScheduledDateVisible) return;
 
-            var currentScheduled =
-                HeaderScheduledDateColumn.Width.Value;
+            var currentStatus = HeaderStatusColumn.Width.Value;
+            var currentScheduled = HeaderScheduledDateColumn.Width.Value;
 
             var minimumDelta = Math.Max(
                 RESULT_STATUS_MIN - currentStatus,
@@ -2143,13 +2362,11 @@ namespace Anfeta.UI.Views
                 minimumDelta,
                 maximumDelta);
 
-            HeaderStatusColumn.Width =
-                new GridLength(
-                    currentStatus + appliedDelta);
+            _savedStatusWidth = currentStatus + appliedDelta;
+            _savedScheduledDateWidth = currentScheduled - appliedDelta;
 
-            HeaderScheduledDateColumn.Width =
-                new GridLength(
-                    currentScheduled - appliedDelta);
+            HeaderStatusColumn.Width = new GridLength(_savedStatusWidth);
+            HeaderScheduledDateColumn.Width = new GridLength(_savedScheduledDateWidth);
 
             ApplyResultColumnWidthsToVisualTree();
         }
@@ -2158,11 +2375,10 @@ namespace Anfeta.UI.Views
             object sender,
             DragDeltaEventArgs e)
         {
-            var currentScheduled =
-                HeaderScheduledDateColumn.Width.Value;
+            if (!_colScheduledDateVisible || !_colDateVisible) return;
 
-            var currentDate =
-                HeaderDateColumn.Width.Value;
+            var currentScheduled = HeaderScheduledDateColumn.Width.Value;
+            var currentDate = HeaderDateColumn.Width.Value;
 
             var minimumDelta = Math.Max(
                 RESULT_SCHEDULED_DATE_MIN - currentScheduled,
@@ -2177,13 +2393,11 @@ namespace Anfeta.UI.Views
                 minimumDelta,
                 maximumDelta);
 
-            HeaderScheduledDateColumn.Width =
-                new GridLength(
-                    currentScheduled + appliedDelta);
+            _savedScheduledDateWidth = currentScheduled + appliedDelta;
+            _savedDateWidth = currentDate - appliedDelta;
 
-            HeaderDateColumn.Width =
-                new GridLength(
-                    currentDate - appliedDelta);
+            HeaderScheduledDateColumn.Width = new GridLength(_savedScheduledDateWidth);
+            HeaderDateColumn.Width = new GridLength(_savedDateWidth);
 
             ApplyResultColumnWidthsToVisualTree();
         }
@@ -2197,11 +2411,31 @@ namespace Anfeta.UI.Views
         private void SaveResultColumnWidths()
         {
             var values = ApplicationData.Current.LocalSettings.Values;
-            values[LS_ResultPathColumnWidth] = HeaderPathColumn.Width.Value;
-            values[LS_ResultStatusColumnWidth] = HeaderStatusColumn.Width.Value;
-            values[LS_ResultScheduledDateColumnWidth] =
-                HeaderScheduledDateColumn.Width.Value;
-            values[LS_ResultDateColumnWidth] = HeaderDateColumn.Width.Value;
+            if (_colPathVisible && HeaderPathColumn.Width.Value > 0)
+            {
+                _savedPathWidth = HeaderPathColumn.Width.Value;
+                values[LS_ResultPathColumnWidth] = _savedPathWidth;
+            }
+            if (_colStatusVisible && HeaderStatusColumn.Width.Value > 0)
+            {
+                _savedStatusWidth = HeaderStatusColumn.Width.Value;
+                values[LS_ResultStatusColumnWidth] = _savedStatusWidth;
+            }
+            if (_colScheduledDateVisible && HeaderScheduledDateColumn.Width.Value > 0)
+            {
+                _savedScheduledDateWidth = HeaderScheduledDateColumn.Width.Value;
+                values[LS_ResultScheduledDateColumnWidth] = _savedScheduledDateWidth;
+            }
+            if (_colDateVisible && HeaderDateColumn.Width.Value > 0)
+            {
+                _savedDateWidth = HeaderDateColumn.Width.Value;
+                values[LS_ResultDateColumnWidth] = _savedDateWidth;
+            }
+
+            values[LS_ResultColPathVisible] = _colPathVisible;
+            values[LS_ResultColStatusVisible] = _colStatusVisible;
+            values[LS_ResultColScheduledDateVisible] = _colScheduledDateVisible;
+            values[LS_ResultColDateVisible] = _colDateVisible;
         }
 
         private void ApplyResultColumnWidthsToVisualTree()
@@ -2222,20 +2456,20 @@ namespace Anfeta.UI.Views
                 string.Equals(grid.Tag?.ToString(), "ResultColumns", StringComparison.Ordinal) &&
                 grid.ColumnDefinitions.Count >= 9)
             {
-                grid.ColumnDefinitions[0].Width =
-                    new GridLength(HeaderPathColumn.Width.Value);
-                grid.ColumnDefinitions[1].Width = new GridLength(5);
-                grid.ColumnDefinitions[2].Width =
-                    new GridLength(1, GridUnitType.Star);
-                grid.ColumnDefinitions[3].Width = new GridLength(5);
-                grid.ColumnDefinitions[4].Width =
-                    new GridLength(HeaderStatusColumn.Width.Value);
-                grid.ColumnDefinitions[5].Width = new GridLength(5);
-                grid.ColumnDefinitions[6].Width =
-                    new GridLength(HeaderScheduledDateColumn.Width.Value);
-                grid.ColumnDefinitions[7].Width = new GridLength(5);
-                grid.ColumnDefinitions[8].Width =
-                    new GridLength(HeaderDateColumn.Width.Value);
+                var pathW = _colPathVisible ? HeaderPathColumn.Width.Value : 0;
+                var statusW = _colStatusVisible ? HeaderStatusColumn.Width.Value : 0;
+                var schedW = _colScheduledDateVisible ? HeaderScheduledDateColumn.Width.Value : 0;
+                var dateW = _colDateVisible ? HeaderDateColumn.Width.Value : 0;
+
+                grid.ColumnDefinitions[0].Width = new GridLength(pathW);
+                grid.ColumnDefinitions[1].Width = pathW > 0 ? new GridLength(5) : new GridLength(0);
+                grid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
+                grid.ColumnDefinitions[3].Width = statusW > 0 ? new GridLength(5) : new GridLength(0);
+                grid.ColumnDefinitions[4].Width = new GridLength(statusW);
+                grid.ColumnDefinitions[5].Width = schedW > 0 ? new GridLength(5) : new GridLength(0);
+                grid.ColumnDefinitions[6].Width = new GridLength(schedW);
+                grid.ColumnDefinitions[7].Width = dateW > 0 ? new GridLength(5) : new GridLength(0);
+                grid.ColumnDefinitions[8].Width = new GridLength(dateW);
             }
 
             var childCount = VisualTreeHelper.GetChildrenCount(node);

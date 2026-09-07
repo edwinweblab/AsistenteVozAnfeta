@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Search;
+using Anfeta.UI.Models.Search;
 using Anfeta.UI.Views.Dialogs;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -81,8 +81,11 @@ namespace Anfeta.UI.Views
             _resultGroupingMode = tag switch
             {
                 "domain" => ResultGroupingMode.Domain,
+                "domain_nobilling" => ResultGroupingMode.DomainNoBilling,
+                "month" => ResultGroupingMode.Month,
                 "name" => ResultGroupingMode.Name,
                 "area" => ResultGroupingMode.Area,
+                "area_nobilling" => ResultGroupingMode.AreaNoBilling,
                 _ => ResultGroupingMode.None
             };
 
@@ -100,13 +103,41 @@ namespace Anfeta.UI.Views
                       $"{GetGroupingModeLabel()} ✅";
         }
 
+        private void MonthFilterCombo_SelectionChanged(
+            object sender,
+            SelectionChangedEventArgs e)
+        {
+            if (_loadingModulePreferences || _isUpdatingMonthFilterCombo)
+                return;
+
+            if (MonthFilterCombo?.SelectedItem is not ComboBoxItem item)
+                return;
+
+            var tag = (item.Tag?.ToString() ?? "all").Trim();
+            if (string.Equals(_selectedMonthFilter, tag, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _selectedMonthFilter = tag;
+
+            ResultsList.SelectedItem = null;
+            RefreshResultsListView();
+            NotifyWorkspaceChanged();
+
+            StatusText.Text = string.Equals(_selectedMonthFilter, "all", StringComparison.OrdinalIgnoreCase)
+                ? "Estado: Filtro de mes desactivado (Todos) ✅"
+                : $"Estado: Filtrado por mes {item.Content} ✅";
+        }
+
         private string GetGroupingModeLabel()
         {
             return _resultGroupingMode switch
             {
-                ResultGroupingMode.Domain => "dominio",
+                ResultGroupingMode.Domain => "proyecto / estado",
+                ResultGroupingMode.DomainNoBilling => "proyecto / estado (sin cobrar/pagar)",
+                ResultGroupingMode.Month => "mes",
                 ResultGroupingMode.Name => "persona asignada",
                 ResultGroupingMode.Area => "tipo / área",
+                ResultGroupingMode.AreaNoBilling => "tipo / área (sin cobrar/pagar)",
                 _ => "ninguno"
             };
         }
@@ -1786,7 +1817,8 @@ namespace Anfeta.UI.Views
                         .TrimEnd('.')
                         .ToLowerInvariant())
                 .Where(domain =>
-                    !string.IsNullOrWhiteSpace(domain))
+                    !string.IsNullOrWhiteSpace(domain) &&
+                    !Anfeta.UI.Models.Weblab.SearchResultRow.IsPlaceholderDomain(domain))
                 .Distinct(
                     StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -2412,28 +2444,34 @@ namespace Anfeta.UI.Views
 
         private void UpdateColumnSortIndicators()
         {
-            if (NameSortArrow == null || ModifiedSortArrow == null)
-                return;
-
-            NameSortArrow.Text = "";
-            ModifiedSortArrow.Text = "";
+            if (NameSortArrow != null) NameSortArrow.Text = "";
+            if (ModifiedSortArrow != null) ModifiedSortArrow.Text = "";
+            if (ScheduledDateSortArrow != null) ScheduledDateSortArrow.Text = "";
 
             switch (_sortKey)
             {
                 case "name_asc":
-                    NameSortArrow.Text = "▲";
+                    if (NameSortArrow != null) NameSortArrow.Text = "▲";
                     break;
 
                 case "name_desc":
-                    NameSortArrow.Text = "▼";
+                    if (NameSortArrow != null) NameSortArrow.Text = "▼";
                     break;
 
                 case "mod_desc":
-                    ModifiedSortArrow.Text = "▼";
+                    if (ModifiedSortArrow != null) ModifiedSortArrow.Text = "▼";
                     break;
 
                 case "mod_asc":
-                    ModifiedSortArrow.Text = "▲";
+                    if (ModifiedSortArrow != null) ModifiedSortArrow.Text = "▲";
+                    break;
+
+                case "scheduled_asc":
+                    if (ScheduledDateSortArrow != null) ScheduledDateSortArrow.Text = "▲";
+                    break;
+
+                case "scheduled_desc":
+                    if (ScheduledDateSortArrow != null) ScheduledDateSortArrow.Text = "▼";
                     break;
             }
         }
