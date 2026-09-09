@@ -19,12 +19,45 @@ public sealed class LocalAiService
     public static string Model { get; set; } = "qwen3:1.7b";
     public const string InstallerUrl = "https://ollama.com/download/OllamaSetup.exe";
 
+    // Lista de modelos detectados en el servidor Ollama local
+    public static List<string> InstalledModels { get; } = new();
+
+    // Caché de contexto para que las consultas consecutivas de la misma sesión no reevalúen todo el prompt
+    private static int[]? _lastContext;
+
     // Timeout amplio para el cliente; el control de cancelación y streaming se realiza mediante CancellationToken y ResponseHeadersRead
     private static readonly HttpClient Client = new()
     {
         BaseAddress = new Uri("http://127.0.0.1:11434"),
         Timeout = TimeSpan.FromMinutes(3)
     };
+
+    public static void ResetContext()
+    {
+        _lastContext = null;
+    }
+
+    /// <summary>
+    /// Precalienta silenciosamente el modelo en memoria RAM en segundo plano para evitar el retraso
+    /// inicial de arranque en frío (Cold Start) de 5 a 10 segundos.
+    /// </summary>
+    public static async Task WarmupAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var payload = JsonSerializer.Serialize(new
+            {
+                model = Model,
+                keep_alive = "60m"
+            });
+            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var response = await Client.PostAsync("/api/generate", content, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Silencioso: si Ollama no está en ejecución, no debe afectar el flujo principal
+        }
+    }
 
     public async Task<LocalAiStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
@@ -39,21 +72,24 @@ public sealed class LocalAiService
                 return new(true, false, "Ollama está activo, pero no tiene modelos instalados.");
 
             string? detected = null;
+            InstalledModels.Clear();
             foreach (var item in models.EnumerateArray())
             {
                 if (item.TryGetProperty("name", out var n))
                 {
                     var name = n.GetString() ?? string.Empty;
-                    if (name.StartsWith("qwen3", StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith("qwen2.5", StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith("qwen", StringComparison.OrdinalIgnoreCase))
-                    {
-                        detected = name;
-                        break;
-                    }
-                    detected ??= name;
+                    if (!string.IsNullOrWhiteSpace(name)) InstalledModels.Add(name);
                 }
             }
+
+            // Prioridad a qwen3 u otros modelos con mayor vocabulario y razonamiento para respuestas completas
+            detected = InstalledModels.FirstOrDefault(n => n.StartsWith("qwen3", StringComparison.OrdinalIgnoreCase))
+                    ?? InstalledModels.FirstOrDefault(n => n.StartsWith("qwen2.5:1.5b", StringComparison.OrdinalIgnoreCase))
+                    ?? InstalledModels.FirstOrDefault(n => n.StartsWith("llama3.2", StringComparison.OrdinalIgnoreCase))
+                    ?? InstalledModels.FirstOrDefault(n => n.StartsWith("qwen2.5:0.5b", StringComparison.OrdinalIgnoreCase))
+                    ?? InstalledModels.FirstOrDefault(n => n.StartsWith("qwen2.5", StringComparison.OrdinalIgnoreCase))
+                    ?? InstalledModels.FirstOrDefault(n => n.StartsWith("qwen", StringComparison.OrdinalIgnoreCase))
+                    ?? InstalledModels.FirstOrDefault();
 
             if (!string.IsNullOrEmpty(detected))
             {
@@ -88,16 +124,19 @@ public sealed class LocalAiService
         var prompt = BuildConcisePrompt(snapshot, effectiveQuestion, conversationMemory, viewContext);
 
         const string systemPrompt =
-            "Eres ANFETA AI, copiloto operativo de una aplicación de escritorio conectada a Notion. " +
-            "Responde SIEMPRE en texto natural limpio, claro, profesional y directo en español. " +
+            "Eres ANFETA AI, copiloto operativo de Notion. " +
+            "Responde SIEMPRE en texto natural limpio, claro, profesional y completo en español. " +
             "REGLAS OBLIGATORIAS: " +
-            "1. NO devuelvas JSON, NO devuelvas llaves {}, corchetes [] ni esquemas técnicos. " +
-            "2. Responde directamente la pregunta del usuario en 2 a 4 oraciones o viñetas concisas. " +
-            "3. Cita nombres de actividades, responsables, proyectos y horarios según el contexto.";
+            "1. Responde ÚNICAMENTE en viñetas limpias numeradas (1., 2., 3., etc.). " +
+            "2. PROHIBIDO usar tablas markdown con barras |, guiones | --- | o esquemas técnicos. " +
+            "3. Formato para cada punto: '1. Actividad - Responsable (Horario): Motivo'. " +
+            "4. Cierra con un breve resumen del estado general sin dejar frases a medias.";
 
+        var requestedCount = ExtractRequestedCount(effectiveQuestion);
+        var numPredict = Math.Max(750, requestedCount * 60);
         var fullBuilder = new StringBuilder();
 
-        await foreach (var chunk in StreamGenerateAsync(prompt, systemPrompt, cancellationToken).ConfigureAwait(false))
+        await foreach (var chunk in StreamGenerateAsync(prompt, systemPrompt, cancellationToken, numPredict).ConfigureAwait(false))
         {
             fullBuilder.Append(chunk);
             onChunkReceived?.Invoke(chunk);
@@ -105,7 +144,7 @@ public sealed class LocalAiService
 
         var text = fullBuilder.ToString().Trim();
 
-        // Limpiar delimitadores markdown si el modelo los añade
+        // Limpiar delimitadores markdown o etiquetas think residuales
         if (text.StartsWith("```", StringComparison.OrdinalIgnoreCase))
         {
             var lines = text.Split('\n');
@@ -120,42 +159,143 @@ public sealed class LocalAiService
         return new DailyAiAssistantResult(text, Array.Empty<string>(), Array.Empty<string>(), string.Empty, string.Empty);
     }
 
+    public static int ExtractRequestedCount(string question)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(question, @"\b([1-9]|[12][0-9]|30)\b");
+        if (match.Success && int.TryParse(match.Value, out var n))
+        {
+            return Math.Max(5, Math.Min(30, n));
+        }
+        return 10;
+    }
+
+    private static List<DailyAiActivitySnapshot> DeduplicateActivities(IEnumerable<DailyAiActivitySnapshot> source)
+    {
+        var result = new List<DailyAiActivitySnapshot>();
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var a in source)
+        {
+            // Quitar tokens de fecha de recurrencia ej. "26-[07JUL]" o "26-[08AGO]" para agrupar tareas repetidas de meses pasados
+            var cleanTitle = System.Text.RegularExpressions.Regex.Replace(a.Title, @"\b\d{1,2}-\[\d{2}[A-Z]{3}\]\b", "").Trim();
+            cleanTitle = System.Text.RegularExpressions.Regex.Replace(cleanTitle, @"\s{2,}", " ");
+            if (string.IsNullOrWhiteSpace(cleanTitle)) cleanTitle = a.Title;
+
+            var key = $"{cleanTitle}::{a.Person}";
+            if (seenKeys.Add(key))
+            {
+                result.Add(a);
+            }
+        }
+        return result;
+    }
+
     private static string BuildConcisePrompt(DailyAiSnapshot snapshot, string question, string? memory = null, string? viewContext = null)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"CONSULTA DEL USUARIO: {question}");
+        sb.AppendLine($"CONSULTA: {question}");
         if (!string.IsNullOrWhiteSpace(memory) && memory != "Sin conversación previa")
         {
-            sb.AppendLine($"MEMORIA PREVIA: {memory}");
+            sb.AppendLine($"MEMORIA: {memory}");
         }
-        sb.AppendLine();
-        sb.AppendLine($"FECHA: {snapshot.Date:dddd, dd 'de' MMMM yyyy}");
-        sb.AppendLine($"TOTALES: {snapshot.Metrics.TotalActivities} actividades, {snapshot.Metrics.PendingToday} pendientes, {snapshot.Metrics.LaggingActivities} rezagadas, {snapshot.Metrics.UnassignedActivities} sin responsable.");
+        sb.AppendLine($"TOTALES REALES: {snapshot.Metrics.TotalActivities} actividades totales, {snapshot.Metrics.PendingToday} pendientes hoy, {snapshot.Metrics.LaggingActivities} rezagadas, {snapshot.Metrics.UnassignedActivities} sin responsable.");
 
-        var activities = snapshot.Activities.Where(x => !x.IsHistorical).Take(10).ToList();
-        if (activities.Count > 0)
+        var lowerQ = question.ToLowerInvariant();
+        bool isUnassignedQuery = lowerQ.Contains("sin responsable") || lowerQ.Contains("sin asignar") || lowerQ.Contains("unassigned");
+
+        // Buscar si el usuario preguntó por una persona en específico (ej. Karla, Genaro, Isaias, Brian...)
+        var personMatch = snapshot.People.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.Name) && (
+            lowerQ.Contains(p.Name.ToLowerInvariant()) ||
+            p.Name.Split(new[] { ' ', '.', '_' }, StringSplitOptions.RemoveEmptyEntries).Any(part => part.Length >= 3 && lowerQ.Contains(part.ToLowerInvariant()))
+        ));
+
+        var requestedCount = ExtractRequestedCount(question);
+
+        List<DailyAiActivitySnapshot> activities;
+
+        if (isUnassignedQuery)
         {
-            sb.AppendLine();
-            sb.AppendLine("ACTIVIDADES DE LA AGENDA:");
+            var rawList = snapshot.Activities
+                .Where(x => !x.IsHistorical && x.IsUnassigned)
+                .OrderByDescending(x => x.IsLagging)
+                .ThenBy(x => x.Start)
+                .ToList();
+
+            activities = DeduplicateActivities(rawList);
+
+            sb.AppendLine($"ACTIVIDADES SIN RESPONSABLE DETECTADAS ({activities.Count} en total):");
             foreach (var a in activities)
             {
-                var tag = a.IsLagging ? " [REZAGADA]" : a.IsUnassigned ? " [SIN ASIGNAR]" : "";
-                sb.AppendLine($"- {a.Title} | Responsable: {a.Person} | Proyecto: {a.ProjectName} | Horario: {a.Start:HH:mm}-{a.End:HH:mm} | Estado: {a.StateLabel}{tag}");
+                var tag = a.IsLagging ? " [REZAGADA]" : "";
+                sb.AppendLine($"- {a.Title} (Proyecto: {a.ProjectName}, Horario: {a.Start:HH:mm}){tag}");
+            }
+
+            sb.AppendLine($"Instrucción: Lista ÚNICAMENTE las {activities.Count} actividades sin responsable listadas arriba (hay exactamente {activities.Count}). Para cada una pon: 'Responsable: Sin responsable'. No inventes responsables ni agregues actividades con responsable.");
+            return sb.ToString();
+        }
+        else if (personMatch != null)
+        {
+            var rawList = snapshot.Activities
+                .Where(x => !x.IsHistorical && (
+                    x.Person.Contains(personMatch.Name, StringComparison.OrdinalIgnoreCase) ||
+                    personMatch.Name.Contains(x.Person, StringComparison.OrdinalIgnoreCase) ||
+                    x.Title.Contains(personMatch.Name, StringComparison.OrdinalIgnoreCase)
+                ))
+                .OrderByDescending(x => x.IsLagging)
+                .ThenBy(x => x.Start)
+                .ToList();
+
+            activities = DeduplicateActivities(rawList).Take(requestedCount + 4).ToList();
+
+            sb.AppendLine($"ACTIVIDADES DE {personMatch.Name.ToUpperInvariant()} ({activities.Count} encontradas en total):");
+            foreach (var a in activities)
+            {
+                var tag = a.IsLagging ? " [REZAGADA]" : "";
+                sb.AppendLine($"- {a.Title} (Responsable: {personMatch.Name}, Horario: {a.Start:HH:mm}){tag}");
+            }
+
+            sb.AppendLine($"Instrucción: Primero menciona claramente cuántas actividades tiene {personMatch.Name} (tiene exactamente {activities.Count}). Luego lista cada una en viñetas numeradas (1., 2., ...). Formato obligatorio: '1. Actividad - Responsable: {personMatch.Name}, Horario: HH:mm, Motivo: Detalle'. NO uses 'Sin responsable', todas pertenecen a {personMatch.Name}.");
+            return sb.ToString();
+        }
+        else if (lowerQ.Contains("próxima") || lowerQ.Contains("proxima") || lowerQ.Contains("horario") || lowerQ.Contains("cronológ"))
+        {
+            var rawList = snapshot.Activities
+                .Where(x => !x.IsHistorical)
+                .OrderBy(x => x.Start)
+                .ToList();
+
+            activities = DeduplicateActivities(rawList).Take(requestedCount + 4).ToList();
+        }
+        else
+        {
+            var rawList = snapshot.Activities
+                .Where(x => !x.IsHistorical)
+                .OrderByDescending(x => x.IsLagging)
+                .ThenByDescending(x => x.Start.Date == snapshot.Date.Date)
+                .ToList();
+
+            activities = DeduplicateActivities(rawList).Take(requestedCount + 4).ToList();
+        }
+
+        if (activities.Count > 0)
+        {
+            sb.AppendLine($"ACTIVIDADES DISPONIBLES (Muestra las {Math.Min(requestedCount, activities.Count)} más relevantes sin duplicar):");
+            foreach (var a in activities)
+            {
+                var tag = a.IsLagging ? " [REZAGADA]" : "";
+                var resp = a.IsUnassigned ? "Sin responsable" : a.Person;
+                sb.AppendLine($"- {a.Title} ({resp}, {a.Start:HH:mm}){tag}");
             }
         }
 
         if (snapshot.People.Count > 0)
         {
-            sb.AppendLine();
-            sb.AppendLine("RESPONSABLES:");
-            foreach (var p in snapshot.People.Take(6))
-            {
-                sb.AppendLine($"- {p.Name}: {p.ActivitiesToday} actividades ({p.PendingToday} pendientes)");
-            }
+            var topPeople = snapshot.People.OrderByDescending(p => p.PendingToday).Take(4).ToList();
+            sb.AppendLine("CARGA: " + string.Join(", ", topPeople.Select(p => $"{p.Name} ({p.PendingToday} pend)")));
         }
 
-        sb.AppendLine();
-        sb.AppendLine("Instrucción: Responde en texto natural claro en español. Ve directo al grano sin código ni JSON.");
+        var targetCount = Math.Min(requestedCount, activities.Count);
+        sb.AppendLine($"Instrucción: Lista exactamente {targetCount} actividades diferentes sin duplicarlas en viñetas numeradas limpias (1., 2., ... {targetCount}.). Formato: '1. Actividad - Responsable: Nombre, Horario: HH:mm, Motivo: Detalle'. NO USES TABLAS. Cierra la respuesta por completo.");
         return sb.ToString();
     }
 
@@ -169,25 +309,38 @@ public sealed class LocalAiService
             Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>()));
     }
 
+    /// <summary>
+    /// Calcula el número óptimo de hilos de CPU evitando saturar los hilos lógicos/hiperhilos,
+    /// lo cual degrada la memoria caché L3 y la velocidad de inferencia de Ollama en procesadores multinúcleo.
+    /// </summary>
+    private static int GetOptimalThreadCount()
+    {
+        var logicalCores = Environment.ProcessorCount;
+        if (logicalCores >= 12) return 6; // Para 6 o más núcleos físicos (como Ryzen 5 5500U)
+        if (logicalCores >= 8) return 5;
+        return Math.Max(2, logicalCores - 1);
+    }
+
     public static async IAsyncEnumerable<string> StreamGenerateAsync(
         string prompt,
         string system,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        int numPredict = 750)
     {
-        var body = new
+        var body = new Dictionary<string, object?>
         {
-            model = Model,
-            system,
-            prompt,
-            stream = true,
-            think = false,
-            keep_alive = "30m",
-            options = new
+            ["model"] = Model,
+            ["system"] = system,
+            ["prompt"] = prompt,
+            ["stream"] = true,
+            ["think"] = false,
+            ["keep_alive"] = "60m",
+            ["options"] = new
             {
                 temperature = 0.2,
-                num_ctx = 1024,
-                num_predict = 180,
-                num_thread = Math.Max(2, Environment.ProcessorCount - 1)
+                num_ctx = 4096,
+                num_predict = numPredict,
+                num_thread = GetOptimalThreadCount()
             }
         };
 
@@ -207,7 +360,6 @@ public sealed class LocalAiService
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             string? chunk = null;
-            bool isDone = false;
 
             try
             {
@@ -215,8 +367,6 @@ public sealed class LocalAiService
                 var root = doc.RootElement;
                 if (root.TryGetProperty("response", out var respProp))
                     chunk = respProp.GetString();
-                if (root.TryGetProperty("done", out var doneProp))
-                    isDone = doneProp.GetBoolean();
             }
             catch
             {
@@ -225,8 +375,6 @@ public sealed class LocalAiService
 
             if (!string.IsNullOrEmpty(chunk))
                 yield return chunk;
-
-            if (isDone) break;
         }
     }
 

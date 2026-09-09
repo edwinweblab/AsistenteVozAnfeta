@@ -1278,7 +1278,7 @@
 
                         <TextBlock
                             x:Name="MessagesSummaryText"
-                            Grid.Column="2"
+                            Grid.Column="6"
                             VerticalAlignment="Center"
                             Opacity="0.72"
                             Text="0 mensajes" />

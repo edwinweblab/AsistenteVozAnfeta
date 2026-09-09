@@ -1323,26 +1323,33 @@ namespace Anfeta.UI
                     // Abrir Notion NO equivale a "Entendido": la tarjeta sigue
                     // visible hasta que el usuario la cierre explícitamente.
                     //
-                    // En alertas de revisión intentamos primero la actividad
-                    // REAL vinculada (open-original), porque reminder.Target
-                    // suele apuntar a la página auxiliar de notificación.
-                    if (IsReminderReviewAlert(
-                            reminder.Message) &&
-                        !string.IsNullOrWhiteSpace(
-                            reminder.PageId))
+                    // Al pulsar 'N' se abre prioritariamente la actividad ORIGINAL
+                    // de donde surgió el mensaje/notificación.
+                    if (!string.IsNullOrWhiteSpace(reminder.PageId))
                     {
                         try
                         {
-                            await OpenReminderQuickActionAsync(
-                                reminder,
-                                "open-original");
+                            var token = Windows.Storage.ApplicationData.Current.LocalSettings.Values["Notion.Token"] as string;
+                            if (!string.IsNullOrWhiteSpace(token))
+                            {
+                                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                                var source = await new Services.Notion.NotionMessageThreadService()
+                                    .GetReviewAlertSourceAsync(token, reminder.PageId, cts.Token);
 
-                            return;
+                                if (source != null && !string.IsNullOrWhiteSpace(source.PageUrl) &&
+                                    Uri.TryCreate(source.PageUrl, UriKind.Absolute, out var originalUri))
+                                {
+                                    if (await Views.SearchView.TryOpenNotionDesktopOnlyAsync(originalUri.AbsoluteUri))
+                                        return;
+
+                                    if (await Windows.System.Launcher.LaunchUriAsync(originalUri))
+                                        return;
+                                }
+                            }
                         }
                         catch
                         {
-                            // Si la resolución interna falla, usamos el
-                            // fallback HTTPS directo de abajo.
+                            // Si la resolución de la actividad original falla, se recurre al fallback.
                         }
                     }
 

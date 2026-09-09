@@ -457,6 +457,23 @@ namespace Anfeta.UI.Views
                             ? Windows.UI.Color.FromArgb(255, 155, 165, 177)
                             : Windows.UI.Color.FromArgb(255, 242, 242, 242));
 
+                var isCompleted =
+                    isZRevision ||
+                    string.Equals(row.WorkflowChipText, "TERMINADA", StringComparison.OrdinalIgnoreCase) ||
+                    (row.ProjectUpdateStatus ?? string.Empty).Contains("terminad", StringComparison.OrdinalIgnoreCase) ||
+                    (row.ProjectUpdateStatus ?? string.Empty).Contains("cobrado", StringComparison.OrdinalIgnoreCase);
+
+                if (isCompleted)
+                {
+                    tb.TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough;
+                    tb.Opacity = 0.55;
+                }
+                else
+                {
+                    tb.TextDecorations = Windows.UI.Text.TextDecorations.None;
+                    tb.Opacity = 1.0;
+                }
+
                 // El resaltado de la búsqueda (por ejemplo el dominio en azul)
                 // se conserva; los Runs sin color propio heredan el rojo/blanco
                 // establecido arriba.
@@ -467,6 +484,8 @@ namespace Anfeta.UI.Views
             else
             {
                 tb.Text = "";
+                tb.TextDecorations = Windows.UI.Text.TextDecorations.None;
+                tb.Opacity = 1.0;
             }
         }
 

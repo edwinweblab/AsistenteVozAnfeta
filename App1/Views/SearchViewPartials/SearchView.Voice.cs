@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Views.Dialogs;
+using Anfeta.UI.Views.Dialogs;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -46,10 +46,27 @@ namespace Anfeta.UI.Views
         public Task ExecuteSearchTextFromExternalAsync(string text)
         {
             _allowProgrammaticSearch = true;
-            SearchBox.Text = text ?? "";
-            SearchBox.Focus(FocusState.Programmatic);
-            TriggerSearchFromHelp(SearchBox.Text);
-            _allowProgrammaticSearch = false;
+            try
+            {
+                if (SearchBox != null)
+                {
+                    Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase.GetAttachedFlyout(SearchBox)?.Hide();
+                    SearchBox.Text = text ?? "";
+                    SearchBox.Focus(FocusState.Programmatic);
+                    TriggerSearchFromHelp(SearchBox.Text);
+                }
+            }
+            finally
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    _allowProgrammaticSearch = false;
+                    if (SearchBox != null)
+                    {
+                        Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase.GetAttachedFlyout(SearchBox)?.Hide();
+                    }
+                });
+            }
             return Task.CompletedTask;
         }
 

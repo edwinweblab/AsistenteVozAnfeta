@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Services.Speech;
@@ -83,8 +83,8 @@ namespace Anfeta.UI.Views
                 return false;
             }
 
-            // Las alertas automáticas de revisión pertenecen al REVISOR
-            // destinatario. Si Neftali envió una actividad a John, la alerta
+            // Las alertas automÃ¡ticas de revisiÃ³n pertenecen al REVISOR
+            // destinatario. Si Neftali enviÃ³ una actividad a John, la alerta
             // "Para John" no debe aparecer en "Todos" de Neftali solo porque
             // Neftali figure como remitente.
             if (item.IsReviewAlert)
@@ -96,7 +96,7 @@ namespace Anfeta.UI.Views
                            item.RecipientTag);
             }
 
-            // Mensajes/recordatorios normales sí pueden verse en "Todos"
+            // Mensajes/recordatorios normales sÃ­ pueden verse en "Todos"
             // cuando el usuario participa como remitente o destinatario.
             return MessageBelongsToCurrentUser(
                 item.SenderTag,
@@ -117,8 +117,8 @@ namespace Anfeta.UI.Views
             {
                 ["jjohn"] = "John",
                 ["kkarl"] = "Karla",
-                // Ajustes guarda el tag de Isaías como iisaia.
-                // Los títulos antiguos con iisai se normalizan automáticamente.
+                // Ajustes guarda el tag de IsaÃ­as como iisaia.
+                // Los tÃ­tulos antiguos con iisai se normalizan automÃ¡ticamente.
                 ["iisaia"] = "Isaias",
                 ["eedua"] = "Sotelo",
                 ["aacal"] = "Acalli",
@@ -139,7 +139,7 @@ namespace Anfeta.UI.Views
 
             return clean switch
             {
-                // Compatibilidad con títulos y versiones anteriores.
+                // Compatibilidad con tÃ­tulos y versiones anteriores.
                 "john" => "jjohn",
                 "karla" or "karl" => "kkarl",
                 "iisai" or "iisiaia" or "isaias" or "isai" => "iisaia",
@@ -154,10 +154,10 @@ namespace Anfeta.UI.Views
             };
         }
 
-        // El destinatario sí conserva el tag corto al inicio del título para
+        // El destinatario sÃ­ conserva el tag corto al inicio del tÃ­tulo para
         // que las vistas personales de Notion sigan funcionando. El remitente
         // usa un alias legible distinto (de:neftali, de:genaro, etc.) para no
-        // provocar que una respuesta dirigida a John aparezca también en la
+        // provocar que una respuesta dirigida a John aparezca tambiÃ©n en la
         // vista NNEFT solo por contener "de:nneft".
         private static string GetMessagesSenderTitleToken(
             string? value)
@@ -207,8 +207,8 @@ namespace Anfeta.UI.Views
             _messagesGroupedView;
         private DispatcherTimer? _messagesRefreshTimer;
 
-        // Cache derivada del índice global. Parsear miles de filas de Revisiones
-        // en cada timer era trabajo repetido aunque el índice no hubiera cambiado.
+        // Cache derivada del Ã­ndice global. Parsear miles de filas de Revisiones
+        // en cada timer era trabajo repetido aunque el Ã­ndice no hubiera cambiado.
         private long _messagesParsedIndexVersion = -1;
         private string _messagesParsedCacheKey = string.Empty;
         private IReadOnlyList<MessageViewItem> _messagesParsedCache =
@@ -242,9 +242,9 @@ namespace Anfeta.UI.Views
             public string Name { get; }
 
             public string Header =>
-                $"{Name} · {Count} " +
+                $"{Name} Â· {Count} " +
                 (Count == 1
-                    ? "conversación"
+                    ? "conversaciÃ³n"
                     : "conversaciones");
 
             public MessageGroup(
@@ -299,13 +299,13 @@ namespace Anfeta.UI.Views
 
                 _recordButton = new Button
                 {
-                    Content = "🎙 Grabar audio",
+                    Content = "ðŸŽ™ Grabar audio",
                     Padding = new Thickness(11, 6, 11, 6)
                 };
 
                 _stopButton = new Button
                 {
-                    Content = "⏹ Detener",
+                    Content = "â¹ Detener",
                     IsEnabled = false,
                     Padding = new Thickness(11, 6, 11, 6)
                 };
@@ -406,8 +406,8 @@ namespace Anfeta.UI.Views
                     _previewPlayer.Source = null;
                     _previewPlayer.Visibility = Visibility.Collapsed;
                     _durationText.Text = "00:00";
-                    _stateText.Text = "Solicitando micrófono...";
-                    _status.Text = "Preparando grabación de audio...";
+                    _stateText.Text = "Solicitando micrÃ³fono...";
+                    _status.Text = "Preparando grabaciÃ³n de audio...";
 
                     using var cts =
                         new CancellationTokenSource(
@@ -415,10 +415,10 @@ namespace Anfeta.UI.Views
 
                     await _recorder.StartAsync(cts.Token);
 
-                    _recordButton.Content = "🔴 Grabando";
+                    _recordButton.Content = "ðŸ”´ Grabando";
                     _stopButton.IsEnabled = true;
                     _stateText.Text =
-                        "Grabando audio. Máximo 10 minutos.";
+                        "Grabando audio. MÃ¡ximo 10 minutos.";
                     _status.Text = "Grabando audio...";
                     _durationTimer.Start();
                 }
@@ -426,11 +426,11 @@ namespace Anfeta.UI.Views
                 {
                     _recordButton.IsEnabled = true;
                     _stopButton.IsEnabled = false;
-                    _recordButton.Content = "🎙 Grabar audio";
+                    _recordButton.Content = "ðŸŽ™ Grabar audio";
                     _stateText.Text =
-                        "No se pudo iniciar la grabación.";
+                        "No se pudo iniciar la grabaciÃ³n.";
                     _status.Text =
-                        $"No se pudo usar el micrófono → {ex.Message}";
+                        $"No se pudo usar el micrÃ³fono â†’ {ex.Message}";
                 }
             }
 
@@ -484,7 +484,7 @@ namespace Anfeta.UI.Views
                         string.IsNullOrWhiteSpace(result.Path))
                     {
                         throw new InvalidOperationException(
-                            "No se generó el archivo de audio.");
+                            "No se generÃ³ el archivo de audio.");
                     }
 
                     var attachment = new PendingMessageAttachment
@@ -510,20 +510,20 @@ namespace Anfeta.UI.Views
                     _durationText.Text =
                         FormatMessageAudioDuration(result.Duration);
                     _stateText.Text =
-                        "Audio listo. Escúchalo antes de enviar.";
-                    _status.Text = "Audio listo para enviar ✅";
+                        "Audio listo. EscÃºchalo antes de enviar.";
+                    _status.Text = "Audio listo para enviar âœ…";
                     _deleteButton.Visibility = Visibility.Visible;
                 }
                 catch (Exception ex)
                 {
                     _stateText.Text =
-                        "No se pudo terminar la grabación.";
+                        "No se pudo terminar la grabaciÃ³n.";
                     _status.Text =
-                        $"No se pudo guardar el audio → {ex.Message}";
+                        $"No se pudo guardar el audio â†’ {ex.Message}";
                 }
                 finally
                 {
-                    _recordButton.Content = "🎙 Volver a grabar";
+                    _recordButton.Content = "ðŸŽ™ Volver a grabar";
                     _recordButton.IsEnabled = true;
                     _stopping = false;
                 }
@@ -549,7 +549,7 @@ namespace Anfeta.UI.Views
                     _previewPlayer.Visibility = Visibility.Collapsed;
                     _deleteButton.Visibility = Visibility.Collapsed;
                     _durationText.Text = "00:00";
-                    _recordButton.Content = "🎙 Grabar audio";
+                    _recordButton.Content = "ðŸŽ™ Grabar audio";
                     _stateText.Text =
                         "Puedes adjuntar un audio al mismo mensaje.";
                     _status.Text = "Audio eliminado.";
@@ -653,7 +653,7 @@ namespace Anfeta.UI.Views
                             ?.Trim();
 
                     return string.IsNullOrWhiteSpace(firstLine)
-                        ? "Conversación"
+                        ? "ConversaciÃ³n"
                         : firstLine;
                 }
             }
@@ -670,7 +670,7 @@ namespace Anfeta.UI.Views
                         .Trim();
 
                     return string.IsNullOrWhiteSpace(value)
-                        ? "Sin mensajes todavía"
+                        ? "Sin mensajes todavÃ­a"
                         : value;
                 }
             }
@@ -745,13 +745,13 @@ namespace Anfeta.UI.Views
 
             public bool IsReviewAlert =>
                 Message.StartsWith(
-                    "Actividad lista para revisión",
+                    "Actividad lista para revisiÃ³n",
                     StringComparison.OrdinalIgnoreCase) ||
                 Message.StartsWith(
                     "Correcciones solicitadas",
                     StringComparison.OrdinalIgnoreCase) ||
                 Message.StartsWith(
-                    "Revisión aprobada",
+                    "RevisiÃ³n aprobada",
                     StringComparison.OrdinalIgnoreCase);
 
             public bool IsProjectMessage =>
@@ -767,7 +767,7 @@ namespace Anfeta.UI.Views
 
             public string MessageTypeLabel =>
                 IsReviewAlert
-                    ? "Revisión"
+                    ? "RevisiÃ³n"
                     : IsProjectMessage
                         ? "Proyecto"
                         : "Recordatorio";
@@ -809,7 +809,7 @@ namespace Anfeta.UI.Views
 
                 return hasProjectToken &&
                        (text.Contains('/') ||
-                        text.Contains("revisión", StringComparison.OrdinalIgnoreCase) ||
+                        text.Contains("revisiÃ³n", StringComparison.OrdinalIgnoreCase) ||
                         text.Contains("revision", StringComparison.OrdinalIgnoreCase));
             }
 
@@ -848,12 +848,12 @@ namespace Anfeta.UI.Views
 
             public string DeleteButtonText =>
                 IsReviewAlert
-                    ? "Eliminar notificación"
+                    ? "Eliminar notificaciÃ³n"
                     : "Eliminar";
 
             public string DeleteButtonToolTip =>
                 IsReviewAlert
-                    ? "Elimina únicamente esta notificación. La actividad original no se modifica."
+                    ? "Elimina Ãºnicamente esta notificaciÃ³n. La actividad original no se modifica."
                     : "Mover este mensaje a la papelera de Notion.";
 
             public Visibility UnreadVisibility =>
@@ -867,7 +867,7 @@ namespace Anfeta.UI.Views
                     : Visibility.Collapsed;
 
             public string DirectionLabel =>
-                $"De: {DisplayPerson(SenderName, SenderTag)} · Para: {DisplayPerson(RecipientName, RecipientTag)}";
+                $"De: {DisplayPerson(SenderName, SenderTag)} Â· Para: {DisplayPerson(RecipientName, RecipientTag)}";
 
             public string ScheduledLabel =>
                 $"Programado: {ScheduledAt:dd/MM/yyyy HH:mm}";
@@ -913,7 +913,7 @@ namespace Anfeta.UI.Views
 
             public string LastReplyLabel =>
                 IsReplyNotification
-                    ? $"Última respuesta: {DisplayPerson(SenderName, SenderTag)} · {ScheduledAt:dd/MM HH:mm}"
+                    ? $"Ãšltima respuesta: {DisplayPerson(SenderName, SenderTag)} Â· {ScheduledAt:dd/MM HH:mm}"
                     : string.Empty;
 
             public Visibility LastReplyVisibility =>
@@ -923,7 +923,7 @@ namespace Anfeta.UI.Views
 
             public string WaitingForLabel =>
                 IsCompleted
-                    ? "Conversación cerrada"
+                    ? "ConversaciÃ³n cerrada"
                     : $"Esperando respuesta de: {DisplayPerson(RecipientName, RecipientTag)}";
 
             private static bool IsCurrentUserReviewApprover()
@@ -1159,7 +1159,7 @@ namespace Anfeta.UI.Views
             if (message == null)
             {
                 StatusText.Text =
-                    "Estado: El recordatorio todavía no está disponible en el índice. Pulsa Actualizar Notion y vuelve a intentar.";
+                    "Estado: El recordatorio todavÃ­a no estÃ¡ disponible en el Ã­ndice. Pulsa Actualizar Notion y vuelve a intentar.";
                 return;
             }
 
@@ -1208,7 +1208,7 @@ namespace Anfeta.UI.Views
                     MarkMessageAsRead(message);
                     RefreshMessagesView();
                     StatusText.Text =
-                        "Estado: Mensaje marcado como visto ✅";
+                        "Estado: Mensaje marcado como visto âœ…";
                     break;
 
                 case "reassign":
@@ -1229,7 +1229,7 @@ namespace Anfeta.UI.Views
 
                 default:
                     StatusText.Text =
-                        "Estado: La acción rápida solicitada no está disponible.";
+                        "Estado: La acciÃ³n rÃ¡pida solicitada no estÃ¡ disponible.";
                     break;
             }
         }
@@ -1272,7 +1272,7 @@ namespace Anfeta.UI.Views
             if (message == null)
             {
                 StatusText.Text =
-                    "Estado: La conversación todavía no está en el índice. Pulsa Actualizar Notion y vuelve a intentar.";
+                    "Estado: La conversaciÃ³n todavÃ­a no estÃ¡ en el Ã­ndice. Pulsa Actualizar Notion y vuelve a intentar.";
                 return;
             }
 
@@ -1337,7 +1337,7 @@ namespace Anfeta.UI.Views
                     RefreshMessagesView();
             };
 
-            // Si se abre el calendario mientras Mensajes está visible,
+            // Si se abre el calendario mientras Mensajes estÃ¡ visible,
             // se cierra Mensajes para que ambas vistas nunca se superpongan.
             ToggleCalendarView.Click += (_, __) =>
             {
@@ -1387,7 +1387,7 @@ namespace Anfeta.UI.Views
             _messagesRefreshTimer?.Start();
 
             StatusText.Text =
-                "Estado: Vista de mensajes abierta ✅";
+                "Estado: Vista de mensajes abierta âœ…";
 
             return Task.CompletedTask;
         }
@@ -1434,7 +1434,7 @@ namespace Anfeta.UI.Views
                 force: true);
 
             StatusText.Text =
-                "Estado: Mensajes actualizados ✅";
+                "Estado: Mensajes actualizados âœ…";
         }
 
         private void MessagesFilterCombo_SelectionChanged(
@@ -1517,7 +1517,7 @@ namespace Anfeta.UI.Views
                 string.IsNullOrWhiteSpace(message.Row.ExternalId))
             {
                 StatusText.Text =
-                    "Estado: La conversación no tiene identificador de Notion.";
+                    "Estado: La conversaciÃ³n no tiene identificador de Notion.";
                 return;
             }
 
@@ -1531,7 +1531,7 @@ namespace Anfeta.UI.Views
             MessagesConversationEmptyState.Visibility = Visibility.Collapsed;
             MessagesChatReplyBox.IsEnabled = true;
             MessagesChatSendButton.IsEnabled = true;
-            MessagesChatStatusText.Text = "Cargando conversación...";
+            MessagesChatStatusText.Text = "Cargando conversaciÃ³n...";
 
             MarkMessageAsRead(message);
             RefreshMessagesView();
@@ -1578,7 +1578,7 @@ namespace Anfeta.UI.Views
             if (MessagesChatStatusText != null)
             {
                 MessagesChatStatusText.Text =
-                    "Selecciona una conversación para responder.";
+                    "Selecciona una conversaciÃ³n para responder.";
             }
         }
 
@@ -1668,7 +1668,7 @@ namespace Anfeta.UI.Views
 
                 MessagesChatHistoryPanel.Children.Clear();
 
-                // Los mensajes normales antiguos pueden no tener todavía
+                // Los mensajes normales antiguos pueden no tener todavÃ­a
                 // una entrada inicial codificada. Se conserva su tarjeta base.
                 if (!message.IsReviewAlert)
                 {
@@ -1717,7 +1717,7 @@ namespace Anfeta.UI.Views
                     MessagesChatHistoryPanel.Children.Add(
                         new TextBlock
                         {
-                            Text = "Esta conversación todavía no tiene movimientos.",
+                            Text = "Esta conversaciÃ³n todavÃ­a no tiene movimientos.",
                             HorizontalAlignment = HorizontalAlignment.Center,
                             Margin = new Thickness(0, 24, 0, 0),
                             Opacity = 0.66
@@ -1749,16 +1749,16 @@ namespace Anfeta.UI.Views
 
                 MessagesChatConversationStateText.Text =
                     message.IsCompleted
-                        ? "Conversación cerrada"
+                        ? "ConversaciÃ³n cerrada"
                         : IsGroupMessageRecipient(waitingTag)
                             ? "Compartida con todo el equipo"
                             : string.IsNullOrWhiteSpace(waitingName)
-                                ? "Conversación activa"
+                                ? "ConversaciÃ³n activa"
                                 : $"Esperando respuesta de {waitingName}";
 
                 MessagesChatStatusText.Text =
                     entries.Count == 0
-                        ? "Sin respuestas todavía."
+                        ? "Sin respuestas todavÃ­a."
                         : $"{entries.Count} movimiento(s) en el historial.";
 
                 DispatcherQueue.TryEnqueue(() =>
@@ -1809,7 +1809,7 @@ namespace Anfeta.UI.Views
                     });
 
                 MessagesChatStatusText.Text =
-                    $"No se pudo cargar → {ex.Message}";
+                    $"No se pudo cargar â†’ {ex.Message}";
             }
         }
 
@@ -1832,7 +1832,7 @@ namespace Anfeta.UI.Views
             if (_messagesSelectedItem == null)
             {
                 MessagesChatStatusText.Text =
-                    "Selecciona primero una conversación.";
+                    "Selecciona primero una conversaciÃ³n.";
                 return;
             }
 
@@ -1869,7 +1869,7 @@ namespace Anfeta.UI.Views
             if (message == null)
             {
                 MessagesChatStatusText.Text =
-                    "Selecciona primero una conversación.";
+                    "Selecciona primero una conversaciÃ³n.";
                 return;
             }
 
@@ -1965,18 +1965,18 @@ namespace Anfeta.UI.Views
 
                 MessagesChatStatusText.Text =
                     string.IsNullOrWhiteSpace(recipientName)
-                        ? "Respuesta enviada ✅"
-                        : $"Respuesta enviada a {recipientName} ✅";
+                        ? "Respuesta enviada âœ…"
+                        : $"Respuesta enviada a {recipientName} âœ…";
             }
             catch (OperationCanceledException)
             {
                 MessagesChatStatusText.Text =
-                    "Notion tardó demasiado en enviar la respuesta.";
+                    "Notion tardÃ³ demasiado en enviar la respuesta.";
             }
             catch (Exception ex)
             {
                 MessagesChatStatusText.Text =
-                    $"No se pudo enviar → {ex.Message}";
+                    $"No se pudo enviar â†’ {ex.Message}";
             }
             finally
             {
@@ -1997,7 +1997,7 @@ namespace Anfeta.UI.Views
                 string.Empty;
 
             // El minuto forma parte de la clave porque un recordatorio futuro
-            // puede convertirse en pendiente/vencido sin que cambie el índice.
+            // puede convertirse en pendiente/vencido sin que cambie el Ã­ndice.
             var minuteBucket =
                 DateTime.Now.ToString(
                     "yyyyMMddHHmm",
@@ -2018,8 +2018,8 @@ namespace Anfeta.UI.Views
                 return _messagesParsedCache;
             }
 
-            // Sincroniza el diccionario en memoria si otra pestaña marcó
-            // un mensaje como leído.
+            // Sincroniza el diccionario en memoria si otra pestaÃ±a marcÃ³
+            // un mensaje como leÃ­do.
             LoadMessagesReadState();
 
             _messagesParsedCache =
@@ -2182,9 +2182,9 @@ namespace Anfeta.UI.Views
                 .ThenBy(item => item.ScheduledAt)
                 .ToList();
 
-            // Si cambió el usuario/filtro y la conversación seleccionada ya no
+            // Si cambiÃ³ el usuario/filtro y la conversaciÃ³n seleccionada ya no
             // pertenece a esta vista, no dejamos el panel derecho mostrando
-            // información de otra persona.
+            // informaciÃ³n de otra persona.
             if (_messagesSelectedItem != null &&
                 !finalItems.Any(item =>
                     string.Equals(
@@ -2224,7 +2224,7 @@ namespace Anfeta.UI.Views
                     "sent" =>
                         $"{_messageItems.Count} enviado(s)",
                     "conversations" =>
-                        $"{_messageItems.Count} conversación(es) activa(s)",
+                        $"{_messageItems.Count} conversaciÃ³n(es) activa(s)",
                     "overdue" =>
                         $"{_messageItems.Count} vencido(s)",
                     "completed" =>
@@ -2232,7 +2232,7 @@ namespace Anfeta.UI.Views
                     _ =>
                         pendingCount == 0
                             ? $"{_messageItems.Count} mensaje(s)"
-                            : $"{_messageItems.Count} mensaje(s) · {pendingCount} activo(s)"
+                            : $"{_messageItems.Count} mensaje(s) Â· {pendingCount} activo(s)"
                 };
 
             var typeLabel =
@@ -2242,8 +2242,8 @@ namespace Anfeta.UI.Views
 
             MessagesSummaryText.Text =
                 string.IsNullOrWhiteSpace(currentUserTag)
-                    ? $"{typeLabel} · Selecciona un usuario en Configuración para ver sus mensajes."
-                    : $"{summaryLabel} · {typeLabel} · Usuario: {currentUserName}";
+                    ? $"{typeLabel} Â· Selecciona un usuario en ConfiguraciÃ³n para ver sus mensajes."
+                    : $"{summaryLabel} Â· {typeLabel} Â· Usuario: {currentUserName}";
 
             MessagesEmptyState.Visibility =
                 _messageItems.Count == 0
@@ -2459,9 +2459,9 @@ namespace Anfeta.UI.Views
                         localDate,
                         DateTimeKind.Local));
 
-            // Los mensajes programados para después no cuentan como no leídos
-            // hasta que llegue su hora. Iniciales y alertas de revisión sí deben
-            // sumar al badge; antes solo [RESPUESTA] podía hacerlo.
+            // Los mensajes programados para despuÃ©s no cuentan como no leÃ­dos
+            // hasta que llegue su hora. Iniciales y alertas de revisiÃ³n sÃ­ deben
+            // sumar al badge; antes solo [RESPUESTA] podÃ­a hacerlo.
             if (messageDate > DateTimeOffset.Now)
                 return false;
 
@@ -2501,8 +2501,8 @@ namespace Anfeta.UI.Views
             }
             catch
             {
-                // El estado leído ya quedó guardado. El servicio normal
-                // volverá a validar el recordatorio en el siguiente escaneo.
+                // El estado leÃ­do ya quedÃ³ guardado. El servicio normal
+                // volverÃ¡ a validar el recordatorio en el siguiente escaneo.
             }
 
             UpdateMessagesUnreadBadge();
@@ -2644,8 +2644,8 @@ namespace Anfeta.UI.Views
                 .Trim(
                     ' ',
                     '-',
-                    '–',
-                    '—',
+                    '\u2013',
+                    '\u2014',
                     ':',
                     '|');
 
@@ -2808,7 +2808,7 @@ namespace Anfeta.UI.Views
         {
             var now = DateTimeOffset.Now;
 
-            // El editor propone siempre el día, la hora y el minuto actuales.
+            // El editor propone siempre el dÃ­a, la hora y el minuto actuales.
             // Se eliminan los segundos para que el TimePicker represente el
             // valor de forma exacta sin adelantarlo ni redondearlo.
             return new DateTimeOffset(
@@ -3034,7 +3034,7 @@ namespace Anfeta.UI.Views
         }
 
         /// <summary>
-        /// Crea un recordatorio/notificación ANFETA vinculado a una actividad
+        /// Crea un recordatorio/notificaciÃ³n ANFETA vinculado a una actividad
         /// real del calendario. Reutiliza exactamente el mismo formato de
         /// Mensajes/Revisiones que ya consume IndexedFileReminderService.
         /// </summary>
@@ -3136,7 +3136,7 @@ namespace Anfeta.UI.Views
                 new TimePicker
                 {
                     Time = suggested.TimeOfDay,
-                    // Recordatorios de actividad: selección exacta minuto a minuto.
+                    // Recordatorios de actividad: selecciÃ³n exacta minuto a minuto.
                     MinuteIncrement = 1,
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch
@@ -3147,7 +3147,7 @@ namespace Anfeta.UI.Views
                 {
                     Header = "Nota opcional",
                     PlaceholderText =
-                        "Ej. Revisar antes de la reunión / validar cambios...",
+                        "Ej. Revisar antes de la reuniÃ³n / validar cambios...",
                     AcceptsReturn = true,
                     TextWrapping =
                         TextWrapping.Wrap,
@@ -3196,7 +3196,7 @@ namespace Anfeta.UI.Views
                                 new TextBlock
                                 {
                                     Text =
-                                        $"Actividad: {activity.Start:dd/MM/yyyy HH:mm}–{activity.End:HH:mm} · " +
+                                        $"Actividad: {activity.Start:dd/MM/yyyy HH:mm}â€“{activity.End:HH:mm} Â· " +
                                         $"{activity.EstimatedDurationLabel}",
                                     FontSize = 10.5,
                                     Opacity = 0.72
@@ -3283,8 +3283,8 @@ namespace Anfeta.UI.Views
                 new TextBlock
                 {
                     Text =
-                        "El recordatorio quedará vinculado a esta actividad. " +
-                        "Desde la notificación podrás abrir la actividad original en Notion.",
+                        "El recordatorio quedarÃ¡ vinculado a esta actividad. " +
+                        "Desde la notificaciÃ³n podrÃ¡s abrir la actividad original en Notion.",
                     FontSize = 10.5,
                     Opacity = 0.68,
                     TextWrapping =
@@ -3298,7 +3298,7 @@ namespace Anfeta.UI.Views
                 new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    Title = "🔔 Recordatorio de actividad",
+                    Title = "ðŸ”” Recordatorio de actividad",
                     Content = panel,
                     PrimaryButtonText =
                         "Crear recordatorio",
@@ -3311,11 +3311,8 @@ namespace Anfeta.UI.Views
             var result =
                 await dialog.ShowAsync();
 
-            if (result !=
-                ContentDialogResult.Primary)
-            {
+            if (result != ContentDialogResult.Primary)
                 return;
-            }
 
             if (recipientCombo.SelectedItem is not
                 ComboBoxItem selectedRecipient)
@@ -3334,7 +3331,7 @@ namespace Anfeta.UI.Views
                 !MessagesPeople.ContainsKey(recipientTag))
             {
                 StatusText.Text =
-                    "Estado: El destinatario seleccionado no es válido.";
+                    "Estado: El destinatario seleccionado no es vÃ¡lido.";
                 return;
             }
 
@@ -3389,12 +3386,12 @@ namespace Anfeta.UI.Views
                 BuildStructuredCalendarMessageSubject(
                     domain,
                     project,
-                    $"🔔 {activity.Title}");
+                    $"ðŸ”” {activity.Title}");
 
             if (string.IsNullOrWhiteSpace(subject))
             {
                 subject =
-                    $"🔔 {activity.Title}";
+                    $"ðŸ”” {activity.Title}";
             }
 
             var authorName =
@@ -3451,7 +3448,7 @@ namespace Anfeta.UI.Views
             try
             {
                 ShowLoadingState(
-                    "Estado: Creando recordatorio…",
+                    "Estado: Creando recordatorioâ€¦",
                     activity.Title);
 
                 using var cts =
@@ -3539,22 +3536,22 @@ namespace Anfeta.UI.Views
                 }
                 catch
                 {
-                    // La página ya quedó creada e indexada.
+                    // La pÃ¡gina ya quedÃ³ creada e indexada.
                 }
 
                 StatusText.Text =
-                    $"Estado: Recordatorio creado ✅ · " +
-                    $"{recipientName} · {scheduled:dd/MM/yyyy HH:mm}";
+                    $"Estado: Recordatorio creado âœ… Â· " +
+                    $"{recipientName} Â· {scheduled:dd/MM/yyyy HH:mm}";
             }
             catch (OperationCanceledException)
             {
                 StatusText.Text =
-                    "Estado: Notion tardó demasiado en crear el recordatorio.";
+                    "Estado: Notion tardÃ³ demasiado en crear el recordatorio.";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo crear el recordatorio → {ex.Message}";
+                    $"Estado: No se pudo crear el recordatorio â†’ {ex.Message}";
             }
             finally
             {
@@ -3666,7 +3663,7 @@ namespace Anfeta.UI.Views
                                 : recipientTag;
 
                 directionPreview.Text =
-                    $"De: {currentName} ({currentTag}) · " +
+                    $"De: {currentName} ({currentTag}) Â· " +
                     $"Para: {recipientName} ({recipientTag})";
             }
 
@@ -3705,7 +3702,7 @@ namespace Anfeta.UI.Views
                 {
                     Header = context == null
                         ? "Asunto"
-                        : "Título / asunto",
+                        : "TÃ­tulo / asunto",
                     PlaceholderText =
                         "Ejemplo: Revisar propuesta del cliente",
                     Text =
@@ -3738,7 +3735,7 @@ namespace Anfeta.UI.Views
                     PlaceholderText =
                         context == null
                             ? "Escribe el contenido del mensaje..."
-                            : "Escribe qué necesita revisar o realizar la persona...",
+                            : "Escribe quÃ© necesita revisar o realizar la persona...",
                     AcceptsReturn = true,
                     TextWrapping =
                         TextWrapping.Wrap,
@@ -3846,7 +3843,7 @@ namespace Anfeta.UI.Views
                                     string.IsNullOrWhiteSpace(
                                         context.ActivityUrl)
                                         ? string.Empty
-                                        : "El enlace de Notion se incluirá automáticamente al enviar."
+                                        : "El enlace de Notion se incluirÃ¡ automÃ¡ticamente al enviar."
                                 }
                                 .Where(value =>
                                     !string.IsNullOrWhiteSpace(value))),
@@ -3987,7 +3984,7 @@ namespace Anfeta.UI.Views
             var attach =
                 new Button
                 {
-                    Content = "📎 Adjuntar archivos",
+                    Content = "ðŸ“Ž Adjuntar archivos",
                     HorizontalAlignment =
                         HorizontalAlignment.Left
                 };
@@ -4070,7 +4067,7 @@ namespace Anfeta.UI.Views
                     catch (Exception ex)
                     {
                         status.Text =
-                            $"No se pudieron seleccionar archivos → {ex.Message}";
+                            $"No se pudieron seleccionar archivos â†’ {ex.Message}";
                     }
                 };
 
@@ -4190,7 +4187,7 @@ namespace Anfeta.UI.Views
                     if (audioComposer.IsRecording)
                     {
                         status.Text =
-                            "Detén la grabación antes de enviar.";
+                            "DetÃ©n la grabaciÃ³n antes de enviar.";
                         return;
                     }
 
@@ -4229,7 +4226,7 @@ namespace Anfeta.UI.Views
                     if (string.IsNullOrWhiteSpace(rawSubject))
                     {
                         status.Text =
-                            "Escribe un título o asunto.";
+                            "Escribe un tÃ­tulo o asunto.";
                         return;
                     }
 
@@ -4248,7 +4245,7 @@ namespace Anfeta.UI.Views
 
                     if (context?.SingleRecipientOnly == true && IsGroupMessageRecipient(selectedRecipientTag))
                     {
-                        status.Text = "Elige una sola persona para esta invitación.";
+                        status.Text = "Elige una sola persona para esta invitaciÃ³n.";
                         return;
                     }
 
@@ -4267,7 +4264,7 @@ namespace Anfeta.UI.Views
                         !MessagesPeople.ContainsKey(selectedRecipientTag))
                     {
                         status.Text =
-                            "El destinatario seleccionado no es válido.";
+                            "El destinatario seleccionado no es vÃ¡lido.";
                         return;
                     }
 
@@ -4327,7 +4324,7 @@ namespace Anfeta.UI.Views
                             broadcastFingerprint))
                     {
                         status.Text =
-                            "Este aviso grupal ya se envió durante esta sesión. " +
+                            "Este aviso grupal ya se enviÃ³ durante esta sesiÃ³n. " +
                             "Cambia el asunto, texto o fecha para enviarlo otra vez.";
                         return;
                     }
@@ -4349,8 +4346,8 @@ namespace Anfeta.UI.Views
                                     uploadProgressBar.Value =
                                         report.Percentage;
                                     uploadProgressText.Text =
-                                        $"{report.Percentage}% · " +
-                                        $"{report.FileName} · " +
+                                        $"{report.Percentage}% Â· " +
+                                        $"{report.FileName} Â· " +
                                         $"{report.Completed}/{report.Total}";
                                     status.Text =
                                         $"Subiendo {report.FileName}...";
@@ -4382,7 +4379,7 @@ namespace Anfeta.UI.Views
 
                             status.Text =
                                 isBroadcast
-                                    ? "Creando mensaje grupal único..."
+                                    ? "Creando mensaje grupal Ãºnico..."
                                     : "Creando mensaje...";
 
                             var created =
@@ -4423,7 +4420,7 @@ namespace Anfeta.UI.Views
                             var initialBody =
                                 string.IsNullOrWhiteSpace(body) &&
                                 initialAttachments.Count > 0
-                                    ? $"Adjuntó {initialAttachments.Count} archivo(s)."
+                                    ? $"AdjuntÃ³ {initialAttachments.Count} archivo(s)."
                                     : body;
 
                             var initialText =
@@ -4494,8 +4491,8 @@ namespace Anfeta.UI.Views
 
                         status.Text =
                             isBroadcast
-                                ? "Mensaje grupal creado una sola vez para todo el equipo ✅"
-                                : "Mensaje creado ✅";
+                                ? "Mensaje grupal creado una sola vez para todo el equipo âœ…"
+                                : "Mensaje creado âœ…";
 
                         dialog.Hide();
 
@@ -4503,7 +4500,7 @@ namespace Anfeta.UI.Views
                             createdMessage != null)
                         {
                             // Un mensaje nuevo debe aparecer inmediatamente en
-                            // la bandeja del emisor, sin esperar una sincronización
+                            // la bandeja del emisor, sin esperar una sincronizaciÃ³n
                             // completa de Notion. Se abre en la vista tipo chat.
                             foreach (var item in
                                      MessagesFilterCombo.Items
@@ -4547,14 +4544,14 @@ namespace Anfeta.UI.Views
                                 $"Estado: Mensaje enviado desde el calendario" +
                                 (string.IsNullOrWhiteSpace(
                                      context.RecipientName)
-                                    ? " ✅"
-                                    : $" a {context.RecipientName} ✅");
+                                    ? " âœ…"
+                                    : $" a {context.RecipientName} âœ…");
                         }
                     }
                     catch (Exception ex)
                     {
                         status.Text =
-                            $"No se pudo crear → {ex.Message}";
+                            $"No se pudo crear â†’ {ex.Message}";
                     }
                     finally
                     {
@@ -4618,7 +4615,7 @@ namespace Anfeta.UI.Views
             }
             catch
             {
-                // El mensaje ya quedó visible en el índice local.
+                // El mensaje ya quedÃ³ visible en el Ã­ndice local.
             }
         }
 
@@ -4637,7 +4634,7 @@ namespace Anfeta.UI.Views
             RefreshMessagesView();
 
             StatusText.Text =
-                "Estado: Mensaje marcado como visto ✅";
+                "Estado: Mensaje marcado como visto âœ…";
         }
 
         private async void MessageHistory_Click(
@@ -4735,7 +4732,7 @@ namespace Anfeta.UI.Views
             var attachButton =
                 new Button
                 {
-                    Content = "📎 Adjuntar",
+                    Content = "ðŸ“Ž Adjuntar",
                     HorizontalAlignment =
                         HorizontalAlignment.Left
                 };
@@ -4908,7 +4905,7 @@ namespace Anfeta.UI.Views
                     catch (Exception ex)
                     {
                         status.Text =
-                            $"No se pudieron seleccionar archivos → {ex.Message}";
+                            $"No se pudieron seleccionar archivos â†’ {ex.Message}";
                     }
                 };
 
@@ -5009,7 +5006,7 @@ namespace Anfeta.UI.Views
                         args.AcceptedOperation =
                             DataPackageOperation.Copy;
                         args.DragUIOverride.Caption =
-                            "Adjuntar a la conversación";
+                            "Adjuntar a la conversaciÃ³n";
                         args.DragUIOverride.IsCaptionVisible = true;
                     }
                 };
@@ -5034,7 +5031,7 @@ namespace Anfeta.UI.Views
                     catch (Exception ex)
                     {
                         status.Text =
-                            $"No se pudieron agregar los archivos → {ex.Message}";
+                            $"No se pudieron agregar los archivos â†’ {ex.Message}";
                     }
                 };
 
@@ -5087,14 +5084,14 @@ namespace Anfeta.UI.Views
                     catch (Exception ex)
                     {
                         status.Text =
-                            $"No se pudo pegar la captura → {ex.Message}";
+                            $"No se pudo pegar la captura â†’ {ex.Message}";
                     }
                 };
 
             var dialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
-                Title = $"Conversación · {message.Message}",
+                Title = $"ConversaciÃ³n Â· {message.Message}",
                 Content = content,
                 PrimaryButtonText = "Enviar",
                 SecondaryButtonText = "Actualizar",
@@ -5106,9 +5103,9 @@ namespace Anfeta.UI.Views
             {
                 historyPanel.Children.Clear();
 
-                // Las alertas de revisión ya guardan el envío inicial
-                // dentro del hilo técnico. No se agrega otra tarjeta sintética
-                // porque se veía como un segundo mensaje duplicado.
+                // Las alertas de revisiÃ³n ya guardan el envÃ­o inicial
+                // dentro del hilo tÃ©cnico. No se agrega otra tarjeta sintÃ©tica
+                // porque se veÃ­a como un segundo mensaje duplicado.
                 if (!message.IsReviewAlert)
                 {
                     historyPanel.Children.Add(
@@ -5202,17 +5199,17 @@ namespace Anfeta.UI.Views
 
                     conversationState.Text =
                         message.IsCompleted
-                            ? "Conversación cerrada."
+                            ? "ConversaciÃ³n cerrada."
                             : IsGroupMessageRecipient(
                                   waitingTag)
                                 ? "Mensaje compartido con todo el equipo."
                                 : string.IsNullOrWhiteSpace(waitingName)
-                                    ? "Conversación compartida."
+                                    ? "ConversaciÃ³n compartida."
                                     : $"Esperando respuesta de {waitingName}.";
 
                     status.Text =
                         entries.Count == 0
-                            ? "Sin respuestas todavía."
+                            ? "Sin respuestas todavÃ­a."
                             : $"{entries.Count} movimiento(s).";
 
                     DispatcherQueue.TryEnqueue(() =>
@@ -5235,7 +5232,7 @@ namespace Anfeta.UI.Views
                 catch (Exception ex)
                 {
                     status.Text =
-                        $"No se pudo cargar → {ex.Message}";
+                        $"No se pudo cargar â†’ {ex.Message}";
                 }
             }
 
@@ -5247,7 +5244,7 @@ namespace Anfeta.UI.Views
                     if (replyAudioComposer.IsRecording)
                     {
                         status.Text =
-                            "Detén la grabación antes de enviar.";
+                            "DetÃ©n la grabaciÃ³n antes de enviar.";
                         return;
                     }
 
@@ -5328,7 +5325,7 @@ namespace Anfeta.UI.Views
                                                     replyUploadProgressBar.Value =
                                                         report.Percentage;
                                                     replyUploadProgressText.Text =
-                                                        $"{report.Percentage}% · {report.FileName}";
+                                                        $"{report.Percentage}% Â· {report.FileName}";
                                                 }),
                                         cts.Token);
 
@@ -5369,7 +5366,7 @@ namespace Anfeta.UI.Views
                             recipientTag,
                             repliedAt,
                             string.IsNullOrWhiteSpace(reply)
-                                ? $"Adjuntó {uploadedAttachments.Count} archivo(s)."
+                                ? $"AdjuntÃ³ {uploadedAttachments.Count} archivo(s)."
                                 : reply,
                             cts.Token);
 
@@ -5383,13 +5380,13 @@ namespace Anfeta.UI.Views
 
                         status.Text =
                             string.IsNullOrWhiteSpace(recipientName)
-                                ? "Respuesta enviada ✅"
-                                : $"Enviada a {recipientName} ✅";
+                                ? "Respuesta enviada âœ…"
+                                : $"Enviada a {recipientName} âœ…";
                     }
                     catch (Exception ex)
                     {
                         status.Text =
-                            $"No se pudo enviar → {ex.Message}";
+                            $"No se pudo enviar â†’ {ex.Message}";
                     }
                     finally
                     {
@@ -5448,7 +5445,7 @@ namespace Anfeta.UI.Views
                 string.IsNullOrWhiteSpace(entry.RecipientTag) &&
                 string.IsNullOrWhiteSpace(entry.RecipientName)
                     ? string.Empty
-                    : $" → {DisplayMessageThreadRecipient(entry)}";
+                    : $" â†’ {DisplayMessageThreadRecipient(entry)}";
 
             if (isSystem)
             {
@@ -5464,7 +5461,7 @@ namespace Anfeta.UI.Views
                     Child = new TextBlock
                     {
                         Text =
-                            $"Sistema · {entry.CreatedAt:dd/MM HH:mm} · {entry.Text}",
+                            $"Sistema Â· {entry.CreatedAt:dd/MM HH:mm} Â· {entry.Text}",
                         FontSize = 10.5,
                         Opacity = 0.80,
                         TextWrapping = TextWrapping.Wrap
@@ -5479,7 +5476,7 @@ namespace Anfeta.UI.Views
 
             var header =
                 $"{DisplayMessageThreadAuthor(entry)}" +
-                $"{recipientLabel} · " +
+                $"{recipientLabel} Â· " +
                 $"{entry.CreatedAt:dd/MM HH:mm}";
 
             var panel = new StackPanel
@@ -5685,7 +5682,7 @@ namespace Anfeta.UI.Views
                 }
                 catch
                 {
-                    // Si la URL temporal expiró, se conserva la tarjeta.
+                    // Si la URL temporal expirÃ³, se conserva la tarjeta.
                 }
             }
 
@@ -5715,7 +5712,7 @@ namespace Anfeta.UI.Views
             var name =
                 new TextBlock
                 {
-                    Text = $"📎 {attachment.FileName}",
+                    Text = $"ðŸ“Ž {attachment.FileName}",
                     FontSize = 10.8,
                     FontWeight =
                         Microsoft.UI.Text.FontWeights.SemiBold,
@@ -5759,7 +5756,7 @@ namespace Anfeta.UI.Views
                     largeButton,
                     canOpen
                         ? "Mostrar la imagen en grande"
-                        : "La URL temporal no está disponible. Pulsa Actualizar.");
+                        : "La URL temporal no estÃ¡ disponible. Pulsa Actualizar.");
 
                 actions.Children.Add(
                     largeButton);
@@ -5848,8 +5845,8 @@ namespace Anfeta.UI.Views
             ToolTipService.SetToolTip(
                 openButton,
                 canOpen
-                    ? "Abrir el archivo con la aplicación predeterminada"
-                    : "La URL temporal no está disponible. Pulsa Actualizar.");
+                    ? "Abrir el archivo con la aplicaciÃ³n predeterminada"
+                    : "La URL temporal no estÃ¡ disponible. Pulsa Actualizar.");
 
             actions.Children.Add(
                 openButton);
@@ -5923,12 +5920,12 @@ namespace Anfeta.UI.Views
                     bytes);
 
                 StatusText.Text =
-                    $"Estado: Archivo guardado en {target.Path} ✅";
+                    $"Estado: Archivo guardado en {target.Path} âœ…";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo guardar el archivo → {ex.Message}";
+                    $"Estado: No se pudo guardar el archivo â†’ {ex.Message}";
             }
         }
 
@@ -6246,7 +6243,7 @@ namespace Anfeta.UI.Views
             }
             catch
             {
-                // El historial no debe impedir la acción principal.
+                // El historial no debe impedir la acciÃ³n principal.
             }
         }
 
@@ -6276,7 +6273,7 @@ namespace Anfeta.UI.Views
             Clipboard.SetContent(package);
 
             StatusText.Text =
-                "Estado: Texto del mensaje copiado ✅";
+                "Estado: Texto del mensaje copiado âœ…";
         }
 
 
@@ -6305,9 +6302,9 @@ namespace Anfeta.UI.Views
         private async Task OpenMessageInNotionAsync(
             MessageViewItem message)
         {
-            // El contador rojo representa notificaciones no leídas.
-            // Al abrir la notificación se marca como leída, aunque siga
-            // pendiente de atención.
+            // El contador rojo representa notificaciones no leÃ­das.
+            // Al abrir la notificaciÃ³n se marca como leÃ­da, aunque siga
+            // pendiente de atenciÃ³n.
             MarkMessageAsRead(message);
             RefreshMessagesView();
 
@@ -6326,7 +6323,7 @@ namespace Anfeta.UI.Views
                 failureStatus:
                     "No se pudo abrir el mensaje",
                 invalidUrlStatus:
-                    "El mensaje no tiene una URL válida de Notion");
+                    "El mensaje no tiene una URL vÃ¡lida de Notion");
         }
 
         private async void MessageOpenOriginalActivity_Click(
@@ -6350,7 +6347,7 @@ namespace Anfeta.UI.Views
                 string.IsNullOrWhiteSpace(message.Row.ExternalId))
             {
                 StatusText.Text =
-                    "Estado: Este mensaje no está vinculado a una actividad.";
+                    "Estado: Este mensaje no estÃ¡ vinculado a una actividad.";
                 return;
             }
 
@@ -6402,23 +6399,23 @@ namespace Anfeta.UI.Views
                 await OpenNotionPageWithFallbackAsync(
                     webUri.AbsoluteUri,
                     desktopSuccessStatus:
-                        $"Actividad real abierta en Notion Desktop · {title}",
+                        $"Actividad real abierta en Notion Desktop Â· {title}",
                     browserSuccessStatus:
-                        $"Actividad real abierta en el navegador · {title}",
+                        $"Actividad real abierta en el navegador Â· {title}",
                     failureStatus:
                         "No se pudo abrir la actividad real",
                     invalidUrlStatus:
-                        "La actividad real no tiene una URL válida de Notion");
+                        "La actividad real no tiene una URL vÃ¡lida de Notion");
             }
             catch (OperationCanceledException)
             {
                 StatusText.Text =
-                    "Estado: Notion tardó demasiado en localizar la actividad real.";
+                    "Estado: Notion tardÃ³ demasiado en localizar la actividad real.";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo abrir la actividad real → {ex.Message}";
+                    $"Estado: No se pudo abrir la actividad real â†’ {ex.Message}";
             }
         }
 
@@ -6512,13 +6509,13 @@ namespace Anfeta.UI.Views
 
                 StatusText.Text =
                     opened
-                        ? "Estado: Tutorial abierto ✅"
+                        ? "Estado: Tutorial abierto âœ…"
                         : "Estado: No se pudo abrir el tutorial.";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo abrir el tutorial → {ex.Message}";
+                    $"Estado: No se pudo abrir el tutorial â†’ {ex.Message}";
             }
         }
 
@@ -6569,7 +6566,7 @@ namespace Anfeta.UI.Views
             var datePicker =
                 new DatePicker
                 {
-                    Header = "Recordarme el día",
+                    Header = "Recordarme el dÃ­a",
                     Date = DateTimeOffset.Now.AddHours(2)
                 };
 
@@ -6592,7 +6589,7 @@ namespace Anfeta.UI.Views
                 new TextBlock
                 {
                     Text =
-                        "Selecciona cuándo debe volver a aparecer este tutorial.",
+                        "Selecciona cuÃ¡ndo debe volver a aparecer este tutorial.",
                     TextWrapping =
                         TextWrapping.Wrap
                 });
@@ -6612,11 +6609,8 @@ namespace Anfeta.UI.Views
                         ContentDialogButton.Primary
                 };
 
-            if (await dialog.ShowAsync() !=
-                ContentDialogResult.Primary)
-            {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
                 return;
-            }
 
             var selectedDate =
                 datePicker.Date.Date;
@@ -6732,12 +6726,12 @@ namespace Anfeta.UI.Views
                 RefreshMessagesView();
 
                 StatusText.Text =
-                    $"Estado: Tutorial pospuesto {label} ✅";
+                    $"Estado: Tutorial pospuesto {label} âœ…";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo posponer el tutorial → {ex.Message}";
+                    $"Estado: No se pudo posponer el tutorial â†’ {ex.Message}";
             }
             finally
             {
@@ -6765,7 +6759,7 @@ namespace Anfeta.UI.Views
             if (message.IsReviewAlert)
             {
                 StatusText.Text =
-                    "Estado: Las alertas de revisión no se pueden reasignar.";
+                    "Estado: Las alertas de revisiÃ³n no se pueden reasignar.";
                 return;
             }
 
@@ -6819,7 +6813,7 @@ namespace Anfeta.UI.Views
             if (message.IsReviewAlert)
             {
                 StatusText.Text =
-                    "Estado: Las alertas de revisión no se pueden reprogramar.";
+                    "Estado: Las alertas de revisiÃ³n no se pueden reprogramar.";
                 return;
             }
 
@@ -6858,8 +6852,8 @@ namespace Anfeta.UI.Views
                 new TextBlock
                 {
                     Text =
-                        "Nueva fecha y hora · se propone exactamente " +
-                        "el día y la hora actuales:",
+                        "Nueva fecha y hora Â· se propone exactamente " +
+                        "el dÃ­a y la hora actuales:",
                     FontWeight =
                         Microsoft.UI.Text.FontWeights.SemiBold,
                     TextWrapping = TextWrapping.Wrap
@@ -6878,11 +6872,8 @@ namespace Anfeta.UI.Views
                 DefaultButton = ContentDialogButton.Primary
             };
 
-            if (await dialog.ShowAsync() !=
-                ContentDialogResult.Primary)
-            {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
                 return;
-            }
 
             var selectedDate =
                 datePicker.Date.Date;
@@ -6965,7 +6956,7 @@ namespace Anfeta.UI.Views
             try
             {
                 ShowLoadingState(
-                    "Estado: Terminando y limpiando recordatorio…",
+                    "Estado: Terminando y limpiando recordatorioâ€¦",
                     message.Message);
 
                 using var cts = new CancellationTokenSource(
@@ -6994,7 +6985,7 @@ namespace Anfeta.UI.Views
                             Text =
                                 $"Recordatorio terminado por {currentName} " +
                                 $"el {DateTimeOffset.Now:dd/MM/yyyy HH:mm}. " +
-                                "La página fue enviada a la papelera."
+                                "La pÃ¡gina fue enviada a la papelera."
                         },
                         cts.Token);
                 }
@@ -7012,8 +7003,8 @@ namespace Anfeta.UI.Views
                     RefreshMessagesView(force: true);
 
                     StatusText.Text =
-                        "Estado: La página ya no existía en Notion; " +
-                        "se limpió el recordatorio atascado de ANFETA ✅";
+                        "Estado: La pÃ¡gina ya no existÃ­a en Notion; " +
+                        "se limpiÃ³ el recordatorio atascado de ANFETA âœ…";
 
                     return;
                 }
@@ -7035,12 +7026,12 @@ namespace Anfeta.UI.Views
                 RefreshMessagesView();
 
                 StatusText.Text =
-                    "Estado: Recordatorio terminado y enviado a la papelera ✅";
+                    "Estado: Recordatorio terminado y enviado a la papelera âœ…";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo terminar el recordatorio → {ex.Message}";
+                    $"Estado: No se pudo terminar el recordatorio â†’ {ex.Message}";
             }
             finally
             {
@@ -7137,9 +7128,9 @@ namespace Anfeta.UI.Views
 
             var actionText =
                 completed
-                    ? $"Alerta atendida por {reviewerName} ({currentUser}) · " +
+                    ? $"Alerta atendida por {reviewerName} ({currentUser}) Â· " +
                       $"{DateTimeOffset.Now:dd/MM/yyyy HH:mm}."
-                    : $"Alerta reabierta por {reviewerName} ({currentUser}) · " +
+                    : $"Alerta reabierta por {reviewerName} ({currentUser}) Â· " +
                       $"{DateTimeOffset.Now:dd/MM/yyyy HH:mm}.";
 
             try
@@ -7229,9 +7220,9 @@ namespace Anfeta.UI.Views
                         if (completed)
                         {
                             // Una alerta atendida se elimina para no acumular
-                            // notificaciones. Si la actividad vuelve a revisión,
-                            // el calendario detectará que este PageId ya no está
-                            // activo y creará una notificación nueva.
+                            // notificaciones. Si la actividad vuelve a revisiÃ³n,
+                            // el calendario detectarÃ¡ que este PageId ya no estÃ¡
+                            // activo y crearÃ¡ una notificaciÃ³n nueva.
                             await pageActions.MovePageToTrashAsync(
                                 token,
                                 alert.Row.ExternalId,
@@ -7243,10 +7234,10 @@ namespace Anfeta.UI.Views
                     catch (Exception ex) when (
                         NotionPageActionsService.IsMissingPageError(ex))
                     {
-                        // Fantasma local: la página ya no existe en Notion.
+                        // Fantasma local: la pÃ¡gina ya no existe en Notion.
                         // Para "Atendida" o "Eliminar" el resultado deseado
-                        // es que deje de verse, así que se limpia del índice y
-                        // se continúa con las demás alertas vinculadas.
+                        // es que deje de verse, asÃ­ que se limpia del Ã­ndice y
+                        // se continÃºa con las demÃ¡s alertas vinculadas.
                         removedIds.Add(alert.Row.ExternalId);
                         MarkMessageAsRead(alert);
                         continue;
@@ -7263,18 +7254,18 @@ namespace Anfeta.UI.Views
 
                 StatusText.Text =
                     completed
-                        ? $"Estado: Alerta atendida por {reviewerName} ✅"
-                        : $"Estado: Alerta reabierta por {reviewerName} ✅";
+                        ? $"Estado: Alerta atendida por {reviewerName} âœ…"
+                        : $"Estado: Alerta reabierta por {reviewerName} âœ…";
             }
             catch (OperationCanceledException)
             {
                 StatusText.Text =
-                    "Estado: Notion tardó demasiado en responder.";
+                    "Estado: Notion tardÃ³ demasiado en responder.";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo actualizar la alerta → {ex.Message}";
+                    $"Estado: No se pudo actualizar la alerta â†’ {ex.Message}";
             }
             finally
             {
@@ -7307,33 +7298,6 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            var confirm = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title =
-                    message.IsReviewAlert
-                        ? "Eliminar notificación"
-                        : "Eliminar recordatorio",
-                Content =
-                    message.IsReviewAlert
-                        ? $"Se eliminará únicamente esta notificación. " +
-                          $"La actividad original del calendario no cambiará.\n\n" +
-                          $"{message.Message}"
-                        : $"¿Deseas mover este recordatorio a la papelera de Notion?\n\n" +
-                          $"{message.Message}",
-                PrimaryButtonText =
-                    message.IsReviewAlert
-                        ? "Eliminar notificación"
-                        : "Eliminar",
-                CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Close
-            };
-
-            if (await confirm.ShowAsync() !=
-                ContentDialogResult.Primary)
-            {
-                return;
-            }
 
             var token = GetSavedNotionToken();
 
@@ -7348,7 +7312,7 @@ namespace Anfeta.UI.Views
             {
                 ShowLoadingState(
                     message.IsReviewAlert
-                        ? "Estado: Eliminando notificación..."
+                        ? "Estado: Eliminando notificaciÃ³n..."
                         : "Estado: Eliminando recordatorio...",
                     message.Message);
 
@@ -7384,18 +7348,18 @@ namespace Anfeta.UI.Views
 
                 StatusText.Text =
                     message.IsReviewAlert
-                        ? "Estado: Notificación eliminada/limpiada. La actividad original permanece intacta ✅"
-                        : "Estado: Recordatorio eliminado/limpiado ✅";
+                        ? "Estado: NotificaciÃ³n eliminada/limpiada. La actividad original permanece intacta âœ…"
+                        : "Estado: Recordatorio eliminado/limpiado âœ…";
             }
             catch (OperationCanceledException)
             {
                 StatusText.Text =
-                    "Estado: Notion tardó demasiado en responder.";
+                    "Estado: Notion tardÃ³ demasiado en responder.";
             }
             catch (Exception ex)
                 when (NotionPageActionsService.IsMissingPageError(ex))
             {
-                // La página ya no existe o ya estaba archivada. Para el usuario,
+                // La pÃ¡gina ya no existe o ya estaba archivada. Para el usuario,
                 // eliminar significa limpiar la referencia local y continuar.
                 await RemoveNotionRowsFromIndexAsync(
                     new HashSet<string>(
@@ -7417,15 +7381,15 @@ namespace Anfeta.UI.Views
 
                 StatusText.Text =
                     message.IsReviewAlert
-                        ? "Estado: La notificación ya no existía en Notion; se limpió de ANFETA ✅"
-                        : "Estado: El recordatorio ya no existía en Notion; se limpió de ANFETA ✅";
+                        ? "Estado: La notificaciÃ³n ya no existÃ­a en Notion; se limpiÃ³ de ANFETA âœ…"
+                        : "Estado: El recordatorio ya no existÃ­a en Notion; se limpiÃ³ de ANFETA âœ…";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
                     message.IsReviewAlert
-                        ? $"Estado: No se pudo eliminar la notificación → {ex.Message}"
-                        : $"Estado: No se pudo eliminar el recordatorio → {ex.Message}";
+                        ? $"Estado: No se pudo eliminar la notificaciÃ³n â†’ {ex.Message}"
+                        : $"Estado: No se pudo eliminar el recordatorio â†’ {ex.Message}";
             }
             finally
             {
@@ -7561,17 +7525,17 @@ namespace Anfeta.UI.Views
                 RefreshMessagesView();
 
                 StatusText.Text =
-                    "Estado: Mensaje actualizado ✅";
+                    "Estado: Mensaje actualizado âœ…";
             }
             catch (OperationCanceledException)
             {
                 StatusText.Text =
-                    "Estado: Notion tardó demasiado en responder.";
+                    "Estado: Notion tardÃ³ demasiado en responder.";
             }
             catch (Exception ex)
             {
                 StatusText.Text =
-                    $"Estado: No se pudo actualizar el mensaje → {ex.Message}";
+                    $"Estado: No se pudo actualizar el mensaje â†’ {ex.Message}";
             }
             finally
             {

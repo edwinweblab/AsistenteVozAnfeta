@@ -492,6 +492,9 @@ namespace Anfeta.UI.Views
 
             NotifyTabModeChanged(CurrentTabMode);
             ForceHideLoadingState();
+
+            // Precalentamiento silencioso en segundo plano de Ollama para eliminar el retraso de arranque en frío
+            _ = Task.Run(() => LocalAiService.WarmupAsync());
         }
 
         private async Task EnsureSearchViewRuntimeInitializedAsync()

@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -297,24 +297,6 @@ namespace Anfeta.UI.Views
 
             deleteButton.Click += async (_, __) =>
             {
-                var dialog = new ContentDialog
-                {
-                    XamlRoot = XamlRoot,
-                    Title = "Eliminar respuesta",
-                    Content =
-                        "Se eliminará únicamente esta respuesta. " +
-                        "La conversación y la actividad original permanecerán intactas.",
-                    PrimaryButtonText = "Eliminar",
-                    CloseButtonText = "Cancelar",
-                    DefaultButton = ContentDialogButton.Close
-                };
-
-                if (await dialog.ShowAsync() !=
-                    ContentDialogResult.Primary)
-                {
-                    return;
-                }
-
                 try
                 {
                     using var cts =

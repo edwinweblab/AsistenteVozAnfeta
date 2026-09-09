@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml;
 using System;
 
 namespace Anfeta.UI
@@ -26,6 +26,18 @@ namespace Anfeta.UI
             // Calendar stays open with its last filter. Another view must link
             // explicitly via the calendar-window button, not steal ownership.
         }
+
+        public void TrackSecondaryWindow(Window window)
+        {
+            if (!_openWindows.Contains(window))
+                _openWindows.Add(window);
+        }
+
+        public void UntrackSecondaryWindow(Window window)
+        {
+            _openWindows.Remove(window);
+        }
+
         private CalendarActivityWindow? _calendarActivityWindow;
         private Action? _calendarActivityWindowClosedCallback;
 

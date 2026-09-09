@@ -897,6 +897,9 @@ namespace Anfeta.UI.Views
 
         private static bool IsPartialOrCompleteBaseAlias(string value)
         {
+            if (string.IsNullOrWhiteSpace(value) || value.Contains('.') || value.Contains('/') || value.Contains('\\'))
+                return false;
+
             var normalized = NormalizeSuggestionText(value);
 
             if (string.IsNullOrWhiteSpace(normalized) || normalized.Contains(' '))
@@ -1436,6 +1439,16 @@ namespace Anfeta.UI.Views
         private NotionBaseScope ResolveNotionBaseScope(string query)
         {
             var q = (query ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(q))
+                return new NotionBaseScope();
+
+            // Si la consulta contiene un dominio web real o de plantilla (ej. dominio.com, tudominio.com.mx, algo.org, [dominio.com])
+            // NUNCA debe interpretarse como comando de cambio de base; es una búsqueda literal.
+            if (Regex.IsMatch(q, @"(?:^|[\[\(\s])(?:https?://)?(?:www\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                return new NotionBaseScope();
+            }
+
             var normalized = NormalizeSuggestionText(q);
 
             if (string.IsNullOrWhiteSpace(normalized))
@@ -1504,7 +1517,7 @@ namespace Anfeta.UI.Views
                     SourceName = "Dominios",
                     PathLabel = "zDOMINIOS",
                     DisplayLabel = "Dominios",
-                    Aliases = new[] { "zdominio", "zd", "dominios", "dominio" }
+                    Aliases = new[] { "zdominio", "zd", "dominios" }
                 },
                 new NotionBaseShortcut
                 {

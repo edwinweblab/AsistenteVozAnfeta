@@ -82,6 +82,62 @@ namespace Anfeta.UI.Services.Notion
         }
 
         private static Dictionary<string, object?>
+            BuildVisibleCalloutBlock(
+                MessageThreadEntry entry)
+        {
+            var author = string.IsNullOrWhiteSpace(entry.AuthorName)
+                ? (string.IsNullOrWhiteSpace(entry.AuthorTag) ? "Usuario" : entry.AuthorTag)
+                : entry.AuthorName;
+            var dateStr = entry.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+            var headerText = $"💬 {author} · {dateStr}\n";
+            var bodyText = entry.Text ?? string.Empty;
+
+            return new Dictionary<string, object?>
+            {
+                ["object"] = "block",
+                ["type"] = "callout",
+                ["callout"] = new Dictionary<string, object?>
+                {
+                    ["icon"] = new Dictionary<string, object?>
+                    {
+                        ["type"] = "emoji",
+                        ["emoji"] = "💬"
+                    },
+                    ["color"] = "gray_background",
+                    ["rich_text"] = new object[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "text",
+                            ["text"] = new Dictionary<string, object?>
+                            {
+                                ["content"] = headerText
+                            },
+                            ["annotations"] = new Dictionary<string, object?>
+                            {
+                                ["bold"] = true,
+                                ["color"] = "default"
+                            }
+                        },
+                        new Dictionary<string, object?>
+                        {
+                            ["type"] = "text",
+                            ["text"] = new Dictionary<string, object?>
+                            {
+                                ["content"] = bodyText
+                            },
+                            ["annotations"] = new Dictionary<string, object?>
+                            {
+                                ["bold"] = false,
+                                ["color"] = "default"
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        private static Dictionary<string, object?>
             BuildEncodedParagraph(
                 string encoded)
         {
@@ -993,6 +1049,7 @@ namespace Anfeta.UI.Services.Notion
                     ["children"] =
                         new object[]
                         {
+                            BuildVisibleCalloutBlock(entry),
                             BuildHiddenMetadataToggle(encoded)
                         }
                 };

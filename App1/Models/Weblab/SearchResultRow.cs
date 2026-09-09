@@ -884,23 +884,54 @@ namespace Anfeta.UI.Models.Weblab
             // Ignorar dominios de plantilla/ejemplo como dominio.com, ejemplo.com, etc.
             var domain = IsPlaceholderDomain(rawDomain) ? string.Empty : rawDomain;
 
-            var titleSource = domainMatch.Success
+            // Si es un dominio de plantilla/placeholder, no removerlo del título para que siga siendo visible y buscable
+            var titleSource = domainMatch.Success && !IsPlaceholderDomain(rawDomain)
                 ? withoutWorkflow.Remove(domainMatch.Index, domainMatch.Length)
                 : withoutWorkflow;
 
             // Extraer Código/Número de orden si existe (ej. mes1.00, mes 1.00, 1.00, 2.00, 0.01, 50.0, 4.00, etc.)
             string orderCode = string.Empty;
 
-            // Caso A: Con prefijo identificador pegado o separado (ej. mes1.00, mes 1.00, m1.00, num1.00, orden1.00, #1.00, act1.00)
-            var orderKeyMatch = Regex.Match(
+            // Caso 0: Día pegado o tras prefijo de cobro/pago (ej. prtuzCOBRAR 01, zCOBRAR 01, prtuzPAGAR 15, zPAGAR 15)
+            var cobrarPagarDayMatch = Regex.Match(
                 titleSource,
-                @"(?i)(?<![\p{L}\p{Nd}_])(?:mes|orden|ord|num|no|act|m|#)\s*(?<order>\d{1,3}(?:\.\d{1,2})?)(?!\d)(?:\s*-\s*|\s+)?",
+                @"(?i)(?<=(?:a?prtuz|sprtuz|rtuz|z)?(?:COBRAR|PAGAR)\s+)(?<order>0?[1-9]|[12]\d|3[01])(?!\d|\.\d)(?:\s*-\s*|\s+)?",
                 RegexOptions.CultureInvariant);
 
-            if (orderKeyMatch.Success && orderKeyMatch.Index < 60)
+            if (cobrarPagarDayMatch.Success && cobrarPagarDayMatch.Index < 60)
             {
-                orderCode = FormatOrderCode(orderKeyMatch.Groups["order"].Value);
-                titleSource = titleSource.Remove(orderKeyMatch.Index, orderKeyMatch.Length);
+                orderCode = FormatOrderCode(cobrarPagarDayMatch.Groups["order"].Value);
+                titleSource = titleSource.Remove(cobrarPagarDayMatch.Index, cobrarPagarDayMatch.Length);
+            }
+
+            // Caso 0B: Patrones explícitos de fecha con día o prefijo día (ej. SEP 01, 01 SEP, SEP-01, 01-SEP, dia 01, día 01, d01, d 01)
+            if (string.IsNullOrWhiteSpace(orderCode))
+            {
+                var dateDayMatch = Regex.Match(
+                    titleSource,
+                    @"(?i)(?<![\p{L}\p{Nd}_])(?:(?:(?:ENE|FEB|FEBR|MAR|MARZ|ABR|ABRI|MAY|MAYO|JUN|JUNI|JUL|JULI|AGO|AGOS|SEP|SEPT|SEPTI|OCT|OCTU|NOV|NOVI|DIC|DICI)\s*[-/]?\s*(?<order>0?[1-9]|[12]\d|3[01]))|(?:(?<order>0?[1-9]|[12]\d|3[01])\s*[-/]?\s*(?:ENE|FEB|FEBR|MAR|MARZ|ABR|ABRI|MAY|MAYO|JUN|JUNI|JUL|JULI|AGO|AGOS|SEP|SEPT|SEPTI|OCT|OCTU|NOV|NOVI|DIC|DICI))|(?:(?:d[ií]a|d)\s*[-/]?\s*(?<order>0?[1-9]|[12]\d|3[01])))(?!\d|\.\d)(?:\s*-\s*|\s+)?",
+                    RegexOptions.CultureInvariant);
+
+                if (dateDayMatch.Success && dateDayMatch.Index < 60)
+                {
+                    orderCode = FormatOrderCode(dateDayMatch.Groups["order"].Value);
+                    titleSource = titleSource.Remove(dateDayMatch.Index, dateDayMatch.Length);
+                }
+            }
+
+            // Caso A: Con prefijo identificador pegado o separado (ej. mes1.00, mes 1.00, m1.00, num1.00, orden1.00, #1.00, act1.00)
+            if (string.IsNullOrWhiteSpace(orderCode))
+            {
+                var orderKeyMatch = Regex.Match(
+                    titleSource,
+                    @"(?i)(?<![\p{L}\p{Nd}_])(?:mes|orden|ord|num|no|act|m|#)\s*(?<order>\d{1,3}(?:\.\d{1,2})?)(?!\d)(?:\s*-\s*|\s+)?",
+                    RegexOptions.CultureInvariant);
+
+                if (orderKeyMatch.Success && orderKeyMatch.Index < 60)
+                {
+                    orderCode = FormatOrderCode(orderKeyMatch.Groups["order"].Value);
+                    titleSource = titleSource.Remove(orderKeyMatch.Index, orderKeyMatch.Length);
+                }
             }
 
             // Caso B: Código decimal directo de orden (ej. 1.00, 2.00, 50.0, 4.00, 0.01)
@@ -915,6 +946,21 @@ namespace Anfeta.UI.Models.Weblab
                 {
                     orderCode = FormatOrderCode(directOrderMatch.Groups["order"].Value);
                     titleSource = titleSource.Remove(directOrderMatch.Index, directOrderMatch.Length);
+                }
+            }
+
+            // Caso C: En tareas de Cobrar / Pagar, número entero directo (1 a 31) al inicio
+            if (string.IsNullOrWhiteSpace(orderCode) && IsBillingOrPaymentItem(display))
+            {
+                var directDayMatch = Regex.Match(
+                    titleSource,
+                    @"(?<![\p{L}\p{Nd}_])(?:\(|\[)?(?<order>0?[1-9]|[12]\d|3[01])(?:\)|\])?(?!\d|\.\d)(?:\s*-\s*|\s+)?",
+                    RegexOptions.CultureInvariant);
+
+                if (directDayMatch.Success && directDayMatch.Index < 40)
+                {
+                    orderCode = FormatOrderCode(directDayMatch.Groups["order"].Value);
+                    titleSource = titleSource.Remove(directDayMatch.Index, directDayMatch.Length);
                 }
             }
 
@@ -946,7 +992,7 @@ namespace Anfeta.UI.Models.Weblab
             {
                 var secondaryOrderMatch = Regex.Match(
                     title,
-                    @"(?i)(?<![\p{L}\p{Nd}_])(?:(?:mes|orden|ord|num|no|act|m|#)\s*)?(?<order>\d{1,3}\.\d{1,2})(?!\d)(?:\s*-\s*|\s+)?",
+                    @"(?i)(?<![\p{L}\p{Nd}_])(?:(?:mes|orden|ord|num|no|act|m|#)\s*)?(?<order>\d{1,3}(?:\.\d{1,2})?)(?!\d)(?:\s*-\s*|\s+)?",
                     RegexOptions.CultureInvariant);
 
                 if (secondaryOrderMatch.Success && secondaryOrderMatch.Index < 40)
@@ -987,6 +1033,12 @@ namespace Anfeta.UI.Models.Weblab
             return new VisualParts(title, workflow, area, extras, domain, monthCode, orderCode);
         }
 
+        private bool IsBillingOrPaymentItem(string text)
+        {
+            return string.Equals(ExternalSourceName, "Cobrar y pagar", StringComparison.OrdinalIgnoreCase) ||
+                   Regex.IsMatch(text ?? string.Empty, @"(?<![\p{L}\p{Nd}_])(?:a?prtuz|sprtuz|rtuz|z)?(?:COBRAR|PAGAR)(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
         public static bool IsPlaceholderDomain(string? domain)
         {
             if (string.IsNullOrWhiteSpace(domain)) return true;
@@ -1003,9 +1055,15 @@ namespace Anfeta.UI.Models.Weblab
             var clean = raw.Trim();
             if (double.TryParse(clean, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var num))
             {
-                // Asegura al menos 2 dígitos enteros y 2 decimales: 01.00, 04.00, 10.00, 90.00
-                // Esto garantiza que 04.00 siempre anteceda alfabética y numéricamente a 90.00.
-                return num.ToString("00.00", System.Globalization.CultureInfo.InvariantCulture);
+                // Si el valor original contenía punto decimal (ej. 01.00, 04.00, 00.01), conservar formato decimal:
+                if (clean.Contains('.'))
+                {
+                    return num.ToString("00.00", System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                // Si es un número entero (ej. día 01, 15, o código de orden sin decimales):
+                // Formatear al menos con 2 dígitos enteros ("01", "04", "15") sin decimales innecesarios:
+                return ((int)num).ToString("00", System.Globalization.CultureInfo.InvariantCulture);
             }
             return clean;
         }

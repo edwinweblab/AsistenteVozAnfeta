@@ -178,6 +178,119 @@ namespace Anfeta.UI.Views
             return false;
         }
 
+        // Enlaces directos a los grupos/chats rápidos de WhatsApp por integrante
+        private static readonly IReadOnlyDictionary<string, string>
+            CalendarPersonWhatsAppUrls =
+                new Dictionary<string, string>(
+                    StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Genaro"] = "https://chat.whatsapp.com/EI5hi7VXf7bAW7hoDR3CDa",
+                    ["Brian"] = "https://chat.whatsapp.com/GFg64NxaZSyDzva5B7L3D6",
+                    ["Acalli"] = "https://chat.whatsapp.com/ExkDSBYotkr3SsoAcQoeGs",
+                    ["Isaias"] = "https://chat.whatsapp.com/Cwk5nchJqdHDSERv6gMSmL",
+                    ["Karla"] = "https://chat.whatsapp.com/DibSTlWvF8WHo7FHVUocsh",
+                    ["Sotelo"] = "https://chat.whatsapp.com/DFcHqql4Nk6BHUBlpWsJpi",
+                    ["Neftali"] = "https://chat.whatsapp.com/EPyTcbICIWs1b5NeMv4ayv",
+                    ["Neft"] = "https://chat.whatsapp.com/EPyTcbICIWs1b5NeMv4ayv"
+                };
+
+        private static bool TryGetCalendarPersonWhatsAppUrl(
+            string person,
+            out string url)
+        {
+            var normalized =
+                NormalizeCalendarPerson(
+                    person ?? string.Empty);
+
+            if (!string.IsNullOrWhiteSpace(normalized) &&
+                CalendarPersonWhatsAppUrls.TryGetValue(
+                    normalized,
+                    out var mapped) &&
+                !string.IsNullOrWhiteSpace(mapped))
+            {
+                url = mapped;
+                return true;
+            }
+
+            url = string.Empty;
+            return false;
+        }
+
+        private Button? CreateCalendarPersonWhatsAppButton(string person)
+        {
+            if (!TryGetCalendarPersonWhatsAppUrl(person, out var url))
+                return null;
+
+            var icon = new Image
+            {
+                Width = 13,
+                Height = 13,
+                Stretch = Stretch.Uniform,
+                Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/whatsapp_logo.png"))
+            };
+
+            var button = new Button
+            {
+                Content = icon,
+                Width = 26,
+                Height = 18,
+                Padding = new Thickness(0),
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Background = new SolidColorBrush(Color.FromArgb(255, 37, 211, 102)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(200, 18, 140, 126)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Tag = url
+            };
+
+            ToolTipService.SetToolTip(
+                button,
+                $"Abrir grupo rápido de WhatsApp de {person}");
+
+            button.Click += async (s, e) =>
+            {
+                try
+                {
+                    if (s is Button btn && btn.Tag is string link && Uri.TryCreate(link, UriKind.Absolute, out var uri))
+                    {
+                        await Windows.System.Launcher.LaunchUriAsync(uri);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: No se pudo abrir WhatsApp → {ex.Message}";
+                }
+            };
+
+            return button;
+        }
+
+        private static bool IsCalendarActivityCompleted(NotionCalendarActivity activity)
+        {
+            if (activity == null) return false;
+
+            if (activity.IsCompletedForReview) return true;
+
+            var status = (activity.Status ?? string.Empty).ToLowerInvariant();
+            if (status.Contains("terminad") ||
+                status.Contains("cobrado terminado") ||
+                status.Contains("finaliz") ||
+                status.Equals("z", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (activity.ChecklistTotal > 0 && activity.ChecklistCompleted >= activity.ChecklistTotal)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
         private readonly HashSet<string> _calendarSelectedPeople =
             new(ActiveCalendarPeople, StringComparer.OrdinalIgnoreCase);
 
@@ -3546,11 +3659,22 @@ namespace Anfeta.UI.Views
                 Grid.SetColumn(headerButton, 0);
                 var nameAndPriority = new Grid();
                 nameAndPriority.Children.Add(headerButton);
+                var rightActionsPanel = new StackPanel
+                {
+                    Orientation = Orientation.Vertical,
+                    Spacing = 2,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 2, 2, 0)
+                };
                 var priorityButton = CreatePriority00Button(person);
-                priorityButton.HorizontalAlignment = HorizontalAlignment.Right;
-                priorityButton.VerticalAlignment = VerticalAlignment.Top;
-                priorityButton.Margin = new Thickness(0, 2, 0, 0);
-                nameAndPriority.Children.Add(priorityButton);
+                rightActionsPanel.Children.Add(priorityButton);
+                var whatsAppButton = CreateCalendarPersonWhatsAppButton(person);
+                if (whatsAppButton != null)
+                {
+                    rightActionsPanel.Children.Add(whatsAppButton);
+                }
+                nameAndPriority.Children.Add(rightActionsPanel);
                 Grid.SetColumn(nameAndPriority, 0);
                 headerContainer.Children.Add(nameAndPriority);
 
@@ -4572,6 +4696,14 @@ namespace Anfeta.UI.Views
                         "Plantilla para documentar acceso y contraseña de dominio.",
                         "https://app.notion.com/p/aprtuzDOMINIO-dominio-com-acceso-contrase-a-aacce-ccont-wword-o-hhost-o-ssite-o-ccpane-ddomi-39eabd7d91b780aa86f0f02f60887f12?source=copy_link"),
                     new CalendarQuickTemplateDefinition(
+                        "cotizacion",
+                        "Cotización",
+                        "ccoti",
+                        "https://app.notion.com/p/prtUzREVISION-ccoti-26-08AGO-Cotizacion-Etapas-dominio-com-n-neft-k-karl-b-bria-g-gena-j-john-384abd7d91b780f99476d6d870ded108?source=copy_link",
+                        60,
+                        "Plantilla para cotización por etapas.",
+                        "https://app.notion.com/p/prtUzREVISION-ccoti-26-08AGO-Cotizacion-Etapas-dominio-com-n-neft-k-karl-b-bria-g-gena-j-john-384abd7d91b780f99476d6d870ded108?source=copy_link"),
+                    new CalendarQuickTemplateDefinition(
                         "web",
                         "WEB",
                         "wwebs",
@@ -5266,6 +5398,12 @@ namespace Anfeta.UI.Views
                         @"(?<![\p{L}\p{Nd}_])aacce(?![\p{L}\p{Nd}_]).*(?<![\p{L}\p{Nd}_])ccorr(?:e)?(?![\p{L}\p{Nd}_])",
                         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
 
+                "ccoti" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:ccoti|coti|cotizacion|cotizaciones)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+
                 _ =>
                     normalized.Contains(
                         template.ProjectToken,
@@ -5281,11 +5419,12 @@ namespace Anfeta.UI.Views
             if (template == null)
                 return;
 
-            // Dominio y correo no son views ni catálogos de Plantilla Fase1:
+            // Dominio, correo y cotización no son views ni catálogos de Plantilla Fase1:
             // cada enlace apunta a UNA página plantilla fija que ya contiene
             // sus propiedades. Se duplica esa página directamente.
             if (template.Key == "acceso-dominio" ||
-                template.Key == "acceso-correo")
+                template.Key == "acceso-correo" ||
+                template.Key == "cotizacion")
             {
                 var sourceUrl = string.IsNullOrWhiteSpace(template.BrowseUrl)
                     ? template.SourceUrl
@@ -5308,9 +5447,11 @@ namespace Anfeta.UI.Views
 
                 var sourcePage = new NotionQuickTemplateItem(
                     idMatch.Value,
-                    template.Key == "acceso-dominio"
-                        ? "aprtuzDOMINIO @dominio.com acceso contraseña aacce ccont [wword o hhost o ssite o ccpane] [ddomi]"
-                        : "[correo@midominio.com] [dominio] [ttags] Acceso correo aacce ccorr",
+                    template.Key == "cotizacion"
+                        ? "prtUzREVISION ccoti 26-08AGO Cotizacion Etapas dominio com n-neft k-karl b-bria g-gena j-john"
+                        : template.Key == "acceso-dominio"
+                            ? "aprtuzDOMINIO @dominio.com acceso contraseña aacce ccont [wword o hhost o ssite o ccpane] [ddomi]"
+                            : "[correo@midominio.com] [dominio] [ttags] Acceso correo aacce ccorr",
                     sourceUrl);
 
                 // El MenuFlyout todavía puede estar cerrándose durante Click.
@@ -12225,16 +12366,21 @@ namespace Anfeta.UI.Views
                 new ColumnDefinition { Width = GridLength.Auto });
 
 
+            var isCompletedActivity =
+                IsCalendarActivityCompleted(activity);
+
             var domainText = new TextBlock
             {
-                Text = domainLabel,
+                Text = isCompletedActivity && !string.IsNullOrWhiteSpace(domainLabel)
+                    ? $"✓ {domainLabel}"
+                    : domainLabel,
                 FontSize = Math.Max(
                     8.1,
                     (miniCard ? 8.5 : 9.2) *
                     CalendarFontScale),
                 FontWeight =
                     Microsoft.UI.Text.FontWeights.SemiBold,
-                Opacity = 0.96,
+                Opacity = isCompletedActivity ? 0.65 : 0.96,
                 MaxLines = 1,
                 TextTrimming =
                     TextTrimming.CharacterEllipsis,
@@ -12261,7 +12407,10 @@ namespace Anfeta.UI.Views
                     CalendarFontScale),
                 FontWeight =
                     Microsoft.UI.Text.FontWeights.Normal,
-                Opacity = 0.84,
+                Opacity = isCompletedActivity ? 0.55 : 0.84,
+                TextDecorations = isCompletedActivity
+                    ? Windows.UI.Text.TextDecorations.Strikethrough
+                    : Windows.UI.Text.TextDecorations.None,
                 MaxLines = fullCard ? 2 : 1,
                 TextTrimming =
                     TextTrimming.CharacterEllipsis,
@@ -12896,6 +13045,7 @@ namespace Anfeta.UI.Views
                 BorderThickness = new Thickness(4, 1, 1, 1),
                 CornerRadius =
                     new CornerRadius(6 * _calendarZoom),
+                Opacity = isCompletedActivity ? 0.65 : 1.0,
                 Tag = activity
             };
 
