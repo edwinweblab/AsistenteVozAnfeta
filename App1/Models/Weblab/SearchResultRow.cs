@@ -81,6 +81,19 @@ namespace Anfeta.UI.Models.Weblab
             }
         }
 
+        private bool _isMarked;
+        [JsonIgnore]
+        public bool IsMarked
+        {
+            get => _isMarked;
+            set
+            {
+                if (_isMarked == value) return;
+                _isMarked = value;
+                OnPropertyChanged();
+            }
+        }
+
         public string NodeId { get; set; } = "";
         public string ExternalId { get; set; } = "";
         public string ExternalUrl { get; set; } = "";

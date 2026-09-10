@@ -1165,6 +1165,14 @@ namespace Anfeta.UI.Views
                         App.LocalIndex.Set(current);
                         await PersistCombinedIndexIfPossibleAsync(current);
 
+                        _priority00IndexVersion = -1;
+                        _priority00RenderedVersion = -1;
+                        RefreshPriority00Counts(force: true);
+                        if (CalendarPersonPreviewPanel?.Visibility == Visibility.Visible && _priority00PanelTag != null)
+                        {
+                            RenderPriority00Panel();
+                        }
+
                         // Si cambió Due Fecha Recordatorio, quita de inmediato
                         // el cobro del día anterior y lo pinta en el día nuevo.
                         if (cobrosChanged &&
@@ -2427,16 +2435,7 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                current.RemoveAll(x =>
-                    x.Source == SearchSource.Notion &&
-                    deletedIds.Contains(GetNotionRowId(x)));
-
-                App.LocalIndex.Set(current);
-                await PersistCombinedIndexIfPossibleAsync(current);
-
-                if (_activeSourceScope != SearchSourceScope.Dropbox)
-                    await RefreshCurrentViewPreservingScopeAsync();
-
+                await RemoveNotionRowsFromIndexAsync(deletedIds);
                 StatusText.Text = $"Estado: Se quitaron {deletedIds.Count} páginas eliminadas de Notion ✅";
             }
             catch (Exception ex)

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -139,6 +139,49 @@ namespace Anfeta.UI.Services.Notion
                     "mover la página a la papelera",
                     response,
                     json);
+            }
+        }
+
+        public async Task<bool> IsPageActiveAsync(
+            string token,
+            string pageId,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(pageId))
+                return false;
+
+            using var http = CreateClient(token);
+            try
+            {
+                using var response = await NotionRequestCoordinator.SendAsync(
+                    http,
+                    () => new HttpRequestMessage(
+                        HttpMethod.Get,
+                        $"pages/{NormalizeId(pageId)}"),
+                    cancellationToken);
+
+                if ((int)response.StatusCode == 404)
+                    return false;
+
+                if (!response.IsSuccessStatusCode)
+                    return true;
+
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                var archived = root.TryGetProperty("archived", out var a) && a.ValueKind == JsonValueKind.True;
+                var inTrash = root.TryGetProperty("in_trash", out var t) && t.ValueKind == JsonValueKind.True;
+
+                return !archived && !inTrash;
+            }
+            catch (Exception ex) when (IsMissingPageError(ex))
+            {
+                return false;
+            }
+            catch
+            {
+                return true;
             }
         }
 

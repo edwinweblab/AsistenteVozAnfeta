@@ -9,11 +9,13 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.System;
 using Windows.UI;
 using Windows.Storage;
 using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Services.Notion;
 
 namespace Anfeta.UI.Views
 {
@@ -178,11 +180,12 @@ namespace Anfeta.UI.Views
         private bool _priority00Loaded;
         private long _priority00IndexVersion = -1;
 
-        private async void RefreshPriority00Counts()
+        private async void RefreshPriority00Counts(bool force = false)
         {
-            if (_priority00Loading || DateTime.UtcNow - _priority00LastRefresh < TimeSpan.FromSeconds(15)) return;
+            if (_priority00Loading) return;
+            if (!force && DateTime.UtcNow - _priority00LastRefresh < TimeSpan.FromSeconds(15)) return;
             var version = App.LocalIndex.Version;
-            if (_priority00Loaded && version == _priority00IndexVersion) return;
+            if (!force && _priority00Loaded && version == _priority00IndexVersion) return;
             _priority00Loading = true;
             _priority00LastRefresh = DateTime.UtcNow;
             try
@@ -211,9 +214,9 @@ namespace Anfeta.UI.Views
 
                 foreach (var (tag, (btn00, btn001, btn002)) in _priorityButtons)
                 {
-                    btn00.Content = $"00·{_priority00Counts.GetValueOrDefault(tag)}";
-                    btn001.Content = $"001·{_priority001Counts.GetValueOrDefault(tag)}";
-                    btn002.Content = $"002·{_priority002Counts.GetValueOrDefault(tag)}";
+                    btn00.Content = $"0·{_priority00Counts.GetValueOrDefault(tag)}";
+                    btn001.Content = $"01·{_priority001Counts.GetValueOrDefault(tag)}";
+                    btn002.Content = $"02·{_priority002Counts.GetValueOrDefault(tag)}";
                 }
 
                 if (_priority00PanelTag != null) RenderPriority00Panel();
@@ -244,7 +247,7 @@ namespace Anfeta.UI.Views
 
             var btn00 = new Button
             {
-                Content = _priority00Loaded ? $"00·{_priority00Counts.GetValueOrDefault(tag)}" : "00",
+                Content = _priority00Loaded ? $"0·{_priority00Counts.GetValueOrDefault(tag)}" : "0",
                 Padding = padding,
                 MinWidth = 0,
                 MinHeight = 0,
@@ -256,11 +259,11 @@ namespace Anfeta.UI.Views
                 BorderThickness = new Thickness(1),
                 CornerRadius = radius
             };
-            ToolTipService.SetToolTip(btn00, $"🔴 Urgente (00) · {person}. Clic para ver todas las rápidas por orden de importancia.");
+            ToolTipService.SetToolTip(btn00, $"🔴 Urgente (0) · {person}. Clic para ver todas las rápidas por orden de importancia.");
 
             var btn001 = new Button
             {
-                Content = _priority00Loaded ? $"001·{_priority001Counts.GetValueOrDefault(tag)}" : "001",
+                Content = _priority00Loaded ? $"01·{_priority001Counts.GetValueOrDefault(tag)}" : "01",
                 Padding = padding,
                 MinWidth = 0,
                 MinHeight = 0,
@@ -272,11 +275,11 @@ namespace Anfeta.UI.Views
                 BorderThickness = new Thickness(1),
                 CornerRadius = radius
             };
-            ToolTipService.SetToolTip(btn001, $"🟡 Importante (001) · {person}. Clic para ver todas las rápidas por orden de importancia.");
+            ToolTipService.SetToolTip(btn001, $"🟡 Importante (01) · {person}. Clic para ver todas las rápidas por orden de importancia.");
 
             var btn002 = new Button
             {
-                Content = _priority00Loaded ? $"002·{_priority002Counts.GetValueOrDefault(tag)}" : "002",
+                Content = _priority00Loaded ? $"02·{_priority002Counts.GetValueOrDefault(tag)}" : "02",
                 Padding = padding,
                 MinWidth = 0,
                 MinHeight = 0,
@@ -288,7 +291,7 @@ namespace Anfeta.UI.Views
                 BorderThickness = new Thickness(1),
                 CornerRadius = radius
             };
-            ToolTipService.SetToolTip(btn002, $"🔵 Secundaria (002) · {person}. Clic para ver todas las rápidas por orden de importancia.");
+            ToolTipService.SetToolTip(btn002, $"🔵 Secundaria (02) · {person}. Clic para ver todas las rápidas por orden de importancia.");
 
             void OpenAllGrouped(string variant)
             {
@@ -297,6 +300,7 @@ namespace Anfeta.UI.Views
                 _priority00PanelVariant = variant;
                 _priority00RenderedVersion = -1;
                 RenderPriority00Panel();
+                _ = PurgeDeletedPriorityActivitiesAsync(tag, silent: true);
             }
 
             btn00.Click += (_, __) => OpenAllGrouped("00");
@@ -345,17 +349,231 @@ namespace Anfeta.UI.Views
                 actions.Children.Add(preview);
             }
             actions.Children.Add(open);
+
+            var deleteBtn = new Button
+            {
+                Content = "🗑️ Eliminar",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 248, 113, 113)),
+                Background = new SolidColorBrush(Color.FromArgb(255, 45, 18, 18)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 248, 113, 113)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6)
+            };
+            deleteBtn.Click += async (_, __) =>
+            {
+                deleteBtn.IsEnabled = false;
+                deleteBtn.Content = "Eliminando...";
+                try
+                {
+                    await DeletePriorityActivityAsync(row);
+                }
+                catch (Exception ex)
+                {
+                    deleteBtn.IsEnabled = true;
+                    deleteBtn.Content = "🗑️ Eliminar";
+                    StatusText.Text = $"Estado: Error al eliminar → {ex.Message}";
+                }
+            };
+            actions.Children.Add(deleteBtn);
+
             stack.Children.Add(actions);
             stack.Children.Add(content);
-            return new Border
+
+            var cardBorder = new Border
             {
                 Padding = new Thickness(12),
                 CornerRadius = new CornerRadius(10),
-                BorderThickness = new Thickness(1),
+                BorderThickness = new Thickness(1.5),
                 BorderBrush = new SolidColorBrush(borderTint),
                 Background = new SolidColorBrush(Color.FromArgb(255, 20, 28, 38)),
                 Child = stack
             };
+
+            cardBorder.PointerEntered += (_, __) =>
+            {
+                cardBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248));
+                cardBorder.Background = new SolidColorBrush(Color.FromArgb(255, 24, 34, 48));
+            };
+            cardBorder.PointerExited += (_, __) =>
+            {
+                cardBorder.BorderBrush = new SolidColorBrush(borderTint);
+                cardBorder.Background = new SolidColorBrush(Color.FromArgb(255, 20, 28, 38));
+            };
+
+            return cardBorder;
+        }
+
+        private async Task DeletePriorityActivityAsync(SearchResultRow row)
+        {
+            if (row == null) return;
+
+            StatusText.Text = $"Estado: Eliminando pendiente → {row.DisplayName ?? row.Name}";
+
+            if (row.Source == SearchSource.Notion && !string.IsNullOrWhiteSpace(row.ExternalId))
+            {
+                var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    try
+                    {
+                        var service = new NotionPageActionsService();
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                        await service.MovePageToTrashAsync(token, row.ExternalId, cts.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!NotionPageActionsService.IsMissingPageError(ex))
+                        {
+                            Debug.WriteLine($"[DELETE_PRIORITY_NOTION] {ex.Message}");
+                        }
+                    }
+                }
+
+                await RemoveNotionRowsFromIndexAsync(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { row.ExternalId });
+            }
+            else
+            {
+                var rowKey = PriorityRowKey(row);
+                var snapshot = App.LocalIndex.GetAll()
+                    .Where(r => PriorityRowKey(r) != rowKey)
+                    .ToList();
+                App.LocalIndex.Set(snapshot);
+                await PersistCombinedIndexIfPossibleAsync(snapshot);
+            }
+
+            _priority00IndexVersion = -1;
+            _priority00RenderedVersion = -1;
+            RefreshPriority00Counts(force: true);
+            RenderPriority00Panel();
+            StatusText.Text = "Estado: Pendiente eliminado correctamente ✅";
+        }
+
+        private async Task DeleteAllPriorityActivitiesAsync(List<SearchResultRow> rows)
+        {
+            if (rows == null || rows.Count == 0) return;
+
+            StatusText.Text = $"Estado: Eliminando {rows.Count} actividades urgentes...";
+            var notionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            var service = new NotionPageActionsService();
+
+            foreach (var row in rows)
+            {
+                if (row.Source == SearchSource.Notion && !string.IsNullOrWhiteSpace(row.ExternalId))
+                {
+                    notionIds.Add(row.ExternalId);
+                    if (!string.IsNullOrWhiteSpace(token))
+                    {
+                        try
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                            await service.MovePageToTrashAsync(token, row.ExternalId, cts.Token);
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            if (notionIds.Count > 0)
+            {
+                await RemoveNotionRowsFromIndexAsync(notionIds);
+            }
+
+            var toRemoveKeys = new HashSet<string>(rows.Select(PriorityRowKey), StringComparer.OrdinalIgnoreCase);
+            var snapshot = App.LocalIndex.GetAll()
+                .Where(r => !toRemoveKeys.Contains(PriorityRowKey(r)))
+                .ToList();
+            App.LocalIndex.Set(snapshot);
+            await PersistCombinedIndexIfPossibleAsync(snapshot);
+
+            _priority00IndexVersion = -1;
+            _priority00RenderedVersion = -1;
+            RefreshPriority00Counts(force: true);
+            RenderPriority00Panel();
+            StatusText.Text = $"Estado: {rows.Count} actividades eliminadas correctamente ✅";
+        }
+
+        private CancellationTokenSource? _priorityPurgeCts;
+
+        private async Task PurgeDeletedPriorityActivitiesAsync(string tag, bool silent = false)
+        {
+            if (string.IsNullOrWhiteSpace(tag)) return;
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                if (!silent) StatusText.Text = "Estado: Notion no configurado para verificar actividades.";
+                return;
+            }
+
+            var notionRows = App.LocalIndex.GetAll()
+                .Where(r => r.Source == SearchSource.Notion && !string.IsNullOrWhiteSpace(r.ExternalId))
+                .Where(r => !IsExcludedPath(r.Target))
+                .Where(r => GetPriorityMatches(r).Any(m => m.Tag == tag))
+                .DistinctBy(PriorityRowKey)
+                .ToList();
+
+            if (notionRows.Count == 0)
+            {
+                if (!silent) StatusText.Text = "Estado: No hay actividades de Notion pendientes para verificar.";
+                return;
+            }
+
+            if (!silent) StatusText.Text = $"Estado: Verificando {notionRows.Count} actividades en Notion...";
+
+            try
+            {
+                _priorityPurgeCts?.Cancel();
+                _priorityPurgeCts?.Dispose();
+            }
+            catch { }
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            _priorityPurgeCts = cts;
+
+            var service = new NotionPageActionsService();
+            var deadIds = new List<string>();
+
+            using var throttler = new SemaphoreSlim(4);
+            var tasks = notionRows.Select(async row =>
+            {
+                await throttler.WaitAsync(cts.Token);
+                try
+                {
+                    var active = await service.IsPageActiveAsync(token, row.ExternalId, cts.Token);
+                    if (!active)
+                    {
+                        lock (deadIds) { deadIds.Add(row.ExternalId); }
+                    }
+                }
+                catch (Exception ex) when (NotionPageActionsService.IsMissingPageError(ex))
+                {
+                    lock (deadIds) { deadIds.Add(row.ExternalId); }
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    throttler.Release();
+                }
+            });
+
+            try
+            {
+                await Task.WhenAll(tasks);
+            }
+            catch { }
+
+            if (deadIds.Count > 0 && !cts.IsCancellationRequested)
+            {
+                await RemoveNotionRowsFromIndexAsync(new HashSet<string>(deadIds, StringComparer.OrdinalIgnoreCase));
+                StatusText.Text = $"Estado: Se detectaron y depuraron {deadIds.Count} actividades eliminadas en Notion ✅";
+            }
+            else if (!silent && !cts.IsCancellationRequested)
+            {
+                StatusText.Text = "Estado: Todas las actividades verificadas siguen activas en Notion ✅";
+            }
         }
 
         private string? _priority00PanelTag;
@@ -393,7 +611,7 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            void AddSection(string sectionTitle, Color headerBg, Color headerBorder, Color headerText, List<SearchResultRow> sectionRows)
+            void AddSection(string sectionTitle, Color headerBg, Color headerBorder, Color headerText, List<SearchResultRow> sectionRows, bool canDeleteAll = false)
             {
                 var headerCard = new Border
                 {
@@ -415,6 +633,37 @@ namespace Anfeta.UI.Views
                     Foreground = new SolidColorBrush(headerText),
                     VerticalAlignment = VerticalAlignment.Center
                 };
+
+                var rightPanel = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                if (canDeleteAll && sectionRows.Count > 0)
+                {
+                    var clearAllBtn = new Button
+                    {
+                        Content = "🗑️ Eliminar todos",
+                        FontSize = 10,
+                        Padding = new Thickness(6, 2, 6, 2),
+                        Foreground = new SolidColorBrush(headerText),
+                        Background = new SolidColorBrush(Color.FromArgb(160, 45, 18, 18)),
+                        BorderBrush = new SolidColorBrush(headerBorder),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(5)
+                    };
+                    ToolTipService.SetToolTip(clearAllBtn, $"Eliminar todas las {sectionRows.Count} actividades urgentes de esta lista");
+                    clearAllBtn.Click += async (_, __) =>
+                    {
+                        clearAllBtn.IsEnabled = false;
+                        clearAllBtn.Content = "Borrando...";
+                        await DeleteAllPriorityActivitiesAsync(sectionRows);
+                    };
+                    rightPanel.Children.Add(clearAllBtn);
+                }
+
                 var countTb = new TextBlock
                 {
                     Text = $"{sectionRows.Count}",
@@ -423,10 +672,12 @@ namespace Anfeta.UI.Views
                     Foreground = new SolidColorBrush(headerText),
                     VerticalAlignment = VerticalAlignment.Center
                 };
+                rightPanel.Children.Add(countTb);
+
                 Grid.SetColumn(titleTb, 0);
-                Grid.SetColumn(countTb, 1);
+                Grid.SetColumn(rightPanel, 1);
                 grid.Children.Add(titleTb);
-                grid.Children.Add(countTb);
+                grid.Children.Add(rightPanel);
                 headerCard.Child = grid;
                 CalendarPersonPreviewItems.Children.Add(headerCard);
 
@@ -448,14 +699,14 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            // 1. Urgentes (00)
-            AddSection("🔴 Urgentes · 00", Color.FromArgb(255, 45, 18, 18), Color.FromArgb(255, 248, 113, 113), Color.FromArgb(255, 254, 202, 202), urgentes00);
+            // 1. Urgentes (0)
+            AddSection("🔴 Urgentes · 0", Color.FromArgb(255, 45, 18, 18), Color.FromArgb(255, 248, 113, 113), Color.FromArgb(255, 254, 202, 202), urgentes00, canDeleteAll: true);
 
-            // 2. Importantes (001)
-            AddSection("🟡 Importantes · 001", Color.FromArgb(255, 45, 34, 12), Color.FromArgb(255, 251, 191, 36), Color.FromArgb(255, 254, 243, 199), importantes001);
+            // 2. Importantes (01)
+            AddSection("🟡 Importantes · 01", Color.FromArgb(255, 45, 34, 12), Color.FromArgb(255, 251, 191, 36), Color.FromArgb(255, 254, 243, 199), importantes001);
 
-            // 3. Secundarias (002)
-            AddSection("🔵 Secundarias · 002", Color.FromArgb(255, 14, 38, 58), Color.FromArgb(255, 56, 189, 248), Color.FromArgb(255, 224, 242, 254), secundarias002);
+            // 3. Secundarias (02)
+            AddSection("🔵 Secundarias · 02", Color.FromArgb(255, 14, 38, 58), Color.FromArgb(255, 56, 189, 248), Color.FromArgb(255, 224, 242, 254), secundarias002);
 
             // 4. Otras
             if (otras.Count > 0)

@@ -2350,12 +2350,24 @@
                                         Text="Día seleccionado" />
                                 </StackPanel>
 
-                                <Button
+                                <StackPanel
                                     Grid.Column="1"
-                                    Style="{StaticResource CalendarIconButtonStyle}"
-                                    Click="CalendarPersonPreviewClose_Click"
-                                    Content="✕"
-                                    ToolTipService.ToolTip="Cerrar vista previa por persona" />
+                                    Orientation="Horizontal"
+                                    Spacing="4"
+                                    VerticalAlignment="Center">
+                                    <Button
+                                        x:Name="CalendarPersonPreviewRefreshButton"
+                                        Style="{StaticResource CalendarIconButtonStyle}"
+                                        Click="CalendarPersonPreviewRefresh_Click"
+                                        Content="🔄"
+                                        FontSize="11"
+                                        ToolTipService.ToolTip="Actualizar y depurar actividades eliminadas en Notion" />
+                                    <Button
+                                        Style="{StaticResource CalendarIconButtonStyle}"
+                                        Click="CalendarPersonPreviewClose_Click"
+                                        Content="✕"
+                                        ToolTipService.ToolTip="Cerrar vista previa por persona" />
+                                </StackPanel>
                             </Grid>
 
                             <TextBlock
@@ -3126,6 +3138,8 @@
                         <ColumnDefinition x:Name="HeaderScheduledDateColumn" Width="155" />
                         <ColumnDefinition Width="5" />
                         <ColumnDefinition x:Name="HeaderDateColumn" Width="145" />
+                        <ColumnDefinition Width="5" />
+                        <ColumnDefinition Width="56" />
                     </Grid.ColumnDefinitions>
 
                     <TextBlock
@@ -3275,6 +3289,16 @@
                         </StackPanel>
                     </Button>
 
+                    <TextBlock
+                        Grid.Column="10"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Center"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        Foreground="#94A3B8"
+                        Text="✓ / ✕"
+                        ToolTipService.ToolTip="Marcar fila / Eliminar elemento" />
+
                 </Grid>
 
                 <!--  Lista de resultados estilo Everything  -->
@@ -3376,13 +3400,25 @@
                         SelectionChanged="ResultsList_SelectionChanged"
                         SelectionMode="Extended">
 
+                        <ListView.Resources>
+                            <!-- Resalto de alto contraste para fila seleccionada en el buscador -->
+                            <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#223C5E" />
+                            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#2B4D77" />
+                            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#1A314E" />
+                            <SolidColorBrush x:Key="ListViewItemBorderBrushSelected" Color="#38BDF8" />
+                            <SolidColorBrush x:Key="ListViewItemBorderBrushSelectedPointerOver" Color="#7DD3FC" />
+                        </ListView.Resources>
+
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="Padding" Value="0" />
                                 <Setter Property="MinHeight" Value="34" />
                                 <Setter Property="VerticalContentAlignment" Value="Stretch" />
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="BorderThickness" Value="0" />
+                                <Setter Property="BorderThickness" Value="1.5,1,1.5,1" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
+                                <Setter Property="CornerRadius" Value="4" />
+                                <Setter Property="Margin" Value="0,1,0,1" />
                             </Style>
                         </ListView.ItemContainerStyle>
 
@@ -3425,6 +3461,8 @@
                                         <ColumnDefinition Width="155" />
                                         <ColumnDefinition Width="5" />
                                         <ColumnDefinition Width="145" />
+                                        <ColumnDefinition Width="5" />
+                                        <ColumnDefinition Width="56" />
                                     </Grid.ColumnDefinitions>
 
                                     <!--  Path: en Notion muestra la base correspondiente  -->
@@ -3608,6 +3646,42 @@
                                         Text="{x:Bind DateModifiedColumn, Mode=OneWay}"
                                         TextTrimming="CharacterEllipsis"
                                         TextWrapping="NoWrap" />
+
+                                    <!-- Columna Check y X para marcar y borrar -->
+                                    <StackPanel
+                                        Grid.Column="10"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Spacing="4">
+                                        <CheckBox
+                                            MinWidth="0"
+                                            MinHeight="0"
+                                            Padding="0"
+                                            Margin="0"
+                                            IsChecked="{x:Bind IsMarked, Mode=TwoWay}"
+                                            Click="RowCheck_Click"
+                                            ToolTipService.ToolTip="Marcar para seleccionar" />
+
+                                        <Button
+                                            Width="22"
+                                            Height="22"
+                                            Padding="0"
+                                            Background="#22EF4444"
+                                            BorderBrush="#80F87171"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Click="RowQuickDeleteButton_Click"
+                                            ToolTipService.ToolTip="Eliminar elemento">
+                                            <TextBlock
+                                                Text="✕"
+                                                FontSize="9"
+                                                FontWeight="Bold"
+                                                Foreground="#F87171"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center" />
+                                        </Button>
+                                    </StackPanel>
 
                                 </Grid>
                             </DataTemplate>

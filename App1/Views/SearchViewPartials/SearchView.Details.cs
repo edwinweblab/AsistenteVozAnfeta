@@ -17,6 +17,17 @@ namespace Anfeta.UI.Views
 
         private async void ResultsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (e.AddedItems != null)
+            {
+                foreach (var added in e.AddedItems.OfType<SearchResultRow>())
+                    added.IsMarked = true;
+            }
+            if (e.RemovedItems != null)
+            {
+                foreach (var removed in e.RemovedItems.OfType<SearchResultRow>())
+                    removed.IsMarked = false;
+            }
+
             if (ResultsList.SelectedItem is not SearchResultRow row) return;
 
             try

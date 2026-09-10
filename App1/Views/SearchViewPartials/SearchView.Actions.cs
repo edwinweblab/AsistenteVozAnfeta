@@ -630,6 +630,53 @@ namespace Anfeta.UI.Views
             }
         }
 
+        private async void RowQuickDeleteButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.DataContext is not SearchResultRow row)
+                return;
+
+            ResultsList.SelectedItem = row;
+
+            if (IsNotionRow(row))
+            {
+                await MoveNotionPagesToTrashAsync(new List<SearchResultRow> { row });
+            }
+            else
+            {
+                var ok = await ConfirmDeleteAsync(new List<SearchResultRow> { row });
+                if (!ok) return;
+
+                try
+                {
+                    await ApplyFileChangeAsync(FileChangeKind.Delete, row);
+                    StatusText.Text = $"Estado: Eliminado ✅ → {row.Name}";
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Error al eliminar: {ex.Message}";
+                }
+            }
+        }
+
+        private void RowCheck_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not CheckBox cb || cb.DataContext is not SearchResultRow row)
+                return;
+
+            if (cb.IsChecked == true)
+            {
+                if (!ResultsList.SelectedItems.Contains(row))
+                    ResultsList.SelectedItems.Add(row);
+                row.IsMarked = true;
+            }
+            else
+            {
+                if (ResultsList.SelectedItems.Contains(row))
+                    ResultsList.SelectedItems.Remove(row);
+                row.IsMarked = false;
+            }
+        }
+
         private async Task MoveNotionPagesToTrashAsync(
             List<SearchResultRow> rows)
         {
@@ -5836,11 +5883,27 @@ CtxMenuRenameItem.Text = isNotion
         private async Task RemoveNotionRowsFromIndexAsync(
             HashSet<string> pageIds)
         {
+            if (pageIds == null || pageIds.Count == 0)
+                return;
+
+            var cleanIds = pageIds
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Replace("-", ""))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            bool MatchesPageId(string? extId)
+            {
+                if (string.IsNullOrWhiteSpace(extId)) return false;
+                if (pageIds.Contains(extId)) return true;
+                var clean = extId.Replace("-", "");
+                return cleanIds.Contains(clean);
+            }
+
             var snapshot = App.LocalIndex
                 .GetAll()
                 .Where(x =>
                     x.Source != SearchSource.Notion ||
-                    !pageIds.Contains(x.ExternalId))
+                    !MatchesPageId(x.ExternalId))
                 .ToList();
 
             App.LocalIndex.Set(snapshot);
@@ -5849,20 +5912,35 @@ CtxMenuRenameItem.Text = isNotion
             foreach (var row in Results
                 .Where(x =>
                     x.Source == SearchSource.Notion &&
-                    pageIds.Contains(x.ExternalId))
+                    MatchesPageId(x.ExternalId))
                 .ToList())
             {
                 Results.Remove(row);
             }
 
+            if (_calendarActivities != null && _calendarActivities.Count > 0)
+            {
+                _calendarActivities = _calendarActivities
+                    .Where(a => a == null || string.IsNullOrWhiteSpace(a.PageId) || !MatchesPageId(a.PageId))
+                    .ToList();
+            }
+
             ResultsList.SelectedItem = null;
 
-            var query = (SearchBox.Text ?? string.Empty).Trim();
+            var query = (SearchBox?.Text ?? string.Empty).Trim();
 
             if (!string.IsNullOrWhiteSpace(query))
                 await RunSearchAsync(query);
             else
                 RefreshResultsListView();
+
+            _priority00IndexVersion = -1;
+            _priority00RenderedVersion = -1;
+            RefreshPriority00Counts(force: true);
+            if (CalendarPersonPreviewPanel?.Visibility == Visibility.Visible && _priority00PanelTag != null)
+            {
+                RenderPriority00Panel();
+            }
         }
 
         private static async Task PersistCombinedIndexIfPossibleAsync(

@@ -283,6 +283,20 @@ namespace Anfeta.UI.Views
                 return true;
             }
 
+            // Si la actividad fue reasignada o tiene un estado activo/pendiente (ej. "arrancar asignar", "por hacer", "en proceso"),
+            // NO debe marcarse como terminada ni llevar paloma/tachado aunque su checklist de Notion estuviese en 20/20.
+            if (IsCalendarPendingStatus(status) ||
+                IsCalendarInProgressStatus(status) ||
+                status.Contains("asignar") ||
+                status.Contains("arrancar") ||
+                status.Contains("hacer") ||
+                status.Contains("proceso") ||
+                status.Contains("trabaj") ||
+                status.Contains("revis"))
+            {
+                return false;
+            }
+
             if (activity.ChecklistTotal > 0 && activity.ChecklistCompleted >= activity.ChecklistTotal)
             {
                 return true;
@@ -19352,6 +19366,20 @@ namespace Anfeta.UI.Views
             CloseCalendarPersonPreviewPanel();
         }
 
+        private async void CalendarPersonPreviewRefresh_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (_priority00PanelTag != null)
+            {
+                await PurgeDeletedPriorityActivitiesAsync(_priority00PanelTag, silent: false);
+            }
+            else if (!string.IsNullOrWhiteSpace(_calendarPersonPreviewPerson))
+            {
+                RenderCalendarPersonPreviewItems(_calendarPersonPreviewPerson);
+            }
+        }
+
         private void ShowCalendarPersonPreview(
             string person)
         {
@@ -21445,10 +21473,27 @@ namespace Anfeta.UI.Views
             }
             catch (Exception ex)
             {
-                contentHost.Content =
-                    BuildCalendarPersonPreviewMessage(
-                        $"No se pudo cargar el contenido.\n{ex.Message}",
-                        isError: true);
+                if (NotionPageActionsService.IsMissingPageError(ex))
+                {
+                    if (!string.IsNullOrWhiteSpace(activity?.PageId))
+                    {
+                        _ = RemoveNotionRowsFromIndexAsync(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { activity.PageId });
+                    }
+
+                    contentHost.Content =
+                        BuildCalendarPersonPreviewMessage(
+                            "Esta actividad ya no existe en Notion (fue eliminada o enviada a papelera).\nSe retiró automáticamente del índice local y de la lista ✅",
+                            isError: false);
+
+                    StatusText.Text = "Estado: Actividad eliminada en Notion detectada y retirada del listado ✅";
+                }
+                else
+                {
+                    contentHost.Content =
+                        BuildCalendarPersonPreviewMessage(
+                            $"No se pudo cargar el contenido.\n{ex.Message}",
+                            isError: true);
+                }
             }
             finally
             {
