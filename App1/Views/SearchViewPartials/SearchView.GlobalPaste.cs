@@ -269,10 +269,10 @@ namespace Anfeta.UI.Views
 
             var guideCard = new Border
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(35, 0, 168, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(70, 0, 168, 255)),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(28, 14, 116, 144)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(160, 56, 189, 248)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
+                CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(12, 9, 12, 9)
             };
 
@@ -293,22 +293,70 @@ namespace Anfeta.UI.Views
             });
             guideCard.Child = guideStack;
 
-            var variant00Check = new CheckBox
+            var variantNormalRadio = new RadioButton
             {
-                Content = "Variante 00 (agrega sufijo '00' al final del tag, ej: prtuzREVISION00)",
-                IsChecked = false,
-                FontWeight = Microsoft.UI.Text.FontWeights.Medium,
-                Margin = new Thickness(0, 0, 0, 4)
+                Content = "Normal",
+                GroupName = "GlobalPasteVariantGroup",
+                IsChecked = true,
+                Margin = new Thickness(0, 0, 8, 0)
             };
+
+            var variant00Radio = new RadioButton
+            {
+                Content = "00 (Urgente)",
+                GroupName = "GlobalPasteVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 120, 120)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
+            var variant001Radio = new RadioButton
+            {
+                Content = "001 (Importante)",
+                GroupName = "GlobalPasteVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 215, 120)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
+            var variant002Radio = new RadioButton
+            {
+                Content = "002 (Secundaria)",
+                GroupName = "GlobalPasteVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 120, 200, 255)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
+            string GetActiveVariantSuffix()
+            {
+                if (variant00Radio.IsChecked == true) return "00";
+                if (variant001Radio.IsChecked == true) return "001";
+                if (variant002Radio.IsChecked == true) return "002";
+                return string.Empty;
+            }
+
+            string StripVariantSuffix(string tag)
+            {
+                var clean = (tag ?? string.Empty).Trim();
+                if (clean.EndsWith("001", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
+                if (clean.EndsWith("002", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
+                if (clean.EndsWith("00", StringComparison.OrdinalIgnoreCase)) return clean[..^2];
+                return clean;
+            }
 
             void AppendTagToTitle(string tag)
             {
                 var cleanTag = (tag ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(cleanTag)) return;
 
-                if (variant00Check.IsChecked == true && !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
+                var activeVariant = GetActiveVariantSuffix();
+                if (!string.IsNullOrEmpty(activeVariant) &&
+                    !cleanTag.EndsWith("001", StringComparison.OrdinalIgnoreCase) &&
+                    !cleanTag.EndsWith("002", StringComparison.OrdinalIgnoreCase) &&
+                    !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
                 {
-                    cleanTag += "00";
+                    cleanTag += activeVariant;
                 }
 
                 var current = (titleBox.Text ?? string.Empty).Trim();
@@ -321,7 +369,7 @@ namespace Anfeta.UI.Views
                 titleBox.SelectionStart = titleBox.Text.Length;
             }
 
-            void Toggle00InTitle(bool is00)
+            void ApplyVariantToTitle(string targetVariant)
             {
                 var text = (titleBox.Text ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(text)) return;
@@ -335,15 +383,10 @@ namespace Anfeta.UI.Views
                     var token = tokens[i];
                     foreach (var baseTag in allTags)
                     {
-                        if (is00 && string.Equals(token, baseTag, StringComparison.OrdinalIgnoreCase))
+                        var rawTokenBase = StripVariantSuffix(token);
+                        if (string.Equals(rawTokenBase, baseTag, StringComparison.OrdinalIgnoreCase))
                         {
-                            tokens[i] = baseTag + "00";
-                            modified = true;
-                            break;
-                        }
-                        else if (!is00 && string.Equals(token, baseTag + "00", StringComparison.OrdinalIgnoreCase))
-                        {
-                            tokens[i] = baseTag;
+                            tokens[i] = string.IsNullOrEmpty(targetVariant) ? baseTag : baseTag + targetVariant;
                             modified = true;
                             break;
                         }
@@ -357,8 +400,15 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            variant00Check.Checked += (_, __) => Toggle00InTitle(true);
-            variant00Check.Unchecked += (_, __) => Toggle00InTitle(false);
+            void OnVariantSelectionChanged()
+            {
+                ApplyVariantToTitle(GetActiveVariantSuffix());
+            }
+
+            variantNormalRadio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant00Radio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant001Radio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant002Radio.Checked += (_, __) => OnVariantSelectionChanged();
 
             var tagsStack = new StackPanel { Spacing = 7 };
             tagsStack.Children.Add(new TextBlock
@@ -368,8 +418,49 @@ namespace Anfeta.UI.Views
                 FontSize = 12
             });
 
-            // Checkbox Variante 00
-            tagsStack.Children.Add(variant00Check);
+            // Selector de variantes (00 Urgente, 001 Importante, 002 Secundaria)
+            var variantsHeader = new TextBlock
+            {
+                Text = "Variante de prioridad / asignación:",
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Opacity = 0.85
+            };
+            tagsStack.Children.Add(variantsHeader);
+
+            var variantsRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4,
+                Margin = new Thickness(0, 0, 0, 2)
+            };
+            variantsRow.Children.Add(variantNormalRadio);
+            variantsRow.Children.Add(variant00Radio);
+            variantsRow.Children.Add(variant001Radio);
+            variantsRow.Children.Add(variant002Radio);
+            tagsStack.Children.Add(variantsRow);
+
+            // Botón Asignar a Todos (002 Secundario)
+            var assignAll002Button = new Button
+            {
+                Content = "👥 Asignar a Todos (002 Secundario)",
+                Padding = new Thickness(10, 4, 10, 4),
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 56, 189, 248)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            ToolTipService.SetToolTip(assignAll002Button, "Inserta los tags 002 secundarios de todos los integrantes del equipo. Puedes borrar individualmente a quien no aplique.");
+
+            assignAll002Button.Click += (_, __) =>
+            {
+                foreach (var personTag in NotionUploadPersonTags)
+                {
+                    AppendTagToTitle(personTag + "002");
+                }
+            };
+            tagsStack.Children.Add(assignAll002Button);
 
             // Tags principales
             var mainTagsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -419,11 +510,11 @@ namespace Anfeta.UI.Views
 
             var tagsCard = new Border
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 20, 29)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 20, 75, 115)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(12)
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14)
             };
             tagsCard.Child = tagsStack;
 
@@ -441,7 +532,6 @@ namespace Anfeta.UI.Views
             var dialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
-                Title = "Pegar texto en Notion → Revisiones",
                 Content = content,
                 PrimaryButtonText = "Crear actividad",
                 CloseButtonText = "Cancelar",
@@ -457,6 +547,43 @@ namespace Anfeta.UI.Views
 
             dialog.Resources[
                 "ContentDialogMinWidth"] = 760d;
+
+            dialog.Resources["ContentDialogBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 9, 16, 23));
+            dialog.Resources["ContentDialogBorderBrush"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(220, 0, 168, 255));
+            dialog.Resources["ContentDialogBorderThickness"] =
+                new Thickness(1.5);
+            dialog.Resources["ContentDialogCornerRadius"] =
+                new CornerRadius(14);
+            dialog.Resources["ContentDialogForeground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 235, 245, 255));
+            dialog.Resources["AccentButtonBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 140, 230));
+            dialog.Resources["AccentButtonBackgroundPointerOver"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255));
+            dialog.Resources["AccentButtonForeground"] =
+                new SolidColorBrush(Microsoft.UI.Colors.White);
+            dialog.Resources["TextControlBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 25, 36));
+            dialog.Resources["TextControlBackgroundPointerOver"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 18, 32, 46));
+            dialog.Resources["TextControlBackgroundFocused"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 22, 32));
+            dialog.Resources["TextControlBorderBrush"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(140, 0, 168, 255));
+            dialog.Resources["TextControlBorderBrushFocused"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255));
+            dialog.Resources["ComboBoxBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 25, 36));
+            dialog.Resources["ComboBoxBackgroundPointerOver"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 18, 32, 46));
+            dialog.Resources["ComboBoxBorderBrush"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(140, 0, 168, 255));
+
+            MakeCalendarContentDialogMovable(
+                dialog,
+                "📋 Pegar texto en Notion · Revisiones");
 
             void RefreshCreateState()
             {

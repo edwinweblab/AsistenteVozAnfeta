@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
@@ -57,6 +57,7 @@ namespace Anfeta.UI.Views
         private void Tabs_AddTabButtonClick(TabView sender, object args)
         {
             AddNewSearchTab();
+            Anfeta.UI.Services.Search.SearchFocusBridge.RequestFocus();
         }
 
         public SearchView AddNewSearchTab()
@@ -82,6 +83,12 @@ namespace Anfeta.UI.Views
             Tabs.TabItems.Add(tab);
             Tabs.SelectedItem = tab;
             SaveWorkspace();
+
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(120);
+                Anfeta.UI.Services.Search.SearchFocusBridge.RequestFocus();
+            });
 
             return view;
         }

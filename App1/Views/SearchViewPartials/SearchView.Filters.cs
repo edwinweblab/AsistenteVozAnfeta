@@ -1263,12 +1263,20 @@ namespace Anfeta.UI.Views
 
             if (textBox != null)
             {
+                if (!string.IsNullOrEmpty(textBox.Text) && !textBox.Text.EndsWith(" "))
+                {
+                    textBox.Text += " ";
+                }
                 textBox.Focus(FocusState.Programmatic);
                 textBox.SelectionStart = textBox.Text?.Length ?? 0;
                 textBox.SelectionLength = 0;
                 return;
             }
 
+            if (!string.IsNullOrEmpty(SearchBox.Text) && !SearchBox.Text.EndsWith(" "))
+            {
+                SearchBox.Text += " ";
+            }
             SearchBox.Focus(FocusState.Programmatic);
         }
 

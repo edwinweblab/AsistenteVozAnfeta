@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Models.Weblab;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -21,7 +21,14 @@ namespace Anfeta.UI.Views
     {
         private bool _programasQuickFilter;
         private static readonly Regex ProgramTag = new(@"(?<![\p{L}\p{Nd}_])pprog(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Regex PriorityTag = new(@"(?<![\p{L}\p{Nd}_])(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)00\d*(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex PriorityTag = new(
+            @"(?<![\p{L}\p{Nd}_])(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\s*(?<variant>001|002|00)(?![\p{L}\p{Nd}_])",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static readonly Regex PriorityPrefixTag = new(
+            @"(?<![\p{L}\p{Nd}_])(?<variant>001|002|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         private static readonly Dictionary<string, string> PriorityPeople = new(StringComparer.OrdinalIgnoreCase)
         {
             ["John"] = "jjohn",
@@ -43,16 +50,26 @@ namespace Anfeta.UI.Views
             _ => tag.ToLowerInvariant()
         };
 
-        private static IEnumerable<string> GetPriorityTags(SearchResultRow row)
+        private static IEnumerable<(string Tag, string Variant)> GetPriorityMatches(SearchResultRow row)
         {
-            // Match explicit title tags only, not hidden URLs/body or arbitrary 00s.
-            // Calendar documents are not quick activities, even if tagged jjohn00.
             var name = row.Name ?? string.Empty;
             if (Regex.IsMatch(name, @"(?i)(?<![\p{L}\p{Nd}_])(?:ccale|fftf)(?![\p{L}\p{Nd}_])"))
-                return Array.Empty<string>();
-            return PriorityTag.Matches(name).Cast<Match>()
-                .Select(m => NormalizePriorityTag(m.Groups["tag"].Value)).Distinct();
+                return Array.Empty<(string Tag, string Variant)>();
+
+            var list = new List<(string Tag, string Variant)>();
+            foreach (Match m in PriorityTag.Matches(name))
+            {
+                list.Add((NormalizePriorityTag(m.Groups["tag"].Value), m.Groups["variant"].Value.ToLowerInvariant()));
+            }
+            foreach (Match m in PriorityPrefixTag.Matches(name))
+            {
+                list.Add((NormalizePriorityTag(m.Groups["tag"].Value), m.Groups["variant"].Value.ToLowerInvariant()));
+            }
+            return list.Distinct();
         }
+
+        private static IEnumerable<string> GetPriorityTags(SearchResultRow row) =>
+            GetPriorityMatches(row).Select(m => m.Tag).Distinct();
 
         private static string PriorityRowKey(SearchResultRow row) =>
             !string.IsNullOrWhiteSpace(row.ExternalId) ? row.Source + ":" + row.ExternalId : row.Source + ":" + row.Target;
@@ -61,7 +78,9 @@ namespace Anfeta.UI.Views
         {
             var clean = query.Trim();
             var match = PriorityTag.Match(clean);
-            return match.Success && match.Value.Length == clean.Length && clean.Length == match.Groups["tag"].Length + 2;
+            if (match.Success && match.Value.Length == clean.Length) return true;
+            var prefixMatch = PriorityPrefixTag.Match(clean);
+            return prefixMatch.Success && prefixMatch.Value.Length == clean.Length;
         }
 
         private static bool IsProgramQuickFilterRow(SearchResultRow row)
@@ -105,11 +124,13 @@ namespace Anfeta.UI.Views
                     .DistinctBy(PriorityRowKey);
             }
 
-            var match = PriorityTag.Match(query.Trim());
             if (IsPriority00FamilyQuery(query))
             {
-                var tag = NormalizePriorityTag(match.Groups["tag"].Value);
-                rows = rows.Where(r => GetPriorityTags(r).Contains(tag)).DistinctBy(PriorityRowKey);
+                var qClean = query.Trim();
+                var m = PriorityTag.Match(qClean);
+                var tag = m.Success ? NormalizePriorityTag(m.Groups["tag"].Value) : NormalizePriorityTag(PriorityPrefixTag.Match(qClean).Groups["tag"].Value);
+                var variant = m.Success ? m.Groups["variant"].Value.ToLowerInvariant() : PriorityPrefixTag.Match(qClean).Groups["variant"].Value.ToLowerInvariant();
+                rows = rows.Where(r => GetPriorityMatches(r).Any(match => match.Tag == tag && (string.IsNullOrEmpty(variant) || match.Variant == variant))).DistinctBy(PriorityRowKey);
             }
             return rows;
         }
@@ -138,6 +159,8 @@ namespace Anfeta.UI.Views
         }
 
         private Dictionary<string, int> _priority00Counts = new(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, int> _priority001Counts = new(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, int> _priority002Counts = new(StringComparer.OrdinalIgnoreCase);
 
         private void ResetQuickRequestFileFilters()
         {
@@ -147,6 +170,8 @@ namespace Anfeta.UI.Views
             foreach (var chip in new[] { ChipBookmarks, ChipFolders, ChipPdf, ChipDocx, ChipXlsx, ChipImg })
                 if (chip != null) chip.IsChecked = false;
         }
+
+        private readonly Dictionary<string, (Button Btn00, Button Btn001, Button Btn002)> _priorityButtons = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Button> _priority00Buttons = new(StringComparer.OrdinalIgnoreCase);
         private DateTime _priority00LastRefresh = DateTime.MinValue;
         private bool _priority00Loading;
@@ -163,16 +188,34 @@ namespace Anfeta.UI.Views
             try
             {
                 var snapshot = App.LocalIndex.GetAll().ToArray();
-                _priority00Counts = await Task.Run(() => snapshot
+                var matches = await Task.Run(() => snapshot
                     .Where(r => !IsExcludedPath(r.Target))
                     .DistinctBy(PriorityRowKey)
-                    .SelectMany(GetPriorityTags)
-                    .GroupBy(t => t, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase));
+                    .SelectMany(GetPriorityMatches)
+                    .ToList());
+
+                _priority00Counts = matches.Where(m => m.Variant == "00")
+                    .GroupBy(m => m.Tag, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+                _priority001Counts = matches.Where(m => m.Variant == "001")
+                    .GroupBy(m => m.Tag, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+                _priority002Counts = matches.Where(m => m.Variant == "002")
+                    .GroupBy(m => m.Tag, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
                 _priority00Loaded = true;
                 _priority00IndexVersion = version;
-                foreach (var pair in _priority00Buttons)
-                    pair.Value.Content = $"00 · {_priority00Counts.GetValueOrDefault(pair.Key)}";
+
+                foreach (var (tag, (btn00, btn001, btn002)) in _priorityButtons)
+                {
+                    btn00.Content = $"00·{_priority00Counts.GetValueOrDefault(tag)}";
+                    btn001.Content = $"001·{_priority001Counts.GetValueOrDefault(tag)}";
+                    btn002.Content = $"002·{_priority002Counts.GetValueOrDefault(tag)}";
+                }
+
                 if (_priority00PanelTag != null) RenderPriority00Panel();
             }
             catch (Exception ex)
@@ -183,38 +226,140 @@ namespace Anfeta.UI.Views
             finally { _priority00Loading = false; }
         }
 
-        private Button CreatePriority00Button(string person)
+        private FrameworkElement CreatePriority00Button(string person)
         {
             PriorityPeople.TryGetValue(person, out var tag);
-            var button = new Button
+            if (tag == null) return new Grid { Visibility = Visibility.Collapsed };
+
+            var panel = new StackPanel
             {
-                Content = _priority00Loaded && tag != null ? $"00 · {_priority00Counts.GetValueOrDefault(tag)}" : "00 · …",
-                Visibility = tag == null ? Visibility.Collapsed : Visibility.Visible,
-                Padding = new Thickness(4, 1, 4, 1),
+                Orientation = Orientation.Horizontal,
+                Spacing = 1.5,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var fontSize = Math.Max(7.0, 7.8 * CalendarFontScale);
+            var padding = new Thickness(2, 0, 2, 0);
+            var radius = new CornerRadius(3);
+
+            var btn00 = new Button
+            {
+                Content = _priority00Loaded ? $"00·{_priority00Counts.GetValueOrDefault(tag)}" : "00",
+                Padding = padding,
                 MinWidth = 0,
                 MinHeight = 0,
-                FontSize = Math.Max(9, 10 * CalendarFontScale),
-                VerticalAlignment = VerticalAlignment.Center,
-                Background = new SolidColorBrush(Color.FromArgb(255, 91, 56, 12)),
-                Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 221, 145)),
-                CornerRadius = new CornerRadius(5)
+                Height = 16,
+                FontSize = fontSize,
+                Background = new SolidColorBrush(Color.FromArgb(255, 75, 20, 20)),
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 254, 202, 202)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 248, 113, 113)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = radius
             };
-            ToolTipService.SetToolTip(button, $"Prioritarios {tag}00 y sufijos numéricos · Notion y Dropbox indexados, sin filtro de fecha ni estado. Excluye documentos de calendario. Clic para ver resultados; actualización periódica mientras el calendario está activo.");
-            if (tag != null)
+            ToolTipService.SetToolTip(btn00, $"🔴 Urgente (00) · {person}. Clic para ver todas las rápidas por orden de importancia.");
+
+            var btn001 = new Button
             {
-                _priority00Buttons[tag] = button;
-                button.Click += (_, __) =>
-                {
-                    ShowCalendarPersonPreview(person);
-                    _priority00PanelTag = tag;
-                    _priority00RenderedVersion = -1;
-                    RenderPriority00Panel();
-                };
+                Content = _priority00Loaded ? $"001·{_priority001Counts.GetValueOrDefault(tag)}" : "001",
+                Padding = padding,
+                MinWidth = 0,
+                MinHeight = 0,
+                Height = 16,
+                FontSize = fontSize,
+                Background = new SolidColorBrush(Color.FromArgb(255, 75, 52, 12)),
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 254, 243, 199)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 251, 191, 36)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = radius
+            };
+            ToolTipService.SetToolTip(btn001, $"🟡 Importante (001) · {person}. Clic para ver todas las rápidas por orden de importancia.");
+
+            var btn002 = new Button
+            {
+                Content = _priority00Loaded ? $"002·{_priority002Counts.GetValueOrDefault(tag)}" : "002",
+                Padding = padding,
+                MinWidth = 0,
+                MinHeight = 0,
+                Height = 16,
+                FontSize = fontSize,
+                Background = new SolidColorBrush(Color.FromArgb(255, 12, 45, 70)),
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 224, 242, 254)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = radius
+            };
+            ToolTipService.SetToolTip(btn002, $"🔵 Secundaria (002) · {person}. Clic para ver todas las rápidas por orden de importancia.");
+
+            void OpenAllGrouped(string variant)
+            {
+                ShowCalendarPersonPreview(person);
+                _priority00PanelTag = tag;
+                _priority00PanelVariant = variant;
+                _priority00RenderedVersion = -1;
+                RenderPriority00Panel();
             }
-            return button;
+
+            btn00.Click += (_, __) => OpenAllGrouped("00");
+            btn001.Click += (_, __) => OpenAllGrouped("001");
+            btn002.Click += (_, __) => OpenAllGrouped("002");
+
+            _priorityButtons[tag] = (btn00, btn001, btn002);
+            _priority00Buttons[tag] = btn00;
+            panel.Children.Add(btn00);
+            panel.Children.Add(btn001);
+            panel.Children.Add(btn002);
+            return panel;
+        }
+
+        private Border BuildPriorityActivityCard(SearchResultRow row, Color borderTint)
+        {
+            var stack = new StackPanel { Spacing = 7 };
+            stack.Children.Add(new TextBlock { Text = row.Name, TextWrapping = TextWrapping.Wrap, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 13.5 });
+            stack.Children.Add(new TextBlock { Text = string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha registrada" : row.ScheduledDate, TextWrapping = TextWrapping.Wrap, Opacity = 0.75, FontSize = 11 });
+            if (!string.IsNullOrWhiteSpace(row.ProjectUpdateStatus))
+                stack.Children.Add(new TextBlock { Text = "Última actualización: " + row.ProjectUpdateStatus, TextWrapping = TextWrapping.Wrap, FontSize = 11, Opacity = 0.85 });
+            var actions = new StackPanel { Spacing = 6 };
+            var open = new Button { Content = row.Source == SearchSource.Notion ? "Abrir en Notion" : "Abrir archivo", HorizontalAlignment = HorizontalAlignment.Stretch };
+            open.Click += async (_, __) =>
+            {
+                try
+                {
+                    if (row.Source == SearchSource.Notion) await OpenNotionDesktopAsync(row, true);
+                    else Process.Start(new ProcessStartInfo(row.Target) { UseShellExecute = true });
+                }
+                catch (Exception ex) { StatusText.Text = "Estado: No se pudo abrir → " + ex.Message; }
+            };
+            var content = new ContentControl { Visibility = Visibility.Collapsed, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            if (row.Source == SearchSource.Notion && !string.IsNullOrWhiteSpace(row.ExternalId))
+            {
+                var preview = new Button { Content = "Ver contenido", HorizontalAlignment = HorizontalAlignment.Stretch };
+                var activity = _calendarActivities.FirstOrDefault(a => a.PageId.Equals(row.ExternalId, StringComparison.OrdinalIgnoreCase)) ?? new NotionCalendarActivity
+                {
+                    PageId = row.ExternalId,
+                    PageUrl = GetRowTarget(row),
+                    Title = row.Name,
+                    Description = row.Description,
+                    UpdateText = row.ProjectUpdateStatus
+                };
+                preview.Click += async (_, __) => await ToggleCalendarPersonActivityContentAsync(activity, preview, content);
+                actions.Children.Add(preview);
+            }
+            actions.Children.Add(open);
+            stack.Children.Add(actions);
+            stack.Children.Add(content);
+            return new Border
+            {
+                Padding = new Thickness(12),
+                CornerRadius = new CornerRadius(10),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(borderTint),
+                Background = new SolidColorBrush(Color.FromArgb(255, 20, 28, 38)),
+                Child = stack
+            };
         }
 
         private string? _priority00PanelTag;
+        private string? _priority00PanelVariant;
         private long _priority00RenderedVersion = -1;
         private void RenderPriority00Panel()
         {
@@ -222,59 +367,100 @@ namespace Anfeta.UI.Views
             var version = App.LocalIndex.Version;
             if (version == _priority00RenderedVersion) return;
             _priority00RenderedVersion = version;
-            var rows = App.LocalIndex.GetAll().Where(r => !IsExcludedPath(r.Target) && GetPriorityTags(r).Contains(_priority00PanelTag))
-                .DistinctBy(PriorityRowKey).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
-            CalendarPersonPreviewTitle.Text = $"Prioritarias de {_calendarPersonPreviewPerson} · 00";
-            CalendarPersonPreviewDate.Text = "Todas las fechas · Notion y Dropbox indexados";
-            CalendarPersonPreviewSummary.Text = $"{rows.Count} actividades etiquetadas · contenido bajo demanda · sin filtro de estado";
+
+            var allMatches = App.LocalIndex.GetAll()
+                .Where(r => !IsExcludedPath(r.Target))
+                .DistinctBy(PriorityRowKey)
+                .Select(r => (Row: r, Match: GetPriorityMatches(r).FirstOrDefault(m => m.Tag == _priority00PanelTag)))
+                .Where(x => x.Match != default)
+                .ToList();
+
+            var urgentes00 = allMatches.Where(x => x.Match.Variant == "00").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            var importantes001 = allMatches.Where(x => x.Match.Variant == "001").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            var secundarias002 = allMatches.Where(x => x.Match.Variant == "002").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            var otras = allMatches.Where(x => x.Match.Variant != "00" && x.Match.Variant != "001" && x.Match.Variant != "002").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+            var totalCount = urgentes00.Count + importantes001.Count + secundarias002.Count + otras.Count;
+
+            CalendarPersonPreviewTitle.Text = $"Pendientes y Rápidas de {_calendarPersonPreviewPerson}";
+            CalendarPersonPreviewDate.Text = "Todas las fechas · Ordenadas por importancia";
+            CalendarPersonPreviewSummary.Text = $"🔴 {urgentes00.Count} Urgentes · 🟡 {importantes001.Count} Importantes · 🔵 {secundarias002.Count} Secundarias";
             CalendarPersonPreviewItems.Children.Clear();
-            if (rows.Count == 0)
-                CalendarPersonPreviewItems.Children.Add(BuildCalendarPersonPreviewMessage("No hay actividades con este tag 00 en el índice local.", false));
-            foreach (var row in rows)
+
+            if (totalCount == 0)
             {
-                var stack = new StackPanel { Spacing = 8 };
-                stack.Children.Add(new TextBlock { Text = row.Name, TextWrapping = TextWrapping.Wrap, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 14 });
-                stack.Children.Add(new TextBlock { Text = string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha registrada" : row.ScheduledDate, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 });
-                if (!string.IsNullOrWhiteSpace(row.ProjectUpdateStatus))
-                    stack.Children.Add(new TextBlock { Text = "Última actualización: " + row.ProjectUpdateStatus, TextWrapping = TextWrapping.Wrap });
-                var actions = new StackPanel { Spacing = 6 };
-                var open = new Button { Content = row.Source == SearchSource.Notion ? "Abrir en Notion" : "Abrir archivo", HorizontalAlignment = HorizontalAlignment.Stretch };
-                open.Click += async (_, __) =>
+                CalendarPersonPreviewItems.Children.Add(BuildCalendarPersonPreviewMessage($"No hay actividades rápidas asignadas para {_calendarPersonPreviewPerson}.", false));
+                return;
+            }
+
+            void AddSection(string sectionTitle, Color headerBg, Color headerBorder, Color headerText, List<SearchResultRow> sectionRows)
+            {
+                var headerCard = new Border
                 {
-                    try
-                    {
-                        if (row.Source == SearchSource.Notion) await OpenNotionDesktopAsync(row, true);
-                        else Process.Start(new ProcessStartInfo(row.Target) { UseShellExecute = true });
-                    }
-                    catch (Exception ex) { StatusText.Text = "Estado: No se pudo abrir → " + ex.Message; }
-                };
-                var content = new ContentControl { Visibility = Visibility.Collapsed, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-                if (row.Source == SearchSource.Notion && !string.IsNullOrWhiteSpace(row.ExternalId))
-                {
-                    var preview = new Button { Content = "Ver contenido", HorizontalAlignment = HorizontalAlignment.Stretch };
-                    var activity = _calendarActivities.FirstOrDefault(a => a.PageId.Equals(row.ExternalId, StringComparison.OrdinalIgnoreCase)) ?? new NotionCalendarActivity
-                    {
-                        PageId = row.ExternalId,
-                        PageUrl = GetRowTarget(row),
-                        Title = row.Name,
-                        Description = row.Description,
-                        UpdateText = row.ProjectUpdateStatus
-                    };
-                    preview.Click += async (_, __) => await ToggleCalendarPersonActivityContentAsync(activity, preview, content);
-                    actions.Children.Add(preview);
-                }
-                actions.Children.Add(open);
-                stack.Children.Add(actions);
-                stack.Children.Add(content);
-                CalendarPersonPreviewItems.Children.Add(new Border
-                {
-                    Padding = new Thickness(12),
-                    CornerRadius = new CornerRadius(10),
+                    Background = new SolidColorBrush(headerBg),
+                    BorderBrush = new SolidColorBrush(headerBorder),
                     BorderThickness = new Thickness(1),
-                    BorderBrush = new SolidColorBrush(Color.FromArgb(255, 145, 106, 37)),
-                    Background = new SolidColorBrush(Color.FromArgb(255, 27, 36, 45)),
-                    Child = stack
-                });
+                    CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(10, 6, 10, 6),
+                    Margin = new Thickness(0, 8, 0, 4)
+                };
+                var grid = new Grid();
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var titleTb = new TextBlock
+                {
+                    Text = sectionTitle,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    FontSize = 12.5,
+                    Foreground = new SolidColorBrush(headerText),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                var countTb = new TextBlock
+                {
+                    Text = $"{sectionRows.Count}",
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(headerText),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(titleTb, 0);
+                Grid.SetColumn(countTb, 1);
+                grid.Children.Add(titleTb);
+                grid.Children.Add(countTb);
+                headerCard.Child = grid;
+                CalendarPersonPreviewItems.Children.Add(headerCard);
+
+                if (sectionRows.Count == 0)
+                {
+                    CalendarPersonPreviewItems.Children.Add(new TextBlock
+                    {
+                        Text = "Sin actividades en esta categoría",
+                        FontSize = 11,
+                        Opacity = 0.5,
+                        Margin = new Thickness(8, 2, 0, 6)
+                    });
+                    return;
+                }
+
+                foreach (var row in sectionRows)
+                {
+                    CalendarPersonPreviewItems.Children.Add(BuildPriorityActivityCard(row, headerBorder));
+                }
+            }
+
+            // 1. Urgentes (00)
+            AddSection("🔴 Urgentes · 00", Color.FromArgb(255, 45, 18, 18), Color.FromArgb(255, 248, 113, 113), Color.FromArgb(255, 254, 202, 202), urgentes00);
+
+            // 2. Importantes (001)
+            AddSection("🟡 Importantes · 001", Color.FromArgb(255, 45, 34, 12), Color.FromArgb(255, 251, 191, 36), Color.FromArgb(255, 254, 243, 199), importantes001);
+
+            // 3. Secundarias (002)
+            AddSection("🔵 Secundarias · 002", Color.FromArgb(255, 14, 38, 58), Color.FromArgb(255, 56, 189, 248), Color.FromArgb(255, 224, 242, 254), secundarias002);
+
+            // 4. Otras
+            if (otras.Count > 0)
+            {
+                AddSection("⚪ Otras Prioritarias", Color.FromArgb(255, 28, 35, 45), Color.FromArgb(255, 100, 120, 140), Color.FromArgb(255, 220, 230, 240), otras);
             }
         }
 

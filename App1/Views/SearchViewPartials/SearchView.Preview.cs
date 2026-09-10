@@ -1293,11 +1293,31 @@ namespace Anfeta.UI.Views
         private static string CleanSpeechText(string? value)
         {
             var text = value ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+
+            // 1. Reemplazar enlaces Markdown [Texto](http...) -> Texto
+            text = Regex.Replace(text, @"\[([^\]]+)\]\([^\)]+\)", "$1");
+
+            // 2. Eliminar URLs directas (http, https)
+            text = Regex.Replace(text, @"https?:\/\/[^\s\)\],;""']+", " ", RegexOptions.IgnoreCase);
+
+            // 3. Eliminar direcciones web tipo www.algo.com
+            text = Regex.Replace(text, @"\bwww\.[^\s\)\],;""']+", " ", RegexOptions.IgnoreCase);
+
+            // 4. Eliminar dominios web comunes si aparecen como enlaces sueltos (ej: figma.com/..., notion.so/...)
+            text = Regex.Replace(text, @"\b[a-zA-Z0-9\.\-_]+\.(?:com|org|net|io|so|app|dev|es|mx)(?:\/[^\s\)\],;""']*)?", " ", RegexOptions.IgnoreCase);
+
+            // 5. Eliminar palabras técnicas de fases de ANFETA
             text = Regex.Replace(text,
                 @"(?<![\p{L}\p{Nd}_])(?:prtuzREVISION|rtuzREVISION|zREVISION|sprtuzREVISION)(?![\p{L}\p{Nd}_])",
                 " ", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             text = Regex.Replace(text, @"\bRevisiones\b", " ", RegexOptions.IgnoreCase);
-            text = Regex.Replace(text, @"\s+", " ").Trim(' ', '-', '–', '—', ':', '|', '/');
+
+            // 6. Eliminar sintaxis markdown común (*, _, #, ~, `, >)
+            text = Regex.Replace(text, @"[`*_~#>]+", " ");
+
+            // 7. Normalizar espacios en blanco y caracteres sueltos
+            text = Regex.Replace(text, @"\s+", " ").Trim(' ', '-', '–', '—', ':', '|', '/', ',');
             return text;
         }
     }

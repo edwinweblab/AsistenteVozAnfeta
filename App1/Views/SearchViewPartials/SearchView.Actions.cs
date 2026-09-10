@@ -1393,21 +1393,54 @@ namespace Anfeta.UI.Views
 
             try
             {
-                if (!e.DataView.Contains(
+                IReadOnlyList<StorageFile> files;
+
+                if (e.DataView.Contains(
                         Windows.ApplicationModel.DataTransfer
                             .StandardDataFormats.StorageItems))
                 {
+                    var storageItems =
+                        await e.DataView.GetStorageItemsAsync();
+
+                    files = storageItems
+                        .OfType<StorageFile>()
+                        .ToList();
+                }
+                else if (e.DataView.Contains(
+                             Windows.ApplicationModel.DataTransfer
+                                 .StandardDataFormats.WebLink))
+                {
+                    var webLink = await e.DataView.GetWebLinkAsync();
+                    var tempUrlFile = Path.Combine(Path.GetTempPath(), $"enlace_{DateTime.Now:yyyyMMdd_HHmmss}.url");
+                    await File.WriteAllTextAsync(tempUrlFile, $"[InternetShortcut]\r\nURL={webLink}\r\n");
+                    var storageFile = await StorageFile.GetFileFromPathAsync(tempUrlFile);
+                    files = new[] { storageFile };
+                }
+                else if (e.DataView.Contains(
+                             Windows.ApplicationModel.DataTransfer
+                                 .StandardDataFormats.Text))
+                {
+                    var text = (await e.DataView.GetTextAsync())?.Trim();
+                    if (Uri.TryCreate(text, UriKind.Absolute, out var uri) &&
+                        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                    {
+                        var tempUrlFile = Path.Combine(Path.GetTempPath(), $"enlace_{DateTime.Now:yyyyMMdd_HHmmss}.url");
+                        await File.WriteAllTextAsync(tempUrlFile, $"[InternetShortcut]\r\nURL={uri}\r\n");
+                        var storageFile = await StorageFile.GetFileFromPathAsync(tempUrlFile);
+                        files = new[] { storageFile };
+                    }
+                    else
+                    {
+                        StatusText.Text = "Estado: Arrastra archivos o enlaces web desde el Explorador o navegador.";
+                        return;
+                    }
+                }
+                else
+                {
                     StatusText.Text =
-                        "Estado: Arrastra archivos desde el Explorador de Windows.";
+                        "Estado: Arrastra archivos o enlaces web válidos.";
                     return;
                 }
-
-                var storageItems =
-                    await e.DataView.GetStorageItemsAsync();
-
-                var files = storageItems
-                    .OfType<StorageFile>()
-                    .ToList();
 
                 if (files.Count == 0)
                 {
@@ -1434,14 +1467,23 @@ namespace Anfeta.UI.Views
                 e.DataView.Contains(
                     Windows.ApplicationModel.DataTransfer
                         .StandardDataFormats.StorageItems);
+            var hasWebLink =
+                e.DataView.Contains(
+                    Windows.ApplicationModel.DataTransfer
+                        .StandardDataFormats.WebLink) ||
+                e.DataView.Contains(
+                    Windows.ApplicationModel.DataTransfer
+                        .StandardDataFormats.Text);
 
-            e.AcceptedOperation = hasStorageItems
+            var canAccept = hasStorageItems || hasWebLink;
+
+            e.AcceptedOperation = canAccept
                 ? Windows.ApplicationModel.DataTransfer
                     .DataPackageOperation.Copy
                 : Windows.ApplicationModel.DataTransfer
                     .DataPackageOperation.None;
 
-            if (!hasStorageItems)
+            if (!canAccept)
             {
                 HideNotionDropOverlay();
                 return;
@@ -1594,6 +1636,14 @@ namespace Anfeta.UI.Views
                         created.PageUrl,
                         created.Title);
 
+                    var matchedPerson = NotionUploadPersonTags.FirstOrDefault(p =>
+                        created.Title.Contains(p, StringComparison.OrdinalIgnoreCase));
+                    string detectedVariant = "";
+                    if (created.Title.Contains("001", StringComparison.OrdinalIgnoreCase)) detectedVariant = "001";
+                    else if (created.Title.Contains("002", StringComparison.OrdinalIgnoreCase)) detectedVariant = "002";
+                    else if (created.Title.Contains("00", StringComparison.OrdinalIgnoreCase)) detectedVariant = "00";
+                    ShowDiscreteActivityToast(created.Title, matchedPerson ?? "", detectedVariant, created.PageUrl);
+
                     StatusText.Text =
                         $"Estado: Página creada en Revisiones ✅ " +
                         $"({created.Title}) · {validFiles.Count} archivo(s)";
@@ -1630,6 +1680,14 @@ namespace Anfeta.UI.Views
                             created.PageId,
                             created.PageUrl,
                             created.Title);
+
+                        var sepPerson = NotionUploadPersonTags.FirstOrDefault(p =>
+                            created.Title.Contains(p, StringComparison.OrdinalIgnoreCase));
+                        string sepVariant = "";
+                        if (created.Title.Contains("001", StringComparison.OrdinalIgnoreCase)) sepVariant = "001";
+                        else if (created.Title.Contains("002", StringComparison.OrdinalIgnoreCase)) sepVariant = "002";
+                        else if (created.Title.Contains("00", StringComparison.OrdinalIgnoreCase)) sepVariant = "00";
+                        ShowDiscreteActivityToast(created.Title, sepPerson ?? "", sepVariant, created.PageUrl);
 
                         createdCount++;
                     }
@@ -1866,6 +1924,101 @@ namespace Anfeta.UI.Views
             return true;
         }
 
+        #region ===== Toast Discreto de Actividad Asignada =====
+
+        private DispatcherTimer? _activityToastTimer;
+        private int _activityToastRemainingTicks;
+        private const int ActivityToastTotalTicks = 100; // 10s (100 * 100ms)
+
+        public void ShowDiscreteActivityToast(
+            string title,
+            string recipient,
+            string variant = "",
+            string? pageUrl = null)
+        {
+            try
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    ToastActivityTitle.Text = string.IsNullOrWhiteSpace(title) ? "Nueva actividad" : title;
+                    ToastActivityDetail.Text = string.IsNullOrWhiteSpace(recipient)
+                        ? "Nueva actividad asignada en Notion"
+                        : $"Asignado a: {GetNotionPersonDisplayName(recipient)} ({recipient})";
+
+                    var cleanVar = (variant ?? string.Empty).Trim();
+                    switch (cleanVar)
+                    {
+                        case "00":
+                            ToastVariantText.Text = "00 · Urgente";
+                            ToastVariantBadge.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 91, 28, 28));
+                            ToastVariantBadge.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 248, 113, 113));
+                            ToastVariantText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 254, 202, 202));
+                            ToastVariantBadge.Visibility = Visibility.Visible;
+                            break;
+                        case "001":
+                            ToastVariantText.Text = "001 · Importante";
+                            ToastVariantBadge.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 91, 65, 12));
+                            ToastVariantBadge.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 251, 191, 36));
+                            ToastVariantText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 254, 243, 199));
+                            ToastVariantBadge.Visibility = Visibility.Visible;
+                            break;
+                        case "002":
+                            ToastVariantText.Text = "002 · Secundaria";
+                            ToastVariantBadge.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 58, 91));
+                            ToastVariantBadge.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 56, 189, 248));
+                            ToastVariantText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 224, 242, 254));
+                            ToastVariantBadge.Visibility = Visibility.Visible;
+                            break;
+                        default:
+                            if (!string.IsNullOrWhiteSpace(cleanVar))
+                            {
+                                ToastVariantText.Text = cleanVar;
+                                ToastVariantBadge.Visibility = Visibility.Visible;
+                            }
+                            else
+                            {
+                                ToastVariantBadge.Visibility = Visibility.Collapsed;
+                            }
+                            break;
+                    }
+
+                    ToastProgressBar.Value = 100;
+                    _activityToastRemainingTicks = ActivityToastTotalTicks;
+
+                    if (_activityToastTimer == null)
+                    {
+                        _activityToastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+                        _activityToastTimer.Tick += (_, __) =>
+                        {
+                            _activityToastRemainingTicks--;
+                            ToastProgressBar.Value = Math.Max(0, _activityToastRemainingTicks);
+                            if (_activityToastRemainingTicks <= 0)
+                            {
+                                _activityToastTimer.Stop();
+                                ActivityAssignedToast.Visibility = Visibility.Collapsed;
+                            }
+                        };
+                    }
+
+                    _activityToastTimer.Stop();
+                    _activityToastTimer.Start();
+                    ActivityAssignedToast.Visibility = Visibility.Visible;
+                });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TOAST] {ex.Message}");
+            }
+        }
+
+        private void ToastCloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            _activityToastTimer?.Stop();
+            ActivityAssignedToast.Visibility = Visibility.Collapsed;
+        }
+
+        #endregion
+
         private async Task<NotionUploadOptions?> PromptNotionRevisionUploadOptionsAsync(
             IReadOnlyList<StorageFile> files,
             string suggestedTitle)
@@ -2030,8 +2183,22 @@ namespace Anfeta.UI.Views
                 titleSuggestionsPanel.Visibility = visible;
             }
 
-            titleBox.TextChanged += (_, __) =>
-                RefreshTitleSuggestions();
+            DispatcherTimer? titleDebounceTimer = null;
+            void ScheduleDebouncedTitleProcessing()
+            {
+                if (titleDebounceTimer == null)
+                {
+                    titleDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(160) };
+                    titleDebounceTimer.Tick += (_, __) =>
+                    {
+                        titleDebounceTimer.Stop();
+                        RefreshTitleSuggestions();
+                        RefreshNaturalReminderPreview();
+                    };
+                }
+                titleDebounceTimer.Stop();
+                titleDebounceTimer.Start();
+            }
 
             var onePageOption = new RadioButton
             {
@@ -2199,7 +2366,14 @@ namespace Anfeta.UI.Views
             var selectAttachmentsButton = new Button
             {
                 Content = "＋ Seleccionar imágenes o archivos",
-                HorizontalAlignment = HorizontalAlignment.Left
+                FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Padding = new Thickness(14, 6, 14, 6),
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 0, 168, 255)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(170, 0, 168, 255)),
+                BorderThickness = new Thickness(1),
+                HorizontalAlignment = HorizontalAlignment.Center
             };
 
             var attachmentDropContent = new StackPanel
@@ -2237,14 +2411,14 @@ namespace Anfeta.UI.Views
             var attachmentDropZone = new Border
             {
                 AllowDrop = true,
-                MinHeight = 92,
-                Padding = new Thickness(14),
-                CornerRadius = new CornerRadius(8),
-                BorderThickness = new Thickness(1),
+                MinHeight = 94,
+                Padding = new Thickness(16, 14, 16, 14),
+                CornerRadius = new CornerRadius(10),
+                BorderThickness = new Thickness(1.5),
                 BorderBrush = new SolidColorBrush(
-                    Windows.UI.Color.FromArgb(150, 96, 165, 250)),
+                    Windows.UI.Color.FromArgb(160, 0, 168, 255)),
                 Background = new SolidColorBrush(
-                    Windows.UI.Color.FromArgb(30, 96, 165, 250)),
+                    Windows.UI.Color.FromArgb(28, 0, 140, 240)),
                 Child = attachmentDropContent
             };
 
@@ -2506,13 +2680,57 @@ namespace Anfeta.UI.Views
             var selectedUploadTags =
                 new List<string>();
 
-            var variant00Check = new CheckBox
+            var variantNormalRadio = new RadioButton
             {
-                Content = "Variante 00 (agrega sufijo '00' al final del tag, ej: prtuzREVISION00)",
-                IsChecked = false,
-                FontWeight = Microsoft.UI.Text.FontWeights.Medium,
-                Margin = new Thickness(0, 0, 0, 4)
+                Content = "Normal",
+                GroupName = "UploadVariantGroup",
+                IsChecked = true,
+                Margin = new Thickness(0, 0, 8, 0)
             };
+
+            var variant00Radio = new RadioButton
+            {
+                Content = "00 (Urgente)",
+                GroupName = "UploadVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 120, 120)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
+            var variant001Radio = new RadioButton
+            {
+                Content = "001 (Importante)",
+                GroupName = "UploadVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 215, 120)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
+            var variant002Radio = new RadioButton
+            {
+                Content = "002 (Secundaria)",
+                GroupName = "UploadVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 120, 200, 255)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
+            string GetActiveVariantSuffix()
+            {
+                if (variant00Radio.IsChecked == true) return "00";
+                if (variant001Radio.IsChecked == true) return "001";
+                if (variant002Radio.IsChecked == true) return "002";
+                return string.Empty;
+            }
+
+            string StripVariantSuffix(string tag)
+            {
+                var clean = (tag ?? string.Empty).Trim();
+                if (clean.EndsWith("001", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
+                if (clean.EndsWith("002", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
+                if (clean.EndsWith("00", StringComparison.OrdinalIgnoreCase)) return clean[..^2];
+                return clean;
+            }
 
             void AppendTagToTextBox(
                 TextBox editor,
@@ -2522,9 +2740,13 @@ namespace Anfeta.UI.Views
                 if (string.IsNullOrWhiteSpace(cleanTag))
                     return;
 
-                if (variant00Check.IsChecked == true && !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
+                var activeVariant = GetActiveVariantSuffix();
+                if (!string.IsNullOrEmpty(activeVariant) &&
+                    !cleanTag.EndsWith("001", StringComparison.OrdinalIgnoreCase) &&
+                    !cleanTag.EndsWith("002", StringComparison.OrdinalIgnoreCase) &&
+                    !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
                 {
-                    cleanTag += "00";
+                    cleanTag += activeVariant;
                 }
 
                 var current = (editor.Text ?? string.Empty).Trim();
@@ -2562,7 +2784,7 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            void Toggle00InEditor(TextBox editor, bool is00)
+            void ApplyVariantToEditor(TextBox editor, string targetVariant)
             {
                 var text = (editor.Text ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(text)) return;
@@ -2576,15 +2798,10 @@ namespace Anfeta.UI.Views
                     var token = tokens[i];
                     foreach (var baseTag in allTags)
                     {
-                        if (is00 && string.Equals(token, baseTag, StringComparison.OrdinalIgnoreCase))
+                        var rawTokenBase = StripVariantSuffix(token);
+                        if (string.Equals(rawTokenBase, baseTag, StringComparison.OrdinalIgnoreCase))
                         {
-                            tokens[i] = baseTag + "00";
-                            modified = true;
-                            break;
-                        }
-                        else if (!is00 && string.Equals(token, baseTag + "00", StringComparison.OrdinalIgnoreCase))
-                        {
-                            tokens[i] = baseTag;
+                            tokens[i] = string.IsNullOrEmpty(targetVariant) ? baseTag : baseTag + targetVariant;
                             modified = true;
                             break;
                         }
@@ -2598,29 +2815,23 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            variant00Check.Checked += (_, __) =>
+            void OnVariantSelectionChanged()
             {
+                var variant = GetActiveVariantSuffix();
                 if (separatePagesOption.IsChecked == true)
                 {
-                    foreach (var ed in titleEditors) Toggle00InEditor(ed, true);
+                    foreach (var ed in titleEditors) ApplyVariantToEditor(ed, variant);
                 }
                 else
                 {
-                    Toggle00InEditor(titleBox, true);
+                    ApplyVariantToEditor(titleBox, variant);
                 }
-            };
+            }
 
-            variant00Check.Unchecked += (_, __) =>
-            {
-                if (separatePagesOption.IsChecked == true)
-                {
-                    foreach (var ed in titleEditors) Toggle00InEditor(ed, false);
-                }
-                else
-                {
-                    Toggle00InEditor(titleBox, false);
-                }
-            };
+            variantNormalRadio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant00Radio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant001Radio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant002Radio.Checked += (_, __) => OnVariantSelectionChanged();
 
             var quickTagsPanel = new StackPanel
             {
@@ -2644,8 +2855,49 @@ namespace Anfeta.UI.Views
                     Opacity = 0.72
                 });
 
-            // Checkbox Variante 00
-            quickTagsPanel.Children.Add(variant00Check);
+            // Selector de las 3 variantes (00 Urgente, 001 Importante, 002 Secundaria)
+            var variantsHeader = new TextBlock
+            {
+                Text = "Variante de prioridad / asignación:",
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Opacity = 0.85
+            };
+            quickTagsPanel.Children.Add(variantsHeader);
+
+            var variantsRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4,
+                Margin = new Thickness(0, 0, 0, 2)
+            };
+            variantsRow.Children.Add(variantNormalRadio);
+            variantsRow.Children.Add(variant00Radio);
+            variantsRow.Children.Add(variant001Radio);
+            variantsRow.Children.Add(variant002Radio);
+            quickTagsPanel.Children.Add(variantsRow);
+
+            // Botón Asignar a Todos (002 Secundario)
+            var assignAll002Button = new Button
+            {
+                Content = "👥 Asignar a Todos (002 Secundario)",
+                Padding = new Thickness(10, 4, 10, 4),
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 56, 189, 248)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            ToolTipService.SetToolTip(assignAll002Button, "Inserta los tags 002 secundarios de todos los integrantes del equipo. Puedes borrar individualmente a quien no aplique.");
+
+            assignAll002Button.Click += (_, __) =>
+            {
+                foreach (var personTag in NotionUploadPersonTags)
+                {
+                    AppendTagToActiveTitles(personTag + "002");
+                }
+            };
+            quickTagsPanel.Children.Add(assignAll002Button);
 
             // Tags principales
             var standardTagsHeader = new TextBlock
@@ -2689,7 +2941,13 @@ namespace Anfeta.UI.Views
             };
 
             var recentPeople = LoadNotionUploadRecentTags()
-                .Select(tag => tag.EndsWith("00", StringComparison.OrdinalIgnoreCase) ? tag[..^2] : tag)
+                .Select(tag =>
+                {
+                    if (tag.EndsWith("001", StringComparison.OrdinalIgnoreCase)) return tag[..^3];
+                    if (tag.EndsWith("002", StringComparison.OrdinalIgnoreCase)) return tag[..^3];
+                    if (tag.EndsWith("00", StringComparison.OrdinalIgnoreCase)) return tag[..^2];
+                    return tag;
+                })
                 .Where(tag => NotionUploadPersonTags.Contains(tag, StringComparer.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var tag in recentPeople.Concat(NotionUploadPersonTags).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -2965,14 +3223,19 @@ namespace Anfeta.UI.Views
                 Spacing = 14
             };
 
+            var cardBg = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 20, 29));
+            var cardBorder = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 20, 75, 115));
+            var cardRadius = new CornerRadius(10);
+            var cardPadding = new Thickness(14);
+
             // Sección 1: Archivos
             var filesCard = new Border
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                Background = cardBg,
+                BorderBrush = cardBorder,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(12)
+                CornerRadius = cardRadius,
+                Padding = cardPadding
             };
             var filesStack = new StackPanel { Spacing = 8 };
             filesStack.Children.Add(filesCountText);
@@ -2999,11 +3262,11 @@ namespace Anfeta.UI.Views
             // Sección 2: Destino y Organización
             var orgCard = new Border
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                Background = cardBg,
+                BorderBrush = cardBorder,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(12)
+                CornerRadius = cardRadius,
+                Padding = cardPadding
             };
             var orgStack = new StackPanel { Spacing = 8 };
             var dropboxOnlyOption = new RadioButton
@@ -3017,7 +3280,8 @@ namespace Anfeta.UI.Views
                     Text = "📋 Destino: Notion → Revisiones / Solo Dropbox",
                     FontWeight =
                         Microsoft.UI.Text.FontWeights.SemiBold,
-                    FontSize = 12.5
+                    FontSize = 12.5,
+                    Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 56, 189, 248))
                 });
             orgStack.Children.Add(
                 new TextBlock
@@ -3035,11 +3299,11 @@ namespace Anfeta.UI.Views
             // Sección 3: Título
             var titleCard = new Border
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                Background = cardBg,
+                BorderBrush = cardBorder,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(12)
+                CornerRadius = cardRadius,
+                Padding = cardPadding
             };
             var titleCardStack = new StackPanel { Spacing = 8 };
             titleCardStack.Children.Add(titleSection);
@@ -3050,11 +3314,11 @@ namespace Anfeta.UI.Views
             // Sección 4: Tags
             var tagsCard = new Border
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                Background = cardBg,
+                BorderBrush = cardBorder,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(12)
+                CornerRadius = cardRadius,
+                Padding = cardPadding
             };
             tagsCard.Child = quickTagsPanel;
             content.Children.Add(tagsCard);
@@ -3062,11 +3326,11 @@ namespace Anfeta.UI.Views
             // Sección 5: Recordatorio
             var reminderCard = new Border
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(25, 255, 255, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 255, 255, 255)),
+                Background = cardBg,
+                BorderBrush = cardBorder,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(12)
+                CornerRadius = cardRadius,
+                Padding = cardPadding
             };
             reminderCard.Child = reminderPanel;
             content.Children.Add(reminderCard);
@@ -3088,9 +3352,6 @@ namespace Anfeta.UI.Views
             var dialog = new ContentDialog
             {
                 XamlRoot = this.XamlRoot,
-                Title = files.Count == 1
-                    ? "Subir archivo"
-                    : "Subir varios archivos",
                 Content = contentScroll,
                 PrimaryButtonText = "Continuar y subir",
                 CloseButtonText = "Cancelar",
@@ -3108,6 +3369,45 @@ namespace Anfeta.UI.Views
 
             dialog.Resources[
                 "ContentDialogMinWidth"] = Math.Min(420d, Math.Max(240d, (XamlRoot?.Size.Width ?? 760) - 80));
+
+            dialog.Resources["ContentDialogBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 9, 16, 23));
+            dialog.Resources["ContentDialogBorderBrush"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(220, 0, 168, 255));
+            dialog.Resources["ContentDialogBorderThickness"] =
+                new Thickness(1.5);
+            dialog.Resources["ContentDialogCornerRadius"] =
+                new CornerRadius(14);
+            dialog.Resources["ContentDialogForeground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 235, 245, 255));
+            dialog.Resources["AccentButtonBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 140, 230));
+            dialog.Resources["AccentButtonBackgroundPointerOver"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255));
+            dialog.Resources["AccentButtonForeground"] =
+                new SolidColorBrush(Microsoft.UI.Colors.White);
+            dialog.Resources["TextControlBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 25, 36));
+            dialog.Resources["TextControlBackgroundPointerOver"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 18, 32, 46));
+            dialog.Resources["TextControlBackgroundFocused"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 22, 32));
+            dialog.Resources["TextControlBorderBrush"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(140, 0, 168, 255));
+            dialog.Resources["TextControlBorderBrushFocused"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255));
+            dialog.Resources["ComboBoxBackground"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 25, 36));
+            dialog.Resources["ComboBoxBackgroundPointerOver"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 18, 32, 46));
+            dialog.Resources["ComboBoxBorderBrush"] =
+                new SolidColorBrush(Windows.UI.Color.FromArgb(140, 0, 168, 255));
+
+            MakeCalendarContentDialogMovable(
+                dialog,
+                files.Count == 1
+                    ? "🚀 Subir archivo a Notion · Revisiones"
+                    : $"🚀 Subir {files.Count} archivos a Notion · Revisiones");
 
             refreshDialogState = () =>
             {
@@ -3158,8 +3458,8 @@ namespace Anfeta.UI.Views
             titleBox.TextChanged +=
                 (_, __) =>
                 {
-                    RefreshNaturalReminderPreview();
                     refreshDialogState();
+                    ScheduleDebouncedTitleProcessing();
                 };
 
             foreach (var editor in titleEditors)
@@ -3187,6 +3487,8 @@ namespace Anfeta.UI.Views
                 (_, __) => refreshDialogState();
             customReminderUnitCombo.SelectionChanged +=
                 (_, __) => refreshDialogState();
+
+            dialog.Closed += (_, __) => titleDebounceTimer?.Stop();
 
             dialog.Opened += (_, __) =>
             {
@@ -3339,7 +3641,7 @@ namespace Anfeta.UI.Views
                 ServerModified = now.ToString("yyyy-MM-dd HH:mm"),
                 Source = SearchSource.Notion,
                 Description = string.Empty,
-                SearchText = $"Revisiones {title}"
+                SearchText = $"Revisiones prtuzREVISION {title}"
             };
 
             var snapshot = App.LocalIndex.GetAll();

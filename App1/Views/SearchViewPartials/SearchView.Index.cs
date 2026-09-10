@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Services.Dropbox;
 using Anfeta.UI.Services.Search;
@@ -1017,29 +1017,72 @@ namespace Anfeta.UI.Views
                     syncAnchorUtc.Subtract(
                         TimeSpan.FromMinutes(3));
 
-                if (!string.IsNullOrWhiteSpace(lastSyncStr) &&
-                    DateTimeOffset.TryParse(lastSyncStr, out var lastSyncUtc))
+                var sourcesNeedingFullSync = new List<NotionDataSourceConfig>();
+                var sourcesForIncremental = new List<NotionDataSourceConfig>();
+
+                var localAll = App.LocalIndex.GetAll();
+
+                DateTimeOffset lastSyncUtc = DateTimeOffset.MinValue;
+                var hasValidLastSync = !string.IsNullOrWhiteSpace(lastSyncStr) &&
+                                       DateTimeOffset.TryParse(lastSyncStr, out lastSyncUtc);
+
+                var overlapAnchor = hasValidLastSync
+                    ? lastSyncUtc.ToUniversalTime().Subtract(TimeSpan.FromMinutes(3))
+                    : DateTimeOffset.MinValue;
+
+                if (hasValidLastSync)
                 {
-                    var overlapAnchor =
-                        lastSyncUtc
-                            .ToUniversalTime()
-                            .Subtract(TimeSpan.FromMinutes(3));
+                    calendarChangeAnchorUtc = overlapAnchor;
 
-                    calendarChangeAnchorUtc =
-                        overlapAnchor;
+                    foreach (var ds in NotionDataSources.Default.Where(x => x.Enabled))
+                    {
+                        var fullSyncKey = $"Notion.FullSyncCompleted.{ds.DataSourceId}";
+                        var hasFullSync = ApplicationData.Current.LocalSettings.Values[fullSyncKey] is bool b && b;
+                        var localCount = localAll.Count(r => r.Source == SearchSource.Notion && string.Equals(r.ExternalSourceName, ds.Name, StringComparison.OrdinalIgnoreCase));
 
-                    changedItems = await NotionIndexBuilder.BuildManyChangedSinceAsync(
-                        token,
-                        NotionDataSources.Default,
-                        overlapAnchor,
-                        CancellationToken.None);
+                        // Si una base nunca ha tenido sincronización completa o tiene menos de 10 registros en el índice local,
+                        // la sincronizamos completa para evitar que falten registros (por ejemplo Dominios o Clientes).
+                        if (!hasFullSync || localCount < 10)
+                        {
+                            sourcesNeedingFullSync.Add(ds);
+                        }
+                        else
+                        {
+                            sourcesForIncremental.Add(ds);
+                        }
+                    }
                 }
                 else
                 {
-                    changedItems = await NotionIndexBuilder.BuildManyAsync(
+                    sourcesNeedingFullSync.AddRange(NotionDataSources.Default.Where(x => x.Enabled));
+                }
+
+                changedItems = new List<SearchResultRow>();
+
+                if (sourcesNeedingFullSync.Count > 0)
+                {
+                    var fullItems = await NotionIndexBuilder.BuildManyAsync(
                         token,
-                        NotionDataSources.Default,
+                        sourcesNeedingFullSync,
                         CancellationToken.None);
+
+                    changedItems.AddRange(fullItems);
+
+                    foreach (var ds in sourcesNeedingFullSync)
+                    {
+                        ApplicationData.Current.LocalSettings.Values[$"Notion.FullSyncCompleted.{ds.DataSourceId}"] = true;
+                    }
+                }
+
+                if (sourcesForIncremental.Count > 0)
+                {
+                    var incrementalItems = await NotionIndexBuilder.BuildManyChangedSinceAsync(
+                        token,
+                        sourcesForIncremental,
+                        overlapAnchor,
+                        CancellationToken.None);
+
+                    changedItems.AddRange(incrementalItems);
                 }
 
                 var completedChangedIds =

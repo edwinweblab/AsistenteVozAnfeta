@@ -723,7 +723,6 @@ public sealed partial class SearchView
                 var btnMiao = new Button { Content = "📊 Vista Miao", IsEnabled = miaoStatus.IsInstalled };
                 var btnMiaoPdf = new Button { Content = "📑 PDF Miao", IsEnabled = miaoStatus.IsInstalled };
                 var pdfStatus = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Foreground = DailyMutedBrush, TextWrapping = TextWrapping.Wrap };
-
                 exportButtons.Children.Add(btnGenerateHtml);
                 exportButtons.Children.Add(btnGeneratePdf);
                 exportButtons.Children.Add(btnMiao);

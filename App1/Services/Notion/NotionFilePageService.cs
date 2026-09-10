@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -245,6 +245,32 @@ namespace Anfeta.UI.Services.Notion
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var file = files[index];
+
+                if (IsUrlShortcutFile(file.FullName))
+                {
+                    var shortcutUrl = TryExtractUrlFromShortcutFile(file.FullName);
+                    if (!string.IsNullOrWhiteSpace(shortcutUrl))
+                    {
+                        progress?.Report(new NotionFileUploadProgress(
+                            Completed: index,
+                            Total: files.Count,
+                            FileName: file.Name));
+
+                        uploadedFiles.Add(new UploadedNotionFile(
+                            string.Empty,
+                            file.Name,
+                            file.Extension,
+                            BookmarkUrl: shortcutUrl));
+
+                        progress?.Report(new NotionFileUploadProgress(
+                            Completed: index + 1,
+                            Total: files.Count,
+                            FileName: file.Name));
+
+                        continue;
+                    }
+                }
+
                 var contentType = GetContentType(file.Extension);
 
                 progress?.Report(new NotionFileUploadProgress(
@@ -332,6 +358,34 @@ namespace Anfeta.UI.Services.Notion
 
                 var info = new FileInfo(path);
 
+                if (IsUrlShortcutFile(info.FullName))
+                {
+                    var shortcutUrl = TryExtractUrlFromShortcutFile(info.FullName);
+                    if (!string.IsNullOrWhiteSpace(shortcutUrl))
+                    {
+                        progress?.Report(
+                            new NotionFileUploadProgress(
+                                index,
+                                validPaths.Count,
+                                info.Name));
+
+                        uploaded.Add(
+                            new UploadedNotionFile(
+                                string.Empty,
+                                info.Name,
+                                info.Extension,
+                                BookmarkUrl: shortcutUrl));
+
+                        progress?.Report(
+                            new NotionFileUploadProgress(
+                                index + 1,
+                                validPaths.Count,
+                                info.Name));
+
+                        continue;
+                    }
+                }
+
                 if (info.Length > MaxMultiPartBytes)
                 {
                     throw new InvalidOperationException(
@@ -373,6 +427,21 @@ namespace Anfeta.UI.Services.Notion
 
             foreach (var item in uploaded)
             {
+                if (!string.IsNullOrWhiteSpace(item.BookmarkUrl))
+                {
+                    children.Add(
+                        new Dictionary<string, object?>
+                        {
+                            ["object"] = "block",
+                            ["type"] = "bookmark",
+                            ["bookmark"] = new Dictionary<string, object?>
+                            {
+                                ["url"] = item.BookmarkUrl
+                            }
+                        });
+                    continue;
+                }
+
                 var blockType = GetBlockType(item.Extension);
 
                 var fileReference =
@@ -433,7 +502,45 @@ namespace Anfeta.UI.Services.Notion
         private sealed record UploadedNotionFile(
             string FileUploadId,
             string FileName,
-            string Extension);
+            string Extension,
+            string? BookmarkUrl = null);
+
+        public static bool IsUrlShortcutFile(string? path)
+        {
+            return string.Equals(
+                Path.GetExtension(path ?? string.Empty),
+                ".url",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static string? TryExtractUrlFromShortcutFile(string? path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                    return null;
+
+                var lines = File.ReadAllLines(path);
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+                    if (trimmed.StartsWith("URL=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var candidate = trimmed.Substring(4).Trim();
+                        if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri) &&
+                            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                        {
+                            return uri.ToString();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
 
         private static HttpClient CreateHttpClient(string token)
         {
@@ -904,6 +1011,52 @@ namespace Anfeta.UI.Services.Notion
 
             foreach (var uploaded in uploadedFiles)
             {
+                if (!string.IsNullOrWhiteSpace(uploaded.BookmarkUrl))
+                {
+                    children.Add(new Dictionary<string, object?>
+                    {
+                        ["object"] = "block",
+                        ["type"] = "bookmark",
+                        ["bookmark"] = new Dictionary<string, object?>
+                        {
+                            ["url"] = uploaded.BookmarkUrl
+                        }
+                    });
+
+                    children.Add(new Dictionary<string, object?>
+                    {
+                        ["object"] = "block",
+                        ["type"] = "paragraph",
+                        ["paragraph"] = new Dictionary<string, object?>
+                        {
+                            ["rich_text"] = new object[]
+                            {
+                                new Dictionary<string, object?>
+                                {
+                                    ["type"] = "text",
+                                    ["text"] = new Dictionary<string, object?>
+                                    {
+                                        ["content"] = $"Enlace: "
+                                    }
+                                },
+                                new Dictionary<string, object?>
+                                {
+                                    ["type"] = "text",
+                                    ["text"] = new Dictionary<string, object?>
+                                    {
+                                        ["content"] = uploaded.BookmarkUrl,
+                                        ["link"] = new Dictionary<string, object?>
+                                        {
+                                            ["url"] = uploaded.BookmarkUrl
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    continue;
+                }
+
                 var blockType = GetBlockType(uploaded.Extension);
 
                 var fileReference = new Dictionary<string, object?>

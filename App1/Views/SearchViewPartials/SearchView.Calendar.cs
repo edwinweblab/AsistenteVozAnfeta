@@ -232,8 +232,8 @@ namespace Anfeta.UI.Views
             var button = new Button
             {
                 Content = icon,
-                Width = 26,
-                Height = 18,
+                Width = 22,
+                Height = 16,
                 Padding = new Thickness(0),
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -242,7 +242,7 @@ namespace Anfeta.UI.Views
                 Background = new SolidColorBrush(Color.FromArgb(255, 37, 211, 102)),
                 BorderBrush = new SolidColorBrush(Color.FromArgb(200, 18, 140, 126)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(5),
+                CornerRadius = new CornerRadius(4),
                 Tag = url
             };
 
@@ -385,6 +385,9 @@ namespace Anfeta.UI.Views
             public double StackSpacing { get; init; }
             public double GridColumnSpacing { get; init; }
             public double GridRowSpacing { get; init; }
+
+            public double WrapGridItemWidth { get; init; }
+            public double WrapGridItemHeight { get; init; }
         }
 
         private readonly ConditionalWeakTable<
@@ -884,7 +887,7 @@ namespace Anfeta.UI.Views
         // que nombre y métricas sigan siendo legibles. El contenido del
         // calendario sí escala; esta banda informativa no baja de 48 px.
         private double CalendarHeaderHeight =>
-            Math.Max(48d, 54d * _calendarZoom);
+            Math.Max(50d, 56d * _calendarZoom);
         private double CalendarFontScale => Math.Clamp(_calendarZoom, 0.70, 1.35);
 
         private IReadOnlyList<NotionCalendarActivity> _activeTodayProjectSource = Array.Empty<NotionCalendarActivity>();
@@ -3427,6 +3430,13 @@ namespace Anfeta.UI.Views
                             GridUnitType.Star)
                     });
 
+                // 📑 Actividades secundarias (John)
+                headerContainer.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = GridLength.Auto
+                    });
+
                 // 📅 Calendario Notion
                 headerContainer.ColumnDefinitions.Add(
                     new ColumnDefinition
@@ -3466,7 +3476,7 @@ namespace Anfeta.UI.Views
                     {
                         Text = person,
                         FontSize = 13.5 * CalendarFontScale,
-                        Margin = new Thickness(0, 0, 48, 0),
+                        Margin = new Thickness(0, 0, 4, 0),
                         FontWeight =
                             Microsoft.UI.Text.FontWeights.SemiBold,
                         TextTrimming = TextTrimming.CharacterEllipsis,
@@ -3476,15 +3486,15 @@ namespace Anfeta.UI.Views
                 var compactMetrics = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
-                    Spacing = 4,
+                    Spacing = 3,
                     VerticalAlignment = VerticalAlignment.Center
                 };
 
                 compactMetrics.Children.Add(
                     new Border
                     {
-                        Padding = new Thickness(4, 0, 4, 0),
-                        CornerRadius = new CornerRadius(5),
+                        Padding = new Thickness(3, 0, 3, 0),
+                        CornerRadius = new CornerRadius(4),
                         Background = new SolidColorBrush(
                             Color.FromArgb(82, 14, 116, 144)),
                         BorderBrush = new SolidColorBrush(
@@ -3493,7 +3503,7 @@ namespace Anfeta.UI.Views
                         Child = new TextBlock
                         {
                             Text = $"C {currentCoverage:0}%",
-                            FontSize = Math.Max(9.6, 9.9 * CalendarFontScale),
+                            FontSize = Math.Max(8.8, 9.3 * CalendarFontScale),
                             FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                             Foreground = GetOneClickCoverageBrush(currentCoverage),
                             MaxLines = 1
@@ -3503,8 +3513,8 @@ namespace Anfeta.UI.Views
                 compactMetrics.Children.Add(
                     new Border
                     {
-                        Padding = new Thickness(4, 0, 4, 0),
-                        CornerRadius = new CornerRadius(5),
+                        Padding = new Thickness(3, 0, 3, 0),
+                        CornerRadius = new CornerRadius(4),
                         Background = new SolidColorBrush(
                             Color.FromArgb(105, 126, 34, 206)),
                         BorderBrush = new SolidColorBrush(
@@ -3513,7 +3523,7 @@ namespace Anfeta.UI.Views
                         Child = new TextBlock
                         {
                             Text = $"A {currentProgress:0}%",
-                            FontSize = Math.Max(9.6, 9.9 * CalendarFontScale),
+                            FontSize = Math.Max(8.8, 9.3 * CalendarFontScale),
                             FontWeight = Microsoft.UI.Text.FontWeights.Bold,
                             Foreground = new SolidColorBrush(
                                 Color.FromArgb(255, 245, 238, 255)),
@@ -3528,36 +3538,97 @@ namespace Anfeta.UI.Views
                         currentCoverage,
                         currentProgress));
 
-                headerContent.Children.Add(compactMetrics);
-
-                var headerButton = new Button
+                var personNameButton = new Button
                 {
-                    Content = headerContent,
-                    Padding = new Thickness(7, 0, 2, 0),
+                    Content = new TextBlock
+                    {
+                        Text = person,
+                        FontSize = 13.0 * CalendarFontScale,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        MaxLines = 1,
+                        VerticalAlignment = VerticalAlignment.Center
+                    },
+                    Padding = new Thickness(4, 0, 2, 0),
+                    Margin = new Thickness(0),
                     HorizontalAlignment = HorizontalAlignment.Stretch,
-                    VerticalAlignment = VerticalAlignment.Stretch,
                     HorizontalContentAlignment = HorizontalAlignment.Left,
-                    VerticalContentAlignment = VerticalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
                     Background = new SolidColorBrush(Colors.Transparent),
                     BorderThickness = new Thickness(0),
                     CornerRadius = new CornerRadius(0),
                     Tag = person
                 };
-
+                personNameButton.Click +=
+                    CalendarPersonPreview_Click;
+                personNameButton.ContextFlyout =
+                    BuildCalendarHeaderContextFlyout(person);
                 ToolTipService.SetToolTip(
-                    headerButton,
+                    personNameButton,
                     BuildCalendarHeaderMetricsTooltip(
                         person,
                         currentCoverage,
                         currentProgress,
                         includeTitle: true));
 
-                // El encabezado completo reemplaza al antiguo botón del ojo.
-                headerButton.Click +=
+                var metricsButton = new Button
+                {
+                    Content = compactMetrics,
+                    Padding = new Thickness(4, 0, 2, 0),
+                    Margin = new Thickness(0),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    CornerRadius = new CornerRadius(0),
+                    Tag = person
+                };
+                metricsButton.Click +=
                     CalendarPersonPreview_Click;
-
-                headerButton.ContextFlyout =
+                metricsButton.ContextFlyout =
                     BuildCalendarHeaderContextFlyout(person);
+                ToolTipService.SetToolTip(
+                    metricsButton,
+                    BuildCalendarHeaderMetricsTooltip(
+                        person,
+                        currentCoverage,
+                        currentProgress));
+
+                var isJohn = string.Equals(person, "John", StringComparison.OrdinalIgnoreCase);
+
+                Button? secondaryActivitiesButton = null;
+                if (isJohn)
+                {
+                    secondaryActivitiesButton = new Button
+                    {
+                        Content = "📑",
+                        Width = 25,
+                        Height = Math.Max(24, headerHeight - 16),
+                        Margin = new Thickness(0, 4, 1.5, 4),
+                        Padding = new Thickness(0),
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalContentAlignment = HorizontalAlignment.Center,
+                        VerticalContentAlignment = VerticalAlignment.Center,
+                        FontSize = 11.0 * CalendarFontScale,
+                        Background =
+                            new SolidColorBrush(
+                                Color.FromArgb(48, 56, 189, 248)),
+                        BorderBrush =
+                            new SolidColorBrush(
+                                Color.FromArgb(150, 56, 189, 248)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(5),
+                        Tag = person
+                    };
+
+                    ToolTipService.SetToolTip(
+                        secondaryActivitiesButton,
+                        "Actividades secundarias de John");
+
+                    secondaryActivitiesButton.Click +=
+                        CalendarJohnSecondaryActivities_Click;
+                }
 
                 var hasPersonNotionCalendar =
                     TryGetCalendarPersonNotionUrl(
@@ -3567,15 +3638,15 @@ namespace Anfeta.UI.Views
                 var notionCalendarButton = new Button
                 {
                     Content = "📅",
-                    Width = 28,
-                    Height = Math.Max(26, headerHeight - 14),
-                    Margin = new Thickness(0, 5, 3, 5),
+                    Width = 25,
+                    Height = Math.Max(24, headerHeight - 16),
+                    Margin = new Thickness(0, 4, 1.5, 4),
                     Padding = new Thickness(0),
                     HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Center,
                     HorizontalContentAlignment = HorizontalAlignment.Center,
                     VerticalContentAlignment = VerticalAlignment.Center,
-                    FontSize = 11.5 * CalendarFontScale,
+                    FontSize = 11.0 * CalendarFontScale,
                     Background =
                         new SolidColorBrush(
                             Color.FromArgb(48, 56, 189, 248)),
@@ -3583,7 +3654,7 @@ namespace Anfeta.UI.Views
                         new SolidColorBrush(
                             Color.FromArgb(150, 56, 189, 248)),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6),
+                    CornerRadius = new CornerRadius(5),
                     Tag = person,
                     Visibility =
                         hasPersonNotionCalendar
@@ -3601,15 +3672,15 @@ namespace Anfeta.UI.Views
                 var optimizeButton = new Button
                 {
                     Content = "⚡",
-                    Width = 28,
-                    Height = Math.Max(26, headerHeight - 14),
-                    Margin = new Thickness(0, 5, 3, 5),
+                    Width = 25,
+                    Height = Math.Max(24, headerHeight - 16),
+                    Margin = new Thickness(0, 4, 1.5, 4),
                     Padding = new Thickness(0),
                     HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Center,
                     HorizontalContentAlignment = HorizontalAlignment.Center,
                     VerticalContentAlignment = VerticalAlignment.Center,
-                    FontSize = 12.5 * CalendarFontScale,
+                    FontSize = 11.5 * CalendarFontScale,
                     Background =
                         new SolidColorBrush(
                             Color.FromArgb(55, 250, 204, 21)),
@@ -3617,7 +3688,7 @@ namespace Anfeta.UI.Views
                         new SolidColorBrush(
                             Color.FromArgb(155, 250, 204, 21)),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6),
+                    CornerRadius = new CornerRadius(5),
                     Tag = person
                 };
 
@@ -3631,15 +3702,15 @@ namespace Anfeta.UI.Views
                 var moreButton = new Button
                 {
                     Content = "⋯",
-                    Width = 26,
-                    Height = Math.Max(26, headerHeight - 14),
-                    Margin = new Thickness(0, 5, 3, 5),
-                    Padding = new Thickness(0, 0, 0, 5),
+                    Width = 24,
+                    Height = Math.Max(24, headerHeight - 16),
+                    Margin = new Thickness(0, 4, 1.5, 4),
+                    Padding = new Thickness(0, 0, 0, 4),
                     HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Center,
                     HorizontalContentAlignment = HorizontalAlignment.Center,
                     VerticalContentAlignment = VerticalAlignment.Center,
-                    FontSize = 15 * CalendarFontScale,
+                    FontSize = 13.5 * CalendarFontScale,
                     Background =
                         new SolidColorBrush(
                             Lighten(_calendarThemeColor, 0.06)),
@@ -3647,7 +3718,7 @@ namespace Anfeta.UI.Views
                         new SolidColorBrush(
                             Lighten(_calendarThemeColor, 0.20)),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6),
+                    CornerRadius = new CornerRadius(5),
                     Tag = person,
                     Flyout = BuildCalendarHeaderContextFlyout(person)
                 };
@@ -3656,35 +3727,80 @@ namespace Anfeta.UI.Views
                     moreButton,
                     $"Más opciones de {person}");
 
-                Grid.SetColumn(headerButton, 0);
-                var nameAndPriority = new Grid();
-                nameAndPriority.Children.Add(headerButton);
-                var rightActionsPanel = new StackPanel
+                var nameAndPriority = new Grid
                 {
-                    Orientation = Orientation.Vertical,
-                    Spacing = 2,
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Top,
-                    Margin = new Thickness(0, 2, 2, 0)
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch
                 };
+                nameAndPriority.RowDefinitions.Add(
+                    new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                nameAndPriority.RowDefinitions.Add(
+                    new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                // Fila 0: Nombre de persona (Columna 0, 1*) y 3 Badges de prioridad (Columna 1, Auto)
+                var row0 = new Grid
+                {
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                row0.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row0.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = GridLength.Auto });
+
                 var priorityButton = CreatePriority00Button(person);
-                rightActionsPanel.Children.Add(priorityButton);
+                priorityButton.HorizontalAlignment = HorizontalAlignment.Right;
+                priorityButton.VerticalAlignment = VerticalAlignment.Center;
+                priorityButton.Margin = new Thickness(1, 0, 1, 0);
+
+                Grid.SetColumn(personNameButton, 0);
+                Grid.SetColumn(priorityButton, 1);
+                row0.Children.Add(personNameButton);
+                row0.Children.Add(priorityButton);
+
+                // Fila 1: Métricas C % y A % (morado) (Columna 0, 1*) y WhatsApp (Columna 1, Auto)
+                var row1 = new Grid
+                {
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                row1.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row1.ColumnDefinitions.Add(
+                    new ColumnDefinition { Width = GridLength.Auto });
+
+                Grid.SetColumn(metricsButton, 0);
+                row1.Children.Add(metricsButton);
+
                 var whatsAppButton = CreateCalendarPersonWhatsAppButton(person);
                 if (whatsAppButton != null)
                 {
-                    rightActionsPanel.Children.Add(whatsAppButton);
+                    whatsAppButton.HorizontalAlignment = HorizontalAlignment.Right;
+                    whatsAppButton.VerticalAlignment = VerticalAlignment.Center;
+                    whatsAppButton.Margin = new Thickness(1, 0, 1, 0);
+                    Grid.SetColumn(whatsAppButton, 1);
+                    row1.Children.Add(whatsAppButton);
                 }
-                nameAndPriority.Children.Add(rightActionsPanel);
+
+                Grid.SetRow(row0, 0);
+                Grid.SetRow(row1, 1);
+                nameAndPriority.Children.Add(row0);
+                nameAndPriority.Children.Add(row1);
+
                 Grid.SetColumn(nameAndPriority, 0);
                 headerContainer.Children.Add(nameAndPriority);
 
-                Grid.SetColumn(notionCalendarButton, 1);
+                if (secondaryActivitiesButton != null)
+                {
+                    Grid.SetColumn(secondaryActivitiesButton, 1);
+                    headerContainer.Children.Add(secondaryActivitiesButton);
+                }
+
+                Grid.SetColumn(notionCalendarButton, 2);
                 headerContainer.Children.Add(notionCalendarButton);
 
-                Grid.SetColumn(optimizeButton, 2);
+                Grid.SetColumn(optimizeButton, 3);
                 headerContainer.Children.Add(optimizeButton);
 
-                Grid.SetColumn(moreButton, 3);
+                Grid.SetColumn(moreButton, 4);
                 headerContainer.Children.Add(moreButton);
 
                 Canvas.SetLeft(headerContainer, left + 2);
@@ -6233,7 +6349,7 @@ namespace Anfeta.UI.Views
 
             value = Regex.Replace(
                 value,
-                @"\(\s*\d{2,4}[A-ZÁÉÍÓÚÑ]{0,12}\s*\)",
+                @"\b\d{2}-\[\d{2}[A-ZÁÉÍÓÚÑ]{3,4}\]|\b\d{2}-\d{2}[A-ZÁÉÍÓÚÑ]{3,4}\b|\(\s*\d{2,4}[A-ZÁÉÍÓÚÑ]{0,12}\s*\)",
                 " ",
                 RegexOptions.IgnoreCase |
                 RegexOptions.CultureInvariant);
@@ -6275,6 +6391,23 @@ namespace Anfeta.UI.Views
                 : value;
         }
 
+        private static readonly string[]
+            CalendarProjectMonth3LetterAbbreviations =
+            {
+                "ENE", "FEB", "MAR", "ABR", "MAY", "JUN",
+                "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"
+            };
+
+        private static string BuildCalendarTemplateMonthTag(
+            DateTime date)
+        {
+            var month = Math.Clamp(date.Month, 1, 12);
+            var yy = $"{date.Year % 100:00}";
+            var mm = $"{month:00}";
+            var abbr = CalendarProjectMonth3LetterAbbreviations[month - 1];
+            return $"{yy}-[{mm}{abbr}]";
+        }
+
         private string BuildCalendarQuickTemplateFinalTitle(
             CalendarQuickTemplateDefinition template,
             DateTime selectedDate,
@@ -6284,14 +6417,14 @@ namespace Anfeta.UI.Views
             string personTag)
         {
             var monthTag =
-                BuildCalendarProjectMonthKey(
+                BuildCalendarTemplateMonthTag(
                     selectedDate.Date);
 
             var titleParts = new[]
             {
                 "prtuzREVISION",
                 template.ProjectToken,
-                $"({monthTag})",
+                monthTag,
                 orderToken,
                 description,
                 domain,
@@ -19993,6 +20126,13 @@ namespace Anfeta.UI.Views
             NotionCalendarActivity activity,
             IReadOnlyList<NotionPreviewBlock>? blocks = null)
         {
+            return BuildCalendarActivityFullSpeechText(activity, blocks);
+        }
+
+        private static string BuildCalendarActivityFullSpeechText(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks)
+        {
             if (activity == null)
                 return string.Empty;
 
@@ -20010,16 +20150,34 @@ namespace Anfeta.UI.Views
                         ? $"Duración aproximada: {Math.Max(1, (int)Math.Round(duration.TotalHours))} horas"
                         : $"Duración aproximada: {(int)duration.TotalHours} horas y {duration.Minutes} minutos";
 
-            parts.Add(
-                $"Horario: {activity.Start:HH:mm} a {activity.End:HH:mm}. {durationText}");
-
             var title = CleanSpeechText(activity.Title);
             if (!string.IsNullOrWhiteSpace(title))
                 parts.Add($"Actividad: {title}");
 
+            if (!string.IsNullOrWhiteSpace(activity.Project))
+                parts.Add($"Proyecto: {CleanSpeechText(activity.Project)}");
+
+            if (!string.IsNullOrWhiteSpace(activity.Person))
+                parts.Add($"Responsable: {activity.Person}");
+
+            parts.Add(
+                $"Horario: {activity.Start:HH:mm} a {activity.End:HH:mm}. {durationText}");
+
             var status = CleanSpeechText(activity.Status);
             if (!string.IsNullOrWhiteSpace(status))
                 parts.Add($"Estado: {status}");
+
+            if (activity.ChecklistTotal > 0)
+            {
+                parts.Add(
+                    $"Avance del checklist: {activity.ChecklistCompleted} de {activity.ChecklistTotal} tareas completadas, {activity.ChecklistPercentage} por ciento");
+            }
+
+            if (activity.WorkedMinutes > 0)
+            {
+                parts.Add(
+                    $"Tiempo registrado: {activity.WorkedMinutes} minutos trabajados. Restan {activity.RemainingWorkMinutes} minutos");
+            }
 
             var update = CleanSpeechText(activity.UpdateText);
             if (!string.IsNullOrWhiteSpace(update))
@@ -20027,25 +20185,52 @@ namespace Anfeta.UI.Views
 
             var description = CleanSpeechText(activity.Description);
             if (!string.IsNullOrWhiteSpace(description))
-                parts.Add($"Resumen: {description}");
+                parts.Add($"Descripción: {description}");
 
-            foreach (var block in
-                     (blocks ?? Array.Empty<NotionPreviewBlock>())
-                     .Where(block =>
-                         !block.IsStrikethrough &&
-                         !(block.Kind == NotionPreviewBlockKind.ToDo && block.IsChecked) &&
-                         block.Kind != NotionPreviewBlockKind.Divider &&
-                         block.Kind != NotionPreviewBlockKind.Image &&
-                         block.Kind != NotionPreviewBlockKind.Pdf &&
-                         block.Kind != NotionPreviewBlockKind.File &&
-                         block.Kind != NotionPreviewBlockKind.Audio &&
-                         block.Kind != NotionPreviewBlockKind.Video &&
-                         block.Kind != NotionPreviewBlockKind.Embed)
-                     .Take(12))
+            if (activity.HasComments && !string.IsNullOrWhiteSpace(activity.LatestCommentText))
             {
-                var text = CleanSpeechText(block.Text);
-                if (!string.IsNullOrWhiteSpace(text))
-                    parts.Add(text);
+                var commentText = CleanSpeechText(activity.LatestCommentText);
+                if (!string.IsNullOrWhiteSpace(commentText))
+                {
+                    parts.Add($"Comentarios de Notion: {commentText}");
+                }
+            }
+
+            if (blocks != null && blocks.Count > 0)
+            {
+                var contentBlocks = blocks
+                    .Where(block =>
+                        !block.IsStrikethrough &&
+                        block.Kind != NotionPreviewBlockKind.Divider &&
+                        block.Kind != NotionPreviewBlockKind.Image &&
+                        block.Kind != NotionPreviewBlockKind.Pdf &&
+                        block.Kind != NotionPreviewBlockKind.File &&
+                        block.Kind != NotionPreviewBlockKind.Audio &&
+                        block.Kind != NotionPreviewBlockKind.Video &&
+                        block.Kind != NotionPreviewBlockKind.Embed)
+                    .Take(40);
+
+                var blockParts = new List<string>();
+                foreach (var block in contentBlocks)
+                {
+                    var text = CleanSpeechText(block.Text);
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        if (block.Kind == NotionPreviewBlockKind.ToDo)
+                        {
+                            blockParts.Add(block.IsChecked ? $"Completado: {text}" : $"Pendiente: {text}");
+                        }
+                        else
+                        {
+                            blockParts.Add(text);
+                        }
+                    }
+                }
+
+                if (blockParts.Count > 0)
+                {
+                    parts.Add("Contenido de la actividad: " + string.Join(". ", blockParts));
+                }
             }
 
             return string.Join(
@@ -20056,21 +20241,202 @@ namespace Anfeta.UI.Views
                     .Distinct(StringComparer.OrdinalIgnoreCase));
         }
 
-        private async Task StartCalendarActivitySpeechAsync(
+        private static string BuildCalendarActivityStructuredSummarySpeechText(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks)
+        {
+            if (activity == null) return string.Empty;
+
+            var parts = new List<string>();
+            var title = CleanSpeechText(activity.Title);
+            parts.Add($"Actividad pendiente: {title}");
+
+            if (!string.IsNullOrWhiteSpace(activity.Project))
+                parts.Add($"Proyecto: {CleanSpeechText(activity.Project)}");
+
+            if (!string.IsNullOrWhiteSpace(activity.Person))
+                parts.Add($"Asignada a {activity.Person}");
+
+            parts.Add($"Horario de {activity.Start:HH:mm} a {activity.End:HH:mm}");
+
+            if (activity.ChecklistTotal > 0)
+            {
+                parts.Add(
+                    $"Checklist con {activity.ChecklistCompleted} de {activity.ChecklistTotal} tareas ({activity.ChecklistPercentage} por ciento)");
+            }
+
+            if (activity.WorkedMinutes > 0)
+            {
+                parts.Add($"Tiempo trabajado {activity.WorkedMinutes} minutos, restan {activity.RemainingWorkMinutes} minutos");
+            }
+
+            if (!string.IsNullOrWhiteSpace(activity.Description))
+                parts.Add($"Objetivo: {CleanSpeechText(activity.Description)}");
+
+            if (activity.HasComments && !string.IsNullOrWhiteSpace(activity.LatestCommentText))
+            {
+                var comments = CleanSpeechText(activity.LatestCommentText);
+                if (!string.IsNullOrWhiteSpace(comments))
+                    parts.Add($"Comentarios clave: {comments}");
+            }
+
+            if (blocks != null && blocks.Count > 0)
+            {
+                var pendingTodos = blocks
+                    .Where(b => b.Kind == NotionPreviewBlockKind.ToDo && !b.IsChecked && !string.IsNullOrWhiteSpace(b.Text))
+                    .Select(b => CleanSpeechText(b.Text))
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Take(4)
+                    .ToList();
+
+                if (pendingTodos.Count > 0)
+                {
+                    parts.Add("Tareas pendientes: " + string.Join(", ", pendingTodos));
+                }
+            }
+
+            return string.Join(". ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+        }
+
+        private async Task<IReadOnlyList<NotionPreviewBlock>?> EnsureCalendarActivityBlocksAsync(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks)
+        {
+            if (blocks != null && blocks.Count > 0)
+                return blocks;
+
+            if (activity == null || string.IsNullOrWhiteSpace(activity.PageId))
+                return blocks;
+
+            if (TryGetCalendarProjectCachedContent(activity.PageId, out var cachedBlocks) &&
+                cachedBlocks != null && cachedBlocks.Count > 0)
+            {
+                return cachedBlocks;
+            }
+
+            try
+            {
+                var token = GetSavedNotionToken();
+                if (!string.IsNullOrWhiteSpace(token) && _notionPreviewService != null)
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    var loaded = await _notionPreviewService.GetPagePreviewAsync(token, activity.PageId, cts.Token);
+                    if (loaded != null && loaded.Count > 0)
+                    {
+                        SaveCalendarProjectCachedContent(activity.PageId, loaded);
+                        return loaded;
+                    }
+                }
+            }
+            catch { }
+
+            return blocks;
+        }
+
+        private static async Task<string> GenerateActivityAiSpeechSummaryAsync(
             NotionCalendarActivity activity,
             IReadOnlyList<NotionPreviewBlock>? blocks,
-            Button readButton,
-            Button stopButton)
+            CancellationToken ct = default)
         {
-            var speechText =
-                BuildCalendarActivitySpeechText(
-                    activity,
-                    blocks);
+            if (activity == null) return string.Empty;
 
+            var sb = new StringBuilder();
+            sb.AppendLine($"Actividad: {CleanSpeechText(activity.Title)}");
+            if (!string.IsNullOrWhiteSpace(activity.Project))
+                sb.AppendLine($"Proyecto: {CleanSpeechText(activity.Project)}");
+            if (!string.IsNullOrWhiteSpace(activity.Person))
+                sb.AppendLine($"Responsable: {activity.Person}");
+            sb.AppendLine($"Horario programado: {activity.Start:HH:mm} a {activity.End:HH:mm}");
+            if (!string.IsNullOrWhiteSpace(activity.Status))
+                sb.AppendLine($"Estado: {CleanSpeechText(activity.Status)}");
+            if (activity.ChecklistTotal > 0)
+                sb.AppendLine($"Checklist: {activity.ChecklistCompleted} de {activity.ChecklistTotal} tareas completadas ({activity.ChecklistPercentage}%)");
+            if (activity.WorkedMinutes > 0)
+                sb.AppendLine($"Tiempo trabajado: {activity.WorkedMinutes} min, restan {activity.RemainingWorkMinutes} min");
+            if (!string.IsNullOrWhiteSpace(activity.Description))
+                sb.AppendLine($"Descripción: {CleanSpeechText(activity.Description)}");
+            if (activity.HasComments && !string.IsNullOrWhiteSpace(activity.LatestCommentText))
+                sb.AppendLine($"Comentarios de Notion: {CleanSpeechText(activity.LatestCommentText)}");
+
+            if (blocks != null && blocks.Count > 0)
+            {
+                var blockLines = blocks
+                    .Where(b => !string.IsNullOrWhiteSpace(b.Text) && !b.IsStrikethrough)
+                    .Select(b => CleanSpeechText(b.Text))
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Take(25);
+                var joined = string.Join("; ", blockLines);
+                if (!string.IsNullOrWhiteSpace(joined))
+                    sb.AppendLine($"Notas y tareas del documento: {joined}");
+            }
+
+            try
+            {
+                string? groqKey = null;
+                try
+                {
+                    groqKey = await App.AppHost.Services.GetRequiredService<Anfeta.UI.Services.Groq.ApiKeyService>().GetActiveGroqKeyAsync();
+                }
+                catch { }
+
+                if (!string.IsNullOrWhiteSpace(groqKey))
+                {
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                    var systemPrompt =
+                        "Eres el asistente de voz de ANFETA. Genera un resumen oral muy conciso y fluido en español (máximo 75 palabras) para ser escuchado por voz sobre la siguiente actividad pendiente. " +
+                        "Sintetiza qué se debe hacer, su avance o estado actual, y qué tareas o comentarios clave están pendientes. " +
+                        "Reglas indispensables: " +
+                        "1. NO incluyas URLs, links ni menciones a páginas web. " +
+                        "2. NO uses formato markdown (nada de asteriscos, guiones ni títulos). " +
+                        "3. Habla de forma natural y profesional, lista para que el sintetizador de voz la dicte directamente. " +
+                        "4. NO empieces con frases como 'En resumen' ni 'Esta actividad'. Ve directo al grano.";
+
+                    var body = new
+                    {
+                        model = "llama-3.3-70b-versatile",
+                        messages = new object[]
+                        {
+                            new { role = "system", content = systemPrompt },
+                            new { role = "user", content = sb.ToString() }
+                        },
+                        temperature = 0.2,
+                        max_tokens = 250
+                    };
+
+                    using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", groqKey.Trim());
+                    request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+                    using var response = await http.SendAsync(request, ct);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var json = await response.Content.ReadAsStringAsync(ct);
+                        using var doc = JsonDocument.Parse(json);
+                        var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+                        if (!string.IsNullOrWhiteSpace(content))
+                        {
+                            return CleanSpeechText(content);
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return BuildCalendarActivityStructuredSummarySpeechText(activity, blocks);
+        }
+
+        private async Task PlaySpeechTextAsync(
+            string speechText,
+            Button? primaryButton,
+            Button? secondaryButton,
+            Button? stopButton,
+            string primaryButtonIdleText,
+            string secondaryButtonIdleText,
+            string readingStatusMessage)
+        {
             if (string.IsNullOrWhiteSpace(speechText))
             {
-                StatusText.Text =
-                    "Estado: Esta actividad no tiene contenido para leer.";
+                StatusText.Text = "Estado: Esta actividad no tiene texto para dictar.";
                 return;
             }
 
@@ -20078,63 +20444,199 @@ namespace Anfeta.UI.Views
             {
                 StopNotionPreviewSpeech();
 
-                readButton.Content = "🔊 Leyendo...";
-                readButton.IsEnabled = false;
-                stopButton.IsEnabled = true;
+                if (primaryButton != null)
+                {
+                    primaryButton.Content = "🔊 Leyendo...";
+                    primaryButton.IsEnabled = false;
+                }
+                if (secondaryButton != null)
+                {
+                    secondaryButton.IsEnabled = false;
+                }
+                if (stopButton != null)
+                {
+                    stopButton.IsEnabled = true;
+                }
 
-                var stream =
-                    await _previewSpeechSynth
-                        .SynthesizeTextToStreamAsync(
-                            speechText);
-
+                var stream = await _previewSpeechSynth.SynthesizeTextToStreamAsync(speechText);
                 var player = new MediaPlayer
                 {
-                    Source =
-                        MediaSource.CreateFromStream(
-                            stream,
-                            stream.ContentType)
+                    Source = MediaSource.CreateFromStream(stream, stream.ContentType)
                 };
 
                 _previewSpeechPlayer = player;
                 _previewSpeechPlaying = true;
 
-                void ResetButtons()
+                void ResetControls()
                 {
-                    if (ReferenceEquals(
-                            _previewSpeechPlayer,
-                            player))
+                    if (ReferenceEquals(_previewSpeechPlayer, player))
                     {
                         StopNotionPreviewSpeech();
                     }
 
-                    readButton.Content = "▶ Leer resumen";
-                    readButton.IsEnabled = true;
-                    stopButton.IsEnabled = false;
+                    if (primaryButton != null)
+                    {
+                        primaryButton.Content = primaryButtonIdleText;
+                        primaryButton.IsEnabled = true;
+                    }
+                    if (secondaryButton != null)
+                    {
+                        secondaryButton.Content = secondaryButtonIdleText;
+                        secondaryButton.IsEnabled = true;
+                    }
+                    if (stopButton != null)
+                    {
+                        stopButton.IsEnabled = false;
+                    }
                 }
 
-                player.MediaEnded +=
-                    (_, __) =>
-                        DispatcherQueue.TryEnqueue(
-                            ResetButtons);
+                player.MediaEnded += (_, __) => DispatcherQueue.TryEnqueue(ResetControls);
+                player.MediaFailed += (_, __) => DispatcherQueue.TryEnqueue(ResetControls);
 
-                player.MediaFailed +=
-                    (_, __) =>
-                        DispatcherQueue.TryEnqueue(
-                            ResetButtons);
-
-                StatusText.Text =
-                    "Estado: Leyendo resumen de la actividad...";
-
+                StatusText.Text = readingStatusMessage;
                 player.Play();
             }
             catch (Exception ex)
             {
                 StopNotionPreviewSpeech();
-                readButton.Content = "▶ Leer resumen";
-                readButton.IsEnabled = true;
+                if (primaryButton != null)
+                {
+                    primaryButton.Content = primaryButtonIdleText;
+                    primaryButton.IsEnabled = true;
+                }
+                if (secondaryButton != null)
+                {
+                    secondaryButton.Content = secondaryButtonIdleText;
+                    secondaryButton.IsEnabled = true;
+                }
+                if (stopButton != null)
+                {
+                    stopButton.IsEnabled = false;
+                }
+                StatusText.Text = $"Estado: Error al reproducir voz → {ex.Message}";
+            }
+        }
+
+        private async Task StartCalendarActivitySpeechAsync(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks,
+            Button readButton,
+            Button stopButton)
+        {
+            await StartCalendarActivityFullSpeechAsync(
+                activity,
+                blocks,
+                readButton,
+                otherButton: null,
+                stopButton);
+        }
+
+        private async Task StartCalendarActivityAiSpeechAsync(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks,
+            Button aiButton,
+            Button? otherButton,
+            Button stopButton)
+        {
+            if (activity == null) return;
+
+            if (IsCalendarActivityCompleted(activity))
+            {
+                StatusText.Text = "Estado: El dictado solo aplica para actividades pendientes por terminar.";
+                return;
+            }
+
+            var previousAiText = aiButton.Content?.ToString() ?? "✨ Resumen IA";
+            var previousOtherText = otherButton?.Content?.ToString() ?? "📄 Contenido";
+
+            aiButton.Content = "🧠 Resumiendo...";
+            aiButton.IsEnabled = false;
+            if (otherButton != null) otherButton.IsEnabled = false;
+            stopButton.IsEnabled = true;
+
+            try
+            {
+                var resolvedBlocks = await EnsureCalendarActivityBlocksAsync(activity, blocks);
+                var speechText = await GenerateActivityAiSpeechSummaryAsync(activity, resolvedBlocks);
+
+                if (string.IsNullOrWhiteSpace(speechText))
+                {
+                    speechText = BuildCalendarActivityStructuredSummarySpeechText(activity, resolvedBlocks);
+                }
+
+                await PlaySpeechTextAsync(
+                    speechText,
+                    aiButton,
+                    otherButton,
+                    stopButton,
+                    previousAiText,
+                    previousOtherText,
+                    "Estado: Dictando resumen inteligente con IA...");
+            }
+            catch (Exception ex)
+            {
+                StopNotionPreviewSpeech();
+                aiButton.Content = previousAiText;
+                aiButton.IsEnabled = true;
+                if (otherButton != null)
+                {
+                    otherButton.Content = previousOtherText;
+                    otherButton.IsEnabled = true;
+                }
                 stopButton.IsEnabled = false;
-                StatusText.Text =
-                    $"Estado: No se pudo leer la actividad → {ex.Message}";
+                StatusText.Text = $"Estado: No se pudo generar el resumen IA → {ex.Message}";
+            }
+        }
+
+        private async Task StartCalendarActivityFullSpeechAsync(
+            NotionCalendarActivity activity,
+            IReadOnlyList<NotionPreviewBlock>? blocks,
+            Button fullButton,
+            Button? otherButton,
+            Button stopButton)
+        {
+            if (activity == null) return;
+
+            if (IsCalendarActivityCompleted(activity))
+            {
+                StatusText.Text = "Estado: El dictado solo aplica para actividades pendientes por terminar.";
+                return;
+            }
+
+            var previousFullText = fullButton.Content?.ToString() ?? "📄 Contenido completo";
+            var previousOtherText = otherButton?.Content?.ToString() ?? "✨ Resumen IA";
+
+            fullButton.Content = "⌛ Preparando...";
+            fullButton.IsEnabled = false;
+            if (otherButton != null) otherButton.IsEnabled = false;
+            stopButton.IsEnabled = true;
+
+            try
+            {
+                var resolvedBlocks = await EnsureCalendarActivityBlocksAsync(activity, blocks);
+                var speechText = BuildCalendarActivityFullSpeechText(activity, resolvedBlocks);
+
+                await PlaySpeechTextAsync(
+                    speechText,
+                    fullButton,
+                    otherButton,
+                    stopButton,
+                    previousFullText,
+                    previousOtherText,
+                    "Estado: Dictando contenido completo de la actividad...");
+            }
+            catch (Exception ex)
+            {
+                StopNotionPreviewSpeech();
+                fullButton.Content = previousFullText;
+                fullButton.IsEnabled = true;
+                if (otherButton != null)
+                {
+                    otherButton.Content = previousOtherText;
+                    otherButton.IsEnabled = true;
+                }
+                stopButton.IsEnabled = false;
+                StatusText.Text = $"Estado: No se pudo dictar el contenido → {ex.Message}";
             }
         }
 
@@ -20706,34 +21208,70 @@ namespace Anfeta.UI.Views
                         activity);
                 };
 
-            var readButton =
-                BuildCardActionButton(
-                    "▶ Leer resumen");
+            var isCardPendingForSpeech =
+                _calendarProjectPreviewActive &&
+                !IsCalendarActivityCompleted(activity);
 
-            var stopSpeechButton =
-                BuildCardActionButton(
-                    "■ Detener");
+            Button? cardAiSpeechButton = null;
+            Button? cardFullSpeechButton = null;
+            Button? cardStopSpeechButton = null;
 
-            stopSpeechButton.IsEnabled = false;
+            if (isCardPendingForSpeech)
+            {
+                cardAiSpeechButton = BuildCardActionButton("✨ Resumen IA");
+                ToolTipService.SetToolTip(
+                    cardAiSpeechButton,
+                    "Escuchar resumen inteligente con IA (pendientes y comentarios).");
 
-            readButton.Click +=
-                async (_, __) =>
-                {
-                    await StartCalendarActivitySpeechAsync(
-                        activity,
-                        blocks: null,
-                        readButton,
-                        stopSpeechButton);
-                };
+                cardFullSpeechButton = BuildCardActionButton("📄 Contenido");
+                ToolTipService.SetToolTip(
+                    cardFullSpeechButton,
+                    "Escuchar contenido completo de la actividad (sin URLs).");
 
-            stopSpeechButton.Click +=
-                (_, __) =>
-                {
-                    StopNotionPreviewSpeech();
-                    readButton.Content = "▶ Leer resumen";
-                    readButton.IsEnabled = true;
-                    stopSpeechButton.IsEnabled = false;
-                };
+                cardStopSpeechButton = BuildCardActionButton("■ Detener");
+                cardStopSpeechButton.IsEnabled = false;
+
+                cardAiSpeechButton.Click +=
+                    async (_, __) =>
+                    {
+                        TryGetCalendarProjectCachedContent(
+                            activity.PageId,
+                            out var cachedBlocks);
+
+                        await StartCalendarActivityAiSpeechAsync(
+                            activity,
+                            cachedBlocks,
+                            cardAiSpeechButton,
+                            cardFullSpeechButton,
+                            cardStopSpeechButton);
+                    };
+
+                cardFullSpeechButton.Click +=
+                    async (_, __) =>
+                    {
+                        TryGetCalendarProjectCachedContent(
+                            activity.PageId,
+                            out var cachedBlocks);
+
+                        await StartCalendarActivityFullSpeechAsync(
+                            activity,
+                            cachedBlocks,
+                            cardFullSpeechButton,
+                            cardAiSpeechButton,
+                            cardStopSpeechButton);
+                    };
+
+                cardStopSpeechButton.Click +=
+                    (_, __) =>
+                    {
+                        StopNotionPreviewSpeech();
+                        cardAiSpeechButton.Content = "✨ Resumen IA";
+                        cardAiSpeechButton.IsEnabled = true;
+                        cardFullSpeechButton.Content = "📄 Contenido";
+                        cardFullSpeechButton.IsEnabled = true;
+                        cardStopSpeechButton.IsEnabled = false;
+                    };
+            }
 
             actions.Children.Add(previewButton);
             actions.Children.Add(messageButton);
@@ -20741,8 +21279,13 @@ namespace Anfeta.UI.Views
             actions.Children.Add(lockButton);
             actions.Children.Add(timerButton);
             actions.Children.Add(finishTimerButton);
-            actions.Children.Add(readButton);
-            actions.Children.Add(stopSpeechButton);
+
+            if (cardAiSpeechButton != null)
+                actions.Children.Add(cardAiSpeechButton);
+            if (cardFullSpeechButton != null)
+                actions.Children.Add(cardFullSpeechButton);
+            if (cardStopSpeechButton != null)
+                actions.Children.Add(cardStopSpeechButton);
 
             root.Children.Add(actions);
             root.Children.Add(contentHost);
@@ -20952,6 +21495,74 @@ namespace Anfeta.UI.Views
                         0,
                         0)
             };
+
+            if (!IsCalendarActivityCompleted(activity))
+            {
+                var speechPanel = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    Margin = new Thickness(0, 0, 0, Math.Max(4, 6 * cardScale)),
+                    HorizontalAlignment = HorizontalAlignment.Left
+                };
+
+                var aiBtn = new Button
+                {
+                    Content = "✨ Resumen IA",
+                    Height = Math.Max(28d, 32d * cardScale),
+                    Padding = new Thickness(10, 0, 10, 0),
+                    CornerRadius = new CornerRadius(6),
+                    Tag = activity
+                };
+                ToolTipService.SetToolTip(aiBtn, "Escuchar resumen inteligente generado con IA de esta actividad.");
+
+                var fullBtn = new Button
+                {
+                    Content = "📄 Contenido completo",
+                    Height = Math.Max(28d, 32d * cardScale),
+                    Padding = new Thickness(10, 0, 10, 0),
+                    CornerRadius = new CornerRadius(6),
+                    Tag = activity
+                };
+                ToolTipService.SetToolTip(fullBtn, "Escuchar todo el contenido y checklist de esta actividad (sin URLs).");
+
+                var stopBtn = new Button
+                {
+                    Content = "■ Detener",
+                    Height = Math.Max(28d, 32d * cardScale),
+                    Padding = new Thickness(10, 0, 10, 0),
+                    CornerRadius = new CornerRadius(6),
+                    IsEnabled = false,
+                    Tag = activity
+                };
+                ToolTipService.SetToolTip(stopBtn, "Detener la lectura de voz.");
+
+                aiBtn.Click += async (_, __) =>
+                {
+                    await StartCalendarActivityAiSpeechAsync(activity, blocks, aiBtn, fullBtn, stopBtn);
+                };
+
+                fullBtn.Click += async (_, __) =>
+                {
+                    await StartCalendarActivityFullSpeechAsync(activity, blocks, fullBtn, aiBtn, stopBtn);
+                };
+
+                stopBtn.Click += (_, __) =>
+                {
+                    StopNotionPreviewSpeech();
+                    aiBtn.Content = "✨ Resumen IA";
+                    aiBtn.IsEnabled = true;
+                    fullBtn.Content = "📄 Contenido completo";
+                    fullBtn.IsEnabled = true;
+                    stopBtn.IsEnabled = false;
+                };
+
+                speechPanel.Children.Add(aiBtn);
+                speechPanel.Children.Add(fullBtn);
+                speechPanel.Children.Add(stopBtn);
+
+                content.Children.Add(speechPanel);
+            }
 
             if (!string.IsNullOrWhiteSpace(
                     activity.Description))
@@ -25448,6 +26059,33 @@ namespace Anfeta.UI.Views
                     $"El calendario de {person} no tiene una URL válida de Notion");
         }
 
+        private async void CalendarJohnSecondaryActivities_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            const string defaultUrl =
+                "https://app.notion.com/p/36eabd7d91b780468151f8625cd04aa7?v=380abd7d91b780ddbf2d000c367145a2&source=copy_link";
+            const string secondaryUrlKey = "Calendar.John.SecondaryActivitiesUrl";
+            var configuredUrl = (ApplicationData.Current.LocalSettings.Values[secondaryUrlKey] as string ?? string.Empty).Trim();
+
+            var targetUrl = !string.IsNullOrWhiteSpace(configuredUrl)
+                ? configuredUrl
+                : defaultUrl;
+
+            HideCalendarActivityPreviewFlyout();
+
+            await OpenNotionPageWithFallbackAsync(
+                targetUrl,
+                desktopSuccessStatus:
+                    "Actividades secundarias de John abiertas en Notion Desktop",
+                browserSuccessStatus:
+                    "Actividades secundarias de John abiertas en el navegador",
+                failureStatus:
+                    "No se pudieron abrir las actividades secundarias de John",
+                invalidUrlStatus:
+                    "El enlace de actividades secundarias de John no tiene una URL válida de Notion");
+        }
+
         private async void CalendarOneClickSchedule_Click(
             object sender,
             RoutedEventArgs e)
@@ -25619,6 +26257,18 @@ namespace Anfeta.UI.Views
 
                 flyout.Items.Add(
                     new MenuFlyoutSeparator());
+            }
+
+            if (string.Equals(person, "John", StringComparison.OrdinalIgnoreCase))
+            {
+                var secondaryItem = new MenuFlyoutItem
+                {
+                    Text = "📑 Actividades secundarias de John",
+                    Tag = person
+                };
+                secondaryItem.Click += CalendarJohnSecondaryActivities_Click;
+                flyout.Items.Add(secondaryItem);
+                flyout.Items.Add(new MenuFlyoutSeparator());
             }
 
 
@@ -28454,14 +29104,34 @@ namespace Anfeta.UI.Views
                 ("eemma", "Emmanuel"), ("emmanuel", "Emmanuel"),
                 ("bbria", "Brian"), ("brian", "Brian"),
                 ("ggena", "Genaro"), ("genaro", "Genaro"),
-                ("nneft", "Neftali"),
-                ("neftali", "Neftali"), ("neft", "Neftali")
+                ("nnetf", "Neftali"), ("nneft", "Neftali"),
+                ("neftali", "Neftali"), ("nefta", "Neftali"),
+                ("neft", "Neftali"), ("netf", "Neftali"),
+                ("netfali", "Neftali"), ("nanoc", "Neftali")
             };
 
             foreach (var (alias, person) in aliases)
             {
                 if (clean.Contains(alias))
                     return person;
+            }
+
+            foreach (var person in ActiveCalendarPeople)
+            {
+                if (string.Equals(clean, person.ToLowerInvariant(), StringComparison.OrdinalIgnoreCase))
+                    return person;
+            }
+
+            if (!string.IsNullOrWhiteSpace(clean) &&
+                !clean.Contains("sinasignar") &&
+                !clean.Contains("unassigned") &&
+                !clean.Contains("none"))
+            {
+                var trimmed = value!.Trim();
+                if (trimmed.Length > 0)
+                {
+                    return char.ToUpperInvariant(trimmed[0]) + (trimmed.Length > 1 ? trimmed.Substring(1) : string.Empty);
+                }
             }
 
             return "Sin asignar";
@@ -36871,10 +37541,13 @@ namespace Anfeta.UI.Views
                             titleText);
 
                         var person =
-                            string.IsNullOrWhiteSpace(
-                                activity.Person)
-                                ? "Sin asignar"
-                                : activity.Person;
+                            !string.IsNullOrWhiteSpace(activity.Person) &&
+                            !string.Equals(activity.Person.Trim(), "sin asignar", StringComparison.OrdinalIgnoreCase)
+                                ? activity.Person
+                                : (!string.IsNullOrWhiteSpace(activity.OriginalPerson) &&
+                                   !string.Equals(activity.OriginalPerson.Trim(), "sin asignar", StringComparison.OrdinalIgnoreCase)
+                                    ? activity.OriginalPerson
+                                    : GetCalendarProjectPrimaryPerson(activity));
 
                         var normalizedDisplayPerson =
                             string.Join(
@@ -37757,29 +38430,39 @@ namespace Anfeta.UI.Views
                     ? GetCalendarActivityPreviewSizeMode()
                     : "hover";
 
+            var isExplicitLargeMode =
+                string.Equals(
+                    previewSizeMode,
+                    "large",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    previewSizeMode,
+                    "xlarge",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    previewSizeMode,
+                    "max",
+                    StringComparison.OrdinalIgnoreCase);
+
             var useWideLayout =
                 _calendarActivityPreviewPinned &&
-                (string.Equals(
-                     previewSizeMode,
-                     "large",
-                     StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(
-                     previewSizeMode,
-                     "xlarge",
-                     StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(
-                     previewSizeMode,
-                     "max",
-                     StringComparison.OrdinalIgnoreCase) ||
+                (isExplicitLargeMode ||
                  (string.Equals(
                       previewSizeMode,
                       "auto",
                       StringComparison.OrdinalIgnoreCase) &&
-                  (RootLayout?.ActualWidth ?? 0) >= 1250));
+                  (RootLayout?.ActualWidth ?? 0) >= 1150));
 
             var previewWidth = _calendarActivityPreviewScrollViewer?.ActualWidth ?? 0;
             if (previewWidth <= 0) previewWidth = _calendarActivityPreviewPopupCard?.Width ?? 0;
-            useWideLayout = useWideLayout && previewWidth >= 1100 * GetCalendarActivityPreviewUiScale();
+            if (previewWidth <= 0 && RootLayout != null) previewWidth = RootLayout.ActualWidth * 0.60;
+
+            // En Grande, Extra grande y Máximo se distribuye en 2 columnas
+            // (actividad seleccionada a la izquierda, lista a la derecha).
+            // Para mantener responsividad en pantallas o ventanas reducidas,
+            // si el ancho baja de 780px se apila a 1 columna sin desbordar.
+            var minTwoColumnThreshold = isExplicitLargeMode ? 780d : 1000d;
+            useWideLayout = useWideLayout && (previewWidth <= 0 || previewWidth >= minTwoColumnThreshold);
             if (!useWideLayout)
             {
                 root.Children.Add(
@@ -37819,7 +38502,7 @@ namespace Anfeta.UI.Views
                 {
                     Width =
                         new GridLength(
-                            0.36,
+                            0.42,
                             GridUnitType.Star)
                 });
 
@@ -37828,7 +38511,7 @@ namespace Anfeta.UI.Views
                 {
                     Width =
                         new GridLength(
-                            0.64,
+                            0.58,
                             GridUnitType.Star)
                 });
 
@@ -38679,6 +39362,14 @@ namespace Anfeta.UI.Views
             if (node is Border border)
                 padding = border.Padding;
 
+            var wrapGridItemWidth = 0d;
+            var wrapGridItemHeight = 0d;
+            if (node is VariableSizedWrapGrid wrapGrid)
+            {
+                wrapGridItemWidth = wrapGrid.ItemWidth;
+                wrapGridItemHeight = wrapGrid.ItemHeight;
+            }
+
             return new CalendarActivityPreviewVisualBaseline
             {
                 FontSize = fontSize,
@@ -38700,7 +39391,9 @@ namespace Anfeta.UI.Views
                 GridRowSpacing =
                     node is Grid rowGrid
                         ? rowGrid.RowSpacing
-                        : 0d
+                        : 0d,
+                WrapGridItemWidth = wrapGridItemWidth,
+                WrapGridItemHeight = wrapGridItemHeight
             };
         }
 
@@ -38755,6 +39448,21 @@ namespace Anfeta.UI.Views
                         36d);
             }
 
+            if (node is VariableSizedWrapGrid variableWrapGrid)
+            {
+                if (baseline.WrapGridItemWidth > 0)
+                {
+                    variableWrapGrid.ItemWidth =
+                        baseline.WrapGridItemWidth * scale;
+                }
+
+                if (baseline.WrapGridItemHeight > 0)
+                {
+                    variableWrapGrid.ItemHeight =
+                        baseline.WrapGridItemHeight * scale;
+                }
+            }
+
             if (node is FrameworkElement element)
             {
                 if (!double.IsNaN(baseline.Height) &&
@@ -38774,14 +39482,14 @@ namespace Anfeta.UI.Views
 
                 if (!double.IsNaN(baseline.Width) &&
                     baseline.Width > 0 &&
-                    baseline.Width <= 190d)
+                    baseline.Width <= 275d)
                 {
                     element.Width =
                         baseline.Width * scale;
                 }
 
                 if (baseline.MinWidth > 0 &&
-                    baseline.MinWidth <= 190d)
+                    baseline.MinWidth <= 275d)
                 {
                     element.MinWidth =
                         baseline.MinWidth * scale;
@@ -39774,25 +40482,35 @@ namespace Anfeta.UI.Views
                              "large",
                              StringComparison.OrdinalIgnoreCase))
                 {
-                    preferredWidth = 760d;
-                    preferredHeight = 900d;
+                    // Grande: organizado en 2 columnas, con ancho responsivo que
+                    // aprovecha pantallas medianas/grandes sin crecer infinitamente hacia abajo.
+                    preferredWidth =
+                        Math.Clamp(
+                            usableWidth * 0.62,
+                            880d,
+                            1300d);
+
+                    preferredHeight =
+                        Math.Clamp(
+                            availableHeight * 0.88,
+                            680d,
+                            1100d);
                 }
                 else if (string.Equals(
                              sizeMode,
                              "xlarge",
                              StringComparison.OrdinalIgnoreCase))
                 {
-                    // Extra grande: deja de ser un 900x1040 fijo.
-                    // Crece con ANFETA y aprovecha monitores 2K/4K.
+                    // Extra grande: 2 columnas amplias y confortables.
                     preferredWidth =
                         Math.Clamp(
-                            usableWidth * 0.66,
-                            980d,
+                            usableWidth * 0.78,
+                            1080d,
                             1900d);
 
                     preferredHeight =
                         Math.Clamp(
-                            availableHeight * 0.90,
+                            availableHeight * 0.92,
                             760d,
                             1500d);
                 }
@@ -41612,11 +42330,17 @@ namespace Anfeta.UI.Views
                 "Movimiento ANFETA",
                 GetCalendarDayMovementDetail(activity));
 
-            var largePreviewText = CalendarFontScale >= 1.15;
-            var actionItemWidth = largePreviewText ? 250d : 198d;
-            var actionItemHeight = largePreviewText ? 46d : 35d;
-            var actionButtonWidth = largePreviewText ? 242d : 190d;
-            var actionButtonHeight = largePreviewText ? 39d : 30d;
+            var previewSizeMode = GetCalendarActivityPreviewSizeMode();
+            var isExplicitLargeMode =
+                string.Equals(previewSizeMode, "large", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(previewSizeMode, "xlarge", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(previewSizeMode, "max", StringComparison.OrdinalIgnoreCase);
+
+            var largePreviewText = isExplicitLargeMode || CalendarFontScale >= 1.15;
+            var actionItemWidth = isExplicitLargeMode ? 260d : (largePreviewText ? 245d : 220d);
+            var actionItemHeight = largePreviewText ? 44d : 36d;
+            var actionButtonWidth = isExplicitLargeMode ? 252d : (largePreviewText ? 237d : 212d);
+            var actionButtonHeight = largePreviewText ? 38d : 31d;
 
             var actionsPanel = new VariableSizedWrapGrid
             {
@@ -41647,8 +42371,9 @@ namespace Anfeta.UI.Views
                         Width = actionButtonWidth,
                         Height = actionButtonHeight,
                         Margin = new Thickness(0, 0, 8, 6),
-                        Padding = new Thickness(10, 0, 10, 0),
+                        Padding = new Thickness(6, 0, 6, 0),
                         CornerRadius = new CornerRadius(6),
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
                         Tag = activity
                     };
 
@@ -41674,8 +42399,9 @@ namespace Anfeta.UI.Views
                         Width = actionButtonWidth,
                         Height = actionButtonHeight,
                         Margin = new Thickness(0, 0, 8, 6),
-                        Padding = new Thickness(10, 0, 10, 0),
+                        Padding = new Thickness(6, 0, 6, 0),
                         CornerRadius = new CornerRadius(6),
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
                         Tag = activity
                     };
 
@@ -41724,9 +42450,10 @@ namespace Anfeta.UI.Views
                     Margin =
                         new Thickness(0, 0, 8, 6),
                     Padding =
-                        new Thickness(10, 0, 10, 0),
+                        new Thickness(6, 0, 6, 0),
                     CornerRadius =
                         new CornerRadius(6),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                     Tag = activity
                 };
 
@@ -41739,8 +42466,17 @@ namespace Anfeta.UI.Views
 
             if (!activity.IsReviewMirror && !HasExactCalendarPhase(activity, "zREVISION"))
             {
-                var terminate = new Button { Content = "T · Terminar…", Width = actionButtonWidth,
-                    Height = actionButtonHeight, Margin = new Thickness(0, 0, 8, 6), Tag = activity };
+                var terminate = new Button
+                {
+                    Content = "T · Terminar…",
+                    Width = actionButtonWidth,
+                    Height = actionButtonHeight,
+                    Margin = new Thickness(0, 0, 8, 6),
+                    Padding = new Thickness(6, 0, 6, 0),
+                    CornerRadius = new CornerRadius(6),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Tag = activity
+                };
                 terminate.Click += CalendarContextComplete_Click;
                 actionsPanel.Children.Add(terminate);
             }
@@ -41751,8 +42487,9 @@ namespace Anfeta.UI.Views
                     Width = actionButtonWidth,
                     Height = actionButtonHeight,
                     Margin = new Thickness(0, 0, 8, 6),
-                    Padding = new Thickness(10, 0, 10, 0),
+                    Padding = new Thickness(6, 0, 6, 0),
                     CornerRadius = new CornerRadius(6),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                     Tag = activity
                 };
 
@@ -41781,8 +42518,9 @@ namespace Anfeta.UI.Views
                     Width = actionButtonWidth,
                     Height = actionButtonHeight,
                     Margin = new Thickness(0, 0, 8, 6),
-                    Padding = new Thickness(10, 0, 10, 0),
+                    Padding = new Thickness(6, 0, 6, 0),
                     CornerRadius = new CornerRadius(6),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                     Tag = activity,
                     IsEnabled = !activity.IsAutomationLocked
                 };
@@ -41819,50 +42557,92 @@ namespace Anfeta.UI.Views
                     });
             }
 
-            var readSpeechButton = new Button
+            var isShellPendingForSpeech = !IsCalendarActivityCompleted(activity);
+            if (isShellPendingForSpeech)
             {
-                Content = "▶ Leer resumen",
-                Width = actionButtonWidth,
-                Height = actionButtonHeight,
-                Margin = new Thickness(0, 0, 8, 6),
-                Padding = new Thickness(10, 0, 10, 0),
-                CornerRadius = new CornerRadius(6),
-                Tag = activity
-            };
-
-            var stopSpeechButton = new Button
-            {
-                Content = "■ Detener lectura",
-                Width = actionButtonWidth,
-                Height = actionButtonHeight,
-                Margin = new Thickness(0, 0, 8, 6),
-                Padding = new Thickness(10, 0, 10, 0),
-                CornerRadius = new CornerRadius(6),
-                IsEnabled = false,
-                Tag = activity
-            };
-
-            readSpeechButton.Click +=
-                async (_, __) =>
+                var aiSpeechButton = new Button
                 {
-                    await StartCalendarActivitySpeechAsync(
-                        activity,
-                        speechBlocks,
-                        readSpeechButton,
-                        stopSpeechButton);
+                    Content = "✨ Resumen IA",
+                    Width = actionButtonWidth,
+                    Height = actionButtonHeight,
+                    Margin = new Thickness(0, 0, 8, 6),
+                    Padding = new Thickness(6, 0, 6, 0),
+                    CornerRadius = new CornerRadius(6),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Tag = activity
                 };
+                ToolTipService.SetToolTip(
+                    aiSpeechButton,
+                    "Generar y escuchar un resumen inteligente con IA sobre estado, pendientes y comentarios.");
 
-            stopSpeechButton.Click +=
-                (_, __) =>
+                var fullSpeechButton = new Button
                 {
-                    StopNotionPreviewSpeech();
-                    readSpeechButton.Content = "▶ Leer resumen";
-                    readSpeechButton.IsEnabled = true;
-                    stopSpeechButton.IsEnabled = false;
+                    Content = "📄 Contenido completo",
+                    Width = actionButtonWidth,
+                    Height = actionButtonHeight,
+                    Margin = new Thickness(0, 0, 8, 6),
+                    Padding = new Thickness(6, 0, 6, 0),
+                    CornerRadius = new CornerRadius(6),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    Tag = activity
                 };
+                ToolTipService.SetToolTip(
+                    fullSpeechButton,
+                    "Escuchar todo el contenido, detalles y comentarios de la actividad (sin URLs).");
 
-            actionsPanel.Children.Add(readSpeechButton);
-            actionsPanel.Children.Add(stopSpeechButton);
+                var stopSpeechButton = new Button
+                {
+                    Content = "■ Detener",
+                    Width = actionButtonWidth,
+                    Height = actionButtonHeight,
+                    Margin = new Thickness(0, 0, 8, 6),
+                    Padding = new Thickness(6, 0, 6, 0),
+                    CornerRadius = new CornerRadius(6),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    IsEnabled = false,
+                    Tag = activity
+                };
+                ToolTipService.SetToolTip(
+                    stopSpeechButton,
+                    "Detener la reproducción de voz en curso.");
+
+                aiSpeechButton.Click +=
+                    async (_, __) =>
+                    {
+                        await StartCalendarActivityAiSpeechAsync(
+                            activity,
+                            speechBlocks,
+                            aiSpeechButton,
+                            fullSpeechButton,
+                            stopSpeechButton);
+                    };
+
+                fullSpeechButton.Click +=
+                    async (_, __) =>
+                    {
+                        await StartCalendarActivityFullSpeechAsync(
+                            activity,
+                            speechBlocks,
+                            fullSpeechButton,
+                            aiSpeechButton,
+                            stopSpeechButton);
+                    };
+
+                stopSpeechButton.Click +=
+                    (_, __) =>
+                    {
+                        StopNotionPreviewSpeech();
+                        aiSpeechButton.Content = "✨ Resumen IA";
+                        aiSpeechButton.IsEnabled = true;
+                        fullSpeechButton.Content = "📄 Contenido completo";
+                        fullSpeechButton.IsEnabled = true;
+                        stopSpeechButton.IsEnabled = false;
+                    };
+
+                actionsPanel.Children.Add(aiSpeechButton);
+                actionsPanel.Children.Add(fullSpeechButton);
+                actionsPanel.Children.Add(stopSpeechButton);
+            }
 
             root.Children.Add(actionsPanel);
 

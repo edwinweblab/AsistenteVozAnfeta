@@ -818,7 +818,7 @@ namespace Anfeta.UI.Views
                 await Task.Delay(150);
 
                 SearchBox.Focus(FocusState.Programmatic);
-                SelectTextInsideSearchBox();
+                MoveSearchBoxCaretToEnd();
             });
         }
 
@@ -829,7 +829,7 @@ namespace Anfeta.UI.Views
             if (textBox != null)
             {
                 textBox.Focus(FocusState.Programmatic);
-                textBox.SelectAll();
+                MoveSearchBoxCaretToEnd();
             }
         }
 
@@ -1106,7 +1106,7 @@ namespace Anfeta.UI.Views
             if (_resultGroupingMode is ResultGroupingMode.Domain or ResultGroupingMode.DomainNoBilling)
             {
                 var targetRows = _resultGroupingMode == ResultGroupingMode.DomainNoBilling
-                    ? rows.Where(r => GetWorkflowGroupState(r) != WorkflowBillingReferences).ToList()
+                    ? rows.Where(r => !IsExcludedByNoBillingMode(r)).ToList()
                     : rows;
 
                 var domainProjects = targetRows
@@ -1139,7 +1139,7 @@ namespace Anfeta.UI.Views
             if (_resultGroupingMode is ResultGroupingMode.Area or ResultGroupingMode.AreaNoBilling)
             {
                 var targetRows = _resultGroupingMode == ResultGroupingMode.AreaNoBilling
-                    ? rows.Where(r => GetWorkflowGroupState(r) != WorkflowBillingReferences).ToList()
+                    ? rows.Where(r => !IsExcludedByNoBillingMode(r)).ToList()
                     : rows;
 
                 var areaGroups = targetRows
@@ -1154,6 +1154,38 @@ namespace Anfeta.UI.Views
             }
 
             return projects.Select(group => new SearchResultGroup(group.Key, group));
+        }
+
+        private static bool IsExcludedByNoBillingMode(
+            SearchResultRow row)
+        {
+            if (row == null)
+                return false;
+
+            var source = (row.ExternalSourceName ?? string.Empty).Trim();
+
+            // Cobrar y pagar es la base de cobros/pagos.
+            if (string.Equals(
+                    source,
+                    "Cobrar y pagar",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var title = (row.DisplayName ?? row.Name ?? string.Empty).Trim();
+
+            // Detectamos COBRAR/PAGAR en el título de la actividad.
+            if (Regex.IsMatch(
+                    title,
+                    @"(?<![\p{L}\p{Nd}_])(?:a?prtuz|sprtuz|rtuz|z)?(?:COBRAR|PAGAR)(?![\p{L}\p{Nd}_])",
+                    RegexOptions.IgnoreCase |
+                    RegexOptions.CultureInvariant))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private static int GetWorkflowGroupState(
