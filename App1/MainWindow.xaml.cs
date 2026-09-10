@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.FunctionTests;
+using Anfeta.UI.FunctionTests;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.ViewModels;
 using Anfeta.UI.Views;
@@ -634,16 +634,16 @@ namespace Anfeta.UI
 
             return clean switch
             {
-                "iisai" or "iisiaia" or "isaias" or "isai" => "iisaia",
+                "iisai" or "iisiaia" or "isaias" => "iisaia",
                 "john" => "jjohn",
-                "karla" or "karl" => "kkarl",
-                "genaro" or "gena" => "ggena",
-                "neftali" or "neft" => "nneft",
-                "brian" or "bria" => "bbria",
-                "andrade" or "andr" => "aandr",
-                "emmanuel" or "emanuel" or "emma" => "eemma",
-                "sotelo" or "edua" or "eduardo" => "eedua",
-                "acalli" or "acal" => "aacal",
+                "karla" => "kkarl",
+                "genaro" => "ggena",
+                "neftali" => "nneft",
+                "brian" => "bbria",
+                "andrade" => "aandr",
+                "emmanuel" => "eemma",
+                "sotelo" or "ssote" or "eduardo" => "eedua",
+                "acalli" => "aacal",
                 _ => clean
             };
         }
@@ -821,6 +821,11 @@ namespace Anfeta.UI
             }
         }
 
+        internal void PlayNotificationSound(bool isUrgent = false)
+        {
+            _ = PlayIncomingReminderSoundAsync(isUrgent);
+        }
+
         private static void PlayAnfetaTone(
             uint frequency,
             uint durationMilliseconds)
@@ -838,8 +843,15 @@ namespace Anfeta.UI
             {
             }
 
-            // Respaldo únicamente si Windows/equipo no admite Beep().
-            MessageBeep(0x00000030); // MB_ICONEXCLAMATION
+            try
+            {
+                System.Media.SystemSounds.Exclamation.Play();
+            }
+            catch
+            {
+                // Respaldo únicamente si Windows/equipo no admite Beep().
+                MessageBeep(0x00000030); // MB_ICONEXCLAMATION
+            }
         }
 
 
@@ -1055,20 +1067,29 @@ namespace Anfeta.UI
                 return;
             }
 
+            var isPriority00 = reminder.Identity.Contains("assignment:00:", StringComparison.OrdinalIgnoreCase) ||
+                (reminder.Title ?? "").Contains("00", StringComparison.OrdinalIgnoreCase) ||
+                (reminder.Message ?? "").Contains("urgente (00)", StringComparison.OrdinalIgnoreCase);
+
+            var isAssignment = reminder.Identity.StartsWith("assignment:", StringComparison.OrdinalIgnoreCase);
+
+            var titleText = isPriority00
+                ? "🚨 Actividad Urgente Asignada (00)"
+                : (isAssignment ? "📌 Nueva actividad asignada" : "🔔 Nuevo recordatorio");
+
+            var titleColor = isPriority00
+                ? Color.FromArgb(255, 248, 113, 113)
+                : Color.FromArgb(255, 233, 213, 255);
+
             var title =
                 new TextBlock
                 {
-                    Text = "🔔 Nuevo recordatorio",
+                    Text = titleText,
                     FontSize = 13.5,
                     FontWeight =
                         Microsoft.UI.Text.FontWeights.SemiBold,
                     Foreground =
-                        new SolidColorBrush(
-                            Color.FromArgb(
-                                255,
-                                233,
-                                213,
-                                255))
+                        new SolidColorBrush(titleColor)
                 };
 
             var message =
@@ -1246,6 +1267,10 @@ namespace Anfeta.UI
             if (reminder.Message.Contains("meet", StringComparison.OrdinalIgnoreCase))
                 body.Children.Add(CreateMeetReminderAction(reminder));
 
+            var cardBorderColor = isPriority00
+                ? Color.FromArgb(255, 239, 68, 68)
+                : Color.FromArgb(255, 217, 70, 239);
+
             var card =
                 new Border
                 {
@@ -1262,12 +1287,7 @@ namespace Anfeta.UI
                                 24,
                                 36)),
                     BorderBrush =
-                        new SolidColorBrush(
-                            Color.FromArgb(
-                                255,
-                                217,
-                                70,
-                                239)),
+                        new SolidColorBrush(cardBorderColor),
                     BorderThickness =
                         new Thickness(2, 1, 1, 1),
                     Child = body
@@ -2385,6 +2405,15 @@ namespace Anfeta.UI
                        StringComparison.OrdinalIgnoreCase) ||
                    value.StartsWith(
                        "Revisión aprobada",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   value.StartsWith(
+                       "🚨",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   value.Contains(
+                       "urgente (00)",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   value.Contains(
+                       "00 · Urgente",
                        StringComparison.OrdinalIgnoreCase);
         }
 

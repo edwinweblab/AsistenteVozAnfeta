@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Models.Weblab;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -361,26 +361,68 @@ namespace Anfeta.UI.Services.Notion
             };
         }
 
+        internal static string[] ReadTitleAssignmentTags(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return Array.Empty<string>();
+            var results = new List<string>();
+
+            // 1. Tag seguido de variante opcional (e.g. jjohn00, jjohn 00, jjohn, ssote00)
+            foreach (Match m in Regex.Matches(title, @"(?<![\p{L}\p{Nd}_])(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\s*(?:001|002|00)?(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase))
+            {
+                var tag = m.Groups["tag"].Value.ToLowerInvariant();
+                results.Add(NormalizeTag(tag));
+            }
+
+            // 2. Variante prefijo seguida de tag (e.g. 00jjohn, 00 jjohn, 001kkarl)
+            foreach (Match m in Regex.Matches(title, @"(?<![\p{L}\p{Nd}_.:\-/])(?:001|002|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase))
+            {
+                var tag = m.Groups["tag"].Value.ToLowerInvariant();
+                results.Add(NormalizeTag(tag));
+            }
+
+            return results.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+            static string NormalizeTag(string t) => t switch
+            {
+                "iisai" => "iisaia",
+                "ssote" => "eedua",
+                _ => t
+            };
+        }
+
         internal static string[] ReadAssignmentKeys(JsonElement props, string title)
         {
+            var keys = new List<string>();
+
+            // 1. Propiedades de Notion (Assignee / Ejecutor Principal)
             // Nunca usar "Asignado por": es el emisor, no el responsable.
-            foreach (var alias in new[] { "Assignee/Ejecutor Principal", "Asignee/Ejecutor Principal", "Assignee / Ejecutor Principal", "Equipo weblab" })
+            // Nunca usar "Equipo weblab": es la lista de todo el equipo, no el responsable individual.
+            foreach (var alias in new[] { "Assignee/Ejecutor Principal", "Asignee/Ejecutor Principal", "Assignee / Ejecutor Principal", "Ejecutor Principal" })
             {
                 var property = props.EnumerateObject().FirstOrDefault(p => NormalizePropertyName(p.Name) == NormalizePropertyName(alias));
                 if (property.Value.ValueKind != JsonValueKind.Object) continue;
                 var type = GetString(property.Value, "type");
                 if ((type == "relation" || type == "people") && property.Value.TryGetProperty(type, out var entries) && entries.ValueKind == JsonValueKind.Array)
                 {
-                    return entries.EnumerateArray().SelectMany(entry => new[] { GetString(entry, "id"), GetString(entry, "name"),
+                    keys.AddRange(entries.EnumerateArray().SelectMany(entry => new[] { GetString(entry, "id"), GetString(entry, "name"),
                         entry.TryGetProperty("person", out var person) && person.ValueKind == JsonValueKind.Object ? GetString(person, "email") : "" })
-                        .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+                        .Where(value => !string.IsNullOrWhiteSpace(value)));
+                    break;
                 }
                 var value = ExtractPropertyText(property.Value);
-                return value.Split(new[] { ',', ';', '\n' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                var tokens = value.Split(new[] { ',', ';', '\n' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                if (tokens.Length > 0)
+                {
+                    keys.AddRange(tokens);
+                    break;
+                }
             }
-            // Páginas antiguas sin Assignee: sólo el último tag activo del título.
-            var tags = Regex.Matches(title ?? "", @"(?<![\p{L}\p{N}])(?:jjohn|kkarl|iisaia|iisai|eedua|aacal|aandr|eemma|bbria|ggena|nneft)(?:00\d*)?(?![\p{L}\p{N}])", RegexOptions.IgnoreCase);
-            return tags.Count == 0 ? Array.Empty<string>() : new[] { Regex.Replace(tags[^1].Value.ToLowerInvariant(), @"00\d*$", "") };
+
+            // 2. Tags en el título (ej. jjohn00, 00jjohn, 001kkarl, ssote00)
+            var titleTags = ReadTitleAssignmentTags(title);
+            keys.AddRange(titleTags);
+
+            return keys.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
 
         private static string FormatDisplayName(string title, string sourceName)

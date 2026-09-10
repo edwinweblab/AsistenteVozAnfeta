@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -206,22 +206,21 @@ namespace Anfeta.UI.Services.Notion
                 new(StringComparer.OrdinalIgnoreCase)
                 {
                     ["John"] = new[] { "jjohn", "john" },
-                    ["Karla"] = new[] { "kkarl", "karla", "karl" },
-                    ["Isaias"] = new[] { "iisai", "isaias", "isai" },
+                    ["Karla"] = new[] { "kkarl", "karla" },
+                    ["Isaias"] = new[] { "iisai", "iisaia", "isaias" },
                     ["Sotelo"] = new[]
                     {
-                        "ssote", "eedua", "sotelo",
-                        "eduardo", "sote", "edua"
+                        "ssote", "eedua", "sotelo", "eduardo"
                     },
-                    ["Acalli"] = new[] { "aacal", "acalli", "acal" },
-                    ["Andrade"] = new[] { "aandr", "andrade", "andr" },
+                    ["Acalli"] = new[] { "aacal", "acalli" },
+                    ["Andrade"] = new[] { "aandr", "andrade" },
                     ["Emmanuel"] = new[]
                     {
-                        "eemma", "emmanuel", "emanuel", "emma"
+                        "eemma", "emmanuel"
                     },
-                    ["Brian"] = new[] { "bbria", "brian", "bria" },
-                    ["Genaro"] = new[] { "ggena", "genaro", "gena" },
-                    ["Neftali"] = new[] { "nneft", "neftali", "neft" }
+                    ["Brian"] = new[] { "bbria", "brian" },
+                    ["Genaro"] = new[] { "ggena", "genaro" },
+                    ["Neftali"] = new[] { "nneft", "neftali" }
                 };
 
         private static readonly string[] ProjectAliases =
@@ -7698,16 +7697,16 @@ namespace Anfeta.UI.Services.Notion
 
             var tags = new[]
             {
-                "jjohn", "john",
-                "kkarl", "karl",
-                "iisai", "isai",
-                "ssote", "sote", "eedua", "edua",
-                "aacal", "acal",
-                "aandr", "andr",
-                "eemma", "emma",
-                "bbria", "bria",
-                "ggena", "gena",
-                "nneft", "neft"
+                "jjohn",
+                "kkarl",
+                "iisai", "iisaia",
+                "ssote", "eedua",
+                "aacal",
+                "aandr",
+                "eemma",
+                "bbria",
+                "ggena",
+                "nneft"
             };
 
             return tags.Any(tag =>
@@ -7730,44 +7729,33 @@ namespace Anfeta.UI.Services.Notion
 
                 ("kkarl", "Karla"),
                 ("karla", "Karla"),
-                ("karl", "Karla"),
 
+                ("iisaia", "Isaias"),
                 ("iisai", "Isaias"),
                 ("isaias", "Isaias"),
-                ("isai", "Isaias"),
 
                 ("ssote", "Sotelo"),
-                ("sotelo", "Sotelo"),
-                ("sote", "Sotelo"),
                 ("eedua", "Sotelo"),
+                ("sotelo", "Sotelo"),
                 ("eduardo", "Sotelo"),
-                ("edua", "Sotelo"),
 
                 ("aacal", "Acalli"),
                 ("acalli", "Acalli"),
-                ("acali", "Acalli"),
-                ("acal", "Acalli"),
 
                 ("aandr", "Andrade"),
                 ("andrade", "Andrade"),
-                ("andr", "Andrade"),
 
                 ("eemma", "Emmanuel"),
                 ("emmanuel", "Emmanuel"),
-                ("emanuel", "Emmanuel"),
-                ("emma", "Emmanuel"),
 
                 ("bbria", "Brian"),
                 ("brian", "Brian"),
-                ("bria", "Brian"),
 
                 ("ggena", "Genaro"),
                 ("genaro", "Genaro"),
-                ("gena", "Genaro"),
 
                 ("nneft", "Neftali"),
-                ("neftali", "Neftali"),
-                ("neft", "Neftali")
+                ("neftali", "Neftali")
             };
 
             foreach (var (alias, person) in aliases)

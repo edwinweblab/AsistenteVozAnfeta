@@ -16,6 +16,7 @@ using Windows.UI;
 using Windows.Storage;
 using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Services.Notion;
+using Anfeta.UI.Services.Search;
 
 namespace Anfeta.UI.Views
 {
@@ -28,7 +29,7 @@ namespace Anfeta.UI.Views
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex PriorityPrefixTag = new(
-            @"(?<![\p{L}\p{Nd}_])(?<variant>001|002|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])",
+            @"(?<![\p{L}\p{Nd}_.:\-/])(?<variant>001|002|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Dictionary<string, string> PriorityPeople = new(StringComparer.OrdinalIgnoreCase)
@@ -55,6 +56,9 @@ namespace Anfeta.UI.Views
         private static IEnumerable<(string Tag, string Variant)> GetPriorityMatches(SearchResultRow row)
         {
             var name = row.Name ?? string.Empty;
+            if (AssignmentChangeTracker.IsTerminated(name))
+                return Array.Empty<(string Tag, string Variant)>();
+
             if (Regex.IsMatch(name, @"(?i)(?<![\p{L}\p{Nd}_])(?:ccale|fftf)(?![\p{L}\p{Nd}_])"))
                 return Array.Empty<(string Tag, string Variant)>();
 
@@ -173,7 +177,6 @@ namespace Anfeta.UI.Views
                 if (chip != null) chip.IsChecked = false;
         }
 
-        private readonly Dictionary<string, (Button Btn00, Button Btn001, Button Btn002)> _priorityButtons = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Button> _priority00Buttons = new(StringComparer.OrdinalIgnoreCase);
         private DateTime _priority00LastRefresh = DateTime.MinValue;
         private bool _priority00Loading;
@@ -212,11 +215,16 @@ namespace Anfeta.UI.Views
                 _priority00Loaded = true;
                 _priority00IndexVersion = version;
 
-                foreach (var (tag, (btn00, btn001, btn002)) in _priorityButtons)
+                EnsureSeenHooked();
+                await PrioritySeenTracker.EnsureLoadedAsync();
+
+                foreach (var (tag, btn) in _priority00Buttons)
                 {
-                    btn00.Content = $"0·{_priority00Counts.GetValueOrDefault(tag)}";
-                    btn001.Content = $"01·{_priority001Counts.GetValueOrDefault(tag)}";
-                    btn002.Content = $"02·{_priority002Counts.GetValueOrDefault(tag)}";
+                    var count00 = _priority00Counts.GetValueOrDefault(tag);
+                    var count01 = _priority001Counts.GetValueOrDefault(tag);
+                    var count02 = _priority002Counts.GetValueOrDefault(tag);
+                    var person = PriorityPeople.FirstOrDefault(x => string.Equals(x.Value, tag, StringComparison.OrdinalIgnoreCase)).Key ?? tag;
+                    ApplySingleBadgeState(btn, person, tag, count00, count01, count02);
                 }
 
                 if (_priority00PanelTag != null) RenderPriority00Panel();
@@ -229,100 +237,262 @@ namespace Anfeta.UI.Views
             finally { _priority00Loading = false; }
         }
 
+        private bool _seenHooked;
+        private void EnsureSeenHooked()
+        {
+            if (_seenHooked) return;
+            _seenHooked = true;
+            PrioritySeenTracker.OnSeenChanged += () =>
+            {
+                DispatcherQueue?.TryEnqueue(() =>
+                {
+                    _priority00RenderedVersion = -1;
+                    RenderPriority00Panel();
+                });
+            };
+        }
+
+        private static void ApplySingleBadgeState(Button btn, string person, string tag, int count00, int count01, int count02)
+        {
+            if (count00 > 0)
+            {
+                btn.Content = $"{count00}";
+                btn.Background = new SolidColorBrush(Color.FromArgb(255, 185, 28, 28)); // Rojo urgente
+                btn.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+                btn.BorderBrush = new SolidColorBrush(Color.FromArgb(220, 248, 113, 113));
+                btn.BorderThickness = new Thickness(1.5);
+                btn.Visibility = Visibility.Visible;
+                ToolTipService.SetToolTip(btn, $"🔴 {count00} Urgente(s) (00) · {person}. Clic para ver actividades.");
+            }
+            else if (count01 > 0)
+            {
+                btn.Content = $"01·{count01}";
+                btn.Background = new SolidColorBrush(Color.FromArgb(255, 120, 53, 15)); // Ámbar / mostaza
+                btn.Foreground = new SolidColorBrush(Color.FromArgb(255, 254, 243, 199));
+                btn.BorderBrush = new SolidColorBrush(Color.FromArgb(220, 245, 158, 11));
+                btn.BorderThickness = new Thickness(1.5);
+                btn.Visibility = Visibility.Visible;
+                ToolTipService.SetToolTip(btn, $"🟡 {count01} Importante(s) (01) · {person}. Clic para ver actividades.");
+            }
+            else if (count02 > 0)
+            {
+                btn.Content = $"02·{count02}";
+                btn.Background = new SolidColorBrush(Color.FromArgb(255, 12, 45, 70)); // Azul secundario
+                btn.Foreground = new SolidColorBrush(Color.FromArgb(255, 186, 230, 253));
+                btn.BorderBrush = new SolidColorBrush(Color.FromArgb(220, 56, 189, 248));
+                btn.BorderThickness = new Thickness(1.5);
+                btn.Visibility = Visibility.Visible;
+                ToolTipService.SetToolTip(btn, $"🔵 {count02} Secundaria(s) (02) · {person}. Clic para ver actividades.");
+            }
+            else
+            {
+                btn.Content = "0";
+                btn.Visibility = Visibility.Collapsed;
+                ToolTipService.SetToolTip(btn, null);
+            }
+        }
+
         private FrameworkElement CreatePriority00Button(string person)
         {
             PriorityPeople.TryGetValue(person, out var tag);
             if (tag == null) return new Grid { Visibility = Visibility.Collapsed };
 
-            var panel = new StackPanel
+            var count00Init = _priority00Counts.GetValueOrDefault(tag);
+            var count01Init = _priority001Counts.GetValueOrDefault(tag);
+            var count02Init = _priority002Counts.GetValueOrDefault(tag);
+
+            // 1 solo badge adaptativo que prioriza 00 (rojo) > 01 (ámbar) > 02 (azul) > oculto
+            var btn = new Button
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 1.5,
+                Padding = new Thickness(6, 1, 6, 1),
+                MinWidth = 26,
+                MinHeight = 24,
+                Height = 25,
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                CornerRadius = new CornerRadius(6),
                 VerticalAlignment = VerticalAlignment.Center
             };
 
-            var fontSize = Math.Max(7.0, 7.8 * CalendarFontScale);
-            var padding = new Thickness(2, 0, 2, 0);
-            var radius = new CornerRadius(3);
-
-            var btn00 = new Button
+            if (_priority00Loaded)
             {
-                Content = _priority00Loaded ? $"0·{_priority00Counts.GetValueOrDefault(tag)}" : "0",
-                Padding = padding,
-                MinWidth = 0,
-                MinHeight = 0,
-                Height = 16,
-                FontSize = fontSize,
-                Background = new SolidColorBrush(Color.FromArgb(255, 75, 20, 20)),
-                Foreground = new SolidColorBrush(Color.FromArgb(255, 254, 202, 202)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 248, 113, 113)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = radius
-            };
-            ToolTipService.SetToolTip(btn00, $"🔴 Urgente (0) · {person}. Clic para ver todas las rápidas por orden de importancia.");
-
-            var btn001 = new Button
+                ApplySingleBadgeState(btn, person, tag, count00Init, count01Init, count02Init);
+            }
+            else
             {
-                Content = _priority00Loaded ? $"01·{_priority001Counts.GetValueOrDefault(tag)}" : "01",
-                Padding = padding,
-                MinWidth = 0,
-                MinHeight = 0,
-                Height = 16,
-                FontSize = fontSize,
-                Background = new SolidColorBrush(Color.FromArgb(255, 75, 52, 12)),
-                Foreground = new SolidColorBrush(Color.FromArgb(255, 254, 243, 199)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 251, 191, 36)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = radius
-            };
-            ToolTipService.SetToolTip(btn001, $"🟡 Importante (01) · {person}. Clic para ver todas las rápidas por orden de importancia.");
-
-            var btn002 = new Button
-            {
-                Content = _priority00Loaded ? $"02·{_priority002Counts.GetValueOrDefault(tag)}" : "02",
-                Padding = padding,
-                MinWidth = 0,
-                MinHeight = 0,
-                Height = 16,
-                FontSize = fontSize,
-                Background = new SolidColorBrush(Color.FromArgb(255, 12, 45, 70)),
-                Foreground = new SolidColorBrush(Color.FromArgb(255, 224, 242, 254)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(160, 56, 189, 248)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = radius
-            };
-            ToolTipService.SetToolTip(btn002, $"🔵 Secundaria (02) · {person}. Clic para ver todas las rápidas por orden de importancia.");
-
-            void OpenAllGrouped(string variant)
-            {
-                ShowCalendarPersonPreview(person);
-                _priority00PanelTag = tag;
-                _priority00PanelVariant = variant;
-                _priority00RenderedVersion = -1;
-                RenderPriority00Panel();
-                _ = PurgeDeletedPriorityActivitiesAsync(tag, silent: true);
+                btn.Content = "0";
+                btn.Visibility = Visibility.Collapsed;
             }
 
-            btn00.Click += (_, __) => OpenAllGrouped("00");
-            btn001.Click += (_, __) => OpenAllGrouped("001");
-            btn002.Click += (_, __) => OpenAllGrouped("002");
+            btn.Click += (_, __) =>
+            {
+                OpenPriority00Panel(person, tag);
+            };
 
-            _priorityButtons[tag] = (btn00, btn001, btn002);
-            _priority00Buttons[tag] = btn00;
-            panel.Children.Add(btn00);
-            panel.Children.Add(btn001);
-            panel.Children.Add(btn002);
-            return panel;
+            _priority00Buttons[tag] = btn;
+            return btn;
+        }
+
+        private void OpenPriority00Panel(string person, string tag)
+        {
+            if (CalendarPersonPreviewPanel == null || CalendarPersonPreviewItems == null) return;
+
+            _calendarPersonPreviewCts?.Cancel();
+            _calendarPersonPreviewCts?.Dispose();
+            _calendarPersonPreviewCts = new CancellationTokenSource();
+
+            _calendarPersonPreviewPerson = person;
+            _priority00PanelTag = tag;
+            _priority00PanelVariant = _priority00Counts.GetValueOrDefault(tag) > 0 ? "00"
+                : _priority001Counts.GetValueOrDefault(tag) > 0 ? "001" : "002";
+            _priority00RenderedVersion = -1;
+
+            CalendarPersonPreviewPanel.Visibility = Visibility.Visible;
+            CalendarPersonPreviewTitle.Text = $"Pendientes y Rápidas de {person}";
+            CalendarPersonPreviewDate.Text = "Todas las fechas · Ordenadas por importancia";
+
+            RenderPriority00Panel();
         }
 
         private Border BuildPriorityActivityCard(SearchResultRow row, Color borderTint)
         {
+            var is00 = GetPriorityMatches(row).Any(m => m.Variant == "00");
+            var rowKey = !string.IsNullOrWhiteSpace(row.ExternalId) ? row.ExternalId : row.Target;
+            PrioritySeenEntry? seenEntry = null;
+            var isSeen = is00 && PrioritySeenTracker.IsSeen(rowKey, out seenEntry);
+
             var stack = new StackPanel { Spacing = 7 };
-            stack.Children.Add(new TextBlock { Text = row.Name, TextWrapping = TextWrapping.Wrap, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 13.5 });
+
+            // Badge de estado Visto / Pendiente para 00
+            if (is00)
+            {
+                if (isSeen && seenEntry != null)
+                {
+                    var seenBadge = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(255, 20, 55, 30)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(200, 34, 197, 94)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(5),
+                        Padding = new Thickness(8, 3, 8, 3),
+                        HorizontalAlignment = HorizontalAlignment.Left
+                    };
+                    seenBadge.Child = new TextBlock
+                    {
+                        Text = $"✅ VISTO por {seenEntry.SeenBy} ({seenEntry.SeenAtUtc.ToLocalTime():dd/MM HH:mm})",
+                        FontSize = 11,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground = new SolidColorBrush(Color.FromArgb(255, 134, 239, 172))
+                    };
+                    stack.Children.Add(seenBadge);
+                }
+                else
+                {
+                    var pendingBadge = new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromArgb(255, 65, 20, 20)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(200, 239, 68, 68)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(5),
+                        Padding = new Thickness(8, 3, 8, 3),
+                        HorizontalAlignment = HorizontalAlignment.Left
+                    };
+                    pendingBadge.Child = new TextBlock
+                    {
+                        Text = "🔴 PENDIENTE DE VER (00 urgente no visto)",
+                        FontSize = 11,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                        Foreground = new SolidColorBrush(Color.FromArgb(255, 252, 165, 165))
+                    };
+                    stack.Children.Add(pendingBadge);
+                }
+            }
+
+            var titleTb = new TextBlock
+            {
+                Text = row.Name,
+                TextWrapping = TextWrapping.Wrap,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                FontSize = 13.5
+            };
+            if (isSeen)
+            {
+                titleTb.TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough;
+                titleTb.Opacity = 0.65;
+            }
+            stack.Children.Add(titleTb);
+
             stack.Children.Add(new TextBlock { Text = string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha registrada" : row.ScheduledDate, TextWrapping = TextWrapping.Wrap, Opacity = 0.75, FontSize = 11 });
             if (!string.IsNullOrWhiteSpace(row.ProjectUpdateStatus))
                 stack.Children.Add(new TextBlock { Text = "Última actualización: " + row.ProjectUpdateStatus, TextWrapping = TextWrapping.Wrap, FontSize = 11, Opacity = 0.85 });
+
             var actions = new StackPanel { Spacing = 6 };
+
+            // Botón para marcar / desmarcar visto
+            if (is00)
+            {
+                if (!isSeen)
+                {
+                    var markSeenBtn = new Button
+                    {
+                        Content = "👁️ Marcar como visto",
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        Foreground = new SolidColorBrush(Color.FromArgb(255, 134, 239, 172)),
+                        Background = new SolidColorBrush(Color.FromArgb(255, 20, 50, 30)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(160, 34, 197, 94)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(6),
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                    };
+                    ToolTipService.SetToolTip(markSeenBtn, "Confirmar que ya leíste y viste este 00 urgente para que quien lo envió lo sepa");
+                    markSeenBtn.Click += async (_, __) =>
+                    {
+                        markSeenBtn.IsEnabled = false;
+                        markSeenBtn.Content = "Guardando visto...";
+                        try
+                        {
+                            var myTag = ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] as string;
+                            var personName = !string.IsNullOrWhiteSpace(myTag) ? myTag : (_calendarPersonPreviewPerson ?? "Destinatario");
+                            await PrioritySeenTracker.MarkSeenAsync(rowKey, personName, row.DisplayName ?? row.Name);
+                            StatusText.Text = $"Estado: Actividad marcada como vista ✅ · {row.DisplayName ?? row.Name}";
+                            _priority00RenderedVersion = -1;
+                            RenderPriority00Panel();
+                        }
+                        catch (Exception ex)
+                        {
+                            markSeenBtn.IsEnabled = true;
+                            markSeenBtn.Content = "👁️ Marcar como visto";
+                            StatusText.Text = $"Estado: Error al marcar visto → {ex.Message}";
+                        }
+                    };
+                    actions.Children.Add(markSeenBtn);
+                }
+                else
+                {
+                    var unmarkBtn = new Button
+                    {
+                        Content = "✓ Visto (clic para desmarcar)",
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        Foreground = new SolidColorBrush(Color.FromArgb(200, 160, 170, 180)),
+                        Background = new SolidColorBrush(Color.FromArgb(100, 30, 40, 50)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(100, 100, 120, 140)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(6),
+                        FontSize = 11
+                    };
+                    ToolTipService.SetToolTip(unmarkBtn, "Desmarcar estado de visto");
+                    unmarkBtn.Click += async (_, __) =>
+                    {
+                        unmarkBtn.IsEnabled = false;
+                        await PrioritySeenTracker.UnmarkSeenAsync(rowKey);
+                        StatusText.Text = $"Estado: Visto desmarcado · {row.DisplayName ?? row.Name}";
+                        _priority00RenderedVersion = -1;
+                        RenderPriority00Panel();
+                    };
+                    actions.Children.Add(unmarkBtn);
+                }
+            }
+
             var open = new Button { Content = row.Source == SearchSource.Notion ? "Abrir en Notion" : "Abrir archivo", HorizontalAlignment = HorizontalAlignment.Stretch };
             open.Click += async (_, __) =>
             {
@@ -380,13 +550,16 @@ namespace Anfeta.UI.Views
             stack.Children.Add(actions);
             stack.Children.Add(content);
 
+            var effectiveBorderTint = isSeen ? Color.FromArgb(140, 34, 197, 94) : borderTint;
+            var effectiveBg = isSeen ? Color.FromArgb(255, 16, 26, 24) : Color.FromArgb(255, 20, 28, 38);
+
             var cardBorder = new Border
             {
                 Padding = new Thickness(12),
                 CornerRadius = new CornerRadius(10),
                 BorderThickness = new Thickness(1.5),
-                BorderBrush = new SolidColorBrush(borderTint),
-                Background = new SolidColorBrush(Color.FromArgb(255, 20, 28, 38)),
+                BorderBrush = new SolidColorBrush(effectiveBorderTint),
+                Background = new SolidColorBrush(effectiveBg),
                 Child = stack
             };
 
@@ -397,8 +570,8 @@ namespace Anfeta.UI.Views
             };
             cardBorder.PointerExited += (_, __) =>
             {
-                cardBorder.BorderBrush = new SolidColorBrush(borderTint);
-                cardBorder.Background = new SolidColorBrush(Color.FromArgb(255, 20, 28, 38));
+                cardBorder.BorderBrush = new SolidColorBrush(effectiveBorderTint);
+                cardBorder.Background = new SolidColorBrush(effectiveBg);
             };
 
             return cardBorder;
@@ -586,6 +759,9 @@ namespace Anfeta.UI.Views
             if (version == _priority00RenderedVersion) return;
             _priority00RenderedVersion = version;
 
+            EnsureSeenHooked();
+            _ = PrioritySeenTracker.EnsureLoadedAsync();
+
             var allMatches = App.LocalIndex.GetAll()
                 .Where(r => !IsExcludedPath(r.Target))
                 .DistinctBy(PriorityRowKey)
@@ -598,11 +774,24 @@ namespace Anfeta.UI.Views
             var secundarias002 = allMatches.Where(x => x.Match.Variant == "002").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
             var otras = allMatches.Where(x => x.Match.Variant != "00" && x.Match.Variant != "001" && x.Match.Variant != "002").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
+            // Separar 00 en pendientes y vistos para ordenarlos y diferenciarlos
+            var urgentesPendientes = urgentes00
+                .Where(r => !PrioritySeenTracker.IsSeen(!string.IsNullOrWhiteSpace(r.ExternalId) ? r.ExternalId : r.Target, out _))
+                .ToList();
+            var urgentesVistos = urgentes00
+                .Where(r => PrioritySeenTracker.IsSeen(!string.IsNullOrWhiteSpace(r.ExternalId) ? r.ExternalId : r.Target, out _))
+                .ToList();
+            var urgentesSorted = urgentesPendientes.Concat(urgentesVistos).ToList();
+
             var totalCount = urgentes00.Count + importantes001.Count + secundarias002.Count + otras.Count;
 
             CalendarPersonPreviewTitle.Text = $"Pendientes y Rápidas de {_calendarPersonPreviewPerson}";
             CalendarPersonPreviewDate.Text = "Todas las fechas · Ordenadas por importancia";
-            CalendarPersonPreviewSummary.Text = $"🔴 {urgentes00.Count} Urgentes · 🟡 {importantes001.Count} Importantes · 🔵 {secundarias002.Count} Secundarias";
+
+            var summary00 = urgentes00.Count > 0
+                ? $"🔴 {urgentes00.Count} Urgentes ({urgentesPendientes.Count} pendientes · {urgentesVistos.Count} vistos)"
+                : "🔴 0 Urgentes";
+            CalendarPersonPreviewSummary.Text = $"{summary00} · 🟡 {importantes001.Count} Importantes · 🔵 {secundarias002.Count} Secundarias";
             CalendarPersonPreviewItems.Children.Clear();
 
             if (totalCount == 0)
@@ -699,8 +888,11 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            // 1. Urgentes (0)
-            AddSection("🔴 Urgentes · 0", Color.FromArgb(255, 45, 18, 18), Color.FromArgb(255, 248, 113, 113), Color.FromArgb(255, 254, 202, 202), urgentes00, canDeleteAll: true);
+            // 1. Urgentes (00)
+            var section00Title = urgentes00.Count > 0
+                ? $"🔴 Urgentes (00) · {urgentesPendientes.Count} pendientes · {urgentesVistos.Count} vistos"
+                : "🔴 Urgentes (00)";
+            AddSection(section00Title, Color.FromArgb(255, 45, 18, 18), Color.FromArgb(255, 248, 113, 113), Color.FromArgb(255, 254, 202, 202), urgentesSorted, canDeleteAll: true);
 
             // 2. Importantes (01)
             AddSection("🟡 Importantes · 01", Color.FromArgb(255, 45, 34, 12), Color.FromArgb(255, 251, 191, 36), Color.FromArgb(255, 254, 243, 199), importantes001);

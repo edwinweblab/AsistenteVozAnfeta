@@ -1349,37 +1349,35 @@ namespace Anfeta.UI.Views
                 ["john"] = "John",
 
                 ["aandr"] = "Andrade",
-                ["andr"] = "Andrade",
                 ["andrade"] = "Andrade",
 
                 ["nneft"] = "Neftali",
-                ["neft"] = "Neftali",
                 ["neftali"] = "Neftali",
 
-                ["brian"] = "Brian",
                 ["bbria"] = "Brian",
-                ["bria"] = "Brian",
+                ["brian"] = "Brian",
 
+                ["ggena"] = "Genaro",
                 ["genaro"] = "Genaro",
-                ["gena"] = "Genaro",
 
+                ["iisaia"] = "Isaias",
+                ["iisai"] = "Isaias",
                 ["isaias"] = "Isaias",
                 ["isaías"] = "Isaias",
-                ["isai"] = "Isaias",
 
+                ["kkarl"] = "Karla",
                 ["karla"] = "Karla",
-                ["karl"] = "Karla",
 
+                ["eedua"] = "Sotelo",
+                ["ssote"] = "Sotelo",
                 ["sotelo"] = "Sotelo",
-                ["sote"] = "Sotelo",
+                ["eduardo"] = "Sotelo",
 
-                ["acali"] = "Acali",
-                ["acal"] = "Acali",
+                ["aacal"] = "Acali",
+                ["acalli"] = "Acali",
 
-                ["emmanuel"] = "Emmanuel",
-                ["emanuel"] = "Emmanuel",
-                ["emma"] = "Emmanuel",
-                ["emman"] = "Emmanuel"
+                ["eemma"] = "Emmanuel",
+                ["emmanuel"] = "Emmanuel"
             };
 
             var tokens = Regex.Matches(

@@ -2050,6 +2050,9 @@ namespace Anfeta.UI.Views
                     _activityToastTimer.Stop();
                     _activityToastTimer.Start();
                     ActivityAssignedToast.Visibility = Visibility.Visible;
+
+                    // Reproducir sonido distintivo de ANFETA (urgente si es variante 00)
+                    (App.MainWindowInstance as MainWindow)?.PlayNotificationSound(cleanVar == "00");
                 });
             }
             catch (Exception ex)
@@ -3675,6 +3678,7 @@ namespace Anfeta.UI.Views
             string title)
         {
             var now = DateTime.Now;
+            var assignedKeys = NotionIndexBuilder.ReadTitleAssignmentTags(title);
             var row = new SearchResultRow
             {
                 NodeId = pageId,
@@ -3688,7 +3692,10 @@ namespace Anfeta.UI.Views
                 ServerModified = now.ToString("yyyy-MM-dd HH:mm"),
                 Source = SearchSource.Notion,
                 Description = string.Empty,
-                SearchText = $"Revisiones prtuzREVISION {title}"
+                SearchText = $"Revisiones prtuzREVISION {title}",
+                AssignmentDataVersion = 1,
+                AssignmentKeys = assignedKeys,
+                NotionEditedUtc = DateTimeOffset.UtcNow
             };
 
             var snapshot = App.LocalIndex.GetAll();
@@ -3703,6 +3710,10 @@ namespace Anfeta.UI.Views
                 snapshot.Add(row);
 
             App.LocalIndex.Set(snapshot);
+
+            _priority00IndexVersion = -1;
+            _priority00RenderedVersion = -1;
+            RefreshPriority00Counts(force: true);
 
             var root = ApplicationData.Current.LocalSettings.Values[
                 LS_DropboxRoot] as string;

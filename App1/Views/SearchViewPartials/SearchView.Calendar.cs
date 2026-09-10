@@ -5201,7 +5201,7 @@ namespace Anfeta.UI.Views
                     new CancellationTokenSource(
                         TimeSpan.FromMinutes(2));
 
-                await _calendarQuickActivityService
+                var createdResult = await _calendarQuickActivityService
                     .CreateAsync(
                         token,
                         NotionFilePageService.RevisionesDataSourceId,
@@ -5209,6 +5209,20 @@ namespace Anfeta.UI.Views
                         start,
                         end,
                         cts.Token);
+
+                if (createdResult != null && !string.IsNullOrWhiteSpace(createdResult.PageId))
+                {
+                    _ = AddCreatedNotionPageToIndexAsync(createdResult.PageId, createdResult.PageUrl, finalTitle);
+                    string? cleanVar = null;
+                    var actState = AssignmentChangeTracker.GetActivityState(finalTitle);
+                    if (actState.StartsWith("00 · Urgente", StringComparison.OrdinalIgnoreCase))
+                        cleanVar = "00";
+                    else if (actState.StartsWith("01 · Importante", StringComparison.OrdinalIgnoreCase))
+                        cleanVar = "01";
+                    else if (actState.StartsWith("02 · Secundaria", StringComparison.OrdinalIgnoreCase))
+                        cleanVar = "02";
+                    ShowDiscreteActivityToast(finalTitle, person, cleanVar, createdResult.PageUrl);
+                }
 
                 await RefreshCalendarAfterQuickCreationAsync(
                     token,
@@ -7395,7 +7409,26 @@ namespace Anfeta.UI.Views
                         .ToList();
 
                 if (succeeded.Count > 0 && personCombo.SelectedItem is ComboBoxItem recentPerson)
-                    SaveNotionUploadRecentTags(new[] { GetCalendarMessageRecipientTag(recentPerson.Tag?.ToString() ?? "") });
+                {
+                    var pTag = recentPerson.Tag?.ToString() ?? "";
+                    SaveNotionUploadRecentTags(new[] { GetCalendarMessageRecipientTag(pTag) });
+                    foreach (var item in succeeded)
+                    {
+                        if (!string.IsNullOrWhiteSpace(item.CreatedPageId))
+                        {
+                            _ = AddCreatedNotionPageToIndexAsync(item.CreatedPageId, item.CreatedPageUrl, item.Title);
+                            string? cleanVar = null;
+                            var actState = AssignmentChangeTracker.GetActivityState(item.Title);
+                            if (actState.StartsWith("00 · Urgente", StringComparison.OrdinalIgnoreCase))
+                                cleanVar = "00";
+                            else if (actState.StartsWith("01 · Importante", StringComparison.OrdinalIgnoreCase))
+                                cleanVar = "01";
+                            else if (actState.StartsWith("02 · Secundaria", StringComparison.OrdinalIgnoreCase))
+                                cleanVar = "02";
+                            ShowDiscreteActivityToast(item.Title, recentPerson.Content?.ToString() ?? pTag, cleanVar, item.CreatedPageUrl);
+                        }
+                    }
+                }
 
                 var failed =
                     batchResults
@@ -8308,7 +8341,23 @@ namespace Anfeta.UI.Views
                             cts.Token);
 
                 if (personCombo.SelectedItem is ComboBoxItem recentPerson)
-                    SaveNotionUploadRecentTags(new[] { GetCalendarMessageRecipientTag(recentPerson.Tag?.ToString() ?? "") });
+                {
+                    var pTag = recentPerson.Tag?.ToString() ?? "";
+                    SaveNotionUploadRecentTags(new[] { GetCalendarMessageRecipientTag(pTag) });
+                    if (created != null && !string.IsNullOrWhiteSpace(created.PageId))
+                    {
+                        _ = AddCreatedNotionPageToIndexAsync(created.PageId, created.PageUrl, title);
+                        string? cleanVar = null;
+                        var actState = AssignmentChangeTracker.GetActivityState(title);
+                        if (actState.StartsWith("00 · Urgente", StringComparison.OrdinalIgnoreCase))
+                            cleanVar = "00";
+                        else if (actState.StartsWith("01 · Importante", StringComparison.OrdinalIgnoreCase))
+                            cleanVar = "01";
+                        else if (actState.StartsWith("02 · Secundaria", StringComparison.OrdinalIgnoreCase))
+                            cleanVar = "02";
+                        ShowDiscreteActivityToast(title, recentPerson.Content?.ToString() ?? pTag, cleanVar, created.PageUrl);
+                    }
+                }
 
                 // La copia ya existe: abrirla inmediatamente sin esperar a que
                 // la consulta incremental la indexe y la pinte en el calendario.
@@ -19363,7 +19412,7 @@ namespace Anfeta.UI.Views
             object sender,
             RoutedEventArgs e)
         {
-            CloseCalendarPersonPreviewPanel();
+            CloseCalendarPersonPreviewPanel(redrawCalendar: false);
         }
 
         private async void CalendarPersonPreviewRefresh_Click(
@@ -22033,9 +22082,17 @@ namespace Anfeta.UI.Views
         }
 
         private void CloseCalendarPersonPreviewPanel(
-            bool redrawCalendar = true)
+            bool redrawCalendar = false)
         {
             _priority00PanelTag = null;
+            try
+            {
+                _priorityPurgeCts?.Cancel();
+                _priorityPurgeCts?.Dispose();
+            }
+            catch { }
+            _priorityPurgeCts = null;
+
             StopNotionPreviewSpeech();
             try
             {
@@ -22060,14 +22117,16 @@ namespace Anfeta.UI.Views
             _calendarProjectContentPreloadCompleted = 0;
             _calendarProjectContentPreloadTotal = 0;
 
-            if (CalendarPersonPreviewItems != null)
-                CalendarPersonPreviewItems.Children.Clear();
-
+            // 1. Ocultar inmediatamente el panel para respuesta visual instantánea (0ms)
             if (CalendarPersonPreviewPanel != null)
             {
                 CalendarPersonPreviewPanel.Visibility =
                     Visibility.Collapsed;
             }
+
+            // 2. Limpiar elementos fuera de la vista
+            if (CalendarPersonPreviewItems != null)
+                CalendarPersonPreviewItems.Children.Clear();
 
             if (redrawCalendar)
             {
@@ -29139,20 +29198,15 @@ namespace Anfeta.UI.Views
             {
                 ("jjohn", "John"), ("john", "John"),
                 ("kkarl", "Karla"), ("karla", "Karla"),
-                ("iisai", "Isaias"), ("isaias", "Isaias"),
-                ("ssote", "Sotelo"), ("sotelo", "Sotelo"),
-                ("sote", "Sotelo"), ("eedua", "Sotelo"),
-                ("eduardo", "Sotelo"), ("edua", "Sotelo"),
+                ("iisaia", "Isaias"), ("iisai", "Isaias"), ("isaias", "Isaias"),
+                ("ssote", "Sotelo"), ("eedua", "Sotelo"), ("sotelo", "Sotelo"), ("eduardo", "Sotelo"),
                 ("aacal", "Acalli"), ("acalli", "Acalli"),
-                ("acali", "Acalli"), ("acal", "Acalli"),
                 ("aandr", "Andrade"), ("andrade", "Andrade"),
                 ("eemma", "Emmanuel"), ("emmanuel", "Emmanuel"),
                 ("bbria", "Brian"), ("brian", "Brian"),
                 ("ggena", "Genaro"), ("genaro", "Genaro"),
                 ("nnetf", "Neftali"), ("nneft", "Neftali"),
-                ("neftali", "Neftali"), ("nefta", "Neftali"),
-                ("neft", "Neftali"), ("netf", "Neftali"),
-                ("netfali", "Neftali"), ("nanoc", "Neftali")
+                ("neftali", "Neftali"), ("netfali", "Neftali"), ("nanoc", "Neftali")
             };
 
             foreach (var (alias, person) in aliases)
@@ -29483,16 +29537,16 @@ namespace Anfeta.UI.Views
 
             var tags = new[]
             {
-                "jjohn", "john",
-                "kkarl", "karl",
-                "iisai", "isai",
-                "ssote", "sote", "eedua", "edua",
-                "aacal", "acal",
-                "aandr", "andr",
-                "eemma", "emma",
-                "bbria", "bria",
-                "ggena", "gena",
-                "nneft", "neft"
+                "jjohn",
+                "kkarl",
+                "iisai", "iisaia",
+                "ssote", "eedua",
+                "aacal",
+                "aandr",
+                "eemma",
+                "bbria",
+                "ggena",
+                "nneft"
             };
 
             return tags.Any(tag =>

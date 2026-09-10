@@ -652,6 +652,14 @@ namespace Anfeta.UI.Views
                     created.PageUrl,
                     created.Title);
 
+                var matchedPerson = NotionUploadPersonTags.FirstOrDefault(p =>
+                    created.Title.Contains(p, StringComparison.OrdinalIgnoreCase));
+                string detectedVariant = "";
+                if (created.Title.Contains("001", StringComparison.OrdinalIgnoreCase)) detectedVariant = "001";
+                else if (created.Title.Contains("002", StringComparison.OrdinalIgnoreCase)) detectedVariant = "002";
+                else if (created.Title.Contains("00", StringComparison.OrdinalIgnoreCase)) detectedVariant = "00";
+                ShowDiscreteActivityToast(created.Title, matchedPerson ?? "", detectedVariant, created.PageUrl);
+
                 StatusText.Text =
                     $"Estado: Actividad creada desde Ctrl+V ✅ ({created.Title})";
             }

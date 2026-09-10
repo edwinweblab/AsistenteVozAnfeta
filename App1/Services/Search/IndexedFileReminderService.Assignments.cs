@@ -67,7 +67,7 @@ public sealed partial class IndexedFileReminderService
                 .Select(r => new { Id = r.ExternalId.Replace("-", "").ToLowerInvariant(), r.Name, r.ExternalUrl, r.Target, r.ScheduledDate,
                     Observation = new AssignmentObservation(r.ExternalId.Replace("-", "").ToLowerInvariant(),
                         IsAssigned(r.AssignmentKeys),
-                        AssignmentChangeTracker.GetActivityState(r.Name).Length > 0, r.NotionEditedUtc) }).ToList();
+                        AssignmentChangeTracker.IsActivityEligible(r.Name), r.NotionEditedUtc) }).ToList();
             if (rows.Count == 0) return; // Caché antigua: esperar la primera sincronización real.
             var file = Path.Combine(ApplicationData.Current.LocalFolder.Path, "assignments-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(user))) + ".json");
             var changed = await Task.Run(() =>
@@ -88,12 +88,25 @@ public sealed partial class IndexedFileReminderService
             if (!_started || _disposed || NormalizeReminderPersonTag(ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] as string) != tag) return;
             foreach (var row in rows.Where(r => changed.Contains(r.Id)))
             {
+                if (!AssignmentChangeTracker.IsActivityEligible(row.Name)) continue;
+
                 var target = string.IsNullOrWhiteSpace(row.ExternalUrl) ? row.Target : row.ExternalUrl;
                 if (string.IsNullOrWhiteSpace(target)) target = "https://www.notion.so/" + row.Id;
-                var message = $"Nueva actividad asignada a {name}: {row.Name}\nEstado: {AssignmentChangeTracker.GetActivityState(row.Name)}\nFecha de trabajo: {(string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha" : row.ScheduledDate)}";
+
+                var stateStr = AssignmentChangeTracker.GetActivityState(row.Name);
+                var isPriority00 = stateStr.StartsWith("00 · Urgente", StringComparison.OrdinalIgnoreCase);
+
+                var prefix = isPriority00 ? "🚨 Actividad urgente (00) asignada" : "Nueva actividad asignada";
+                var title = isPriority00 ? "🚨 Actividad Urgente Asignada (00)" : "Nueva actividad asignada";
+                var message = $"{prefix} a {name}: {row.Name}\nEstado: {(string.IsNullOrWhiteSpace(stateStr) ? "Sin estado" : stateStr)}\nFecha de trabajo: {(string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha" : row.ScheduledDate)}";
+
+                var identity = isPriority00
+                    ? $"assignment:00:{row.Id}:{Guid.NewGuid():N}"
+                    : $"assignment:{row.Id}:{Guid.NewGuid():N}";
+
                 // PageId vacío intencional: Enterado NO modifica la actividad ni crea mensajes en Notion.
-                ReminderDue?.Invoke(this, new IndexedFileReminder("assignment:" + row.Id + ":" + Guid.NewGuid().ToString("N"),
-                    "Nueva actividad asignada", message, target, DateTimeOffset.Now, SearchSource.Notion, tag, name, "", "", ""));
+                ReminderDue?.Invoke(this, new IndexedFileReminder(identity,
+                    title, message, target, DateTimeOffset.Now, SearchSource.Notion, tag, name, "", "", ""));
             }
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine("[Assignments] " + ex.GetType().Name); }

@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Models.Weblab;
 using Microsoft.UI.Dispatching;
 using System;
 using System.Collections.Generic;
@@ -523,16 +523,16 @@ namespace Anfeta.UI.Services.Search
 
             return clean switch
             {
-                "iisai" or "iisiaia" or "isaias" or "isai" => "iisaia",
+                "iisai" or "iisiaia" or "isaias" => "iisaia",
                 "john" => "jjohn",
-                "karla" or "karl" => "kkarl",
-                "genaro" or "gena" => "ggena",
-                "neftali" or "neft" => "nneft",
-                "brian" or "bria" => "bbria",
-                "andrade" or "andr" => "aandr",
-                "emmanuel" or "emanuel" or "emma" => "eemma",
-                "sotelo" or "edua" or "eduardo" => "eedua",
-                "acalli" or "acal" => "aacal",
+                "karla" => "kkarl",
+                "genaro" => "ggena",
+                "neftali" => "nneft",
+                "brian" => "bbria",
+                "andrade" => "aandr",
+                "emmanuel" => "eemma",
+                "sotelo" or "ssote" or "eduardo" => "eedua",
+                "acalli" => "aacal",
                 _ => clean
             };
         }
