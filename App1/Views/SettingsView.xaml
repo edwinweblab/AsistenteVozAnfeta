@@ -1,4 +1,4 @@
-﻿<Page
+<Page
     x:Class="Anfeta.UI.Views.SettingsView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -122,10 +122,6 @@
                                     <ComboBoxItem Content="John" Tag="jjohn" />
                                     <ComboBoxItem Content="Karla" Tag="kkarl" />
                                     <ComboBoxItem Content="Isaias" Tag="iisaia" />
-                                    <ComboBoxItem Content="Sotelo" Tag="eedua" />
-                                    <ComboBoxItem Content="Acalli" Tag="aacal" />
-                                    <ComboBoxItem Content="Andrade" Tag="aandr" />
-                                    <ComboBoxItem Content="Emmanuel" Tag="eemma" />
                                     <ComboBoxItem Content="Brian" Tag="bbria" />
                                     <ComboBoxItem Content="Genaro" Tag="ggena" />
                                     <ComboBoxItem Content="Neftali" Tag="nneft" />

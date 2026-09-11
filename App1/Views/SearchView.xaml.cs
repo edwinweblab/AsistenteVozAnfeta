@@ -1054,23 +1054,55 @@ namespace Anfeta.UI.Views
             {
                 _groupedResultsViewSource = null;
                 _resultGroups.Clear();
-                ResultsList.ItemsSource = null;
-                ResultsList.ItemsSource = displayRows;
+                if (!ReferenceEquals(ResultsList.ItemsSource, displayRows))
+                {
+                    ResultsList.ItemsSource = displayRows;
+                }
             }
             else
             {
-                _resultGroups.Clear();
+                var newGroups = BuildResultGroups(displayRows).ToList();
 
-                foreach (var group in BuildResultGroups(displayRows))
-                    _resultGroups.Add(group);
-
-                _groupedResultsViewSource = new CollectionViewSource
+                // Comprobar si los grupos son idénticos en clave y conteo
+                bool groupsIdentical = _resultGroups.Count == newGroups.Count;
+                if (groupsIdentical)
                 {
-                    Source = _resultGroups,
-                    IsSourceGrouped = true
-                };
+                    for (int g = 0; g < newGroups.Count; g++)
+                    {
+                        if (!string.Equals(_resultGroups[g].Key, newGroups[g].Key, StringComparison.Ordinal) ||
+                            _resultGroups[g].Count != newGroups[g].Count)
+                        {
+                            groupsIdentical = false;
+                            break;
+                        }
+                    }
+                }
 
-                ResultsList.ItemsSource = _groupedResultsViewSource.View;
+                if (groupsIdentical && _groupedResultsViewSource != null && ResultsList.ItemsSource != null)
+                {
+                    // Estructura idéntica: NO tocar ItemsSource ni CollectionViewSource para evitar el salto y congelamiento
+                }
+                else
+                {
+                    _resultGroups.Clear();
+
+                    foreach (var group in newGroups)
+                        _resultGroups.Add(group);
+
+                    if (_groupedResultsViewSource == null)
+                    {
+                        _groupedResultsViewSource = new CollectionViewSource
+                        {
+                            Source = _resultGroups,
+                            IsSourceGrouped = true
+                        };
+                        ResultsList.ItemsSource = _groupedResultsViewSource.View;
+                    }
+                    else if (ResultsList.ItemsSource == null)
+                    {
+                        ResultsList.ItemsSource = _groupedResultsViewSource.View;
+                    }
+                }
             }
 
             if (ResultsThumbnailGrid != null)
@@ -2017,19 +2049,11 @@ namespace Anfeta.UI.Views
         {
             if (args.ItemContainer != null)
             {
-                ApplyTextScaleRecursive(args.ItemContainer);
-                ApplyResultColumnWidthsRecursive(args.ItemContainer);
-
-                // Al refrescar, WinUI puede notificar el contenedor antes de
-                // insertar su DataTemplate. Repetimos una vez en la cola para
-                // que la fila recién materializada tome los mismos anchos del
-                // encabezado sin que el usuario tenga que mover un splitter.
-                var materializedContainer = args.ItemContainer;
-                DispatcherQueue.TryEnqueue(() =>
+                if (Math.Abs(_textScale - 1.0) > 0.001)
                 {
-                    ApplyTextScaleRecursive(materializedContainer);
-                    ApplyResultColumnWidthsRecursive(materializedContainer);
-                });
+                    ApplyTextScaleRecursive(args.ItemContainer);
+                }
+                ApplyResultColumnWidthsRecursive(args.ItemContainer);
             }
         }
 

@@ -13,6 +13,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
 using System.Text.RegularExpressions;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 namespace Anfeta.UI.Views
 {
     public sealed partial class SearchView
@@ -562,10 +564,14 @@ namespace Anfeta.UI.Views
             public string Title { get; set; } = "";
             public string Description { get; set; } = "";
             public string Query { get; set; } = "";
+            public string ScheduledDate { get; set; } = "";
+            public bool IsPendingTask { get; set; }
             public Anfeta.UI.Models.SearchCriteriaState? Criteria { get; set; }
         }
 
         private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _savedSearches = new();
+        private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _pendingTasks = new();
+        private const string LS_PendingTasks = "anfeta_pending_tasks_v1";
         private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _visibleSavedSearches = new();
         private readonly System.Collections.ObjectModel.ObservableCollection<PredictiveSuggestion> _predictiveSuggestions = new();
         private bool _quickFlyoutOpen;
@@ -2000,28 +2006,47 @@ namespace Anfeta.UI.Views
         private void LoadSavedSearches()
         {
             _savedSearches.Clear();
-            var raw = ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] as string;
+            _pendingTasks.Clear();
 
-            if (string.IsNullOrWhiteSpace(raw))
+            var rawSearches = ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] as string;
+            if (!string.IsNullOrWhiteSpace(rawSearches))
             {
-                RefreshSavedSearchesUi();
-                return;
-            }
-
-            try
-            {
-                var list = JsonSerializer.Deserialize<System.Collections.Generic.List<SavedSearch>>(raw)
-                           ?? new System.Collections.Generic.List<SavedSearch>();
-                foreach (var it in list)
+                try
                 {
-                    if (it == null || (string.IsNullOrWhiteSpace(it.Query) && it.Criteria == null)) continue;
-                    if (string.IsNullOrWhiteSpace(it.Title)) it.Title = it.Query;
-                    _savedSearches.Add(it);
+                    var list = JsonSerializer.Deserialize<System.Collections.Generic.List<SavedSearch>>(rawSearches)
+                               ?? new System.Collections.Generic.List<SavedSearch>();
+                    foreach (var it in list)
+                    {
+                        if (it == null || (string.IsNullOrWhiteSpace(it.Query) && it.Criteria == null)) continue;
+                        if (string.IsNullOrWhiteSpace(it.Title)) it.Title = it.Query;
+                        _savedSearches.Add(it);
+                    }
+                }
+                catch
+                {
+                    ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = "";
                 }
             }
-            catch
+
+            var rawTasks = ApplicationData.Current.LocalSettings.Values[LS_PendingTasks] as string;
+            if (!string.IsNullOrWhiteSpace(rawTasks))
             {
-                ApplicationData.Current.LocalSettings.Values[LS_SavedSearches] = "";
+                try
+                {
+                    var taskList = JsonSerializer.Deserialize<System.Collections.Generic.List<SavedSearch>>(rawTasks)
+                                   ?? new System.Collections.Generic.List<SavedSearch>();
+                    foreach (var it in taskList)
+                    {
+                        if (it == null) continue;
+                        if (string.IsNullOrWhiteSpace(it.Title)) it.Title = it.Query;
+                        it.IsPendingTask = true;
+                        _pendingTasks.Add(it);
+                    }
+                }
+                catch
+                {
+                    ApplicationData.Current.LocalSettings.Values[LS_PendingTasks] = "";
+                }
             }
 
             RefreshSavedSearchesUi();
@@ -2035,12 +2060,42 @@ namespace Anfeta.UI.Views
             NotifySearchPresetsChanged();
         }
 
+        private void SavePendingTasks()
+        {
+            var list = _pendingTasks.ToList();
+            var raw = JsonSerializer.Serialize(list);
+            ApplicationData.Current.LocalSettings.Values[LS_PendingTasks] = raw;
+        }
+
         private void RefreshSavedSearchesUi()
         {
             if (CommandsSidebarList != null)
             {
                 CommandsSidebarList.ItemsSource = null;
                 CommandsSidebarList.ItemsSource = _savedSearches;
+            }
+
+            if (PendingTasksSidebarList != null)
+            {
+                PendingTasksSidebarList.ItemsSource = null;
+                PendingTasksSidebarList.ItemsSource = _pendingTasks;
+            }
+
+            if (PendingTasksSidebarEmptyHint != null)
+            {
+                PendingTasksSidebarEmptyHint.Visibility = _pendingTasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (PendingTasksCountBadge != null && PendingTasksCountText != null)
+            {
+                PendingTasksCountText.Text = _pendingTasks.Count.ToString();
+                PendingTasksCountBadge.Visibility = _pendingTasks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (PendientesToolbarBadge != null && PendientesToolbarCount != null)
+            {
+                PendientesToolbarCount.Text = _pendingTasks.Count.ToString();
+                PendientesToolbarBadge.Visibility = _pendingTasks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             }
 
             RefreshQuickFlyoutContent(SearchBox?.Text ?? string.Empty);
@@ -2250,6 +2305,364 @@ namespace Anfeta.UI.Views
 
             flyout.Items.Add(edit);
             flyout.Items.Add(del);
+            flyout.ShowAt(fe, e.GetPosition(fe));
+        }
+
+        private async void PendingTasksSidebarList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is SavedSearch cmd)
+            {
+                await ApplySavedQuickSearchAsync(cmd);
+                if (PendingTasksSidebarList != null)
+                    PendingTasksSidebarList.SelectedItem = null;
+            }
+        }
+
+        private async Task ShowPendingTaskEditorDialogAsync(SavedSearch? existingItem = null)
+        {
+            var isEditing = existingItem != null;
+            var currentQuery = (SearchBox?.Text ?? "").Trim();
+            var saveName = CurrentSearchSaveName();
+            var criteria = CaptureSearchCriteria();
+
+            var initialTitle = isEditing
+                ? (existingItem?.Title ?? "")
+                : (string.IsNullOrWhiteSpace(saveName) ? currentQuery : saveName);
+
+            var initialDate = isEditing
+                ? (existingItem?.ScheduledDate ?? "")
+                : DateTime.Today.ToString("dd/MM");
+
+            var initialQuery = isEditing
+                ? (existingItem?.Query ?? "")
+                : currentQuery;
+
+            var rootPanel = new StackPanel
+            {
+                Spacing = 12,
+                Width = 460
+            };
+
+            // 1. Encabezado con degradado y badge ámbar
+            var headerCard = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(40, 245, 158, 11)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(120, 245, 158, 11)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12, 10, 12, 10)
+            };
+
+            var headerStack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var iconBorder = new Border
+            {
+                Width = 36,
+                Height = 36,
+                CornerRadius = new CornerRadius(8),
+                Background = new SolidColorBrush(Color.FromArgb(80, 217, 119, 6)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(200, 251, 191, 36)),
+                BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            iconBorder.Child = new FontIcon
+            {
+                Glyph = "\uE787",
+                FontSize = 18,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 253, 230, 138)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            headerStack.Children.Add(iconBorder);
+
+            var headerTextStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+            headerTextStack.Children.Add(new TextBlock
+            {
+                Text = isEditing ? "EDITAR PENDIENTE POR HACER" : "NUEVO PENDIENTE POR HACER",
+                FontSize = 13.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 253, 230, 138))
+            });
+            headerTextStack.Children.Add(new TextBlock
+            {
+                Text = "Organiza tus tareas con fecha agendada y filtro de búsqueda.",
+                FontSize = 10.5,
+                Foreground = new SolidColorBrush(Color.FromArgb(200, 203, 213, 225))
+            });
+            headerStack.Children.Add(headerTextStack);
+            headerCard.Child = headerStack;
+            rootPanel.Children.Add(headerCard);
+
+            // 2. Campo: Título de la tarea
+            var titleBox = new TextBox
+            {
+                Header = "Título de la tarea o pendiente:",
+                Text = initialTitle,
+                PlaceholderText = "ej. Revisión técnica semanal, sseo agapetours...",
+                FontSize = 12.5
+            };
+            rootPanel.Children.Add(titleBox);
+
+            // 3. Campo: Fecha programada con Chips rápidos interactivos
+            var dateSection = new StackPanel { Spacing = 6 };
+            dateSection.Children.Add(new TextBlock
+            {
+                Text = "Fecha programada (ej. dd/MM o dd/MM/yyyy):",
+                FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 226, 232, 240))
+            });
+
+            var dateChipsRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6
+            };
+
+            var dateBox = new TextBox
+            {
+                Text = initialDate,
+                PlaceholderText = "dd/MM o dd/MM 14:00",
+                FontSize = 12
+            };
+
+            Button CreateDateChip(string label, string dateValue)
+            {
+                var btn = new Button
+                {
+                    Content = label,
+                    FontSize = 10.5,
+                    Padding = new Thickness(8, 3, 8, 3),
+                    CornerRadius = new CornerRadius(6),
+                    Background = new SolidColorBrush(Color.FromArgb(30, 245, 158, 11)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(100, 245, 158, 11)),
+                    BorderThickness = new Thickness(1),
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 253, 230, 138))
+                };
+                btn.Click += (_, __) =>
+                {
+                    dateBox.Text = dateValue;
+                };
+                return btn;
+            }
+
+            var todayStr = DateTime.Today.ToString("dd/MM");
+            var tomorrowStr = DateTime.Today.AddDays(1).ToString("dd/MM");
+            var in3DaysStr = DateTime.Today.AddDays(3).ToString("dd/MM");
+            var daysUntilMonday = ((int)DayOfWeek.Monday - (int)DateTime.Today.DayOfWeek + 7) % 7;
+            if (daysUntilMonday == 0) daysUntilMonday = 7;
+            var nextMondayStr = DateTime.Today.AddDays(daysUntilMonday).ToString("dd/MM");
+
+            dateChipsRow.Children.Add(CreateDateChip("Hoy", todayStr));
+            dateChipsRow.Children.Add(CreateDateChip("Mañana", tomorrowStr));
+            dateChipsRow.Children.Add(CreateDateChip("+3 Días", in3DaysStr));
+            dateChipsRow.Children.Add(CreateDateChip("Próx. Lunes", nextMondayStr));
+
+            dateSection.Children.Add(dateChipsRow);
+            dateSection.Children.Add(dateBox);
+            rootPanel.Children.Add(dateSection);
+
+            // 4. Campo: Búsqueda o Filtro asociado
+            var queryBox = new TextBox
+            {
+                Header = "Búsqueda / Filtro asociado:",
+                Text = initialQuery,
+                PlaceholderText = "ej. sseo agapetours...",
+                FontSize = 12
+            };
+            rootPanel.Children.Add(queryBox);
+
+            // 5. Vista previa en vivo de la tarjeta
+            var previewBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(35, 15, 23, 42)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(70, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 8, 12, 8),
+                Margin = new Thickness(0, 4, 0, 0)
+            };
+
+            var previewStack = new StackPanel { Spacing = 4 };
+            previewStack.Children.Add(new TextBlock
+            {
+                Text = "VISTA PREVIA EN COLUMNA PENDIENTES:",
+                FontSize = 9.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromArgb(200, 56, 189, 248))
+            });
+
+            var previewCard = new Grid { MinHeight = 36, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            var previewInner = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+            var previewTop = new Grid();
+            previewTop.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            previewTop.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var previewTitle = new TextBlock
+            {
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 241, 245, 249)),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 1,
+                Text = string.IsNullOrWhiteSpace(initialTitle) ? "Nombre de la tarea" : initialTitle
+            };
+            Grid.SetColumn(previewTitle, 0);
+            previewTop.Children.Add(previewTitle);
+
+            var previewBadge = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(38, 217, 119, 6)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(96, 245, 158, 11)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(5, 1, 5, 1),
+                Margin = new Thickness(4, 0, 0, 0)
+            };
+            var previewDate = new TextBlock
+            {
+                FontSize = 9.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 253, 230, 138)),
+                Text = string.IsNullOrWhiteSpace(initialDate) ? todayStr : initialDate
+            };
+            previewBadge.Child = previewDate;
+            Grid.SetColumn(previewBadge, 1);
+            previewTop.Children.Add(previewBadge);
+
+            var previewQuery = new TextBlock
+            {
+                FontSize = 10.5,
+                Foreground = new SolidColorBrush(Color.FromArgb(180, 148, 163, 184)),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxLines = 1,
+                Text = string.IsNullOrWhiteSpace(initialQuery) ? "Sin búsqueda vinculada" : initialQuery
+            };
+
+            previewInner.Children.Add(previewTop);
+            previewInner.Children.Add(previewQuery);
+            previewCard.Children.Add(previewInner);
+            previewStack.Children.Add(previewCard);
+            previewBorder.Child = previewStack;
+            rootPanel.Children.Add(previewBorder);
+
+            // Sincronizar vista previa en tiempo real
+            titleBox.TextChanged += (_, __) =>
+            {
+                var t = titleBox.Text?.Trim();
+                previewTitle.Text = string.IsNullOrWhiteSpace(t) ? "Nombre de la tarea" : t;
+            };
+            dateBox.TextChanged += (_, __) =>
+            {
+                var d = dateBox.Text?.Trim();
+                previewDate.Text = string.IsNullOrWhiteSpace(d) ? todayStr : d;
+            };
+            queryBox.TextChanged += (_, __) =>
+            {
+                var q = queryBox.Text?.Trim();
+                previewQuery.Text = string.IsNullOrWhiteSpace(q) ? "Sin búsqueda vinculada" : q;
+            };
+
+            var dialog = new ContentDialog
+            {
+                Content = rootPanel,
+                PrimaryButtonText = isEditing ? "Actualizar Pendiente" : "Guardar en Pendientes",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = this.XamlRoot
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                return;
+
+            var finalTitle = (titleBox.Text ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(finalTitle))
+                finalTitle = (queryBox.Text ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(finalTitle))
+                finalTitle = "Pendiente sin título";
+
+            var finalDate = (dateBox.Text ?? "").Trim();
+            var finalQuery = (queryBox.Text ?? "").Trim();
+
+            if (isEditing && existingItem != null)
+            {
+                existingItem.Title = finalTitle;
+                existingItem.ScheduledDate = finalDate;
+                existingItem.Query = finalQuery;
+            }
+            else
+            {
+                _pendingTasks.Add(new SavedSearch
+                {
+                    Title = finalTitle,
+                    ScheduledDate = finalDate,
+                    Query = finalQuery,
+                    IsPendingTask = true,
+                    Criteria = criteria
+                });
+            }
+
+            SavePendingTasks();
+            RefreshSavedSearchesUi();
+            StatusText.Text = $"Estado: Pendiente guardado con fecha ✅ {finalTitle}";
+        }
+
+        private async void BtnAddPendingTask_Click(object sender, RoutedEventArgs e)
+        {
+            await ShowPendingTaskEditorDialogAsync(null);
+        }
+
+        private void PendingTaskRow_RightTapped(object sender, RightTappedRoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe) return;
+            if (fe.DataContext is not SavedSearch cmd) return;
+
+            var flyout = new MenuFlyout();
+            var edit = new MenuFlyoutItem { Text = "Editar" };
+            edit.Click += async (_, __) =>
+            {
+                await ShowPendingTaskEditorDialogAsync(cmd);
+            };
+
+            var del = new MenuFlyoutItem { Text = "Eliminar" };
+            del.Click += (_, __) =>
+            {
+                _pendingTasks.Remove(cmd);
+                SavePendingTasks();
+                RefreshSavedSearchesUi();
+            };
+
+            flyout.Items.Add(edit);
+            flyout.Items.Add(del);
+            flyout.Items.Add(new MenuFlyoutSeparator());
+
+            var deleteAll = new MenuFlyoutItem { Text = "Borrar todos" };
+            deleteAll.Click += async (_, __) =>
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "Borrar todos los pendientes",
+                    Content = "¿Seguro que quieres eliminar todos los pendientes por hacer?",
+                    PrimaryButtonText = "Borrar",
+                    CloseButtonText = "Cancelar",
+                    DefaultButton = ContentDialogButton.Close,
+                    XamlRoot = this.XamlRoot
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+                _pendingTasks.Clear();
+                SavePendingTasks();
+                RefreshSavedSearchesUi();
+                StatusText.Text = "Estado: Pendientes eliminados";
+            };
+
+            flyout.Items.Add(deleteAll);
             flyout.ShowAt(fe, e.GetPosition(fe));
         }
 

@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Views;
+using Anfeta.UI.Views;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -123,10 +123,17 @@ namespace Anfeta.UI
                     AppWindow.GetFromWindowId(
                         windowId);
 
-                appWindow?.Resize(
-                    new Windows.Graphics.SizeInt32(
-                        1500,
-                        900));
+                if (appWindow?.Presenter is OverlappedPresenter presenter)
+                {
+                    presenter.Maximize();
+                }
+                else
+                {
+                    appWindow?.Resize(
+                        new Windows.Graphics.SizeInt32(
+                            1500,
+                            900));
+                }
             }
             catch (Exception ex)
             {

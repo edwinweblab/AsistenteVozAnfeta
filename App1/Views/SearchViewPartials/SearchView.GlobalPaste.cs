@@ -508,6 +508,27 @@ namespace Anfeta.UI.Views
             };
             tagsStack.Children.Add(personCombo);
 
+            var activePeoplePanel = new VariableSizedWrapGrid
+            {
+                Orientation = Orientation.Horizontal,
+                MaximumRowsOrColumns = 3,
+                ItemWidth = 100,
+                ItemHeight = 36
+            };
+            foreach (var pTag in NotionUploadPersonTags)
+            {
+                var btn = new Button
+                {
+                    Content = pTag,
+                    Padding = new Thickness(8, 3, 8, 3),
+                    CornerRadius = new CornerRadius(5)
+                };
+                ToolTipService.SetToolTip(btn, $"{GetNotionPersonDisplayName(pTag)} ({pTag})");
+                btn.Click += (_, __) => AppendTagToTitle(pTag);
+                activePeoplePanel.Children.Add(btn);
+            }
+            tagsStack.Children.Add(activePeoplePanel);
+
             var tagsCard = new Border
             {
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 20, 29)),

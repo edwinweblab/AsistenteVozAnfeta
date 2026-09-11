@@ -1047,6 +1047,28 @@
                     ToolTipService.ToolTip="Mostrar o ampliar miniaturas" />
 
                     <ToggleButton
+                    x:Name="TogglePendientesPane"
+                    MinWidth="88"
+                    MinHeight="26"
+                    Padding="8,0"
+                    VerticalAlignment="Center"
+                    Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                    BorderBrush="#2A3947"
+                    BorderThickness="1"
+                    Click="TogglePendientesPane_Click"
+                    CornerRadius="6"
+                    IsChecked="True"
+                    ToolTipService.ToolTip="Mostrar/ocultar columna de Pendientes por hacer">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <FontIcon FontSize="11" Glyph="&#xE787;" Foreground="#F59E0B" />
+                            <TextBlock VerticalAlignment="Center" FontSize="11" Text="Pendientes" />
+                            <Border x:Name="PendientesToolbarBadge" Background="#D97706" CornerRadius="8" Padding="4,0" Margin="2,0,0,0">
+                                <TextBlock x:Name="PendientesToolbarCount" Text="0" FontSize="9.5" FontWeight="Bold" Foreground="White" />
+                            </Border>
+                        </StackPanel>
+                    </ToggleButton>
+
+                    <ToggleButton
                     x:Name="ToggleFoldersPane"
                     MinWidth="70"
                     MinHeight="26"
@@ -1168,9 +1190,9 @@
         -->
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="PendientesPaneCol" Width="270" />
                 <ColumnDefinition x:Name="FoldersPaneCol" Width="230" />
-                <ColumnDefinition Width="1" />
-                <!--  div izq-centro  -->
+                <!--  Centro  -->
                 <ColumnDefinition Width="*" MinWidth="320" />
                 <!--  Centro  -->
                 <ColumnDefinition
@@ -2451,11 +2473,137 @@
             </Thumb>
 
 
-            <!--  ── LEFT PANEL ───────────────────────────────────  -->
+            <!--  ── COLUMNA DEDICADA: PENDIENTES POR HACER (abrible / cerrable) ──  -->
+            <Border
+                x:Name="PendientesPane"
+                Grid.Column="0"
+                Margin="10,8,4,8"
+                Background="{StaticResource AnfetaSurfaceBrush}"
+                BorderBrush="{StaticResource AnfetaPanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Encabezado de la columna Pendientes -->
+                    <Grid
+                        Grid.Row="0"
+                        Height="36"
+                        Padding="12,0,8,0"
+                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        BorderThickness="0,0,0,1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <FontIcon FontSize="12" Glyph="&#xE787;" Foreground="#F59E0B" />
+                            <TextBlock
+                                FontSize="12"
+                                FontWeight="Bold"
+                                Foreground="#F59E0B"
+                                Text="PENDIENTES" />
+                            <Border x:Name="PendingTasksCountBadge"
+                                Background="#33F59E0B" BorderBrush="#80F59E0B" BorderThickness="1"
+                                CornerRadius="8" Padding="6,1" Visibility="Collapsed">
+                                <TextBlock x:Name="PendingTasksCountText" FontSize="9.5" FontWeight="Bold" Foreground="#FDE68A" Text="0" />
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <Button
+                                Width="28"
+                                Height="28"
+                                Padding="0"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="BtnAddPendingTask_Click"
+                                ToolTipService.ToolTip="Guardar como pendiente por hacer con fecha">
+                                <FontIcon FontSize="11" Glyph="&#xE710;" Foreground="#38BDF8" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Lista de pendientes con scroll individual -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Padding="4,4">
+                            <ListView
+                                x:Name="PendingTasksSidebarList"
+                                Padding="0"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                BorderThickness="0"
+                                IsItemClickEnabled="True"
+                                ItemClick="PendingTasksSidebarList_ItemClick"
+                                SelectionMode="Single">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="Padding" Value="8,4" />
+                                        <Setter Property="MinHeight" Value="40" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid MinHeight="36" RightTapped="PendingTaskRow_RightTapped" Background="Transparent">
+                                            <StackPanel VerticalAlignment="Center" Spacing="2">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock
+                                                        Grid.Column="0"
+                                                        FontSize="12"
+                                                        FontWeight="SemiBold"
+                                                        Foreground="#F1F5F9"
+                                                        MaxLines="1"
+                                                        Text="{Binding Title}"
+                                                        TextTrimming="CharacterEllipsis" />
+                                                    <Border Grid.Column="1" Background="#26D97706" BorderBrush="#60F59E0B" BorderThickness="1" CornerRadius="5" Padding="4,1" Margin="4,0,0,0">
+                                                        <TextBlock
+                                                            FontSize="9.5"
+                                                            FontWeight="Bold"
+                                                            Foreground="#FDE68A"
+                                                            MaxLines="1"
+                                                            Text="{Binding ScheduledDate}" />
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock
+                                                    FontSize="10.5"
+                                                    MaxLines="1"
+                                                    Opacity="0.6"
+                                                    Foreground="#94A3B8"
+                                                    Text="{Binding Query}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <TextBlock
+                                x:Name="PendingTasksSidebarEmptyHint"
+                                Margin="12,12,12,6"
+                                FontSize="11"
+                                Opacity="0.5"
+                                TextWrapping="Wrap"
+                                Text="No hay pendientes guardados. Presiona '+' para programar uno con fecha." />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <!--  ── LEFT PANEL: FILTROS ────────────────────────────  -->
             <Border
                 x:Name="FoldersPane"
-                Grid.Column="0"
-                Margin="10,8,6,8"
+                Grid.Column="1"
+                Margin="4,8,6,8"
                 Background="{StaticResource AnfetaSurfaceBrush}"
                 BorderBrush="{StaticResource AnfetaPanelBorderBrush}"
                 BorderThickness="1"
@@ -2917,6 +3065,7 @@
                                             Text="Aún no hay búsquedas rápidas guardadas" />
                                     </StackPanel>
                                 </StackPanel>
+
 
                                 <!--  CARPETAS EXCLUIDAS  -->
                                 <muxc:Expander
@@ -3398,7 +3547,11 @@
                         ItemsSource="{x:Bind Results, Mode=OneWay}"
                         RightTapped="ResultsList_RightTapped"
                         SelectionChanged="ResultsList_SelectionChanged"
-                        SelectionMode="Extended">
+                        SelectionMode="Multiple"
+                        IsMultiSelectCheckBoxEnabled="False"
+                        SingleSelectionFollowsFocus="False"
+                        IsSwipeEnabled="False"
+                        CanDragItems="False">
 
                         <ListView.Resources>
                             <!-- Resalto de alto contraste para fila seleccionada en el buscador -->
@@ -3419,6 +3572,8 @@
                                 <Setter Property="BorderBrush" Value="Transparent" />
                                 <Setter Property="CornerRadius" Value="4" />
                                 <Setter Property="Margin" Value="0,1,0,1" />
+                                <Setter Property="ManipulationMode" Value="System" />
+                                <Setter Property="IsHoldingEnabled" Value="False" />
                             </Style>
                         </ListView.ItemContainerStyle>
 
@@ -3546,6 +3701,16 @@
                                                 ToolTipService.ToolTip="{x:Bind OrderChipText, Mode=OneWay}">
                                                 <TextBlock FontSize="8" FontWeight="SemiBold" Foreground="#C4B5FD"
                                                     Text="{x:Bind OrderChipText, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                            </Border>
+
+                                            <!-- Chip de Progreso Checklist (ej. 78/82 · 95%) - Esmeralda / Menta -->
+                                            <Border MaxWidth="88" Margin="0,0,4,0" Padding="5,2" CornerRadius="7"
+                                                VerticalAlignment="Center"
+                                                Background="#20104E3E" BorderBrush="#804ADE80" BorderThickness="1"
+                                                Visibility="{x:Bind ChecklistProgressVisibility, Mode=OneWay}"
+                                                ToolTipService.ToolTip="{x:Bind ChecklistProgressText, Mode=OneWay}">
+                                                <TextBlock FontSize="8" FontWeight="Bold" Foreground="#86EFAC"
+                                                    Text="{x:Bind ChecklistProgressText, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                             </Border>
                                         </StackPanel>
 

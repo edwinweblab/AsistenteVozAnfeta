@@ -39,11 +39,7 @@ namespace Anfeta.UI.Views
             ["Karla"] = "kkarl",
             ["Brian"] = "bbria",
             ["Genaro"] = "ggena",
-            ["Isaias"] = "iisai",
-            ["Emmanuel"] = "eemma",
-            ["Andrade"] = "aandr",
-            ["Sotelo"] = "ssote",
-            ["Acalli"] = "aacal"
+            ["Isaias"] = "iisai"
         };
 
         private static string NormalizePriorityTag(string tag) => tag.ToLowerInvariant() switch
@@ -178,6 +174,8 @@ namespace Anfeta.UI.Views
         }
 
         private readonly Dictionary<string, Button> _priority00Buttons = new(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, int> _priority00UnseenCounts = new(StringComparer.OrdinalIgnoreCase);
+        private List<(SearchResultRow Row, string Tag, string Variant)> _priority00CachedMatches = new();
         private DateTime _priority00LastRefresh = DateTime.MinValue;
         private bool _priority00Loading;
         private bool _priority00Loaded;
@@ -197,8 +195,10 @@ namespace Anfeta.UI.Views
                 var matches = await Task.Run(() => snapshot
                     .Where(r => !IsExcludedPath(r.Target))
                     .DistinctBy(PriorityRowKey)
-                    .SelectMany(GetPriorityMatches)
+                    .SelectMany(r => GetPriorityMatches(r).Select(m => (Row: r, Tag: m.Tag, Variant: m.Variant)))
                     .ToList());
+
+                _priority00CachedMatches = matches;
 
                 _priority00Counts = matches.Where(m => m.Variant == "00")
                     .GroupBy(m => m.Tag, StringComparer.OrdinalIgnoreCase)
@@ -218,14 +218,7 @@ namespace Anfeta.UI.Views
                 EnsureSeenHooked();
                 await PrioritySeenTracker.EnsureLoadedAsync();
 
-                foreach (var (tag, btn) in _priority00Buttons)
-                {
-                    var count00 = _priority00Counts.GetValueOrDefault(tag);
-                    var count01 = _priority001Counts.GetValueOrDefault(tag);
-                    var count02 = _priority002Counts.GetValueOrDefault(tag);
-                    var person = PriorityPeople.FirstOrDefault(x => string.Equals(x.Value, tag, StringComparison.OrdinalIgnoreCase)).Key ?? tag;
-                    ApplySingleBadgeState(btn, person, tag, count00, count01, count02);
-                }
+                UpdateAllPriorityBadgeStates();
 
                 if (_priority00PanelTag != null) RenderPriority00Panel();
             }
@@ -235,6 +228,25 @@ namespace Anfeta.UI.Views
                 _priority00LastRefresh = DateTime.MinValue;
             }
             finally { _priority00Loading = false; }
+        }
+
+        private void UpdateAllPriorityBadgeStates()
+        {
+            _priority00UnseenCounts = _priority00CachedMatches
+                .Where(m => m.Variant == "00")
+                .Where(m => !PrioritySeenTracker.IsSeen(!string.IsNullOrWhiteSpace(m.Row.ExternalId) ? m.Row.ExternalId : m.Row.Target, out _))
+                .GroupBy(m => m.Tag, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (tag, btn) in _priority00Buttons)
+            {
+                var count00 = _priority00Counts.GetValueOrDefault(tag);
+                var count01 = _priority001Counts.GetValueOrDefault(tag);
+                var count02 = _priority002Counts.GetValueOrDefault(tag);
+                var unseen00 = _priority00UnseenCounts.GetValueOrDefault(tag);
+                var person = PriorityPeople.FirstOrDefault(x => string.Equals(x.Value, tag, StringComparison.OrdinalIgnoreCase)).Key ?? tag;
+                ApplySingleBadgeState(btn, person, tag, count00, count01, count02, unseen00);
+            }
         }
 
         private bool _seenHooked;
@@ -247,22 +259,25 @@ namespace Anfeta.UI.Views
                 DispatcherQueue?.TryEnqueue(() =>
                 {
                     _priority00RenderedVersion = -1;
+                    UpdateAllPriorityBadgeStates();
                     RenderPriority00Panel();
                 });
             };
         }
 
-        private static void ApplySingleBadgeState(Button btn, string person, string tag, int count00, int count01, int count02)
+        private static void ApplySingleBadgeState(Button btn, string person, string tag, int count00, int count01, int count02, int unseen00 = 0)
         {
             if (count00 > 0)
             {
-                btn.Content = $"{count00}";
+                var hasUnseen = unseen00 > 0;
+                btn.Content = hasUnseen ? $"👁️ {count00}" : $"{count00}";
                 btn.Background = new SolidColorBrush(Color.FromArgb(255, 185, 28, 28)); // Rojo urgente
                 btn.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
-                btn.BorderBrush = new SolidColorBrush(Color.FromArgb(220, 248, 113, 113));
-                btn.BorderThickness = new Thickness(1.5);
+                btn.BorderBrush = new SolidColorBrush(hasUnseen ? Color.FromArgb(255, 254, 202, 202) : Color.FromArgb(220, 248, 113, 113));
+                btn.BorderThickness = new Thickness(hasUnseen ? 2 : 1.5);
                 btn.Visibility = Visibility.Visible;
-                ToolTipService.SetToolTip(btn, $"🔴 {count00} Urgente(s) (00) · {person}. Clic para ver actividades.");
+                var unseenDetail = hasUnseen ? $"{unseen00} pendiente(s) de ver" : "todas vistas";
+                ToolTipService.SetToolTip(btn, $"🔴 {count00} Urgente(s) (00) [{unseenDetail}] · {person}. Clic para ver actividades.");
             }
             else if (count01 > 0)
             {
@@ -300,8 +315,9 @@ namespace Anfeta.UI.Views
             var count00Init = _priority00Counts.GetValueOrDefault(tag);
             var count01Init = _priority001Counts.GetValueOrDefault(tag);
             var count02Init = _priority002Counts.GetValueOrDefault(tag);
+            var unseen00Init = _priority00UnseenCounts.GetValueOrDefault(tag);
 
-            // 1 solo badge adaptativo que prioriza 00 (rojo) > 01 (ámbar) > 02 (azul) > oculto
+            // 1 solo badge adaptativo que prioriza 00 (rojo con ojito si no se ha visto) > 01 (ámbar) > 02 (azul) > oculto
             var btn = new Button
             {
                 Padding = new Thickness(6, 1, 6, 1),
@@ -316,7 +332,7 @@ namespace Anfeta.UI.Views
 
             if (_priority00Loaded)
             {
-                ApplySingleBadgeState(btn, person, tag, count00Init, count01Init, count02Init);
+                ApplySingleBadgeState(btn, person, tag, count00Init, count01Init, count02Init, unseen00Init);
             }
             else
             {

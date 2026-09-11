@@ -697,14 +697,36 @@ namespace Anfeta.UI.Views
         private void ReplaceSearchResults(
             IReadOnlyList<Anfeta.UI.Models.Weblab.SearchResultRow> rows)
         {
-            // Desconectar temporalmente evita que WinUI procese Clear + hasta
-            // 500 Add como cientos de diseños separados. Al final se enlaza y
-            // mide una sola vez, también en la ventana independiente.
-            ResultsList.ItemsSource = null;
+            // 1. Si los resultados son idénticos en conteo y orden, actualizar propiedades in-place
+            // sin limpiar Results ni destruir el árbol visual.
+            if (Results.Count == rows.Count && Results.Count > 0)
+            {
+                bool sameItems = true;
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    if (!string.Equals(Results[i].Target, rows[i].Target, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(Results[i].DisplayName, rows[i].DisplayName, StringComparison.Ordinal))
+                    {
+                        sameItems = false;
+                        break;
+                    }
+                }
 
-            if (ResultsThumbnailGrid != null)
-                ResultsThumbnailGrid.ItemsSource = null;
+                if (sameItems)
+                {
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        Results[i].ProjectUpdateStatus = rows[i].ProjectUpdateStatus;
+                        Results[i].ScheduledDate = rows[i].ScheduledDate;
+                        Results[i].NotionEditedUtc = rows[i].NotionEditedUtc;
+                        Results[i].IsBookmarked = rows[i].IsBookmarked;
+                    }
+                    RefreshResultsListView();
+                    return;
+                }
+            }
 
+            // 2. Reemplazo limpio de elementos en la colección observable
             Results.Clear();
 
             foreach (var row in rows)

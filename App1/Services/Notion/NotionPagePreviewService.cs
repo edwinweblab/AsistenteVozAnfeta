@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
 using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
@@ -245,6 +245,13 @@ namespace Anfeta.UI.Services.Notion
                         // nunca deben mostrarse en previews ni recorrerse.
                         if (IsTechnicalMetadataBlock(block))
                             continue;
+
+                        var blockType = ReadString(block, "type");
+                        if (string.Equals(blockType, "synced_block", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(blockType, "template", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
 
                         var mapped =
                             MapBlock(block, depth);

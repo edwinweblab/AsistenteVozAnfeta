@@ -14296,36 +14296,48 @@ namespace Anfeta.UI.Views
 
             var clean = original;
 
-            // Fases técnicas. Se quitan solo como tokens completos para no
-            // afectar palabras que casualmente contengan esas letras.
+            // Fases técnicas (REVISION, COBRAR, PAGAR, HACER) con prefijos sprtuz, aprtuz, prtuz, rtuz, z:
             clean = Regex.Replace(
                 clean,
-                @"(?<![\p{L}\p{Nd}_])(?:sprtuz|aprtuz|prtuz|rtuz|z)REVISION(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?:sprtuz|aprtuz|prtuz|rtuz|z)(?:REVISION|COBRAR|PAGAR|HACER)?(?![\p{L}\p{Nd}_])",
                 " ",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-            // Tipo de proyecto técnico (sseo, aads, wwebs, etc.).
+            // Tipo de proyecto técnico y canales (sseo, aads, wwebs, aapli, pprog, ddise, rrede, cchat, rrapi, mmapi, bblib, etc.):
             clean = Regex.Replace(
                 clean,
-                @"(?<![\p{L}\p{Nd}_])(?:sseo|wwebs|aads|aapli|pprog|ddise|rrede)(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?:sseo|wwebs|aads|aapli|pprog|ddise|rrede|cchat|rrapi|mmapi|bblib)(?![\p{L}\p{Nd}_])",
                 " ",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-            // Token de mes, con o sin paréntesis: (2608AGOS) / 2608AGOS.
+            // Token de mes, con o sin corchetes o guiones: 26-[09SEP] / [09SEP] / (2608AGOS) / 2608AGOS / 2609SEPT:
             clean = Regex.Replace(
                 clean,
-                @"\(?\b\d{2}(?:0[1-9]|1[0-2])(?:ENER|FEBR|MARZ|ABRI|MAYO|JUNI|JULI|AGOS|SEPT|OCTU|NOVI|DICI)\b\)?",
+                @"(?:\d{2}\s*-\s*)?\[\s*\d{2,4}(?:ENER|FEBR|MARZ|ABRI|MAYO|JUNI|JULI|AGOS|SEPT|OCTU|NOVI|DICI|ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\s*\]",
                 " ",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-            // Tags cortos de persona usados en títulos de Notion.
             clean = Regex.Replace(
                 clean,
-                @"(?<![\p{L}\p{Nd}_])(?:jjohn|kkarl|iisai|iisaia|ssote|eedua|aacal|aandr|eemma|bbria|ggena|nneft)(?![\p{L}\p{Nd}_])",
+                @"\(?\b\d{2,4}(?:-)?(?:0[1-9]|1[0-2])?(?:ENER|FEBR|MARZ|ABRI|MAYO|JUNI|JULI|AGOS|SEPT|OCTU|NOVI|DICI|ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)\b\)?",
                 " ",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-            // El dominio ya aparece en el encabezado del proyecto.
+            // Tags cortos de persona con variantes opcionales 00, 001, 002 al inicio o al final (ej. 00nneft, nneft, nneft002):
+            clean = Regex.Replace(
+                clean,
+                @"(?<![\p{L}\p{Nd}_])(?:00|001|002)?(?:jjohn|kkarl|iisai|iisaia|ssote|eedua|aacal|aandr|eemma|bbria|ggena|nneft)(?:00|001|002)?(?![\p{L}\p{Nd}_])",
+                " ",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            // Variantes de prioridad aisladas (00, 001, 002) al inicio del texto:
+            clean = Regex.Replace(
+                clean,
+                @"^\s*(?:00|001|002)\s+",
+                " ",
+                RegexOptions.CultureInvariant);
+
+            // El dominio ya aparece en el encabezado del proyecto:
             var domain =
                 NormalizeCalendarProjectDomain(
                     TryExtractFirstDomain(
@@ -14339,6 +14351,13 @@ namespace Anfeta.UI.Views
                     " ",
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             }
+
+            // Limpiar preposiciones colgantes al final si el dominio fue removido (ej. "Ajustes en anfeta.com" -> "Ajustes en" -> "Ajustes"):
+            clean = Regex.Replace(
+                clean,
+                @"\s+\b(?:en|de|del|la|el|los|las|por|para|con)\s*$",
+                "",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             clean = Regex.Replace(
                 clean,
@@ -14355,7 +14374,7 @@ namespace Anfeta.UI.Views
 
             // Si el título quedó demasiado corto, conserva el original para no
             // ocultar información útil por una nomenclatura inesperada.
-            return clean.Length >= 4
+            return clean.Length >= 3
                 ? clean
                 : original;
         }
@@ -37584,19 +37603,122 @@ namespace Anfeta.UI.Views
                         var textStack =
                             new StackPanel
                             {
-                                Spacing = 1,
+                                Spacing = 2,
                                 HorizontalAlignment =
                                     HorizontalAlignment.Stretch
                             };
 
-                        // La lista interna del popup usa la misma limpieza que
-                        // "Proyecto relacionado": 1.00/1.10/2.03 queda en su
-                        // columna, y prtuz/rtuz + tipo + mes + dominio/persona
-                        // dejan de competir visualmente con el nombre real.
                         var cleanProjectTitle =
                             GetCalendarProjectPreviewTitle(
                                 activity,
                                 out _);
+
+                        // Fila superior: Badges operativos (Tipo/Área, Mes, Fase y Fecha dd/MM)
+                        var badgesRow = new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            Spacing = 4,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+
+                        var hasKnownType = TryGetWhatsAppCalendarProjectType(
+                            activity,
+                            out _,
+                            out var actTypeLabel);
+
+                        var effectiveType = hasKnownType
+                            ? actTypeLabel
+                            : (!string.IsNullOrWhiteSpace(criteria.ProjectLabel) &&
+                               !string.Equals(criteria.ProjectLabel, "TODAS", StringComparison.OrdinalIgnoreCase) &&
+                               !string.Equals(criteria.ProjectLabel, "PROYECTO", StringComparison.OrdinalIgnoreCase)
+                                ? criteria.ProjectLabel
+                                : string.Empty);
+
+                        if (!string.IsNullOrWhiteSpace(effectiveType))
+                        {
+                            badgesRow.Children.Add(new Border
+                            {
+                                Padding = new Thickness(5, 1, 5, 1),
+                                CornerRadius = new CornerRadius(6),
+                                Background = new SolidColorBrush(Color.FromArgb(32, 27, 71, 100)),
+                                BorderBrush = new SolidColorBrush(Color.FromArgb(115, 56, 182, 255)),
+                                BorderThickness = new Thickness(1),
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Child = new TextBlock
+                                {
+                                    Text = effectiveType.ToUpperInvariant(),
+                                    FontSize = 8,
+                                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                    Foreground = new SolidColorBrush(Color.FromArgb(255, 125, 211, 252))
+                                }
+                            });
+                        }
+
+                        var effectiveMonth = !string.IsNullOrWhiteSpace(criteria.MonthTag)
+                            ? criteria.MonthTag
+                            : string.Empty;
+
+                        if (string.IsNullOrWhiteSpace(effectiveMonth))
+                        {
+                            if (TryGetCalendarProjectMonth(activity, out _, out _, out var parsedMonth))
+                            {
+                                effectiveMonth = parsedMonth;
+                            }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(effectiveMonth))
+                        {
+                            badgesRow.Children.Add(new Border
+                            {
+                                Padding = new Thickness(5, 1, 5, 1),
+                                CornerRadius = new CornerRadius(6),
+                                Background = new SolidColorBrush(Color.FromArgb(32, 16, 78, 62)),
+                                BorderBrush = new SolidColorBrush(Color.FromArgb(102, 45, 212, 191)),
+                                BorderThickness = new Thickness(1),
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Child = new TextBlock
+                                {
+                                    Text = effectiveMonth,
+                                    FontSize = 8,
+                                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                    Foreground = new SolidColorBrush(Color.FromArgb(255, 94, 234, 212))
+                                }
+                            });
+                        }
+
+                        var technicalPhase =
+                            GetCalendarProjectPhaseInfo(activity)?.Token ??
+                            string.Empty;
+
+                        if (!string.IsNullOrWhiteSpace(technicalPhase) &&
+                            !string.Equals(technicalPhase, "PENDIENTES", StringComparison.OrdinalIgnoreCase))
+                        {
+                            badgesRow.Children.Add(new Border
+                            {
+                                Padding = new Thickness(4, 1, 4, 1),
+                                CornerRadius = new CornerRadius(6),
+                                Background = new SolidColorBrush(Color.FromArgb(40, 46, 58, 71)),
+                                BorderBrush = new SolidColorBrush(Color.FromArgb(105, 126, 147, 168)),
+                                BorderThickness = new Thickness(1),
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Child = new TextBlock
+                                {
+                                    Text = technicalPhase,
+                                    FontSize = 7.5,
+                                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                    Foreground = new SolidColorBrush(Color.FromArgb(255, 224, 242, 254))
+                                }
+                            });
+                        }
+
+                        badgesRow.Children.Add(new TextBlock
+                        {
+                            Text = activity.Start.ToString("dd/MM", CultureInfo.InvariantCulture),
+                            FontSize = 8.5,
+                            Foreground = new SolidColorBrush(Color.FromArgb(180, 148, 163, 184)),
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Margin = new Thickness(2, 0, 0, 0)
+                        });
 
                         var titleText =
                             new TextBlock
@@ -37605,7 +37727,7 @@ namespace Anfeta.UI.Views
                                     string.IsNullOrWhiteSpace(cleanProjectTitle)
                                         ? "Actividad sin título"
                                         : cleanProjectTitle,
-                                FontSize = 10.5,
+                                FontSize = 10.8,
                                 FontWeight =
                                     isCurrent
                                         ? Microsoft.UI.Text.FontWeights.SemiBold
@@ -37613,31 +37735,21 @@ namespace Anfeta.UI.Views
                                 Foreground =
                                     new SolidColorBrush(
                                         isCurrent
-                                            ? Color.FromArgb(
-                                                255,
-                                                255,
-                                                255,
-                                                255)
-                                            : Color.FromArgb(
-                                                245,
-                                                255,
-                                                255,
-                                                255)),
-                                TextWrapping =
-                                    TextWrapping.NoWrap,
+                                            ? Color.FromArgb(255, 255, 255, 255)
+                                            : Color.FromArgb(245, 241, 245, 249)),
+                                TextWrapping = TextWrapping.NoWrap,
                                 MaxLines = 1,
-                                TextTrimming =
-                                    TextTrimming.CharacterEllipsis
+                                TextTrimming = TextTrimming.CharacterEllipsis
                             };
 
-                        // El título ORIGINAL sigue disponible al pasar el mouse;
-                        // no se modifica nada en Notion.
-                        ToolTipService.SetToolTip(
-                            titleText,
-                            activity.Title);
+                        ToolTipService.SetToolTip(titleText, activity.Title);
 
-                        textStack.Children.Add(
-                            titleText);
+                        var metaRow = new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            Spacing = 6,
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
 
                         var person =
                             !string.IsNullOrWhiteSpace(activity.Person) &&
@@ -37652,117 +37764,89 @@ namespace Anfeta.UI.Views
                             string.Join(
                                 ", ",
                                 SplitPersons(person)
-                                    .Select(
-                                        NormalizeCalendarPerson)
-                                    .Where(value =>
-                                        !string.IsNullOrWhiteSpace(value))
-                                    .Distinct(
-                                        StringComparer.OrdinalIgnoreCase));
+                                    .Select(NormalizeCalendarPerson)
+                                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                                    .Distinct(StringComparer.OrdinalIgnoreCase));
 
-                        if (string.IsNullOrWhiteSpace(
-                                normalizedDisplayPerson))
+                        if (string.IsNullOrWhiteSpace(normalizedDisplayPerson))
                         {
-                            normalizedDisplayPerson =
-                                "Sin asignar";
+                            normalizedDisplayPerson = "Sin asignar";
                         }
 
-                        textStack.Children.Add(
+                        metaRow.Children.Add(
                             new Border
                             {
-                                HorizontalAlignment =
-                                    HorizontalAlignment.Left,
-                                MaxWidth = 180,
-                                Margin =
-                                    new Thickness(
-                                        0, 1, 0, 1),
-                                Padding =
-                                    new Thickness(
-                                        6, 1, 6, 1),
-                                CornerRadius =
-                                    new CornerRadius(8),
-                                Background =
-                                    new SolidColorBrush(
-                                        Color.FromArgb(
-                                            42,
-                                            14,
-                                            165,
-                                            233)),
-                                BorderBrush =
-                                    new SolidColorBrush(
-                                        Color.FromArgb(
-                                            120,
-                                            56,
-                                            189,
-                                            248)),
-                                BorderThickness =
-                                    new Thickness(1),
-                                Child =
-                                    new TextBlock
+                                HorizontalAlignment = HorizontalAlignment.Left,
+                                MaxWidth = 170,
+                                Padding = new Thickness(5, 1, 5, 1),
+                                CornerRadius = new CornerRadius(6),
+                                Background = new SolidColorBrush(Color.FromArgb(42, 14, 165, 233)),
+                                BorderBrush = new SolidColorBrush(Color.FromArgb(120, 56, 189, 248)),
+                                BorderThickness = new Thickness(1),
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Child = new TextBlock
+                                {
+                                    Text = $"👤 {normalizedDisplayPerson}",
+                                    FontSize = 8.5,
+                                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                    Foreground = new SolidColorBrush(Color.FromArgb(255, 224, 242, 254)),
+                                    TextTrimming = TextTrimming.CharacterEllipsis,
+                                    MaxLines = 1
+                                }
+                            });
+
+                        var actDomain = NormalizeCalendarProjectDomain(
+                            TryExtractFirstDomain(BuildCalendarSearchRow(activity)));
+
+                        if (string.IsNullOrWhiteSpace(actDomain))
+                        {
+                            actDomain = criteria.Domain;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(actDomain))
+                        {
+                            metaRow.Children.Add(
+                                new Border
+                                {
+                                    HorizontalAlignment = HorizontalAlignment.Left,
+                                    MaxWidth = 170,
+                                    Padding = new Thickness(5, 1, 5, 1),
+                                    CornerRadius = new CornerRadius(6),
+                                    Background = new SolidColorBrush(Color.FromArgb(28, 30, 41, 59)),
+                                    BorderBrush = new SolidColorBrush(Color.FromArgb(85, 96, 165, 250)),
+                                    BorderThickness = new Thickness(1),
+                                    VerticalAlignment = VerticalAlignment.Center,
+                                    Child = new TextBlock
                                     {
-                                        Text =
-                                            $"👤 {normalizedDisplayPerson}",
-                                        FontSize = 8.7,
-                                        FontWeight =
-                                            Microsoft.UI.Text.FontWeights.SemiBold,
-                                        Foreground =
-                                            new SolidColorBrush(
-                                                Color.FromArgb(
-                                                    255,
-                                                    224,
-                                                    242,
-                                                    254)),
-                                        TextTrimming =
-                                            TextTrimming.CharacterEllipsis,
+                                        Text = $"🌐 {actDomain}",
+                                        FontSize = 8.5,
+                                        Foreground = new SolidColorBrush(Color.FromArgb(255, 147, 197, 253)),
+                                        TextTrimming = TextTrimming.CharacterEllipsis,
                                         MaxLines = 1
                                     }
-                            });
+                                });
+                        }
 
-                        var technicalPhase =
-                            GetCalendarProjectPhaseInfo(activity)?.Token ??
-                            string.Empty;
+                        // Fila superior: Badges operativos + Título limpio (con todo el ancho disponible)
+                        var topLine = new Grid
+                        {
+                            VerticalAlignment = VerticalAlignment.Center,
+                            ColumnSpacing = 6
+                        };
+                        topLine.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                        topLine.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-                        // Esto corresponde a la petición de John: la
-                        // nomenclatura técnica (revisión / tipo / mes...) queda
-                        // en un tono cercano al fondo para que la vista se lea
-                        // como un listado limpio a simple vista.
-                        textStack.Children.Add(
-                            new TextBlock
-                            {
-                                Text =
-                                    string.Join(
-                                        " · ",
-                                        new[]
-                                        {
-                                            technicalPhase,
-                                            TryGetWhatsAppCalendarProjectType(
-                                                activity,
-                                                out _,
-                                                out var activityProjectLabel)
-                                                    ? activityProjectLabel
-                                                    : criteria.ProjectLabel,
-                                            criteria.MonthTag,
-                                            activity.Start.ToString(
-                                                "dd/MM",
-                                                CultureInfo.InvariantCulture)
-                                        }.Where(value =>
-                                            !string.IsNullOrWhiteSpace(value))),
-                                FontSize = 8.7,
-                                Foreground =
-                                    new SolidColorBrush(
-                                        Color.FromArgb(
-                                            255,
-                                            255,
-                                            255,
-                                            255)),
-                                // Sigue siendo secundaria por tamaño/opacidad,
-                                // pero ya no se pierde contra tarjetas oscuras.
-                                Opacity = 0.78,
-                                TextWrapping =
-                                    TextWrapping.NoWrap,
-                                MaxLines = 1,
-                                TextTrimming =
-                                    TextTrimming.CharacterEllipsis
-                            });
+                        Grid.SetColumn(badgesRow, 0);
+                        Grid.SetColumn(titleText, 1);
+
+                        topLine.Children.Add(badgesRow);
+                        topLine.Children.Add(titleText);
+
+                        textStack.Children.Add(topLine);
+
+                        // Fila inferior: Tags de Persona y Dominio (en su propia fila para máxima legibilidad)
+                        metaRow.Margin = new Thickness(0, 2, 0, 0);
+                        textStack.Children.Add(metaRow);
 
                         Grid.SetColumn(
                             textStack,
@@ -39722,10 +39806,14 @@ namespace Anfeta.UI.Views
         {
             var raw =
                 (ApplicationData.Current.LocalSettings.Values[
-                    LS_CalendarActivityPreviewSizeMode] as string ??
-                 "auto")
-                .Trim()
-                .ToLowerInvariant();
+                    LS_CalendarActivityPreviewSizeMode] as string)
+                ?.Trim()
+                ?.ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(raw) || raw == "auto")
+            {
+                return "max";
+            }
 
             return raw switch
             {
@@ -39733,7 +39821,7 @@ namespace Anfeta.UI.Views
                 "large" => "large",
                 "xlarge" => "xlarge",
                 "max" => "max",
-                _ => "auto"
+                _ => "max"
             };
         }
 

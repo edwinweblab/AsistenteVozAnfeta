@@ -663,17 +663,23 @@ namespace Anfeta.UI.Views
             if (sender is not CheckBox cb || cb.DataContext is not SearchResultRow row)
                 return;
 
-            if (cb.IsChecked == true)
+            try
             {
-                if (!ResultsList.SelectedItems.Contains(row))
-                    ResultsList.SelectedItems.Add(row);
-                row.IsMarked = true;
+                row.IsMarked = cb.IsChecked == true;
+                if (row.IsMarked)
+                {
+                    if (!ResultsList.SelectedItems.Contains(row))
+                        ResultsList.SelectedItems.Add(row);
+                }
+                else
+                {
+                    if (ResultsList.SelectedItems.Contains(row))
+                        ResultsList.SelectedItems.Remove(row);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                if (ResultsList.SelectedItems.Contains(row))
-                    ResultsList.SelectedItems.Remove(row);
-                row.IsMarked = false;
+                System.Diagnostics.Debug.WriteLine($"[RowCheck_Click] {ex.Message}");
             }
         }
 
@@ -1286,15 +1292,11 @@ namespace Anfeta.UI.Views
 
         private static readonly string[] NotionUploadPersonTags =
         {
-            "jjohn",
-            "kkarl",
-            "iisaia",
-            "eedua",
-            "aacal",
-            "aandr",
-            "eemma",
-            "bbria",
             "ggena",
+            "kkarl",
+            "jjohn",
+            "bbria",
+            "iisai",
             "nneft"
         };
 
@@ -1303,18 +1305,19 @@ namespace Anfeta.UI.Views
 
         private static string GetNotionPersonDisplayName(string tag)
         {
-            return (tag ?? string.Empty).Trim().ToLowerInvariant() switch
+            var clean = (tag ?? string.Empty).Trim().ToLowerInvariant();
+            if (clean.EndsWith("001")) clean = clean[..^3];
+            else if (clean.EndsWith("002")) clean = clean[..^3];
+            else if (clean.EndsWith("00")) clean = clean[..^2];
+
+            return clean switch
             {
-                "jjohn" => "John",
-                "kkarl" => "Karla",
-                "iisaia" => "Isaias",
-                "eedua" => "Sotelo",
-                "aacal" => "Acalli",
-                "aandr" => "Andrade",
-                "eemma" => "Emmanuel",
-                "bbria" => "Brian",
-                "ggena" => "Genaro",
-                "nneft" => "Neftali",
+                "jjohn" or "john" => "John",
+                "kkarl" or "karla" => "Karla",
+                "iisai" or "iisaia" or "isaias" => "Isaias",
+                "bbria" or "bbrian" or "brian" => "Brian",
+                "ggena" or "genaro" => "Genaro",
+                "nneft" or "neftali" => "Neftali",
                 _ => tag
             };
         }
@@ -2724,8 +2727,6 @@ namespace Anfeta.UI.Views
             });
             titleSection.Children.Add(titleGuideCard);
             titleSection.Children.Add(titleBox);
-            titleSection.Children.Add(titleSuggestionsLabel);
-            titleSection.Children.Add(titleSuggestionsPanel);
 
             var selectedUploadTags =
                 new List<string>();
@@ -2772,6 +2773,238 @@ namespace Anfeta.UI.Views
                 if (variant002Radio.IsChecked == true) return "002";
                 return string.Empty;
             }
+
+            // Constructor Estructurado de Título (Dominio, Tipo, Mes actual, Persona y Detalle)
+            var composerCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(28, 15, 23, 42)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(100, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 8, 10, 10),
+                Margin = new Thickness(0, 2, 0, 4)
+            };
+
+            var composerStack = new StackPanel { Spacing = 8 };
+
+            var composerHeader = new TextBlock
+            {
+                Text = "🧩 Constructor rápido de título (Dominio + Tipo + Mes):",
+                FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 125, 211, 252))
+            };
+            composerStack.Children.Add(composerHeader);
+
+            var compRow1 = new Grid { ColumnSpacing = 8 };
+            compRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.2, GridUnitType.Star) });
+            compRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            compRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
+
+            // Campo 1: Dominio con autocompletado y búsqueda (solo dominios reales y limpios)
+            var domainSuggestBox = new AutoSuggestBox
+            {
+                Header = "1. Dominio (.com)",
+                PlaceholderText = "Escribe para buscar (ej. agape)...",
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            static bool IsCleanDomain(string? domain)
+            {
+                if (string.IsNullOrWhiteSpace(domain)) return false;
+                var d = domain.Trim().ToLowerInvariant();
+
+                if (d.Contains("notion") || d.Contains("dropbox") || d.Contains("voidtool") || 
+                    d.Contains("google") || d.Contains("github") || d.Contains("localhost"))
+                    return false;
+
+                if (d.StartsWith("pprog") || d.StartsWith("sseo") || d.StartsWith("wwebs") || 
+                    d.StartsWith("aads") || d.StartsWith("aapli") || d.StartsWith("rrede"))
+                    return false;
+
+                var match = Regex.Match(d, @"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.(com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev)$");
+                if (!match.Success) return false;
+
+                var parts = d.Split('.');
+                if (parts.Length > 3) return false;
+                if (parts[0].Length < 2) return false;
+
+                return true;
+            }
+
+            var allKnownDomains = (App.LocalIndex?.GetAll() ?? Enumerable.Empty<SearchResultRow>())
+                .Select(r => r.DomainChipText)
+                .Where(IsCleanDomain)
+                .Select(d => d.Trim().ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(d => d)
+                .ToList();
+
+            void FilterDomainSuggestions(string? query)
+            {
+                var q = (query ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(q))
+                {
+                    domainSuggestBox.ItemsSource = allKnownDomains.Take(30).ToList();
+                }
+                else
+                {
+                    domainSuggestBox.ItemsSource = allKnownDomains
+                        .Where(d => d.Contains(q, StringComparison.OrdinalIgnoreCase))
+                        .Take(30)
+                        .ToList();
+                }
+            }
+
+            domainSuggestBox.TextChanged += (sender, args) =>
+            {
+                if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+                {
+                    FilterDomainSuggestions(sender.Text);
+                }
+            };
+
+            domainSuggestBox.GotFocus += (_, __) =>
+            {
+                FilterDomainSuggestions(domainSuggestBox.Text);
+            };
+
+            Grid.SetColumn(domainSuggestBox, 0);
+            compRow1.Children.Add(domainSuggestBox);
+
+            // Botón "Ver existentes" con flyout
+            var viewDomainsButton = new Button
+            {
+                Content = "📋 Ver existentes",
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Padding = new Thickness(8, 6, 8, 6),
+                CornerRadius = new CornerRadius(5),
+                Margin = new Thickness(0, 0, 0, 1)
+            };
+            ToolTipService.SetToolTip(viewDomainsButton, "Muestra dominios indexados limpios para verificar cuáles ya existen.");
+            Grid.SetColumn(viewDomainsButton, 1);
+            compRow1.Children.Add(viewDomainsButton);
+
+            // Campo 2: Tipo de proyecto
+            var typeCombo = new ComboBox
+            {
+                Header = "2. Tipo",
+                PlaceholderText = "Tipo...",
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            typeCombo.Items.Add(new ComboBoxItem { Content = "sseo (SEO)", Tag = "sseo" });
+            typeCombo.Items.Add(new ComboBoxItem { Content = "aads (ADS)", Tag = "aads" });
+            typeCombo.Items.Add(new ComboBoxItem { Content = "wwebs (WEB)", Tag = "wwebs" });
+            typeCombo.Items.Add(new ComboBoxItem { Content = "aapli (APLICACIONES)", Tag = "aapli" });
+            typeCombo.Items.Add(new ComboBoxItem { Content = "rrede (REDES)", Tag = "rrede" });
+            typeCombo.Items.Add(new ComboBoxItem { Content = "pprog (PROGRAMACIÓN)", Tag = "pprog" });
+            Grid.SetColumn(typeCombo, 2);
+            compRow1.Children.Add(typeCombo);
+
+            composerStack.Children.Add(compRow1);
+
+            // Fila 2: Mes actual (ej. 26-[09SEP]) y Detalle / Tarea
+            var compRow2 = new Grid { ColumnSpacing = 8 };
+            compRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.1, GridUnitType.Star) });
+            compRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.5, GridUnitType.Star) });
+
+            string GetSpanishMonthAbbr(int month) => month switch
+            {
+                1 => "ENE",
+                2 => "FEB",
+                3 => "MAR",
+                4 => "ABR",
+                5 => "MAY",
+                6 => "JUN",
+                7 => "JUL",
+                8 => "AGO",
+                9 => "SEP",
+                10 => "OCT",
+                11 => "NOV",
+                12 => "DIC",
+                _ => "MES"
+            };
+
+            var currentMonthDefault = $"{DateTime.Today:yy}-[{DateTime.Today:MM}{GetSpanishMonthAbbr(DateTime.Today.Month)}]";
+            var monthBox = new TextBox
+            {
+                Header = "3. Mes",
+                Text = currentMonthDefault,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            ToolTipService.SetToolTip(monthBox, "Mes actual prellenado automáticamente. Ej: 26-[09SEP]");
+            Grid.SetColumn(monthBox, 0);
+            compRow2.Children.Add(monthBox);
+
+            var detailDescBox = new TextBox
+            {
+                Header = "4. Descripción / Tarea",
+                PlaceholderText = "ej. Optimización Técnica On-Page...",
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            Grid.SetColumn(detailDescBox, 1);
+            compRow2.Children.Add(detailDescBox);
+
+            composerStack.Children.Add(compRow2);
+
+            void ApplyComposedTitle()
+            {
+                var parts = new List<string>();
+                var dom = domainSuggestBox.Text?.Trim();
+                if (!string.IsNullOrWhiteSpace(dom)) parts.Add(dom);
+
+                if (typeCombo.SelectedItem is ComboBoxItem typeItem && typeItem.Tag is string tVal && !string.IsNullOrWhiteSpace(tVal))
+                {
+                    parts.Add(tVal);
+                }
+
+                var mVal = monthBox.Text?.Trim();
+                if (!string.IsNullOrWhiteSpace(mVal)) parts.Add(mVal);
+
+                var desc = detailDescBox.Text?.Trim();
+                if (!string.IsNullOrWhiteSpace(desc)) parts.Add(desc);
+
+                if (parts.Count > 0)
+                {
+                    titleBox.Text = string.Join(" ", parts);
+                    titleBox.SelectionStart = titleBox.Text.Length;
+                }
+            }
+
+            var domainsFlyout = new MenuFlyout();
+            foreach (var d in allKnownDomains.Take(45))
+            {
+                var domainItem = new MenuFlyoutItem { Text = d };
+                domainItem.Click += (_, __) =>
+                {
+                    domainSuggestBox.Text = d;
+                    ApplyComposedTitle();
+                };
+                domainsFlyout.Items.Add(domainItem);
+            }
+            if (allKnownDomains.Count == 0)
+            {
+                domainsFlyout.Items.Add(new MenuFlyoutItem { Text = "No hay dominios indexados aún", IsEnabled = false });
+            }
+            viewDomainsButton.Flyout = domainsFlyout;
+
+            domainSuggestBox.SuggestionChosen += (sender, args) =>
+            {
+                if (args.SelectedItem is string chosen)
+                {
+                    sender.Text = chosen;
+                    ApplyComposedTitle();
+                }
+            };
+
+            typeCombo.SelectionChanged += (_, __) => ApplyComposedTitle();
+            monthBox.TextChanged += (_, __) => ApplyComposedTitle();
+            detailDescBox.TextChanged += (_, __) => ApplyComposedTitle();
+            domainSuggestBox.QuerySubmitted += (_, __) => ApplyComposedTitle();
+
+            composerCard.Child = composerStack;
+            titleSection.Children.Insert(1, composerCard);
 
             string StripVariantSuffix(string tag)
             {
@@ -3230,42 +3463,47 @@ namespace Anfeta.UI.Views
             reminderDelayCombo.SelectionChanged += (_, __) =>
                 RefreshCustomReminderVisibility();
 
+            var activePeopleTags = new[] { "ggena", "kkarl", "jjohn", "bbria", "iisai", "nneft" };
             var recentTags = LoadNotionUploadRecentTags();
-            if (recentTags.Count > 0)
+            var combinedRecent = activePeopleTags
+                .Concat(recentTags.Where(t => !activePeopleTags.Contains(t, StringComparer.OrdinalIgnoreCase)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            quickTagsPanel.Children.Add(
+                new TextBlock
+                {
+                    Text = "Usados recientemente:",
+                    FontSize = 11,
+                    Opacity = 0.70,
+                    Margin = new Thickness(0, 4, 0, 0)
+                });
+
+            var recentPanel = new VariableSizedWrapGrid
             {
-                quickTagsPanel.Children.Add(
-                    new TextBlock
-                    {
-                        Text = "Usados recientemente:",
-                        FontSize = 11,
-                        Opacity = 0.70
-                    });
+                Orientation = Orientation.Horizontal,
+                MaximumRowsOrColumns = 3,
+                ItemWidth = 100,
+                ItemHeight = 36
+            };
 
-                var recentPanel = new VariableSizedWrapGrid
+            foreach (var tag in combinedRecent.Take(12))
+            {
+                var button = new Button
                 {
-                    Orientation = Orientation.Horizontal,
-                    MaximumRowsOrColumns = 3,
-                    ItemWidth = 150,
-                    ItemHeight = 38
+                    Content = tag,
+                    Padding = new Thickness(8, 3, 8, 3),
+                    CornerRadius = new CornerRadius(5)
                 };
+                ToolTipService.SetToolTip(button, $"{GetNotionPersonDisplayName(tag)} ({tag})");
 
-                foreach (var tag in recentTags.Take(5))
-                {
-                    var button = new Button
-                    {
-                        Content = GetNotionPersonDisplayName(tag),
-                        Padding = new Thickness(8, 3, 8, 3),
-                        CornerRadius = new CornerRadius(5)
-                    };
+                button.Click += (_, __) =>
+                    AppendTagToActiveTitles(tag);
 
-                    button.Click += (_, __) =>
-                        AppendTagToActiveTitles(tag);
-
-                    recentPanel.Children.Add(button);
-                }
-
-                quickTagsPanel.Children.Add(recentPanel);
+                recentPanel.Children.Add(button);
             }
+
+            quickTagsPanel.Children.Add(recentPanel);
 
             var content = new StackPanel
             {

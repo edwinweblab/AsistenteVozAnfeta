@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Search;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -303,6 +303,13 @@ namespace Anfeta.UI.Views
             }
 
             await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
+        }
+
+        private void TogglePendientesPane_Click(object sender, RoutedEventArgs e)
+        {
+            var show = TogglePendientesPane.IsChecked == true;
+            PendientesPane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            PendientesPaneCol.Width = show ? new GridLength(270) : new GridLength(0);
         }
 
         private void ToggleFoldersPane_Click(object sender, RoutedEventArgs e)

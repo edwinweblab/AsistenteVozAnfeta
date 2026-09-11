@@ -297,6 +297,40 @@ namespace Anfeta.UI.Models.Weblab
         public Visibility OrderChipVisibility =>
             string.IsNullOrWhiteSpace(OrderChipText) ? Visibility.Collapsed : Visibility.Visible;
 
+        private string? _checklistProgressText;
+        private bool _checklistProgressCalculated;
+        [JsonIgnore]
+        public string? ChecklistProgressText
+        {
+            get
+            {
+                if (_checklistProgressCalculated) return _checklistProgressText;
+                _checklistProgressCalculated = true;
+                if (Source == SearchSource.Notion && !string.IsNullOrWhiteSpace(ExternalId))
+                {
+                    if (Anfeta.UI.Services.Notion.NotionCalendarService.TryGetStoredChecklistStats(ExternalId, out var stats))
+                    {
+                        var pct = stats.Total > 0 ? (int)Math.Round((double)stats.Completed / stats.Total * 100) : 0;
+                        _checklistProgressText = $"{stats.Completed}/{stats.Total} · {pct}%";
+                        return _checklistProgressText;
+                    }
+                }
+                return null;
+            }
+            set
+            {
+                _checklistProgressCalculated = true;
+                if (_checklistProgressText == value) return;
+                _checklistProgressText = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ChecklistProgressVisibility));
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility ChecklistProgressVisibility =>
+            string.IsNullOrWhiteSpace(ChecklistProgressText) ? Visibility.Collapsed : Visibility.Visible;
+
         [JsonIgnore]
         public double OrderNumericRank
         {

@@ -1238,6 +1238,31 @@ namespace Anfeta.UI.Services.Notion
             }
         }
 
+        public static bool TryGetStoredChecklistStats(
+            string pageId,
+            out (int Completed, int Total) stats)
+        {
+            stats = (0, 0);
+
+            if (string.IsNullOrWhiteSpace(pageId))
+                return false;
+
+            var cleanId = pageId.Replace("-", "").Trim();
+
+            if (PersistentChecklistStats.TryGetValue(pageId, out var stored) ||
+                (!string.Equals(cleanId, pageId, StringComparison.OrdinalIgnoreCase) &&
+                 PersistentChecklistStats.TryGetValue(cleanId, out stored)))
+            {
+                if (stored.Total > 0)
+                {
+                    stats = (Math.Clamp(stored.Completed, 0, stored.Total), stored.Total);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public bool TryGetCachedChecklistStats(
             string pageId,
             out NotionChecklistStats stats)
@@ -1861,12 +1886,17 @@ namespace Anfeta.UI.Services.Notion
 
                         var type = ReadString(block, "type");
 
-                        // Los bloques sincronizados pueden repetir contenido de
+                        // Los bloques sincronizados y plantillas pueden repetir contenido de
                         // otras páginas. No se recorren para evitar contar dos
-                        // veces la misma checklist.
+                        // veces la misma checklist ni tomar plantillas nativas.
                         if (type.Equals(
                                 "synced_block",
-                                StringComparison.OrdinalIgnoreCase))
+                                StringComparison.OrdinalIgnoreCase) ||
+                            type.Equals(
+                                "template",
+                                StringComparison.OrdinalIgnoreCase) ||
+                            block.TryGetProperty("synced_block", out _) ||
+                            block.TryGetProperty("template", out _))
                         {
                             continue;
                         }
@@ -2125,6 +2155,12 @@ namespace Anfeta.UI.Services.Notion
             var structuralContainer =
                 type.Equals(
                     "toggle",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "synced_block",
+                    StringComparison.OrdinalIgnoreCase) ||
+                type.Equals(
+                    "template",
                     StringComparison.OrdinalIgnoreCase) ||
                 type.Equals(
                     "heading_1",
