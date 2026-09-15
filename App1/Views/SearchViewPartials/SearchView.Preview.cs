@@ -542,6 +542,33 @@ namespace Anfeta.UI.Views
 
             if (block.IsChecked)
             {
+                var timeLabel = "✓ Hecho";
+                string? timeTooltip = null;
+
+                if (block.LastEditedTime.HasValue)
+                {
+                    var localTime = block.LastEditedTime.Value.ToLocalTime();
+                    var isToday = localTime.Date == DateTime.Today;
+                    var isYesterday = localTime.Date == DateTime.Today.AddDays(-1);
+
+                    var timeFormatted = localTime.ToString("hh:mm tt", System.Globalization.CultureInfo.CurrentCulture);
+                    if (isToday)
+                    {
+                        timeLabel = $"✓ Hecho · Hoy {timeFormatted}";
+                    }
+                    else if (isYesterday)
+                    {
+                        timeLabel = $"✓ Hecho · Ayer {timeFormatted}";
+                    }
+                    else
+                    {
+                        var dateFormatted = localTime.ToString("dd/MM", System.Globalization.CultureInfo.InvariantCulture);
+                        timeLabel = $"✓ Hecho · {dateFormatted} {timeFormatted}";
+                    }
+
+                    timeTooltip = $"Completado en Notion: {localTime:dd/MM/yyyy hh:mm:ss tt}";
+                }
+
                 var badge = new Border
                 {
                     Background = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 0, 230, 118)),
@@ -553,12 +580,18 @@ namespace Anfeta.UI.Views
                     VerticalAlignment = VerticalAlignment.Center,
                     Child = new TextBlock
                     {
-                        Text = "✓ Hecho",
+                        Text = timeLabel,
                         FontSize = 9.5,
                         FontWeight = FontWeights.SemiBold,
                         Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 230, 118))
                     }
                 };
+
+                if (!string.IsNullOrEmpty(timeTooltip))
+                {
+                    ToolTipService.SetToolTip(badge, timeTooltip);
+                }
+
                 Grid.SetColumn(badge, 2);
                 grid.Children.Add(badge);
             }

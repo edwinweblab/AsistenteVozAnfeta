@@ -7346,5 +7346,105 @@ CtxMenuRenameItem.Text = isNotion
         }
 
         #endregion
+        private async Task<string?> ConfigureRxFolderPathAsync()
+        {
+            try
+            {
+                var picker = new Windows.Storage.Pickers.FolderPicker
+                {
+                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.ComputerFolder
+                };
+                picker.FileTypeFilter.Add("*");
+                if (App.MainWindowInstance != null)
+                {
+                    WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance));
+                }
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder != null && System.IO.Directory.Exists(folder.Path))
+                {
+                    ApplicationData.Current.LocalSettings.Values["RxFolderPath"] = folder.Path;
+                    StatusText.Text = $"Estado: Ruta de Carpeta RX guardada: {folder.Path}";
+                    return folder.Path;
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: No se pudo configurar ruta de Carpeta RX: {ex.Message}";
+            }
+            return null;
+        }
+
+        private async void BtnRxFolder_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var customPath = ApplicationData.Current.LocalSettings.Values["RxFolderPath"] as string;
+                string? targetFolder = null;
+
+                if (!string.IsNullOrWhiteSpace(customPath) && System.IO.Directory.Exists(customPath))
+                {
+                    targetFolder = customPath;
+                }
+                else
+                {
+                    var candidatePaths = new List<string>
+                    {
+                        @"C:\Users\nanoc\Dropbox\CARPETA UNIKA drx",
+                        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Dropbox", "CARPETA UNIKA drx")
+                    };
+
+                    foreach (var p in candidatePaths)
+                    {
+                        if (System.IO.Directory.Exists(p))
+                        {
+                            targetFolder = p;
+                            break;
+                        }
+                    }
+
+                    if (string.IsNullOrWhiteSpace(targetFolder))
+                    {
+                        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                        var dropboxDir = System.IO.Path.Combine(userProfile, "Dropbox");
+                        if (System.IO.Directory.Exists(dropboxDir))
+                        {
+                            var found = System.IO.Directory.GetDirectories(dropboxDir, "*CARPETA UNIKA*", System.IO.SearchOption.TopDirectoryOnly);
+                            if (found.Length > 0) targetFolder = found[0];
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(targetFolder) || !System.IO.Directory.Exists(targetFolder))
+                {
+                    targetFolder = await ConfigureRxFolderPathAsync();
+                }
+
+                if (!string.IsNullOrWhiteSpace(targetFolder) && System.IO.Directory.Exists(targetFolder))
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = targetFolder,
+                        UseShellExecute = true
+                    });
+                    StatusText.Text = $"Estado: Abriendo Carpeta RX ({System.IO.Path.GetFileName(targetFolder)}) en Explorador...";
+                }
+                else
+                {
+                    StatusText.Text = "Estado: No se encontrÃ³ la Carpeta RX ni se configurÃ³ una ruta vÃ¡lida.";
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: No se pudo abrir la carpeta RX: {ex.Message}";
+            }
+        }
+
+        private async void BtnRxFolderConfigure_Click(object sender, RoutedEventArgs e)
+        {
+            await ConfigureRxFolderPathAsync();
+        }
+
+        private void BtnOpenRxFolder_Click(object sender, RoutedEventArgs e) => BtnRxFolder_Click(sender, e);
+
     }
 }

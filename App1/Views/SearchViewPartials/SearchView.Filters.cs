@@ -2035,7 +2035,7 @@ namespace Anfeta.UI.Views
                 {
                     var taskList = JsonSerializer.Deserialize<System.Collections.Generic.List<SavedSearch>>(rawTasks)
                                    ?? new System.Collections.Generic.List<SavedSearch>();
-                    foreach (var it in taskList)
+                    foreach (var it in taskList.Where(x => x != null).OrderBy(it => ParsePendienteSortDate(it.ScheduledDate)))
                     {
                         if (it == null) continue;
                         if (string.IsNullOrWhiteSpace(it.Title)) it.Title = it.Query;
@@ -2060,8 +2060,37 @@ namespace Anfeta.UI.Views
             NotifySearchPresetsChanged();
         }
 
+        private static DateTime ParsePendienteSortDate(string? dateStr)
+        {
+            if (string.IsNullOrWhiteSpace(dateStr)) return DateTime.MaxValue;
+            dateStr = dateStr.Trim();
+            string[] formats = { "dd/MM HH:mm", "dd/MM/yyyy HH:mm", "dd/MM/yyyy", "dd/MM", "d/M HH:mm", "d/M/yyyy HH:mm", "d/M/yyyy", "d/M" };
+            if (DateTime.TryParseExact(dateStr, formats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+            {
+                if (dt.Year == 1)
+                {
+                    dt = new DateTime(DateTime.Today.Year, dt.Month, dt.Day, dt.Hour, dt.Minute, 0);
+                }
+                return dt;
+            }
+            if (DateTime.TryParse(dateStr, out var parsed))
+                return parsed;
+            return DateTime.MaxValue;
+        }
+
+        private void SortPendingTasksInPlace()
+        {
+            var sorted = _pendingTasks.OrderBy(it => ParsePendienteSortDate(it.ScheduledDate)).ToList();
+            _pendingTasks.Clear();
+            foreach (var item in sorted)
+            {
+                _pendingTasks.Add(item);
+            }
+        }
+
         private void SavePendingTasks()
         {
+            SortPendingTasksInPlace();
             var list = _pendingTasks.ToList();
             var raw = JsonSerializer.Serialize(list);
             ApplicationData.Current.LocalSettings.Values[LS_PendingTasks] = raw;
@@ -2459,11 +2488,61 @@ namespace Anfeta.UI.Views
             var nextMondayStr = DateTime.Today.AddDays(daysUntilMonday).ToString("dd/MM");
 
             dateChipsRow.Children.Add(CreateDateChip("Hoy", todayStr));
-            dateChipsRow.Children.Add(CreateDateChip("Mañana", tomorrowStr));
-            dateChipsRow.Children.Add(CreateDateChip("+3 Días", in3DaysStr));
-            dateChipsRow.Children.Add(CreateDateChip("Próx. Lunes", nextMondayStr));
+            dateChipsRow.Children.Add(CreateDateChip("MaÃ±ana", tomorrowStr));
+            dateChipsRow.Children.Add(CreateDateChip("+3 DÃ­as", in3DaysStr));
+            dateChipsRow.Children.Add(CreateDateChip("PrÃ³x. Lunes", nextMondayStr));
+
+            var timeChipsRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 5,
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+
+            Button CreateTimeChip(string label, int minutesToAdd)
+            {
+                var btn = new Button
+                {
+                    Content = label,
+                    FontSize = 10,
+                    Padding = new Thickness(7, 2, 7, 2),
+                    CornerRadius = new CornerRadius(6),
+                    Background = new SolidColorBrush(Color.FromArgb(28, 14, 116, 144)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(90, 6, 182, 212)),
+                    BorderThickness = new Thickness(1),
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 165, 243, 252))
+                };
+                btn.Click += (_, __) =>
+                {
+                    var baseDt = DateTime.Now;
+                    var cur = (dateBox.Text ?? "").Trim();
+                    if (!string.IsNullOrWhiteSpace(cur))
+                    {
+                        var parsed = ParsePendienteSortDate(cur);
+                        if (parsed != DateTime.MaxValue)
+                        {
+                            if (parsed.Date != DateTime.Today && parsed.Hour == 0 && parsed.Minute == 0)
+                            {
+                                baseDt = parsed.Date.Add(DateTime.Now.TimeOfDay);
+                            }
+                        }
+                    }
+                    var target = baseDt.AddMinutes(minutesToAdd);
+                    dateBox.Text = target.ToString("dd/MM HH:mm");
+                };
+                return btn;
+            }
+
+            timeChipsRow.Children.Add(CreateTimeChip("+10 min", 10));
+            timeChipsRow.Children.Add(CreateTimeChip("+30 min", 30));
+            timeChipsRow.Children.Add(CreateTimeChip("+1 hora", 60));
+            timeChipsRow.Children.Add(CreateTimeChip("+2 horas", 120));
+            timeChipsRow.Children.Add(CreateTimeChip("+3 horas", 180));
+            timeChipsRow.Children.Add(CreateTimeChip("+4 horas", 240));
+            timeChipsRow.Children.Add(CreateTimeChip("+5 horas", 300));
 
             dateSection.Children.Add(dateChipsRow);
+            dateSection.Children.Add(timeChipsRow);
             dateSection.Children.Add(dateBox);
             rootPanel.Children.Add(dateSection);
 

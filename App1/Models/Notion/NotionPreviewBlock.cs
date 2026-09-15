@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Anfeta.UI.Models.Notion
 {
@@ -42,5 +42,6 @@ namespace Anfeta.UI.Models.Notion
         public bool IsStrikethrough { get; init; }
         public int Depth { get; init; }
         public string Language { get; init; } = string.Empty;
+        public DateTimeOffset? LastEditedTime { get; init; }
     }
 }

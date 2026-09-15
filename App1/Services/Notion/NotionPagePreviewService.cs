@@ -421,6 +421,18 @@ namespace Anfeta.UI.Services.Notion
                 return null;
             }
 
+            var lastEditedRaw =
+                ReadString(block, "last_edited_time");
+            DateTimeOffset? lastEditedTime = null;
+            if (DateTimeOffset.TryParse(
+                    lastEditedRaw,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal,
+                    out var parsedTime))
+            {
+                lastEditedTime = parsedTime.ToLocalTime();
+            }
+
             return new NotionPreviewBlock
             {
                 Id = id,
@@ -431,7 +443,8 @@ namespace Anfeta.UI.Services.Notion
                 IsChecked = isChecked,
                 IsStrikethrough = isStrikethrough,
                 Depth = depth,
-                Language = language
+                Language = language,
+                LastEditedTime = lastEditedTime
             };
         }
 

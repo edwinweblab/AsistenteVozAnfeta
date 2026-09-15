@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.DailyProgress;
+using Anfeta.UI.Models.DailyProgress;
 using Anfeta.UI.Services.Notion;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -1697,8 +1697,101 @@ namespace Anfeta.UI.Views.DailyProgress
                         danger: false));
             }
 
+            PersonDetailItems.Children.Add(
+                BuildDetailSectionTitle(
+                    "CHECKLISTS COMPLETADOS HOY",
+                    person.CompletedItemsToday?.Count ?? 0,
+                    danger: false));
+
+            if ((person.CompletedItemsToday?.Count ?? 0) == 0)
+            {
+                PersonDetailItems.Children.Add(
+                    BuildEmptyDetailCard(
+                        "No se registraron casillas marcadas como hechas en este día."));
+            }
+            else
+            {
+                PersonDetailItems.Children.Add(
+                    BuildDetailCompletedChecksList(
+                        person.CompletedItemsToday!));
+            }
+
             ShowPersonMode();
             DispatcherQueue.TryEnqueue(ApplyTextZoom);
+        }
+
+        private UIElement BuildDetailCompletedChecksList(
+            IReadOnlyList<NotionCompletedChecklistItem> items)
+        {
+            var stack = new StackPanel
+            {
+                Spacing = 6,
+                Margin = new Thickness(0, 4, 0, 10)
+            };
+
+            foreach (var item in items)
+            {
+                var card = new Border
+                {
+                    Padding = new Thickness(12, 8, 12, 8),
+                    Background = SurfaceBrush,
+                    BorderBrush = BorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6)
+                };
+
+                var grid = new Grid
+                {
+                    ColumnSpacing = 8
+                };
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var checkBadge = new Border
+                {
+                    Background = ProgressBackgroundBrush,
+                    BorderBrush = ProgressBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = "✓ Hecho",
+                        FontSize = 10,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = ProgressBrush
+                    }
+                };
+                Grid.SetColumn(checkBadge, 0);
+                grid.Children.Add(checkBadge);
+
+                var tb = new TextBlock
+                {
+                    Text = item.Text,
+                    FontSize = 11.5,
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(tb, 1);
+                grid.Children.Add(tb);
+
+                var timeBadge = new TextBlock
+                {
+                    Text = item.CompletedAt.ToLocalTime().ToString("hh:mm tt", CultureInfo.CurrentCulture),
+                    FontSize = 11,
+                    Foreground = MutedBrush,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(timeBadge, 2);
+                grid.Children.Add(timeBadge);
+
+                card.Child = grid;
+                stack.Children.Add(card);
+            }
+
+            return stack;
         }
 
         private UIElement BuildDetailCardsGrid(

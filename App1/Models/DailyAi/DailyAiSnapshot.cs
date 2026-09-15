@@ -80,6 +80,14 @@ public sealed record DailyAiAreaSnapshot(
     int LaggingCount,
     int AverageProgressToday);
 
+public sealed record DailyAiCompletedChecklistItem(
+    string Person,
+    string ProjectName,
+    string ActivityTitle,
+    string Text,
+    DateTimeOffset CompletedAt,
+    string TimeLabel);
+
 public sealed record DailyAiSnapshot(
     DateTime Date,
     DateTimeOffset GeneratedAt,
@@ -89,7 +97,8 @@ public sealed record DailyAiSnapshot(
     IReadOnlyList<DailyAiAreaSnapshot> Areas,
     IReadOnlyList<DailyAiActivitySnapshot> Activities,
     string DataNote,
-    string Fingerprint);
+    string Fingerprint,
+    IReadOnlyList<DailyAiCompletedChecklistItem>? CompletedChecklists = null);
 
 public sealed record DailyAiNarrative(
     string Summary,

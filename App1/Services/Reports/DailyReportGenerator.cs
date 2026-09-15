@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -97,6 +98,64 @@ public static class DailyReportGenerator
                 }
             }
 
+            string completedChecklistsHtml = "";
+            int totalChecksDoneToday = 0;
+            if (root.TryGetProperty("CompletedChecklists", out var compArr) && compArr.ValueKind == JsonValueKind.Array)
+            {
+                totalChecksDoneToday = compArr.GetArrayLength();
+                var groupedByPerson = new Dictionary<string, List<(string Project, string Activity, string Text, string Time)>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var item in compArr.EnumerateArray())
+                {
+                    string person = E(item.TryGetProperty("Person", out var perProp) ? perProp.GetString() : "Sin asignar");
+                    string proj = E(item.TryGetProperty("ProjectName", out var prjProp) ? prjProp.GetString() : "Sin proyecto");
+                    string act = E(item.TryGetProperty("ActivityTitle", out var actProp) ? actProp.GetString() : "");
+                    string text = E(item.TryGetProperty("Text", out var txtProp) ? txtProp.GetString() : "");
+                    string time = E(item.TryGetProperty("TimeLabel", out var timeProp) ? timeProp.GetString() : "");
+
+                    if (!groupedByPerson.TryGetValue(person, out var list))
+                    {
+                        list = new List<(string Project, string Activity, string Text, string Time)>();
+                        groupedByPerson[person] = list;
+                    }
+                    list.Add((proj, act, text, time));
+                }
+
+                if (groupedByPerson.Count > 0)
+                {
+                    foreach (var kvp in groupedByPerson)
+                    {
+                        var personName = kvp.Key;
+                        var items = kvp.Value;
+                        completedChecklistsHtml += $@"
+                        <div style=""margin-bottom: 12px; background-color: #0c161f; border: 1px solid #1a2c3d; border-radius: 8px; padding: 12px;"">
+                            <div style=""display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #1a2c3d; padding-bottom: 6px;"">
+                                <span style=""font-weight: 700; color: #48bef5; font-size: 13px;"">👤 {personName}</span>
+                                <span class=""badge norm"">{items.Count} check(s) hecho(s) hoy</span>
+                            </div>
+                            <ul style=""margin: 0; padding-left: 20px; font-size: 12px; color: #d4e2ed;"">";
+
+                        foreach (var checkItem in items)
+                        {
+                            completedChecklistsHtml += $@"
+                                <li style=""margin-bottom: 4px;"">
+                                    <span style=""color: #2abf8e; font-weight: 600;"">✓ [{checkItem.Time}]</span>
+                                    <strong style=""color: #8797a5;"">[{checkItem.Project} - {checkItem.Activity}]:</strong>
+                                    {checkItem.Text}
+                                </li>";
+                        }
+
+                        completedChecklistsHtml += @"
+                            </ul>
+                        </div>";
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(completedChecklistsHtml))
+            {
+                completedChecklistsHtml = "<div class=\"row-item\">No se registraron casillas de checklist completadas en la jornada de hoy.</div>";
+            }
+
             return $@"<!DOCTYPE html>
 <html lang=""es"">
 <head>
@@ -193,6 +252,7 @@ public static class DailyReportGenerator
             <div class=""kpi-card""><div class=""kpi-val"" style=""color:#b473ff;"">{inReview}</div><div class=""kpi-lbl"">En Revisión</div></div>
             <div class=""kpi-card""><div class=""kpi-val"" style=""color:#ff9146;"">{unassigned}</div><div class=""kpi-lbl"">Sin Responsable</div></div>
             <div class=""kpi-card""><div class=""kpi-val"" style=""color:#8797a5;"">{missingChecklist}</div><div class=""kpi-lbl"">Sin Checklist</div></div>
+            <div class=""kpi-card""><div class=""kpi-val"" style=""color:#2abf8e;"">{totalChecksDoneToday}</div><div class=""kpi-lbl"">Checks Hoy</div></div>
         </div>
 
         <div class=""card"">
@@ -206,6 +266,11 @@ public static class DailyReportGenerator
                 <tr><th>Responsable</th><th class=""center"">Act.</th><th class=""center"">Pend.</th><th class=""center"">Rez.</th></tr>
                 {peopleHtml}
             </table>
+        </div>
+
+        <div class=""card"">
+            <div class=""card-title"">Checklists y Tareas Completadas Hoy por Colaborador</div>
+            {completedChecklistsHtml}
         </div>
     </div>
 </body>

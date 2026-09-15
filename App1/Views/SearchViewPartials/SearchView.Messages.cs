@@ -1,4 +1,4 @@
-using Anfeta.UI.Models.Notion;
+﻿using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Services.Speech;
@@ -4120,6 +4120,7 @@ namespace Anfeta.UI.Views
             panel.Children.Add(messageBox);
             panel.Children.Add(audioComposer.View);
             panel.Children.Add(dateRow);
+            panel.Children.Add(BuildQuickTimeChips(datePicker, timePicker));
             panel.Children.Add(attach);
             panel.Children.Add(filesPanel);
             panel.Children.Add(uploadProgressBar);
@@ -6596,6 +6597,7 @@ namespace Anfeta.UI.Views
 
             panel.Children.Add(datePicker);
             panel.Children.Add(timePicker);
+            panel.Children.Add(BuildQuickTimeChips(datePicker, timePicker));
 
             var dialog =
                 new ContentDialog
@@ -6807,7 +6809,52 @@ namespace Anfeta.UI.Views
             await RescheduleMessageAsync(message);
         }
 
-        private async Task RescheduleMessageAsync(
+                private static FrameworkElement BuildQuickTimeChips(DatePicker datePicker, TimePicker timePicker)
+        {
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Margin = new Thickness(0, 4, 0, 4)
+            };
+
+            Button CreateChip(string label, Func<DateTimeOffset, DateTimeOffset> calculator)
+            {
+                var btn = new Button
+                {
+                    Content = label,
+                    Padding = new Thickness(8, 3, 8, 3),
+                    FontSize = 11,
+                    CornerRadius = new CornerRadius(12)
+                };
+                btn.Click += (_, _) =>
+                {
+                    var baseTime = DateTimeOffset.Now;
+                    var target = calculator(baseTime);
+                    datePicker.Date = target.Date;
+                    timePicker.Time = target.TimeOfDay;
+                };
+                return btn;
+            }
+
+            stack.Children.Add(CreateChip("+10 min", t => t.AddMinutes(10)));
+            stack.Children.Add(CreateChip("+30 min", t => t.AddMinutes(30)));
+            stack.Children.Add(CreateChip("+1 hora", t => t.AddHours(1)));
+            stack.Children.Add(CreateChip("+2 horas", t => t.AddHours(2)));
+            stack.Children.Add(CreateChip("+4 horas", t => t.AddHours(4)));
+            stack.Children.Add(CreateChip("MaÃ±ana", t => t.AddDays(1)));
+
+            return new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+                HorizontalScrollMode = ScrollMode.Enabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollMode = ScrollMode.Disabled,
+                Content = stack
+            };
+        }
+
+private async Task RescheduleMessageAsync(
             MessageViewItem message)
         {
             if (message.IsReviewAlert)
@@ -6861,6 +6908,7 @@ namespace Anfeta.UI.Views
 
             panel.Children.Add(datePicker);
             panel.Children.Add(timePicker);
+            panel.Children.Add(BuildQuickTimeChips(datePicker, timePicker));
 
             var dialog = new ContentDialog
             {

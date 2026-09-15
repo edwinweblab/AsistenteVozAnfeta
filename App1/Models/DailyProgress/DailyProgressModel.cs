@@ -1,4 +1,5 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Services.Notion;
 using System;
 using System.Collections.Generic;
 
@@ -45,6 +46,9 @@ namespace Anfeta.UI.Models.DailyProgress
         public int TodayChecklistCompleted { get; init; }
         public int TodayChecklistTotal { get; init; }
         public int TodayChecklistPercentage { get; init; }
+
+        public IReadOnlyList<NotionCompletedChecklistItem> CompletedItemsToday { get; init; } =
+            Array.Empty<NotionCompletedChecklistItem>();
 
         public string TodayChecklistLabel =>
             ChecklistScanned
@@ -164,6 +168,9 @@ namespace Anfeta.UI.Models.DailyProgress
         public IReadOnlyList<DailyProgressActivityItem> AllActivities { get; init; } =
             Array.Empty<DailyProgressActivityItem>();
 
+        public IReadOnlyList<NotionCompletedChecklistItem> CompletedItemsToday { get; init; } =
+            Array.Empty<NotionCompletedChecklistItem>();
+
         public int ReviewCount { get; init; }
         public int CompletedCount { get; init; }
         public int PendingCount { get; init; }
@@ -183,6 +190,7 @@ namespace Anfeta.UI.Models.DailyProgress
         public int CurrentProgressPercentage { get; init; }
         public int TotalActivities { get; init; }
         public int LaggingCount { get; init; }
+        public int TotalChecklistsCompletedToday { get; init; }
 
         // Transiciones/movimientos detectados en la ventana del Feed.
         public int ReviewCount { get; init; }

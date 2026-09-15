@@ -1,4 +1,4 @@
-using Anfeta.UI.Models.Notion;
+﻿using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Notion;
@@ -4757,27 +4757,24 @@ namespace Anfeta.UI.Views
 
             UpdateCalendarCobrosToggleVisual();
 
-            if (_calendarShowCobros)
+                        if (_calendarViewActive)
             {
-                // Primera activación después de actualizar ANFETA: reconstruye
-                // únicamente la base Cobrar y pagar para corregir filas viejas
-                // que todavía conserven una fecha anterior en el índice.
-                await EnsureCobrosCalendarIndexMappingAsync();
-
-                _calendarCobroOverlayCache.Clear();
-                _calendarCobroCacheIndexVersion =
-                    App.LocalIndex.Version;
+                RefreshCalendarExternalOverlaysIfNeeded(force: true);
+                StatusText.Text = _calendarShowCobros
+                    ? $"Estado: BdCOBRAR visible ({GetCalendarCobroItems(_calendarSelectedDate).Count} evento(s) en Ã­ndice)..."
+                    : "Estado: BdCOBRAR oculto.";
             }
 
-            if (_calendarViewActive)
+            if (_calendarShowCobros)
             {
-                RefreshCalendarExternalOverlaysIfNeeded(
-                    force: true);
-
-                StatusText.Text =
-                    _calendarShowCobros
-                        ? $"Estado: BdCOBRAR visible ✅ ({GetCalendarCobroItems(_calendarSelectedDate).Count} evento(s) con hora)"
-                        : "Estado: BdCOBRAR oculto ✅";
+                await EnsureCobrosCalendarIndexMappingAsync();
+                _calendarCobroOverlayCache.Clear();
+                _calendarCobroCacheIndexVersion = App.LocalIndex.Version;
+                if (_calendarViewActive)
+                {
+                    RefreshCalendarExternalOverlaysIfNeeded(force: true);
+                    StatusText.Text = $"Estado: BdCOBRAR visible Â· ({GetCalendarCobroItems(_calendarSelectedDate).Count} evento(s) con hora)";
+                }
             }
         }
 
@@ -9583,7 +9580,30 @@ namespace Anfeta.UI.Views
             }
         }
 
-        private static bool HasExactCalendarPhase(
+                private static readonly Regex CalendarPriority00TagRegex = new(
+            @"(?<![\p{L}\p{Nd}_.:\-/])(?:(?:jjohn|john|nneft|neft|kkarl|karl|bbria|bria|ggena|gena|iisai|iisaia|isai|eemma|emma|aandr|andr|ssote|sote|eedua|edua|aacal|acal)\s*(?:001|002|00)|(?:001|002|00)\s*(?:jjohn|john|nneft|neft|kkarl|karl|bbria|bria|ggena|gena|iisai|iisaia|isai|eemma|emma|aandr|andr|ssote|sote|eedua|edua|aacal|acal))(?![\p{L}\p{Nd}_])",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        private static bool HasCalendarPriority00Phase(
+            NotionCalendarActivity activity)
+        {
+            if (activity == null ||
+                string.IsNullOrWhiteSpace(activity.Title))
+            {
+                return false;
+            }
+
+            if (HasExactCalendarPhase(activity, "zREVISION") ||
+                HasExactCalendarPhase(activity, "rtuzREVISION") ||
+                HasExactCalendarPhase(activity, "sprtuzREVISION") ||
+                HasExactCalendarPhase(activity, "aprtuzREVISION"))
+            {
+                return false;
+            }
+
+            return CalendarPriority00TagRegex.IsMatch(activity.Title);
+        }
+private static bool HasExactCalendarPhase(
             NotionCalendarActivity activity,
             string phase)
         {
@@ -9637,6 +9657,7 @@ namespace Anfeta.UI.Views
             return HasExactCalendarPhase(
                        activity,
                        "prtuzREVISION") ||
+                   HasCalendarPriority00Phase(activity) ||
                    HasExactCalendarPhase(
                        activity,
                        "zREVISION") ||
@@ -26522,6 +26543,7 @@ namespace Anfeta.UI.Views
             return HasExactCalendarPhase(
                        activity,
                        "prtuzREVISION") ||
+                   HasCalendarPriority00Phase(activity) ||
                    HasExactCalendarPhase(
                        activity,
                        "sprtuzREVISION");
@@ -32764,7 +32786,7 @@ namespace Anfeta.UI.Views
             // Orden exactamente como se solicitó.
             if (HasExactCalendarPhase(
                     activity,
-                    "prtuzREVISION"))
+                    "prtuzREVISION") || HasCalendarPriority00Phase(activity))
             {
                 return new CalendarProjectPhaseInfo(
                     "prtuzREVISION",

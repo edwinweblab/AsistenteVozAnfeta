@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.DailyProgress;
+using Anfeta.UI.Models.DailyProgress;
 using Anfeta.UI.Models.Notion;
 using System;
 using System.Collections.Generic;
@@ -1251,6 +1251,9 @@ namespace Anfeta.UI.Services.Notion
                         assignedUnique.Count(item =>
                             item.IsLagging),
 
+                    TotalChecklistsCompletedToday =
+                        people.Sum(p => p.CompletedItemsToday.Count),
+
                     ReviewCount =
                         assignedUnique.Count(item =>
                             item.IsReviewMovement),
@@ -1661,6 +1664,10 @@ namespace Anfeta.UI.Services.Notion
                 TodayChecklistPercentage =
                     todayChecklistPercentage,
 
+                CompletedItemsToday =
+                    checklistStats?.GetCompletedItemsOn(selectedDay) ??
+                    (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>(),
+
                 ChecklistDeltaToday =
                     checklistDelta,
                 WorkedMinutesDeltaToday =
@@ -1817,6 +1824,11 @@ namespace Anfeta.UI.Services.Notion
                         CanonicalFeedPerson(
                             group.Key);
 
+                    var completedItemsToday = all
+                        .SelectMany(item => item.CompletedItemsToday ?? Array.Empty<NotionCompletedChecklistItem>())
+                        .OrderByDescending(ci => ci.CompletedAt)
+                        .ToList();
+
                     return new DailyProgressPersonSnapshot
                     {
                         Name =
@@ -1854,6 +1866,9 @@ namespace Anfeta.UI.Services.Notion
 
                         AllActivities =
                             all,
+
+                        CompletedItemsToday =
+                            completedItemsToday,
 
                         // En V2 son movimientos del día.
                         ReviewCount =

@@ -60,11 +60,25 @@ public sealed class DailyAiSnapshotBuilder
             projects.Count(x => x.IsSuspended), activities.Count(x => x.IsUnassigned),
             activities.Count(x => x.ChecksTotal <= 0));
 
+        var completedChecklists = source.People
+            .SelectMany(p => (p.AllActivities ?? Array.Empty<DailyProgressActivityItem>())
+                .SelectMany(act => (act.CompletedItemsToday ?? Array.Empty<Anfeta.UI.Services.Notion.NotionCompletedChecklistItem>())
+                    .Select(ci => new DailyAiCompletedChecklistItem(
+                        string.IsNullOrWhiteSpace(p.Name) ? "Sin asignar" : p.Name.Trim(),
+                        string.IsNullOrWhiteSpace(act.Source.Project) ? (string.IsNullOrWhiteSpace(act.Domain) ? "Sin proyecto" : act.Domain) : act.Source.Project.Trim(),
+                        act.FullTitle.Length > 0 ? act.FullTitle : act.Source.Title,
+                        ci.Text,
+                        ci.CompletedAt,
+                        ci.CompletedAt.ToString("hh:mm tt", System.Globalization.CultureInfo.CurrentCulture)))))
+            .OrderBy(x => x.Person)
+            .ThenByDescending(x => x.CompletedAt)
+            .ToList();
+
         var generatedAt = DateTimeOffset.Now;
-        var fingerprintInput = JsonSerializer.Serialize(new { Date = source.Date.Date, metrics, projects, people, areas });
+        var fingerprintInput = JsonSerializer.Serialize(new { Date = source.Date.Date, metrics, projects, people, areas, CompletedChecklistsCount = completedChecklists.Count });
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintInput)));
         return new DailyAiSnapshot(source.Date.Date, generatedAt, metrics, projects, people, areas, activities,
-            source.DataNote ?? string.Empty, fingerprint);
+            source.DataNote ?? string.Empty, fingerprint, completedChecklists);
     }
 
     private static DailyAiActivitySnapshot ToActivity(DailyProgressActivityItem item)
