@@ -14,9 +14,9 @@ public sealed class AssignmentChangeTracker
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex PriorityVariant = new(
-        @"(?<![\p{L}\p{Nd}_])(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\s*(?<v>001|002|00)(?![\p{L}\p{Nd}_])|" +
-        @"(?<![\p{L}\p{Nd}_.:\-/])(?<v>001|002|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])|" +
-        @"(?<![\p{L}\p{Nd}_.:\-/])(?<v>001|002|00)(?:prt[a-z0-9_-]*)?(?![\p{L}\p{Nd}_.:\-/])",
+        @"(?<![\p{L}\p{Nd}_])(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\s*(?<v>001|002|003|00)(?![\p{L}\p{Nd}_])|" +
+        @"(?<![\p{L}\p{Nd}_.:\-/])(?<v>001|002|003|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])|" +
+        @"(?<![\p{L}\p{Nd}_.:\-/])(?<v>001|002|003|00)(?:prt[a-z0-9_-]*)?(?![\p{L}\p{Nd}_.:\-/])",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TerminatedKeyword = new(
@@ -46,6 +46,7 @@ public sealed class AssignmentChangeTracker
             "00" => "00 · Urgente",
             "001" => "01 · Importante",
             "002" => "02 · Secundaria",
+            "003" => "03 · Recordar-usar",
             _ => ""
         } : "";
 

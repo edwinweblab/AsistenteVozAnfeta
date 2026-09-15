@@ -27,6 +27,18 @@ namespace Anfeta.UI.Services.Speech
         public TextToSpeechService(AppStateService appState)
         {
             _appState = appState;
+            try
+            {
+                var spanishVoice = SpeechSynthesizer.AllVoices
+                    .FirstOrDefault(v => v.Language.StartsWith("es", StringComparison.OrdinalIgnoreCase));
+                if (spanishVoice != null)
+                {
+                    _synth.Voice = spanishVoice;
+                }
+            }
+            catch
+            {
+            }
         }
 
         // Cambia velocidad de reproducción en tiempo real si hay audio en curso.

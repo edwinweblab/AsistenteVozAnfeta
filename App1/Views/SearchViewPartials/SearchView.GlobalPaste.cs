@@ -328,11 +328,21 @@ namespace Anfeta.UI.Views
                 Margin = new Thickness(0, 0, 8, 0)
             };
 
+            var variant003Radio = new RadioButton
+            {
+                Content = "003 (Recordar-usar)",
+                GroupName = "GlobalPasteVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 192, 132, 252)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
             string GetActiveVariantSuffix()
             {
                 if (variant00Radio.IsChecked == true) return "00";
                 if (variant001Radio.IsChecked == true) return "001";
                 if (variant002Radio.IsChecked == true) return "002";
+                if (variant003Radio.IsChecked == true) return "003";
                 return string.Empty;
             }
 
@@ -341,6 +351,7 @@ namespace Anfeta.UI.Views
                 var clean = (tag ?? string.Empty).Trim();
                 if (clean.EndsWith("001", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
                 if (clean.EndsWith("002", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
+                if (clean.EndsWith("003", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
                 if (clean.EndsWith("00", StringComparison.OrdinalIgnoreCase)) return clean[..^2];
                 return clean;
             }
@@ -354,6 +365,7 @@ namespace Anfeta.UI.Views
                 if (!string.IsNullOrEmpty(activeVariant) &&
                     !cleanTag.EndsWith("001", StringComparison.OrdinalIgnoreCase) &&
                     !cleanTag.EndsWith("002", StringComparison.OrdinalIgnoreCase) &&
+                    !cleanTag.EndsWith("003", StringComparison.OrdinalIgnoreCase) &&
                     !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
                 {
                     cleanTag += activeVariant;
@@ -409,6 +421,7 @@ namespace Anfeta.UI.Views
             variant00Radio.Checked += (_, __) => OnVariantSelectionChanged();
             variant001Radio.Checked += (_, __) => OnVariantSelectionChanged();
             variant002Radio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant003Radio.Checked += (_, __) => OnVariantSelectionChanged();
 
             var tagsStack = new StackPanel { Spacing = 7 };
             tagsStack.Children.Add(new TextBlock
@@ -418,7 +431,7 @@ namespace Anfeta.UI.Views
                 FontSize = 12
             });
 
-            // Selector de variantes (00 Urgente, 001 Importante, 002 Secundaria)
+            // Selector de variantes (00 Urgente, 001 Importante, 002 Secundaria, 003 Recordar-usar)
             var variantsHeader = new TextBlock
             {
                 Text = "Variante de prioridad / asignación:",
@@ -438,6 +451,7 @@ namespace Anfeta.UI.Views
             variantsRow.Children.Add(variant00Radio);
             variantsRow.Children.Add(variant001Radio);
             variantsRow.Children.Add(variant002Radio);
+            variantsRow.Children.Add(variant003Radio);
             tagsStack.Children.Add(variantsRow);
 
             // Botón Asignar a Todos (002 Secundario)
@@ -539,9 +553,14 @@ namespace Anfeta.UI.Views
             };
             tagsCard.Child = tagsStack;
 
+            double desiredGlobalPasteWidth = Math.Clamp(
+                (XamlRoot?.Size.Width ?? 1200) * 0.85,
+                900d,
+                1060d);
+
             var content = new StackPanel
             {
-                Width = 680,
+                Width = desiredGlobalPasteWidth - 40,
                 Spacing = 12
             };
 
@@ -564,10 +583,10 @@ namespace Anfeta.UI.Views
             };
 
             dialog.Resources[
-                "ContentDialogMaxWidth"] = 760d;
+                "ContentDialogMaxWidth"] = desiredGlobalPasteWidth;
 
             dialog.Resources[
-                "ContentDialogMinWidth"] = 760d;
+                "ContentDialogMinWidth"] = Math.Min(desiredGlobalPasteWidth, 880d);
 
             dialog.Resources["ContentDialogBackground"] =
                 new SolidColorBrush(Windows.UI.Color.FromArgb(255, 9, 16, 23));
@@ -678,6 +697,7 @@ namespace Anfeta.UI.Views
                 string detectedVariant = "";
                 if (created.Title.Contains("001", StringComparison.OrdinalIgnoreCase)) detectedVariant = "001";
                 else if (created.Title.Contains("002", StringComparison.OrdinalIgnoreCase)) detectedVariant = "002";
+                else if (created.Title.Contains("003", StringComparison.OrdinalIgnoreCase)) detectedVariant = "003";
                 else if (created.Title.Contains("00", StringComparison.OrdinalIgnoreCase)) detectedVariant = "00";
                 ShowDiscreteActivityToast(created.Title, matchedPerson ?? "", detectedVariant, created.PageUrl);
 

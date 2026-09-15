@@ -1691,6 +1691,7 @@ namespace Anfeta.UI.Views
                     string detectedVariant = "";
                     if (created.Title.Contains("001", StringComparison.OrdinalIgnoreCase)) detectedVariant = "001";
                     else if (created.Title.Contains("002", StringComparison.OrdinalIgnoreCase)) detectedVariant = "002";
+                    else if (created.Title.Contains("003", StringComparison.OrdinalIgnoreCase)) detectedVariant = "003";
                     else if (created.Title.Contains("00", StringComparison.OrdinalIgnoreCase)) detectedVariant = "00";
                     ShowDiscreteActivityToast(created.Title, matchedPerson ?? "", detectedVariant, created.PageUrl);
 
@@ -1736,6 +1737,7 @@ namespace Anfeta.UI.Views
                         string sepVariant = "";
                         if (created.Title.Contains("001", StringComparison.OrdinalIgnoreCase)) sepVariant = "001";
                         else if (created.Title.Contains("002", StringComparison.OrdinalIgnoreCase)) sepVariant = "002";
+                        else if (created.Title.Contains("003", StringComparison.OrdinalIgnoreCase)) sepVariant = "003";
                         else if (created.Title.Contains("00", StringComparison.OrdinalIgnoreCase)) sepVariant = "00";
                         ShowDiscreteActivityToast(created.Title, sepPerson ?? "", sepVariant, created.PageUrl);
 
@@ -2017,6 +2019,13 @@ namespace Anfeta.UI.Views
                             ToastVariantBadge.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 58, 91));
                             ToastVariantBadge.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 56, 189, 248));
                             ToastVariantText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 224, 242, 254));
+                            ToastVariantBadge.Visibility = Visibility.Visible;
+                            break;
+                        case "003":
+                            ToastVariantText.Text = "003 · Recordar-usar";
+                            ToastVariantBadge.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 58, 28, 91));
+                            ToastVariantBadge.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 192, 132, 252));
+                            ToastVariantText.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 235, 255));
                             ToastVariantBadge.Visibility = Visibility.Visible;
                             break;
                         default:
@@ -2766,11 +2775,21 @@ namespace Anfeta.UI.Views
                 Margin = new Thickness(0, 0, 8, 0)
             };
 
+            var variant003Radio = new RadioButton
+            {
+                Content = "003 (Recordar-usar)",
+                GroupName = "UploadVariantGroup",
+                IsChecked = false,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 192, 132, 252)),
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
             string GetActiveVariantSuffix()
             {
                 if (variant00Radio.IsChecked == true) return "00";
                 if (variant001Radio.IsChecked == true) return "001";
                 if (variant002Radio.IsChecked == true) return "002";
+                if (variant003Radio.IsChecked == true) return "003";
                 return string.Empty;
             }
 
@@ -3011,6 +3030,7 @@ namespace Anfeta.UI.Views
                 var clean = (tag ?? string.Empty).Trim();
                 if (clean.EndsWith("001", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
                 if (clean.EndsWith("002", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
+                if (clean.EndsWith("003", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
                 if (clean.EndsWith("00", StringComparison.OrdinalIgnoreCase)) return clean[..^2];
                 return clean;
             }
@@ -3027,6 +3047,7 @@ namespace Anfeta.UI.Views
                 if (!string.IsNullOrEmpty(activeVariant) &&
                     !cleanTag.EndsWith("001", StringComparison.OrdinalIgnoreCase) &&
                     !cleanTag.EndsWith("002", StringComparison.OrdinalIgnoreCase) &&
+                    !cleanTag.EndsWith("003", StringComparison.OrdinalIgnoreCase) &&
                     !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
                 {
                     cleanTag += activeVariant;
@@ -3115,6 +3136,7 @@ namespace Anfeta.UI.Views
             variant00Radio.Checked += (_, __) => OnVariantSelectionChanged();
             variant001Radio.Checked += (_, __) => OnVariantSelectionChanged();
             variant002Radio.Checked += (_, __) => OnVariantSelectionChanged();
+            variant003Radio.Checked += (_, __) => OnVariantSelectionChanged();
 
             var quickTagsPanel = new StackPanel
             {
@@ -3138,7 +3160,7 @@ namespace Anfeta.UI.Views
                     Opacity = 0.72
                 });
 
-            // Selector de las 3 variantes (00 Urgente, 001 Importante, 002 Secundaria)
+            // Selector de variantes (00 Urgente, 001 Importante, 002 Secundaria, 003 Recordar-usar)
             var variantsHeader = new TextBlock
             {
                 Text = "Variante de prioridad / asignación:",
@@ -3158,6 +3180,7 @@ namespace Anfeta.UI.Views
             variantsRow.Children.Add(variant00Radio);
             variantsRow.Children.Add(variant001Radio);
             variantsRow.Children.Add(variant002Radio);
+            variantsRow.Children.Add(variant003Radio);
             quickTagsPanel.Children.Add(variantsRow);
 
             // Botón Asignar a Todos (002 Secundario)
@@ -3482,7 +3505,7 @@ namespace Anfeta.UI.Views
             var recentPanel = new VariableSizedWrapGrid
             {
                 Orientation = Orientation.Horizontal,
-                MaximumRowsOrColumns = 3,
+                MaximumRowsOrColumns = 6,
                 ItemWidth = 100,
                 ItemHeight = 36
             };
@@ -3507,7 +3530,8 @@ namespace Anfeta.UI.Views
 
             var content = new StackPanel
             {
-                MaxWidth = 660,
+                MaxWidth = 960,
+                MinWidth = 840,
                 Spacing = 14
             };
 
@@ -3623,13 +3647,18 @@ namespace Anfeta.UI.Views
             reminderCard.Child = reminderPanel;
             content.Children.Add(reminderCard);
 
+            double desiredDialogWidth = Math.Clamp(
+                (XamlRoot?.Size.Width ?? 1200) * 0.85,
+                920d,
+                1120d);
+
             var contentScroll = new ScrollViewer
             {
                 Content = content,
                 MaxHeight = Math.Clamp(
-                    ActualHeight - 190,
-                    420,
-                    680),
+                    ActualHeight - 110,
+                    560,
+                    880),
                 HorizontalScrollBarVisibility =
                     ScrollBarVisibility.Disabled,
                 VerticalScrollBarVisibility =
@@ -3653,10 +3682,10 @@ namespace Anfeta.UI.Views
             };
 
             dialog.Resources[
-                "ContentDialogMaxWidth"] = 760d;
+                "ContentDialogMaxWidth"] = desiredDialogWidth;
 
             dialog.Resources[
-                "ContentDialogMinWidth"] = Math.Min(420d, Math.Max(240d, (XamlRoot?.Size.Width ?? 760) - 80));
+                "ContentDialogMinWidth"] = Math.Min(desiredDialogWidth, 880d);
 
             dialog.Resources["ContentDialogBackground"] =
                 new SolidColorBrush(Windows.UI.Color.FromArgb(255, 9, 16, 23));

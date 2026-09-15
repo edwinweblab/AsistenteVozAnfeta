@@ -620,7 +620,87 @@ namespace Anfeta.UI
                     // ContentDialog. Se muestra como tarjeta flotante y el
                     // usuario decide cuándo abrir el detalle completo.
                     ShowReminderToast(reminder);
+                    SpeakIncomingReminder(reminder);
                 });
+        }
+
+        private void SpeakIncomingReminder(IndexedFileReminder reminder)
+        {
+            try
+            {
+                var isVoiceEnabled = ApplicationData.Current.LocalSettings.Values["Speech.DictateToasts"] as bool? ?? true;
+                if (!isVoiceEnabled || reminder == null) return;
+
+                var spokenSummary = BuildSpokenReminderSummary(reminder);
+                if (string.IsNullOrWhiteSpace(spokenSummary)) return;
+
+                var tts = App.AppHost.Services.GetService<Services.Speech.ITextToSpeechService>();
+                if (tts != null)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            // Pausa para dejar que el tono de aviso inicial termine de sonar
+                            await Task.Delay(850);
+                            await tts.SpeakAsync(spokenSummary);
+                        }
+                        catch
+                        {
+                        }
+                    });
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static string BuildSpokenReminderSummary(IndexedFileReminder reminder)
+        {
+            if (reminder == null) return string.Empty;
+
+            var isPriority00 = reminder.Identity.Contains("assignment:00:", StringComparison.OrdinalIgnoreCase) ||
+                (reminder.Title ?? "").Contains("00", StringComparison.OrdinalIgnoreCase) ||
+                (reminder.Message ?? "").Contains("urgente (00)", StringComparison.OrdinalIgnoreCase);
+
+            var isAssignment = reminder.Identity.StartsWith("assignment:", StringComparison.OrdinalIgnoreCase);
+
+            var sender = !string.IsNullOrWhiteSpace(reminder.SenderName)
+                ? reminder.SenderName.Trim()
+                : string.Empty;
+
+            var prefix = isPriority00
+                ? (!string.IsNullOrEmpty(sender) ? $"Atención: Actividad urgente de {sender}." : "Atención: Actividad urgente asignada.")
+                : (isAssignment
+                    ? (!string.IsNullOrEmpty(sender) ? $"Nueva actividad asignada por {sender}." : "Nueva actividad asignada.")
+                    : (!string.IsNullOrEmpty(sender) ? $"Nuevo recordatorio de {sender}." : "Nuevo recordatorio."));
+
+            var rawContent = !string.IsNullOrWhiteSpace(reminder.Title) ? reminder.Title : (reminder.Message ?? string.Empty);
+
+            // Limpieza de URLs, GUIDs, códigos y tags
+            var clean = Regex.Replace(rawContent, @"https?://\S+", "");
+            clean = Regex.Replace(clean, @"\b[0-9a-f]{32}\b", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\b\d{4}-\d{2}-\d{2}\b", "");
+            clean = Regex.Replace(clean, @"(?i)\b(jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\b", "");
+            clean = Regex.Replace(clean, @"(?i)\b(001|002|003|00|pprog|wwebs|sseo|aads|aapli|rrede|prtuzREVISION|prtuzCOBRAR|prtuzPAGAR|bbilb)\b", "");
+            clean = Regex.Replace(clean, @"\.(pdf|docx?|xlsx?|png|jpg|jpeg)\b", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"[\[\](){}_*#|~`>]+", " ");
+            clean = Regex.Replace(clean, @"\s+", " ").Trim();
+
+            if (clean.Length > 140)
+            {
+                var periodIdx = clean.IndexOf('.', 60);
+                if (periodIdx > 0 && periodIdx < 140)
+                    clean = clean[..(periodIdx + 1)];
+                else
+                    clean = clean[..135].Trim() + "…";
+            }
+
+            if (string.IsNullOrWhiteSpace(clean))
+                return prefix;
+
+            return $"{prefix} {clean}";
         }
 
 

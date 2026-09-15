@@ -199,6 +199,8 @@ namespace Anfeta.UI.Views.DailyProgress
                 token ?? string.Empty;
         }
 
+        private string? _pendingPersonToSelect;
+
         public void UpdateToken(string token)
         {
             _token =
@@ -208,6 +210,7 @@ namespace Anfeta.UI.Views.DailyProgress
         public async Task OpenAsync(
             DateTime day)
         {
+            _pendingPersonToSelect = null;
             _currentDate =
                 day.Date;
 
@@ -219,6 +222,31 @@ namespace Anfeta.UI.Views.DailyProgress
                 _lastIncrementalCheckUtc =
                     DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(3));
             }
+
+            ApplyScopeLayout();
+            await LoadActiveScopeAsync(forceRefresh: false);
+        }
+
+        public async Task OpenForPersonAsync(
+            DateTime day,
+            string person)
+        {
+            _pendingPersonToSelect = person;
+            _currentDate =
+                day.Date;
+
+            Visibility =
+                Visibility.Visible;
+
+            if (_lastIncrementalCheckUtc == DateTimeOffset.MinValue)
+            {
+                _lastIncrementalCheckUtc =
+                    DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(3));
+            }
+
+            // Activar modo por usuario directamente
+            PersonModeToggle.IsChecked = true;
+            GeneralModeToggle.IsChecked = false;
 
             ApplyScopeLayout();
             await LoadActiveScopeAsync(forceRefresh: false);
@@ -532,12 +560,18 @@ namespace Anfeta.UI.Views.DailyProgress
             PersonPicker.ItemsSource =
                 pickerItems;
 
+            var targetPerson = !string.IsNullOrWhiteSpace(_pendingPersonToSelect)
+                ? CanonicalPersonUi(_pendingPersonToSelect)
+                : previousPerson;
+            _pendingPersonToSelect = null;
+
             var canonicalSelection =
                 pickerItems.FirstOrDefault(item =>
                     string.Equals(
                         item,
-                        previousPerson,
-                        StringComparison.OrdinalIgnoreCase));
+                        targetPerson,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    item.Contains(targetPerson, StringComparison.OrdinalIgnoreCase));
 
             if (!string.IsNullOrWhiteSpace(
                     canonicalSelection))

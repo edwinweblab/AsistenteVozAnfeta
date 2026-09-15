@@ -25,11 +25,11 @@ namespace Anfeta.UI.Views
         private bool _programasQuickFilter;
         private static readonly Regex ProgramTag = new(@"(?<![\p{L}\p{Nd}_])pprog(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex PriorityTag = new(
-            @"(?<![\p{L}\p{Nd}_])(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\s*(?<variant>001|002|00)(?![\p{L}\p{Nd}_])",
+            @"(?<![\p{L}\p{Nd}_])(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\s*(?<variant>001|002|003|00)(?![\p{L}\p{Nd}_])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex PriorityPrefixTag = new(
-            @"(?<![\p{L}\p{Nd}_.:\-/])(?<variant>001|002|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])",
+            @"(?<![\p{L}\p{Nd}_.:\-/])(?<variant>001|002|003|00)\s*(?<tag>jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)(?![\p{L}\p{Nd}_])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Dictionary<string, string> PriorityPeople = new(StringComparer.OrdinalIgnoreCase)
@@ -788,7 +788,8 @@ namespace Anfeta.UI.Views
             var urgentes00 = allMatches.Where(x => x.Match.Variant == "00").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
             var importantes001 = allMatches.Where(x => x.Match.Variant == "001").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
             var secundarias002 = allMatches.Where(x => x.Match.Variant == "002").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
-            var otras = allMatches.Where(x => x.Match.Variant != "00" && x.Match.Variant != "001" && x.Match.Variant != "002").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            var recordatorios003 = allMatches.Where(x => x.Match.Variant == "003").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            var otras = allMatches.Where(x => x.Match.Variant != "00" && x.Match.Variant != "001" && x.Match.Variant != "002" && x.Match.Variant != "003").Select(x => x.Row).OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
             // Separar 00 en pendientes y vistos para ordenarlos y diferenciarlos
             var urgentesPendientes = urgentes00
@@ -799,7 +800,7 @@ namespace Anfeta.UI.Views
                 .ToList();
             var urgentesSorted = urgentesPendientes.Concat(urgentesVistos).ToList();
 
-            var totalCount = urgentes00.Count + importantes001.Count + secundarias002.Count + otras.Count;
+            var totalCount = urgentes00.Count + importantes001.Count + secundarias002.Count + recordatorios003.Count + otras.Count;
 
             CalendarPersonPreviewTitle.Text = $"Pendientes y Rápidas de {_calendarPersonPreviewPerson}";
             CalendarPersonPreviewDate.Text = "Todas las fechas · Ordenadas por importancia";
@@ -807,7 +808,8 @@ namespace Anfeta.UI.Views
             var summary00 = urgentes00.Count > 0
                 ? $"🔴 {urgentes00.Count} Urgentes ({urgentesPendientes.Count} pendientes · {urgentesVistos.Count} vistos)"
                 : "🔴 0 Urgentes";
-            CalendarPersonPreviewSummary.Text = $"{summary00} · 🟡 {importantes001.Count} Importantes · 🔵 {secundarias002.Count} Secundarias";
+            var summary03 = recordatorios003.Count > 0 ? $" · 🟣 {recordatorios003.Count} Recordar-usar" : "";
+            CalendarPersonPreviewSummary.Text = $"{summary00} · 🟡 {importantes001.Count} Importantes · 🔵 {secundarias002.Count} Secundarias{summary03}";
             CalendarPersonPreviewItems.Children.Clear();
 
             if (totalCount == 0)
@@ -842,7 +844,7 @@ namespace Anfeta.UI.Views
                 var rightPanel = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
-                    Spacing = 8,
+                    Spacing = 6,
                     VerticalAlignment = VerticalAlignment.Center
                 };
 
@@ -850,13 +852,13 @@ namespace Anfeta.UI.Views
                 {
                     var clearAllBtn = new Button
                     {
-                        Content = "🗑️ Eliminar todos",
-                        FontSize = 10,
-                        Padding = new Thickness(6, 2, 6, 2),
-                        Foreground = new SolidColorBrush(headerText),
-                        Background = new SolidColorBrush(Color.FromArgb(160, 45, 18, 18)),
-                        BorderBrush = new SolidColorBrush(headerBorder),
-                        BorderThickness = new Thickness(1),
+                        Content = "🗑️ Borrar urgentes",
+                        FontSize = 10.5,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Background = new SolidColorBrush(Color.FromArgb(180, 220, 38, 38)),
+                        Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                        BorderThickness = new Thickness(0),
+                        Padding = new Thickness(8, 3, 8, 3),
                         CornerRadius = new CornerRadius(5)
                     };
                     ToolTipService.SetToolTip(clearAllBtn, $"Eliminar todas las {sectionRows.Count} actividades urgentes de esta lista");
@@ -916,7 +918,13 @@ namespace Anfeta.UI.Views
             // 3. Secundarias (02)
             AddSection("🔵 Secundarias · 02", Color.FromArgb(255, 14, 38, 58), Color.FromArgb(255, 56, 189, 248), Color.FromArgb(255, 224, 242, 254), secundarias002);
 
-            // 4. Otras
+            // 4. Recordar-usar (03)
+            if (recordatorios003.Count > 0)
+            {
+                AddSection("🟣 Recordar-usar · 03", Color.FromArgb(255, 38, 18, 58), Color.FromArgb(255, 192, 132, 252), Color.FromArgb(255, 245, 235, 255), recordatorios003);
+            }
+
+            // 5. Otras
             if (otras.Count > 0)
             {
                 AddSection("⚪ Otras Prioritarias", Color.FromArgb(255, 28, 35, 45), Color.FromArgb(255, 100, 120, 140), Color.FromArgb(255, 220, 230, 240), otras);

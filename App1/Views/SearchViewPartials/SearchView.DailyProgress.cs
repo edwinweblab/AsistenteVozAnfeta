@@ -1,6 +1,7 @@
-﻿using Anfeta.UI.Views.DailyProgress;
+using Anfeta.UI.Views.DailyProgress;
 using Microsoft.UI.Xaml;
 using System;
+using System.Threading.Tasks;
 using Windows.Storage;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 
@@ -46,6 +47,46 @@ namespace Anfeta.UI.Views
             {
                 StatusText.Text =
                     $"Estado: No se pudo abrir Avance diario → {ex.Message}";
+            }
+        }
+
+        public async Task OpenDailyProgressForPersonAsync(
+            DateTime day,
+            string person)
+        {
+            var token =
+                ApplicationData.Current.LocalSettings.Values[
+                    LS_NotionToken] as string;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                StatusText.Text =
+                    "Estado: Configura primero el token de Notion.";
+                return;
+            }
+
+            EnsureDailyProgressEvents();
+
+            DailyProgressPanel.Initialize(
+                _notionCalendarService,
+                token);
+
+            DailyProgressPanel.Visibility =
+                Visibility.Visible;
+
+            StatusText.Text =
+                $"Estado: Avance diario de {person}…";
+
+            try
+            {
+                await DailyProgressPanel.OpenForPersonAsync(
+                    day,
+                    person);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text =
+                    $"Estado: No se pudo abrir Avance diario de {person} → {ex.Message}";
             }
         }
 

@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Notion;
@@ -3458,6 +3458,13 @@ namespace Anfeta.UI.Views
                         Width = GridLength.Auto
                     });
 
+                // 📊 Avance Diario
+                headerContainer.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = GridLength.Auto
+                    });
+
                 // ⚡ One Click
                 headerContainer.ColumnDefinitions.Add(
                     new ColumnDefinition
@@ -3552,17 +3559,55 @@ namespace Anfeta.UI.Views
                         currentCoverage,
                         currentProgress));
 
+                var isOnline = Anfeta.UI.Services.Presence.UserPresenceService.Instance.IsUserOnline(person);
+                var initials = Anfeta.UI.Services.Presence.UserPresenceService.GetPersonInitials(person);
+                var presenceStatus = Anfeta.UI.Services.Presence.UserPresenceService.Instance.GetPresenceStatusText(person);
+
+                var nameWithAvatar = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 5,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                var avatarBorder = new Border
+                {
+                    Width = 19,
+                    Height = 19,
+                    CornerRadius = new CornerRadius(9.5),
+                    Background = new SolidColorBrush(Color.FromArgb(40, 148, 163, 184)),
+                    BorderBrush = new SolidColorBrush(isOnline ? Color.FromArgb(255, 34, 197, 94) : Color.FromArgb(180, 100, 116, 139)),
+                    BorderThickness = new Thickness(1.5),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                var initialsText = new TextBlock
+                {
+                    Text = initials,
+                    FontSize = 8.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(isOnline ? Color.FromArgb(255, 187, 247, 208) : Color.FromArgb(255, 203, 213, 225)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                avatarBorder.Child = initialsText;
+
+                var nameText = new TextBlock
+                {
+                    Text = person,
+                    FontSize = 12.5 * CalendarFontScale,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxLines = 1,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                nameWithAvatar.Children.Add(avatarBorder);
+                nameWithAvatar.Children.Add(nameText);
+
                 var personNameButton = new Button
                 {
-                    Content = new TextBlock
-                    {
-                        Text = person,
-                        FontSize = 13.0 * CalendarFontScale,
-                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                        TextTrimming = TextTrimming.CharacterEllipsis,
-                        MaxLines = 1,
-                        VerticalAlignment = VerticalAlignment.Center
-                    },
+                    Content = nameWithAvatar,
                     Padding = new Thickness(4, 0, 2, 0),
                     Margin = new Thickness(0),
                     HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -3579,6 +3624,7 @@ namespace Anfeta.UI.Views
                     BuildCalendarHeaderContextFlyout(person);
                 ToolTipService.SetToolTip(
                     personNameButton,
+                    $"[{presenceStatus}] · " +
                     BuildCalendarHeaderMetricsTooltip(
                         person,
                         currentCoverage,
@@ -3682,6 +3728,41 @@ namespace Anfeta.UI.Views
 
                 notionCalendarButton.Click +=
                     CalendarOpenPersonNotion_Click;
+
+                var dailyProgressButton = new Button
+                {
+                    Content = "📊",
+                    Width = 25,
+                    Height = Math.Max(24, headerHeight - 16),
+                    Margin = new Thickness(0, 4, 1.5, 4),
+                    Padding = new Thickness(0),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    FontSize = 11.0 * CalendarFontScale,
+                    Background =
+                        new SolidColorBrush(
+                            Color.FromArgb(48, 14, 165, 233)),
+                    BorderBrush =
+                        new SolidColorBrush(
+                            Color.FromArgb(150, 14, 165, 233)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Tag = person
+                };
+
+                ToolTipService.SetToolTip(
+                    dailyProgressButton,
+                    $"Abrir Avance Diario de {person}");
+
+                dailyProgressButton.Click += async (s, e) =>
+                {
+                    if (s is FrameworkElement { Tag: string targetPerson })
+                    {
+                        await OpenDailyProgressForPersonAsync(_calendarSelectedDate, targetPerson);
+                    }
+                };
 
                 var optimizeButton = new Button
                 {
@@ -3811,10 +3892,13 @@ namespace Anfeta.UI.Views
                 Grid.SetColumn(notionCalendarButton, 2);
                 headerContainer.Children.Add(notionCalendarButton);
 
-                Grid.SetColumn(optimizeButton, 3);
+                Grid.SetColumn(dailyProgressButton, 3);
+                headerContainer.Children.Add(dailyProgressButton);
+
+                Grid.SetColumn(optimizeButton, 4);
                 headerContainer.Children.Add(optimizeButton);
 
-                Grid.SetColumn(moreButton, 4);
+                Grid.SetColumn(moreButton, 5);
                 headerContainer.Children.Add(moreButton);
 
                 Canvas.SetLeft(headerContainer, left + 2);
