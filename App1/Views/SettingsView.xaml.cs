@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Services;
+using Anfeta.UI.Services;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Speech;
 using Microsoft.Extensions.DependencyInjection;
@@ -77,6 +77,7 @@ namespace Anfeta.UI.Views
             LoadDropboxRootIntoUI();
             LoadNotionSettingsIntoUI();
             LoadWhatsAppSettingsIntoUI();
+            LoadNotificationSettingsIntoUI();
             await LoadDropboxApiStateAsync();
 
             // WhatsApp se comprueba en paralelo para no retrasar la apertura
@@ -1702,6 +1703,59 @@ namespace Anfeta.UI.Views
 
             _statusTimer.Stop();
             _statusTimer.Start();
+        }
+
+        // ─────────────────────────────────────────────────────────
+        // NOTIFICACIONES
+        // ─────────────────────────────────────────────────────────
+
+        private void LoadNotificationSettingsIntoUI()
+        {
+            try
+            {
+                TglMuteNotifications.IsOn = Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsMuted;
+                var vol = Anfeta.UI.Services.Notifications.NotificationSoundPlayer.VolumePercent;
+                SliderNotificationVolume.Value = vol;
+                TxtNotificationVolumeValue.Text = $"{(int)vol}%";
+
+                var isVoiceEnabled = ApplicationData.Current.LocalSettings.Values["Speech.DictateToasts"] as bool? ?? true;
+                TglDictateNotifications.IsOn = isVoiceEnabled;
+
+                TglAutoDismissNotifications.IsOn = Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsAutoDismissEnabled;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Settings] LoadNotificationSettingsIntoUI error: {ex.Message}");
+            }
+        }
+
+        private void TglMuteNotifications_Toggled(object sender, RoutedEventArgs e)
+        {
+            Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsMuted = TglMuteNotifications.IsOn;
+        }
+
+        private void SliderNotificationVolume_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+        {
+            if (TxtNotificationVolumeValue != null)
+            {
+                TxtNotificationVolumeValue.Text = $"{(int)e.NewValue}%";
+            }
+            Anfeta.UI.Services.Notifications.NotificationSoundPlayer.VolumePercent = e.NewValue;
+        }
+
+        private void TglDictateNotifications_Toggled(object sender, RoutedEventArgs e)
+        {
+            ApplicationData.Current.LocalSettings.Values["Speech.DictateToasts"] = TglDictateNotifications.IsOn;
+        }
+
+        private void TglAutoDismissNotifications_Toggled(object sender, RoutedEventArgs e)
+        {
+            Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsAutoDismissEnabled = TglAutoDismissNotifications.IsOn;
+        }
+
+        private async void BtnTestNotificationSound_Click(object sender, RoutedEventArgs e)
+        {
+            await Anfeta.UI.Services.Notifications.NotificationSoundPlayer.PlayNotificationSoundAsync(false);
         }
     }
 }

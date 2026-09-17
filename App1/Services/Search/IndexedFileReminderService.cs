@@ -103,7 +103,7 @@ namespace Anfeta.UI.Services.Search
             TimeSpan.FromMinutes(15);
 
         private static readonly TimeSpan NotionCatchUpWindow =
-            TimeSpan.FromHours(48);
+            TimeSpan.FromHours(4);
 
         private const int MaxCatchUpRemindersPerScan = 1;
 

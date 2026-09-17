@@ -94,15 +94,19 @@ public sealed partial class IndexedFileReminderService
                 if (string.IsNullOrWhiteSpace(target)) target = "https://www.notion.so/" + row.Id;
 
                 var stateStr = AssignmentChangeTracker.GetActivityState(row.Name);
-                var isPriority00 = stateStr.StartsWith("00 · Urgente", StringComparison.OrdinalIgnoreCase);
-
-                var prefix = isPriority00 ? "🚨 Actividad urgente (00) asignada" : "Nueva actividad asignada";
-                var title = isPriority00 ? "🚨 Actividad Urgente Asignada (00)" : "Nueva actividad asignada";
-                var message = $"{prefix} a {name}: {row.Name}\nEstado: {(string.IsNullOrWhiteSpace(stateStr) ? "Sin estado" : stateStr)}\nFecha de trabajo: {(string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha" : row.ScheduledDate)}";
+                var parsed = Anfeta.UI.Services.Notifications.NotificationContentParser.Parse(row.Name, null);
+                var isPriority00 = parsed.IsUrgent;
 
                 var identity = isPriority00
-                    ? $"assignment:00:{row.Id}:{Guid.NewGuid():N}"
-                    : $"assignment:{row.Id}:{Guid.NewGuid():N}";
+                    ? $"assignment:00:{row.Id}"
+                    : $"assignment:{row.Id}";
+
+                if (_fired.ContainsKey(identity)) continue;
+                _fired[identity] = DateTimeOffset.Now;
+                SaveFiredReminders();
+
+                var title = parsed.ToastTitle;
+                var message = $"{parsed.CleanTitle}\nEstado: {(string.IsNullOrWhiteSpace(stateStr) ? "Sin estado" : stateStr)}\nFecha: {(string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha" : row.ScheduledDate)}";
 
                 // PageId vacío intencional: Enterado NO modifica la actividad ni crea mensajes en Notion.
                 ReminderDue?.Invoke(this, new IndexedFileReminder(identity,

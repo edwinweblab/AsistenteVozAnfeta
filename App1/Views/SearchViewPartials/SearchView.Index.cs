@@ -2218,9 +2218,45 @@ namespace Anfeta.UI.Views
                 .Replace('/', Path.DirectorySeparatorChar)
                 .Replace('\\', Path.DirectorySeparatorChar);
 
-            var candidate = Path.GetFullPath(Path.Combine(DROPBOX_ROOT, relative));
             var root = Path.GetFullPath(DROPBOX_ROOT)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var rootFolderName = Path.GetFileName(root);
+
+            // Si la raíz configurada es una subcarpeta (ej. "C:\...\Dropbox\DRX"):
+            // Solo nos interesan los cambios remotos que pertenezcan a esa subcarpeta.
+            // Si remotePath empieza por esa subcarpeta, removemos el prefijo para
+            // no duplicarlo (".../DRX/DRX/..."). Si no empieza por esa subcarpeta,
+            // pero la raíz es una subcarpeta dentro de Dropbox, se ignora.
+            if (!string.IsNullOrWhiteSpace(rootFolderName))
+            {
+                var isExact = string.Equals(relative, rootFolderName, StringComparison.OrdinalIgnoreCase);
+                var isChild = relative.StartsWith(rootFolderName + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+                if (isExact)
+                {
+                    relative = string.Empty;
+                }
+                else if (isChild)
+                {
+                    relative = relative.Substring(rootFolderName.Length + 1);
+                }
+                else
+                {
+                    var parent = Path.GetDirectoryName(root);
+                    if (!string.IsNullOrWhiteSpace(parent) &&
+                        (string.Equals(Path.GetFileName(parent), "Dropbox", StringComparison.OrdinalIgnoreCase) ||
+                         Directory.Exists(Path.Combine(parent, ".dropbox")) ||
+                         Directory.Exists(Path.Combine(parent, ".dropbox.cache"))))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            var candidate = string.IsNullOrWhiteSpace(relative)
+                ? root
+                : Path.GetFullPath(Path.Combine(root, relative));
+
             var prefix = root + Path.DirectorySeparatorChar;
 
             if (!string.Equals(candidate, root, StringComparison.OrdinalIgnoreCase) &&

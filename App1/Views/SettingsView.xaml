@@ -897,6 +897,171 @@
                         </Grid>
                     </Border>
                 </StackPanel>
+
+                <!--  ═══ SECCIÓN NOTIFICACIONES ═══  -->
+                <StackPanel Spacing="14">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border
+                            Width="3"
+                            Height="18"
+                            Background="{StaticResource AnfetaAccentBrush}"
+                            CornerRadius="2" />
+                        <FontIcon
+                            FontSize="14"
+                            Foreground="{StaticResource AnfetaAccentBrush}"
+                            Glyph="&#xEA8F;" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            CharacterSpacing="100"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="#FFFFFF"
+                            Text="NOTIFICACIONES" />
+                    </StackPanel>
+
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Grid.Column="0"
+                                Background="{StaticResource AnfetaAccentBrush}"
+                                CornerRadius="12,0,0,12"
+                                Opacity="0.6" />
+                            <StackPanel
+                                Grid.Column="1"
+                                Padding="18,16"
+                                Spacing="16">
+
+                                <!-- Silenciar notificaciones (Mute) -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="#FFFFFF"
+                                            Text="Silenciar sonido de notificaciones (Mute)" />
+                                        <TextBlock
+                                            FontSize="11"
+                                            Foreground="#D4C9C0"
+                                            Text="Mutea los chimes de alerta y el dictado por voz de las tareas asignadas."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ToggleSwitch
+                                        x:Name="TglMuteNotifications"
+                                        Grid.Column="1"
+                                        OnContent=""
+                                        OffContent=""
+                                        Toggled="TglMuteNotifications_Toggled" />
+                                </Grid>
+
+                                <!-- Slider de Volumen de alertas -->
+                                <StackPanel Spacing="8">
+                                    <Grid>
+                                        <TextBlock
+                                            HorizontalAlignment="Left"
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="#FFFFFF"
+                                            Text="Volumen de alertas sonoras" />
+                                        <TextBlock
+                                            x:Name="TxtNotificationVolumeValue"
+                                            HorizontalAlignment="Right"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource AnfetaAccentBrush}"
+                                            Text="25%" />
+                                    </Grid>
+                                    <TextBlock
+                                        FontSize="11"
+                                        Foreground="#D4C9C0"
+                                        Text="Controla la intensidad del tono armónico. Por defecto se encuentra atenuado al 25%."
+                                        TextWrapping="Wrap" />
+                                    <Slider
+                                        x:Name="SliderNotificationVolume"
+                                        Minimum="0"
+                                        Maximum="100"
+                                        StepFrequency="5"
+                                        Value="25"
+                                        ValueChanged="SliderNotificationVolume_ValueChanged" />
+                                </StackPanel>
+
+                                <!-- Toggle Dictar notificaciones por voz (TTS) -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="#FFFFFF"
+                                            Text="Dictar notificaciones por voz (TTS)" />
+                                        <TextBlock
+                                            FontSize="11"
+                                            Foreground="#D4C9C0"
+                                            Text="Menciona en voz alta el dominio, prioridad y asunto de las nuevas actividades."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ToggleSwitch
+                                        x:Name="TglDictateNotifications"
+                                        Grid.Column="1"
+                                        OnContent=""
+                                        OffContent=""
+                                        Toggled="TglDictateNotifications_Toggled" />
+                                </Grid>
+
+                                <!-- Toggle Auto-dismiss -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            Foreground="#FFFFFF"
+                                            Text="Cerrar avisos automáticamente (Auto-dismiss)" />
+                                        <TextBlock
+                                            FontSize="11"
+                                            Foreground="#D4C9C0"
+                                            Text="Las tarjetas flotantes desaparecerán a los 8 segundos sin necesidad de clic manual (se pausa si pasas el mouse por encima)."
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ToggleSwitch
+                                        x:Name="TglAutoDismissNotifications"
+                                        Grid.Column="1"
+                                        OnContent=""
+                                        OffContent=""
+                                        Toggled="TglAutoDismissNotifications_Toggled" />
+                                </Grid>
+
+                                <!-- Botón Probar Sonido -->
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button
+                                        x:Name="BtnTestNotificationSound"
+                                        Click="BtnTestNotificationSound_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xEA8F;" />
+                                            <TextBlock Text="Probar sonido de notificación" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
                 <!--  ═══ SECCIÓN AUDIO ═══  -->
                 <StackPanel Spacing="14">
                     <StackPanel Orientation="Horizontal" Spacing="10">

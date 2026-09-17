@@ -52,6 +52,16 @@ namespace Anfeta.UI.Services.Speech
                 _player.PlaybackRate = SpeakingRate;
         }
 
+        // Volumen actual. Rango: 0.0–1.0. Default: 0.5
+        public double Volume { get; private set; } = 0.5;
+
+        public void SetVolume(double volume)
+        {
+            Volume = Math.Clamp(volume, 0.0, 1.0);
+            if (_player != null)
+                _player.Volume = Volume;
+        }
+
         private void SetTemporaryDefaultDevice(int naudioId)
         {
             try
@@ -124,8 +134,9 @@ namespace Anfeta.UI.Services.Speech
                 _player.Source = MediaSource.CreateFromStream(stream, stream.ContentType);
                 _player.MediaEnded += (s, e) => RestoreDefaultDevice();
 
-                // Aplica la velocidad almacenada antes de iniciar reproducción.
+                // Aplica la velocidad y volumen almacenados antes de iniciar reproducción.
                 _player.PlaybackRate = SpeakingRate;
+                _player.Volume = Volume;
 
                 _isPaused = false;
                 _player.Play();

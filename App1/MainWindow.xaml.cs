@@ -3,6 +3,7 @@ using Anfeta.UI.Services.Search;
 using Anfeta.UI.ViewModels;
 using Anfeta.UI.Views;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -40,6 +41,7 @@ namespace Anfeta.UI
             public Popup Popup { get; init; } = null!;
             public IndexedFileReminder Reminder { get; init; } = null!;
             public string DedupKey { get; init; } = string.Empty;
+            public DispatcherQueueTimer? AutoDismissTimer { get; set; }
         }
 
         private readonly List<ReminderToastEntry>
@@ -137,6 +139,10 @@ namespace Anfeta.UI
 
             _indexedReminderService.Start(
                 DispatcherQueue);
+
+            UpdateNotificationMuteUi();
+            Anfeta.UI.Services.Notifications.NotificationSoundPlayer.MuteChanged += (_, _) =>
+                DispatcherQueue.TryEnqueue(UpdateNotificationMuteUi);
 
             this.Closed += MainWindow_Closed;
 
@@ -461,6 +467,37 @@ namespace Anfeta.UI
                 ContentFrame?.Navigate(typeof(GoogleCalendarView));
         }
 
+        private void BtnMuteNotifications_Click(object sender, RoutedEventArgs e)
+        {
+            Anfeta.UI.Services.Notifications.NotificationSoundPlayer.ToggleMute();
+            UpdateNotificationMuteUi();
+        }
+
+        private void UpdateNotificationMuteUi()
+        {
+            var isMuted = Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsMuted;
+            if (IconNotificationMute != null)
+            {
+                IconNotificationMute.Glyph = isMuted ? "\uEA90" : "\uEA8F";
+                IconNotificationMute.Foreground = new SolidColorBrush(
+                    isMuted ? Color.FromArgb(255, 248, 113, 113) : Color.FromArgb(255, 140, 128, 117));
+            }
+            if (TxtNotificationMute != null)
+            {
+                TxtNotificationMute.Text = isMuted ? "Silenciado" : "Sonido";
+                TxtNotificationMute.Foreground = new SolidColorBrush(
+                    isMuted ? Color.FromArgb(255, 248, 113, 113) : Color.FromArgb(255, 140, 128, 117));
+            }
+            if (BtnMuteNotifications != null)
+            {
+                ToolTipService.SetToolTip(
+                    BtnMuteNotifications,
+                    isMuted
+                        ? "Notificaciones silenciadas (Mute) · Clic para activar sonido"
+                        : "Sonido de notificaciones activo · Clic para silenciar");
+            }
+        }
+
         /// Busca un NavigationViewItem por Tag en MenuItems y FooterMenuItems.
         /// Entrada: tag (string) — valor del Tag a buscar.
         /// Salida: NavigationViewItem encontrado, o null.
@@ -628,6 +665,9 @@ namespace Anfeta.UI
         {
             try
             {
+                if (Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsMuted)
+                    return;
+
                 var isVoiceEnabled = ApplicationData.Current.LocalSettings.Values["Speech.DictateToasts"] as bool? ?? true;
                 if (!isVoiceEnabled || reminder == null) return;
 
@@ -637,12 +677,15 @@ namespace Anfeta.UI
                 var tts = App.AppHost.Services.GetService<Services.Speech.ITextToSpeechService>();
                 if (tts != null)
                 {
+                    // Ajustar volumen del TTS según el volumen configurado para notificaciones (ej. 25%)
+                    tts.SetVolume(Anfeta.UI.Services.Notifications.NotificationSoundPlayer.VolumeNormalized);
+
                     _ = Task.Run(async () =>
                     {
                         try
                         {
-                            // Pausa para dejar que el tono de aviso inicial termine de sonar
-                            await Task.Delay(850);
+                            // Pausa para dejar que el tono de aviso inicial termine de sonar suavemente
+                            await Task.Delay(550);
                             await tts.SpeakAsync(spokenSummary);
                         }
                         catch
@@ -660,47 +703,10 @@ namespace Anfeta.UI
         {
             if (reminder == null) return string.Empty;
 
-            var isPriority00 = reminder.Identity.Contains("assignment:00:", StringComparison.OrdinalIgnoreCase) ||
-                (reminder.Title ?? "").Contains("00", StringComparison.OrdinalIgnoreCase) ||
-                (reminder.Message ?? "").Contains("urgente (00)", StringComparison.OrdinalIgnoreCase);
-
-            var isAssignment = reminder.Identity.StartsWith("assignment:", StringComparison.OrdinalIgnoreCase);
-
-            var sender = !string.IsNullOrWhiteSpace(reminder.SenderName)
-                ? reminder.SenderName.Trim()
-                : string.Empty;
-
-            var prefix = isPriority00
-                ? (!string.IsNullOrEmpty(sender) ? $"Atención: Actividad urgente de {sender}." : "Atención: Actividad urgente asignada.")
-                : (isAssignment
-                    ? (!string.IsNullOrEmpty(sender) ? $"Nueva actividad asignada por {sender}." : "Nueva actividad asignada.")
-                    : (!string.IsNullOrEmpty(sender) ? $"Nuevo recordatorio de {sender}." : "Nuevo recordatorio."));
-
             var rawContent = !string.IsNullOrWhiteSpace(reminder.Title) ? reminder.Title : (reminder.Message ?? string.Empty);
+            var parsed = Anfeta.UI.Services.Notifications.NotificationContentParser.Parse(rawContent, reminder.SenderName);
 
-            // Limpieza de URLs, GUIDs, códigos y tags
-            var clean = Regex.Replace(rawContent, @"https?://\S+", "");
-            clean = Regex.Replace(clean, @"\b[0-9a-f]{32}\b", "", RegexOptions.IgnoreCase);
-            clean = Regex.Replace(clean, @"\b\d{4}-\d{2}-\d{2}\b", "");
-            clean = Regex.Replace(clean, @"(?i)\b(jjohn|nneft|kkarl|bbria|ggena|iisai|iisaia|eemma|aandr|ssote|eedua|aacal)\b", "");
-            clean = Regex.Replace(clean, @"(?i)\b(001|002|003|00|pprog|wwebs|sseo|aads|aapli|rrede|prtuzREVISION|prtuzCOBRAR|prtuzPAGAR|bbilb)\b", "");
-            clean = Regex.Replace(clean, @"\.(pdf|docx?|xlsx?|png|jpg|jpeg)\b", "", RegexOptions.IgnoreCase);
-            clean = Regex.Replace(clean, @"[\[\](){}_*#|~`>]+", " ");
-            clean = Regex.Replace(clean, @"\s+", " ").Trim();
-
-            if (clean.Length > 140)
-            {
-                var periodIdx = clean.IndexOf('.', 60);
-                if (periodIdx > 0 && periodIdx < 140)
-                    clean = clean[..(periodIdx + 1)];
-                else
-                    clean = clean[..135].Trim() + "…";
-            }
-
-            if (string.IsNullOrWhiteSpace(clean))
-                return prefix;
-
-            return $"{prefix} {clean}";
+            return parsed.SpokenSummary;
         }
 
 
@@ -856,6 +862,9 @@ namespace Anfeta.UI
         private async Task PlayIncomingReminderSoundAsync(
             bool isReviewAlert)
         {
+            if (Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsMuted)
+                return;
+
             // Si llegan varias notificaciones al mismo tiempo, no reproducimos
             // varias secuencias encima. Los popups sí se muestran normalmente.
             if (!await _reminderSoundLock.WaitAsync(0))
@@ -863,33 +872,7 @@ namespace Anfeta.UI
 
             try
             {
-                await Task.Run(() =>
-                {
-                    if (isReviewAlert)
-                    {
-                        // Alerta importante / revisión: tres llamadas claras.
-                        for (var repeat = 0; repeat < 3; repeat++)
-                        {
-                            PlayAnfetaTone(1047, 140);
-                            Thread.Sleep(55);
-                            PlayAnfetaTone(1319, 140);
-                            Thread.Sleep(55);
-                            PlayAnfetaTone(1568, 220);
-
-                            if (repeat < 2)
-                                Thread.Sleep(260);
-                        }
-                    }
-                    else
-                    {
-                        // Recordatorio normal: distintivo pero más corto.
-                        PlayAnfetaTone(784, 130);
-                        Thread.Sleep(60);
-                        PlayAnfetaTone(988, 180);
-                        Thread.Sleep(90);
-                        PlayAnfetaTone(1319, 230);
-                    }
-                });
+                await Anfeta.UI.Services.Notifications.NotificationSoundPlayer.PlayNotificationSoundAsync(isReviewAlert);
             }
             catch
             {
@@ -904,34 +887,6 @@ namespace Anfeta.UI
         internal void PlayNotificationSound(bool isUrgent = false)
         {
             _ = PlayIncomingReminderSoundAsync(isUrgent);
-        }
-
-        private static void PlayAnfetaTone(
-            uint frequency,
-            uint durationMilliseconds)
-        {
-            try
-            {
-                if (Beep(
-                        frequency,
-                        durationMilliseconds))
-                {
-                    return;
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                System.Media.SystemSounds.Exclamation.Play();
-            }
-            catch
-            {
-                // Respaldo únicamente si Windows/equipo no admite Beep().
-                MessageBeep(0x00000030); // MB_ICONEXCLAMATION
-            }
         }
 
 
@@ -1147,42 +1102,134 @@ namespace Anfeta.UI
                 return;
             }
 
-            var isPriority00 = reminder.Identity.Contains("assignment:00:", StringComparison.OrdinalIgnoreCase) ||
-                (reminder.Title ?? "").Contains("00", StringComparison.OrdinalIgnoreCase) ||
-                (reminder.Message ?? "").Contains("urgente (00)", StringComparison.OrdinalIgnoreCase);
+            var parsed = Anfeta.UI.Services.Notifications.NotificationContentParser.Parse(
+                !string.IsNullOrWhiteSpace(reminder.Title) ? reminder.Title : (reminder.Message ?? string.Empty),
+                reminder.SenderName);
 
+            var isPriority00 = parsed.IsUrgent;
             var isAssignment = reminder.Identity.StartsWith("assignment:", StringComparison.OrdinalIgnoreCase);
 
-            var titleText = isPriority00
-                ? "🚨 Actividad Urgente Asignada (00)"
-                : (isAssignment ? "📌 Nueva actividad asignada" : "🔔 Nuevo recordatorio");
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var titleColor = isPriority00
-                ? Color.FromArgb(255, 248, 113, 113)
-                : Color.FromArgb(255, 233, 213, 255);
+            var badgesPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                VerticalAlignment = VerticalAlignment.Center
+            };
 
-            var title =
-                new TextBlock
+            if (!string.IsNullOrEmpty(parsed.Domain))
+            {
+                var domainBadge = new Border
                 {
-                    Text = titleText,
-                    FontSize = 13.5,
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground =
-                        new SolidColorBrush(titleColor)
+                    Padding = new Thickness(6, 2, 6, 2),
+                    CornerRadius = new CornerRadius(4),
+                    Background = new SolidColorBrush(Color.FromArgb(200, 29, 78, 216)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(255, 96, 165, 250)),
+                    BorderThickness = new Thickness(1),
+                    Child = new TextBlock
+                    {
+                        Text = $"🌐 {parsed.Domain}",
+                        FontSize = 11,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = new SolidColorBrush(Color.FromArgb(255, 239, 246, 255))
+                    }
                 };
+                badgesPanel.Children.Add(domainBadge);
+            }
+
+            var priorityBg = isPriority00
+                ? Color.FromArgb(220, 153, 27, 27)
+                : (parsed.PriorityLabel == "Primaria"
+                    ? Color.FromArgb(220, 146, 64, 14)
+                    : (parsed.PriorityLabel == "Secundaria"
+                        ? Color.FromArgb(220, 30, 41, 59)
+                        : Color.FromArgb(220, 88, 28, 135)));
+
+            var priorityBorder = isPriority00
+                ? Color.FromArgb(255, 248, 113, 113)
+                : (parsed.PriorityLabel == "Primaria"
+                    ? Color.FromArgb(255, 251, 191, 36)
+                    : (parsed.PriorityLabel == "Secundaria"
+                        ? Color.FromArgb(255, 148, 163, 184)
+                        : Color.FromArgb(255, 216, 180, 254)));
+
+            var priorityFg = isPriority00
+                ? Color.FromArgb(255, 254, 202, 202)
+                : (parsed.PriorityLabel == "Primaria"
+                    ? Color.FromArgb(255, 254, 240, 138)
+                    : (parsed.PriorityLabel == "Secundaria"
+                        ? Color.FromArgb(255, 226, 232, 240)
+                        : Color.FromArgb(255, 243, 232, 255)));
+
+            var priorityIcon = isPriority00 ? "🚨 " : (parsed.PriorityLabel == "Primaria" ? "⭐ " : (parsed.PriorityLabel == "Secundaria" ? "🔹 " : "📌 "));
+            var priorityText = isPriority00 ? "Urgente (00)" : (parsed.PriorityLabel is "Primaria" or "Secundaria" ? parsed.PriorityLabel : (isAssignment ? "Nueva actividad" : "Recordatorio"));
+
+            var priorityBadge = new Border
+            {
+                Padding = new Thickness(6, 2, 6, 2),
+                CornerRadius = new CornerRadius(4),
+                Background = new SolidColorBrush(priorityBg),
+                BorderBrush = new SolidColorBrush(priorityBorder),
+                BorderThickness = new Thickness(1),
+                Child = new TextBlock
+                {
+                    Text = $"{priorityIcon}{priorityText}",
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(priorityFg)
+                }
+            };
+            badgesPanel.Children.Add(priorityBadge);
+
+            Grid.SetColumn(badgesPanel, 0);
+            headerGrid.Children.Add(badgesPanel);
+
+            // Botón Mute rápido dentro de la tarjeta
+            var toastMuteBtn = new Button
+            {
+                Width = 26,
+                Height = 26,
+                Padding = new Thickness(0),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(6)
+            };
+
+            void SyncToastMuteIcon()
+            {
+                var muted = Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsMuted;
+                toastMuteBtn.Content = new FontIcon
+                {
+                    FontSize = 12,
+                    Glyph = muted ? "\uEA90" : "\uEA8F",
+                    Foreground = new SolidColorBrush(muted ? Color.FromArgb(255, 248, 113, 113) : Color.FromArgb(180, 180, 180, 180))
+                };
+                ToolTipService.SetToolTip(toastMuteBtn, muted ? "Notificaciones silenciadas (Mute) · Clic para activar sonido" : "Silenciar sonido de notificaciones");
+            }
+            SyncToastMuteIcon();
+
+            toastMuteBtn.Click += (_, _) =>
+            {
+                Anfeta.UI.Services.Notifications.NotificationSoundPlayer.ToggleMute();
+                SyncToastMuteIcon();
+            };
+
+            Grid.SetColumn(toastMuteBtn, 1);
+            headerGrid.Children.Add(toastMuteBtn);
 
             var message =
                 new TextBlock
                 {
-                    Text = reminder.Message,
-                    FontSize = 12.5,
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold,
+                    Text = !string.IsNullOrWhiteSpace(parsed.CleanTitle) ? parsed.CleanTitle : reminder.Message,
+                    FontSize = 13,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 245, 245, 245)),
                     TextWrapping = TextWrapping.Wrap,
                     MaxLines = 3,
-                    TextTrimming =
-                        TextTrimming.CharacterEllipsis
+                    TextTrimming = TextTrimming.CharacterEllipsis
                 };
 
             var schedule =
@@ -1340,7 +1387,7 @@ namespace Anfeta.UI
                     Spacing = 8
                 };
 
-            body.Children.Add(title);
+            body.Children.Add(headerGrid);
             body.Children.Add(message);
             body.Children.Add(schedule);
             body.Children.Add(actions);
@@ -1349,7 +1396,11 @@ namespace Anfeta.UI
 
             var cardBorderColor = isPriority00
                 ? Color.FromArgb(255, 239, 68, 68)
-                : Color.FromArgb(255, 217, 70, 239);
+                : (parsed.PriorityLabel == "Primaria"
+                    ? Color.FromArgb(255, 245, 158, 11)
+                    : (parsed.PriorityLabel == "Secundaria"
+                        ? Color.FromArgb(255, 59, 130, 246)
+                        : Color.FromArgb(255, 217, 70, 239)));
 
             var card =
                 new Border
@@ -1469,6 +1520,27 @@ namespace Anfeta.UI
                 (_, __) =>
                     RepositionReminderToasts();
 
+            if (Anfeta.UI.Services.Notifications.NotificationSoundPlayer.IsAutoDismissEnabled)
+            {
+                var autoTimer = DispatcherQueue.CreateTimer();
+                autoTimer.Interval = TimeSpan.FromSeconds(8);
+                autoTimer.Tick += (s, e) =>
+                {
+                    autoTimer.Stop();
+                    DismissReminderToast(entry, acknowledged: false);
+                };
+
+                card.PointerEntered += (s, e) => autoTimer.Stop();
+                card.PointerExited += (s, e) =>
+                {
+                    if (entry.Popup.IsOpen)
+                        autoTimer.Start();
+                };
+
+                autoTimer.Start();
+                entry.AutoDismissTimer = autoTimer;
+            }
+
             _activeReminderToasts.Add(entry);
 
             while (_activeReminderToasts.Count >
@@ -1477,9 +1549,9 @@ namespace Anfeta.UI
                 var oldest =
                     _activeReminderToasts[0];
 
-                QueueReminderToastForLater(
+                DismissReminderToast(
                     oldest,
-                    TimeSpan.FromMinutes(2));
+                    acknowledged: false);
             }
 
             popup.IsOpen = true;
@@ -1492,6 +1564,12 @@ namespace Anfeta.UI
         {
             if (entry == null)
                 return;
+
+            if (entry.AutoDismissTimer != null)
+            {
+                entry.AutoDismissTimer.Stop();
+                entry.AutoDismissTimer = null;
+            }
 
             if (acknowledged)
             {

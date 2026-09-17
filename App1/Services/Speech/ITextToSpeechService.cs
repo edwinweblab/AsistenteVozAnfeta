@@ -1,4 +1,4 @@
-﻿using System.Threading;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Anfeta.UI.Services.Speech
@@ -21,5 +21,9 @@ namespace Anfeta.UI.Services.Speech
         // Rango válido: 0.5 (lento) – 6.0 (rápido). Default: 1.0
         void SetRate(double rate);
         double SpeakingRate { get; }
+
+        // Rango válido: 0.0 (silencio) – 1.0 (máximo). Default: 0.5
+        void SetVolume(double volume);
+        double Volume { get; }
     }
 }
