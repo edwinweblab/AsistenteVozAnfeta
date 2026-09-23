@@ -60,6 +60,7 @@ namespace Anfeta.UI.Views
             DomainNoBilling,
             Month,
             Name,
+            NameNoCompleted,
             Area,
             AreaNoBilling
         }
@@ -91,6 +92,7 @@ namespace Anfeta.UI.Views
         private bool _isBrowsing = false;
         private bool _onlyBookmarks = false;
         private bool _onlyFolders = false;
+        private bool _onlyContent = false;
         private string? _extFilter = null;
         // Resultados abren siempre con lo más reciente arriba.
         // El usuario todavía puede cambiar el orden manualmente durante la sesión.
@@ -490,6 +492,13 @@ namespace Anfeta.UI.Views
             // Asi no compiten varios procesos pesados de Notion al mismo tiempo.
             StartCalendarStartupPipeline();
 
+            // Comprobación instantánea al volver el foco a la ventana de ANFETA (Alt+Tab o clic)
+            if (App.MainWindowInstance != null)
+            {
+                App.MainWindowInstance.Activated -= MainWindow_Activated;
+                App.MainWindowInstance.Activated += MainWindow_Activated;
+            }
+
             NotifyTabModeChanged(CurrentTabMode);
             ForceHideLoadingState();
 
@@ -564,6 +573,11 @@ namespace Anfeta.UI.Views
                 DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
                 SearchFocusBridge.FocusRequested -= OnSearchFocusRequested;
                 _isIndexStateHooked = false;
+            }
+
+            if (App.MainWindowInstance != null)
+            {
+                App.MainWindowInstance.Activated -= MainWindow_Activated;
             }
 
             DetachMessagesNavigationBridge();
@@ -753,7 +767,7 @@ namespace Anfeta.UI.Views
                 DispatcherQueue.CreateTimer();
 
             _fastNotionResultsRefreshTimer.Interval =
-                TimeSpan.FromSeconds(30);
+                TimeSpan.FromSeconds(20);
 
             _fastNotionResultsRefreshTimer.Tick +=
                 async (_, __) =>
@@ -785,9 +799,10 @@ namespace Anfeta.UI.Views
 
         private async Task RefreshNotionResultsFastAsync()
         {
-            // No competir con el calendario cuando está visible.
+            // No competir con el calendario cuando está visible ni gastar consultas si está minimizada.
             if (DeferInitialIndexPaint ||
-                _calendarViewActive)
+                _calendarViewActive ||
+                IsMainWindowMinimized())
             {
                 return;
             }
@@ -809,6 +824,56 @@ namespace Anfeta.UI.Views
             {
                 // Es un watcher silencioso: nunca bloquear Resultados.
             }
+        }
+
+        private void MainWindow_Activated(object sender, WindowActivatedEventArgs e)
+        {
+            if (e.WindowActivationState != WindowActivationState.Deactivated)
+            {
+                // Si el usuario regresa a ANFETA tras editar en Notion u otra ventana, comprobar cambios de inmediato de forma 100% silenciosa
+                DispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        if (_calendarViewActive)
+                        {
+                            await RefreshCalendarDaySilentlyAsync(
+                                _calendarSelectedDate.Date,
+                                _calendarLoadVersion,
+                                userInitiated: false,
+                                forceNetworkCheck: true);
+                        }
+                        else
+                        {
+                            await CheckNotionChangesAsync(force: true);
+                            await RefreshFromSharedIndexIfChangedAsync();
+                        }
+                    }
+                    catch { }
+                });
+            }
+        }
+
+        private static bool IsMainWindowMinimized()
+        {
+            try
+            {
+                var appWindow = App.MainWindowInstance?.AppWindow;
+                if (appWindow != null)
+                {
+                    if (!appWindow.IsVisible)
+                        return true;
+
+                    if (appWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter &&
+                        presenter.State == Microsoft.UI.Windowing.OverlappedPresenterState.Minimized)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
         }
 
         private void OnSearchFocusRequested()
@@ -1185,7 +1250,45 @@ namespace Anfeta.UI.Views
                         .ThenBy(row => row.VisualTitle, StringComparer.OrdinalIgnoreCase)));
             }
 
+            if (_resultGroupingMode is ResultGroupingMode.Name or ResultGroupingMode.NameNoCompleted)
+            {
+                var targetRows = _resultGroupingMode == ResultGroupingMode.NameNoCompleted
+                    ? rows.Where(r => !IsTerminatedRow(r)).ToList()
+                    : rows;
+
+                var nameGroups = targetRows
+                    .GroupBy(row => GetAssignedPersonGroupName(row))
+                    .OrderBy(group => IsFallbackGroup(group.Key) ? 1 : 0)
+                    .ThenBy(group => group.Key);
+
+                return nameGroups.Select(group => new SearchResultGroup(
+                    group.Key,
+                    OrderWorkflowRows(group)));
+            }
+
             return projects.Select(group => new SearchResultGroup(group.Key, group));
+        }
+
+        private static bool IsTerminatedRow(SearchResultRow? row)
+        {
+            if (row == null)
+                return false;
+
+            if (string.Equals(row.WorkflowChipText, "TERMINADA", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var rawName = (row.DisplayName ?? row.Name ?? string.Empty).Trim();
+            if (HasExactWorkflowToken(rawName, "zREVISION"))
+                return true;
+
+            var status = (row.ProjectUpdateStatus ?? string.Empty).Trim();
+            if (status.Contains("terminad", StringComparison.OrdinalIgnoreCase) ||
+                status.Contains("cobrado", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private static bool IsExcludedByNoBillingMode(
@@ -1312,6 +1415,7 @@ namespace Anfeta.UI.Views
                 ResultGroupingMode.DomainNoBilling => GetDomainGroupName(row),
                 ResultGroupingMode.Month => string.IsNullOrWhiteSpace(row?.MonthChipText) ? "Sin mes" : row.MonthChipText,
                 ResultGroupingMode.Name => GetAssignedPersonGroupName(row),
+                ResultGroupingMode.NameNoCompleted => GetAssignedPersonGroupName(row),
                 ResultGroupingMode.Area => row?.AreaGroupName ?? "Otros",
                 ResultGroupingMode.AreaNoBilling => row?.AreaGroupName ?? "Otros",
                 _ => "Resultados"
@@ -1786,6 +1890,7 @@ namespace Anfeta.UI.Views
                     "domain_nobilling" => ResultGroupingMode.DomainNoBilling,
                     "month" => ResultGroupingMode.Month,
                     "name" => ResultGroupingMode.Name,
+                    "name_noterminated" or "name_nocompleted" => ResultGroupingMode.NameNoCompleted,
                     "area" => ResultGroupingMode.Area,
                     "area_nobilling" => ResultGroupingMode.AreaNoBilling,
                     _ => ResultGroupingMode.None

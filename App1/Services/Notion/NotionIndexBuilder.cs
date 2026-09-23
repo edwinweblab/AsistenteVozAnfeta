@@ -200,7 +200,15 @@ namespace Anfeta.UI.Services.Notion
                             ct.ThrowIfCancellationRequested();
 
                             if (IsArchivedOrInTrash(page))
+                            {
+                                if (lastEditedAfterUtc.HasValue)
+                                {
+                                    var deletedRow = MapPageToSearchRow(page, sourceName);
+                                    deletedRow.IsDeleted = true;
+                                    results.Add(deletedRow);
+                                }
                                 continue;
+                            }
 
                             results.Add(
                                 MapPageToSearchRow(

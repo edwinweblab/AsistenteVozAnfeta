@@ -717,7 +717,7 @@ namespace Anfeta.UI.Views
                     "pero podrán recuperarse desde la papelera de Notion.",
                 PrimaryButtonText = "Mover a papelera",
                 CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Close
+                DefaultButton = ContentDialogButton.Primary
             };
 
             if (await dialog.ShowAsync() != ContentDialogResult.Primary)
@@ -3982,18 +3982,7 @@ namespace Anfeta.UI.Views
             _priority00RenderedVersion = -1;
             RefreshPriority00Counts(force: true);
 
-            var root = ApplicationData.Current.LocalSettings.Values[
-                LS_DropboxRoot] as string;
-
-            if (!string.IsNullOrWhiteSpace(root) &&
-                Directory.Exists(root) &&
-                snapshot.Count > 0)
-            {
-                await LocalIndexPersistence.SaveAsync(
-                    root,
-                    snapshot,
-                    CancellationToken.None);
-            }
+            await LocalIndexPersistence.UpsertRowAsync(row);
 
             var query = (SearchBox.Text ?? string.Empty).Trim();
 
@@ -5824,7 +5813,7 @@ namespace Anfeta.UI.Views
                 Content = $"Vas a eliminar {count} elemento(s):\n\n{preview}\n\n¿Deseas continuar?",
                 PrimaryButtonText = "Eliminar",
                 CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Close
+                DefaultButton = ContentDialogButton.Primary
             };
             return await dialog.ShowAsync() == ContentDialogResult.Primary;
         }
@@ -6148,7 +6137,8 @@ CtxMenuRenameItem.Text = isNotion
             }
 
             App.LocalIndex.Set(snapshot);
-            await PersistCombinedIndexIfPossibleAsync(snapshot);
+            if (row != null)
+                await PersistSingleRowIfPossibleAsync(row);
 
             var query = (SearchBox.Text ?? string.Empty).Trim();
 
@@ -6236,6 +6226,20 @@ CtxMenuRenameItem.Text = isNotion
                     snapshot,
                     CancellationToken.None);
             }
+        }
+
+        private static async Task PersistSingleRowIfPossibleAsync(
+            SearchResultRow row)
+        {
+            if (row == null) return;
+            await LocalIndexPersistence.UpsertRowAsync(row, CancellationToken.None);
+        }
+
+        private static async Task PersistRowsIfPossibleAsync(
+            IEnumerable<SearchResultRow> rows)
+        {
+            if (rows == null) return;
+            await LocalIndexPersistence.UpsertRowsAsync(rows, CancellationToken.None);
         }
 
         #endregion

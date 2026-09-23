@@ -88,8 +88,8 @@ public sealed class DailyAiSummaryService
             activities = activities.Where(x => mentionedPeople.Contains(x.Person));
         else if (normalized.Contains("sin responsable") || normalized.Contains("sin asignar"))
             activities = activities.Where(x => x.IsUnassigned);
-        else if (normalized.Contains("rezagad") || normalized.Contains("urge") || normalized.Contains("prioridad"))
-            activities = activities.Where(x => x.IsLagging || x.IsUnassigned);
+        else if (normalized.Contains("rezagad") || normalized.Contains("urge") || normalized.Contains("prioridad") || normalized.Contains("auditar") || normalized.Contains("error") || normalized.Contains("riesgo"))
+            activities = activities.Where(x => x.IsLagging || x.IsUnassigned || x.IsSuspended || x.ChecksTodayTotal == 0);
         else if (normalized.Contains("próxim") || normalized.Contains("proxim") || normalized.Contains("horario"))
             activities = activities.Where(x => x.End >= DateTime.Now).OrderBy(x => x.Start);
 

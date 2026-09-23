@@ -53,6 +53,14 @@ namespace Anfeta.UI.Views
             new(StringComparer.OrdinalIgnoreCase);
         private CancellationTokenSource? _localFsDebounceCts;
 
+        private readonly object _pruneLocalLock = new();
+        private readonly HashSet<string> _pendingLocalPruneTargets = new(StringComparer.OrdinalIgnoreCase);
+        private CancellationTokenSource? _pruneLocalDebounceCts;
+
+        private DispatcherQueueTimer? _incrementalAuditTimer;
+        private static int _incrementalAuditCursor;
+        private static readonly SemaphoreSlim SharedIncrementalAuditGate = new(1, 1);
+
         // ===== Performance Cache v1 =====
         // El índice es global (App.LocalIndex), por lo que el bootstrap y las
         // comprobaciones automáticas también deben coordinarse globalmente.
@@ -672,7 +680,8 @@ namespace Anfeta.UI.Views
                     .Where(item =>
                         item.Source == SearchSource.Dropbox &&
                         !localTargets.Contains(
-                            NormalizePath(item.Target)))
+                            NormalizePath(item.Target)) &&
+                        (!Path.IsPathRooted(item.Target) || File.Exists(item.Target) || Directory.Exists(item.Target)))
                     .ToList();
 
                 localRows.AddRange(remoteOnlyDropboxRows);
@@ -1140,6 +1149,16 @@ namespace Anfeta.UI.Views
                                     incomingId,
                                     StringComparison.OrdinalIgnoreCase));
 
+                        if (incoming.IsDeleted)
+                        {
+                            if (existingIndex >= 0)
+                            {
+                                current.RemoveAt(existingIndex);
+                                appliedChanges++;
+                            }
+                            continue;
+                        }
+
                         if (existingIndex < 0)
                         {
                             current.Add(incoming);
@@ -1163,7 +1182,21 @@ namespace Anfeta.UI.Views
                     if (appliedChanges > 0)
                     {
                         App.LocalIndex.Set(current);
-                        await PersistCombinedIndexIfPossibleAsync(current);
+
+                        if (sourcesNeedingFullSync.Count == 0 && changedItems.Count > 0)
+                        {
+                            var toUpsert = changedItems.Where(x => !x.IsDeleted).ToList();
+                            var toDelete = changedItems.Where(x => x.IsDeleted).ToList();
+
+                            if (toUpsert.Count > 0)
+                                await LocalIndexPersistence.UpsertRowsAsync(toUpsert);
+                            foreach (var del in toDelete)
+                                await LocalIndexPersistence.DeleteRowAsync(del);
+                        }
+                        else
+                        {
+                            await PersistCombinedIndexIfPossibleAsync(current);
+                        }
 
                         _priority00IndexVersion = -1;
                         _priority00RenderedVersion = -1;
@@ -2030,6 +2063,8 @@ namespace Anfeta.UI.Views
             };
             _dropboxChangeTimer.Start();
 
+            StartIncrementalLocalIndexAuditWatcher();
+
             // La primera llamada crea el cursor base. No modifica resultados.
             _ = CheckDropboxChangesAsync();
         }
@@ -2037,12 +2072,194 @@ namespace Anfeta.UI.Views
         private void StopDropboxChangeWatcher()
         {
             StopLocalFileWatcher();
+            StopIncrementalLocalIndexAuditWatcher();
 
             if (_dropboxChangeTimer == null)
                 return;
 
             _dropboxChangeTimer.Stop();
             _dropboxChangeTimer = null;
+        }
+
+        private void StartIncrementalLocalIndexAuditWatcher()
+        {
+            if (DeferInitialIndexPaint)
+                return;
+
+            if (_incrementalAuditTimer != null)
+                return;
+
+            _incrementalAuditTimer = DispatcherQueue.CreateTimer();
+            _incrementalAuditTimer.Interval = TimeSpan.FromSeconds(90);
+            _incrementalAuditTimer.Tick += async (_, _) =>
+            {
+                await RunIncrementalLocalIndexAuditBatchAsync();
+            };
+            _incrementalAuditTimer.Start();
+        }
+
+        private void StopIncrementalLocalIndexAuditWatcher()
+        {
+            if (_incrementalAuditTimer == null)
+                return;
+
+            _incrementalAuditTimer.Stop();
+            _incrementalAuditTimer = null;
+        }
+
+        private async Task RunIncrementalLocalIndexAuditBatchAsync()
+        {
+            if (!SharedIncrementalAuditGate.Wait(0))
+                return;
+
+            try
+            {
+                var snapshot = App.LocalIndex.GetAll();
+                if (snapshot.Count == 0)
+                    return;
+
+                var localRows = snapshot
+                    .Where(r => r.Source != SearchSource.Notion && Path.IsPathRooted(r.Target))
+                    .ToList();
+
+                if (localRows.Count == 0)
+                    return;
+
+                const int batchSize = 150;
+                var start = _incrementalAuditCursor % localRows.Count;
+                var count = Math.Min(batchSize, localRows.Count - start);
+                var batch = localRows.GetRange(start, count);
+                _incrementalAuditCursor = (start + count) % localRows.Count;
+
+                var staleTargets = new List<string>();
+
+                await Task.Run(() =>
+                {
+                    foreach (var row in batch)
+                    {
+                        var path = row.Target;
+                        bool exists;
+                        try
+                        {
+                            exists = File.Exists(path) || Directory.Exists(path);
+                        }
+                        catch
+                        {
+                            exists = false;
+                        }
+
+                        if (!exists)
+                        {
+                            staleTargets.Add(path);
+                        }
+                    }
+                });
+
+                if (staleTargets.Count > 0)
+                {
+                    QueuePruneDeletedLocalTargets(staleTargets);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AUDIT] Error en auditoría incremental: {ex.Message}");
+            }
+            finally
+            {
+                SharedIncrementalAuditGate.Release();
+            }
+        }
+
+        public void QueuePruneDeletedLocalTargets(IEnumerable<string> targets)
+        {
+            if (targets == null)
+                return;
+
+            CancellationTokenSource debounce;
+            lock (_pruneLocalLock)
+            {
+                var added = false;
+                foreach (var t in targets)
+                {
+                    if (!string.IsNullOrWhiteSpace(t))
+                    {
+                        var norm = NormalizePath(t);
+                        if (_pendingLocalPruneTargets.Add(norm))
+                            added = true;
+                    }
+                }
+
+                if (!added)
+                    return;
+
+                try
+                {
+                    _pruneLocalDebounceCts?.Cancel();
+                }
+                catch
+                {
+                }
+
+                _pruneLocalDebounceCts = new CancellationTokenSource();
+                debounce = _pruneLocalDebounceCts;
+            }
+
+            _ = DebouncePruneDeletedLocalTargetsAsync(debounce);
+        }
+
+        private async Task DebouncePruneDeletedLocalTargetsAsync(CancellationTokenSource debounce)
+        {
+            try
+            {
+                await Task.Delay(850, debounce.Token);
+
+                List<string> batch;
+                lock (_pruneLocalLock)
+                {
+                    if (!ReferenceEquals(_pruneLocalDebounceCts, debounce))
+                        return;
+
+                    batch = _pendingLocalPruneTargets.ToList();
+                    _pendingLocalPruneTargets.Clear();
+                    _pruneLocalDebounceCts = null;
+                }
+
+                if (batch.Count == 0)
+                    return;
+
+                await Task.Run(async () =>
+                {
+                    var snapshot = App.LocalIndex.GetAll().ToList();
+                    var targetSet = batch.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    var removed = snapshot.RemoveAll(row =>
+                        row.Source != SearchSource.Notion &&
+                        targetSet.Contains(NormalizePath(row.Target)));
+
+                    if (removed > 0)
+                    {
+                        App.LocalIndex.Set(snapshot);
+                        var root = ApplicationData.Current.LocalSettings.Values[LS_DropboxRoot] as string ?? DROPBOX_ROOT;
+                        if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+                        {
+                            await LocalIndexPersistence.SaveAsync(root, snapshot, CancellationToken.None);
+                        }
+
+                        Debug.WriteLine($"[LOCAL_FS] Purga incremental: {removed} archivos eliminados removidos de la caché local.");
+                    }
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[LOCAL_FS] Error al purgar archivos eliminados: {ex.Message}");
+            }
+            finally
+            {
+                try { debounce.Dispose(); } catch { }
+            }
         }
 
         private async Task CheckDropboxChangesAsync()
@@ -2318,7 +2535,7 @@ namespace Anfeta.UI.Views
                 return;
 
             _notionChangeTimer = DispatcherQueue.CreateTimer();
-            _notionChangeTimer.Interval = TimeSpan.FromMinutes(2);
+            _notionChangeTimer.Interval = TimeSpan.FromSeconds(25);
 
             _notionChangeTimer.Tick += async (_, _) =>
             {
@@ -2339,19 +2556,26 @@ namespace Anfeta.UI.Views
             _notionChangeTimer = null;
         }
 
-        private async Task CheckNotionChangesAsync()
+        private async Task CheckNotionChangesAsync(bool force = false)
         {
             if (_notionSyncRunning)
                 return;
 
-            if (!ReserveSharedProbe(
+            // Evitar saturar red o UI si el usuario está escribiendo o buscando activamente
+            if (_searchDebounceTimer != null && _searchDebounceTimer.IsEnabled)
+                return;
+
+            if (!force && IsMainWindowMinimized())
+                return;
+
+            if (!force && !ReserveSharedProbe(
                     ref SharedLastNotionProbeUtc,
-                    TimeSpan.FromSeconds(30)))
+                    TimeSpan.FromSeconds(5)))
             {
                 return;
             }
 
-            if (!await SharedNotionProbeGate.WaitAsync(0))
+            if (!await SharedNotionProbeGate.WaitAsync(force ? 500 : 0))
                 return;
 
             try
@@ -2384,7 +2608,7 @@ namespace Anfeta.UI.Views
                 var overlapAnchor =
                     lastSyncUtc
                         .ToUniversalTime()
-                        .Subtract(TimeSpan.FromMinutes(3));
+                        .Subtract(TimeSpan.FromSeconds(10));
 
                 var hasChanges =
                     await NotionIndexBuilder.HasAnyChangesSinceAsync(
@@ -2399,17 +2623,27 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                ShowNotionSyncNotice(
-                    "Notion al día",
-                    visibleSeconds: 3);
+                if (force)
+                {
+                    ShowNotionSyncNotice(
+                        "Notion al día",
+                        visibleSeconds: 3);
+                }
+                else
+                {
+                    HideNotionSyncNotice();
+                }
             }
             catch
             {
                 BtnRefreshNotion.Visibility = Visibility.Collapsed;
-                ShowNotionSyncNotice(
-                    "Error al revisar Notion",
-                    isError: true,
-                    visibleSeconds: 8);
+                if (force)
+                {
+                    ShowNotionSyncNotice(
+                        "Error al revisar Notion",
+                        isError: true,
+                        visibleSeconds: 8);
+                }
             }
             finally
             {

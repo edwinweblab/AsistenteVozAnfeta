@@ -123,6 +123,7 @@ namespace Anfeta.UI.Models.Weblab
         public int AssignmentDataVersion { get; set; }
         public string[] AssignmentKeys { get; set; } = Array.Empty<string>();
         public DateTimeOffset? NotionEditedUtc { get; set; }
+        public bool IsDeleted { get; set; }
         public string ExternalSourceName { get; set; } = "";
 
         private string _name = "";
@@ -212,6 +213,44 @@ namespace Anfeta.UI.Models.Weblab
         public long Size { get; set; }
         public string ServerModified { get; set; } = "";
         public SearchSource Source { get; set; }
+
+        private bool _matchedInContent;
+        [JsonIgnore]
+        public bool MatchedInContent
+        {
+            get => _matchedInContent;
+            set
+            {
+                if (_matchedInContent == value) return;
+                _matchedInContent = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ContentMatchBadgeVisibility));
+            }
+        }
+
+        private string _contentSnippet = "";
+        [JsonIgnore]
+        public string ContentSnippet
+        {
+            get => _contentSnippet;
+            set
+            {
+                var clean = value ?? string.Empty;
+                if (_contentSnippet == clean) return;
+                _contentSnippet = clean;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ContentSnippetVisibility));
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility ContentMatchBadgeVisibility =>
+            _matchedInContent ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility ContentSnippetVisibility =>
+            !string.IsNullOrWhiteSpace(_contentSnippet) ? Visibility.Visible : Visibility.Collapsed;
+
 
         // ----------------------------
         // Helpers visuales para resultados

@@ -1,13 +1,17 @@
 using Anfeta.UI.Services.Search;
+using Anfeta.UI.Services.Notion;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Windows.Storage;
 
 namespace Anfeta.UI.Views
 {
@@ -470,109 +474,7 @@ namespace Anfeta.UI.Views
         // Sin CancellationToken — para llamadas directas
         private async Task RunLocalSearchAsync(string query)
         {
-            _isBrowsing = false;
-            _mode = ViewMode.Explorer;
-
-            var rawQuery = (query ?? "").Trim();
-            IEnumerable<Anfeta.UI.Models.Weblab.SearchResultRow> items = App.LocalIndex.GetAll();
-            items = items.Where(x => !IsExcludedPath(x.Target));
-            items = ApplyGlobalSourceFilter(items);
-
-            var scope = ResolveNotionBaseScope(rawQuery);
-            var queryForSearch = scope.HasBase ? scope.Remainder : rawQuery;
-            var executionQuery = IsPriority00FamilyQuery(rawQuery) ? string.Empty : NormalizeConvenienceSearchQuery(queryForSearch);
-
-            SyncBaseChipsFromQuery(rawQuery);
-            UpdateSearchBreadcrumb(rawQuery, scope, queryForSearch);
-
-            if (scope.HasBase)
-            {
-                items = items.Where(x =>
-                    x.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
-                    string.Equals(x.ExternalSourceName, scope.SourceName, StringComparison.OrdinalIgnoreCase));
-
-                if (!string.IsNullOrWhiteSpace(scope.TitleFilter))
-                {
-                    items = items.Where(x =>
-                        PaymentBaseTitleMatches(
-                            x,
-                            scope.TitleFilter));
-                }
-            }
-
-            var parsed = AdvancedQueryV3.Parse(executionQuery);
-
-            if (HasQuotedSearchParts(queryForSearch) ||
-                !LooksAdvanced(executionQuery))
-                UpdateHighlightTermsForAutoAnd(queryForSearch);
-            else
-                UpdateHighlightTerms(executionQuery, parsed);
-
-            if (!string.IsNullOrWhiteSpace(executionQuery))
-            {
-                if (executionQuery == "-") return;
-
-                if (HasQuotedSearchParts(queryForSearch) ||
-                    !LooksAdvanced(executionQuery))
-                {
-                    items = items.Where(x => MatchesFlexibleOrQuotedQuery(x, queryForSearch));
-                }
-                else
-                {
-                    // EvaluateWithPlan ya maneja internamente:
-                    //   - expr booleana (AND/OR/NOT/pipe)
-                    //   - nopath:
-                    //   - ext: con lista (pdf;docx;xlsx)
-                    //   - FolderContains y OnlyFolders se aplican abajo como siempre
-                    items = items.Where(x => AdvancedQueryV3.EvaluateWithPlan(parsed.Expr, new RowView(x), parsed.Plan));
-
-                    // FolderContains: filtro de ruta/carpeta (de la query o ruta absoluta)
-                    if (!string.IsNullOrWhiteSpace(parsed.Plan.FolderContains))
-                    {
-                        var f = parsed.Plan.FolderContains.ToLowerInvariant();
-                        items = items.Where(x => (x.Target ?? "").ToLowerInvariant().Contains(f));
-                    }
-
-                    // OnlyFolders: type:folder / type:file
-                    if (parsed.Plan.OnlyFolders.HasValue)
-                    {
-                        var wantFolder = parsed.Plan.OnlyFolders.Value;
-                        items = items.Where(x =>
-                            wantFolder
-                                ? (x.Type ?? "").Equals("FOLDER", StringComparison.OrdinalIgnoreCase)
-                                : (x.Type ?? "").Equals("FILE", StringComparison.OrdinalIgnoreCase));
-                    }
-
-                    // Nota: parsed.Plan.Ext / ExtList ya fue aplicado dentro de EvaluateWithPlan,
-                    // NO hace falta volver a filtrar aquí.
-                }
-            }
-
-            // ApplyChipFilters: solo actúa cuando el usuario clickea un chip
-            // sin escribir query (p. ej. _extFilter viene del chip PDF, DOCX, etc.)
-            items = ApplyChipFilters(items);
-            items = ApplyRequestedQuickFilters(items, rawQuery);
-
-            if (!scope.HasBase)
-                items = ApplyNotionBaseFilter(items);
-
-            items = ApplySortKey(items);
-
-            var nextResults = items.Take(500).ToList();
-
-            foreach (var it in nextResults)
-            {
-                it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
-                it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
-            }
-
-            ReplaceSearchResults(nextResults);
-
-            CountText.Text = $"{Results.Count} resultados";
-            EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            _voicePost.NotifySearchResults(Results);
-            Dictation_SetResults(BuildSpeechResults(Results));
-            await Task.CompletedTask;
+            await RunLocalSearchAsync(query, CancellationToken.None);
         }
 
         // Con CancellationToken — para el debounce
@@ -675,13 +577,64 @@ namespace Anfeta.UI.Views
                     ids.Contains(i.NodeId));
             }
 
-            var nextResults = items.Take(500).ToList();
+            var nextResults = new List<Anfeta.UI.Models.Weblab.SearchResultRow>(Math.Min(100, 500));
+            var staleLocalTargets = new List<string>();
 
-            foreach (var it in nextResults)
+            foreach (var it in items)
             {
                 token.ThrowIfCancellationRequested();
+
+                if (it.Source != Anfeta.UI.Models.Weblab.SearchSource.Notion &&
+                    Path.IsPathRooted(it.Target))
+                {
+                    bool exists;
+                    try
+                    {
+                        exists = File.Exists(it.Target) || Directory.Exists(it.Target);
+                    }
+                    catch
+                    {
+                        exists = false;
+                    }
+
+                    if (!exists)
+                    {
+                        staleLocalTargets.Add(it.Target);
+                        continue;
+                    }
+
+                    if (string.Equals(it.Type, "FILE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            var fi = new FileInfo(it.Target);
+                            if (fi.Exists)
+                            {
+                                var lastWrite = fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
+                                if (!string.Equals(it.ServerModified, lastWrite, StringComparison.Ordinal))
+                                {
+                                    it.ServerModified = lastWrite;
+                                    it.Size = fi.Length;
+                                }
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+
                 it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
+
+                nextResults.Add(it);
+                if (nextResults.Count >= 500)
+                    break;
+            }
+
+            if (staleLocalTargets.Count > 0)
+            {
+                QueuePruneDeletedLocalTargets(staleLocalTargets);
             }
 
             token.ThrowIfCancellationRequested();
@@ -691,6 +644,8 @@ namespace Anfeta.UI.Views
             EmptyResultsHint.Visibility = Results.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             _voicePost.NotifySearchResults(Results);
             Dictation_SetResults(BuildSpeechResults(Results));
+
+            ScheduleNotionCandidateVerification(nextResults);
             await Task.CompletedTask;
         }
 
@@ -735,6 +690,102 @@ namespace Anfeta.UI.Views
             RefreshResultsListView();
         }
 
+        private static readonly Dictionary<string, DateTimeOffset> _recentlyVerifiedNotionPages = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly object _notionVerificationLock = new();
+
+        private void ScheduleNotionCandidateVerification(
+            IReadOnlyList<Anfeta.UI.Models.Weblab.SearchResultRow> rows)
+        {
+            if (rows == null || rows.Count == 0)
+                return;
+
+            var notionCandidates = rows
+                .Where(r => r.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
+                            !string.IsNullOrWhiteSpace(r.NodeId))
+                .ToList();
+
+            if (notionCandidates.Count == 0)
+                return;
+
+            var token = ApplicationData.Current.LocalSettings.Values[LS_NotionToken] as string;
+            if (string.IsNullOrWhiteSpace(token))
+                return;
+
+            var now = DateTimeOffset.UtcNow;
+            var toCheck = new List<string>();
+
+            lock (_notionVerificationLock)
+            {
+                foreach (var candidate in notionCandidates)
+                {
+                    var id = candidate.NodeId.Trim();
+                    if (_recentlyVerifiedNotionPages.TryGetValue(id, out var lastVerified) &&
+                        now - lastVerified < TimeSpan.FromMinutes(5))
+                    {
+                        continue;
+                    }
+
+                    _recentlyVerifiedNotionPages[id] = now;
+                    toCheck.Add(id);
+                    if (toCheck.Count >= 10)
+                        break;
+                }
+            }
+
+            if (toCheck.Count == 0)
+                return;
+
+            _ = Task.Run(async () =>
+            {
+                var deadIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                using var http = new HttpClient();
+                http.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                http.DefaultRequestHeaders.Add("Notion-Version", "2022-06-28");
+                http.Timeout = TimeSpan.FromSeconds(8);
+
+                foreach (var id in toCheck)
+                {
+                    try
+                    {
+                        var cleanId = id.Replace("-", "");
+                        using var res = await http.GetAsync($"https://api.notion.com/v1/pages/{cleanId}");
+
+                        if (res.StatusCode == System.Net.HttpStatusCode.NotFound)
+                        {
+                            deadIds.Add(id);
+                            continue;
+                        }
+
+                        if (res.IsSuccessStatusCode)
+                        {
+                            var json = await res.Content.ReadAsStringAsync();
+                            using var doc = JsonDocument.Parse(json);
+                            var root = doc.RootElement;
+                            var archived = root.TryGetProperty("archived", out var a) && a.ValueKind == JsonValueKind.True;
+                            var inTrash = root.TryGetProperty("in_trash", out var t) && t.ValueKind == JsonValueKind.True;
+                            if (archived || inTrash)
+                            {
+                                deadIds.Add(id);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                if (deadIds.Count > 0)
+                {
+                    DispatcherQueue.TryEnqueue(async () =>
+                    {
+                        await RemoveNotionRowsFromIndexAsync(deadIds);
+                    });
+                }
+            });
+        }
+
         /// <summary>
         /// Alias rápidos pensados para Dropbox. Se traducen internamente a los
         /// operadores avanzados que ANFETA ya entiende, por lo que no duplicamos
@@ -773,6 +824,9 @@ namespace Anfeta.UI.Views
             Anfeta.UI.Models.Weblab.SearchResultRow row,
             string query)
         {
+            row.MatchedInContent = false;
+            row.ContentSnippet = string.Empty;
+
             var searchable = string.Join(
                 " ",
                 new[]
@@ -794,7 +848,7 @@ namespace Anfeta.UI.Views
             if (parts.Count == 0)
                 return true;
 
-            return parts.All(part =>
+            var metaMatched = parts.All(part =>
             {
                 // Los tags operativos son tokens, no texto libre.
                 // rtuzREVISION no debe coincidir dentro de prtuzREVISION o
@@ -829,6 +883,48 @@ namespace Anfeta.UI.Views
                         part.Value,
                         StringComparison.OrdinalIgnoreCase);
             });
+
+            var contentMatched = false;
+            if (row.Source == Anfeta.UI.Models.Weblab.SearchSource.Notion &&
+                !string.IsNullOrWhiteSpace(row.ExternalId) &&
+                App.NotionContentIndex.TryGetContent(row.ExternalId, out var pageContent))
+            {
+                if (MatchesContent(pageContent, parts, out var snippet))
+                {
+                    row.MatchedInContent = true;
+                    row.ContentSnippet = snippet;
+                    contentMatched = true;
+                }
+            }
+
+            return metaMatched || contentMatched;
+        }
+
+        private static bool MatchesContent(
+            string pageContent,
+            IReadOnlyList<FlexibleSearchPart> parts,
+            out string snippet)
+        {
+            snippet = string.Empty;
+            if (string.IsNullOrWhiteSpace(pageContent) || parts.Count == 0)
+                return false;
+
+            var textParts = parts.Where(p => !IsExactWorkflowSearchToken(p.Value) && p.Value.Length >= 2).ToList();
+            if (textParts.Count == 0) return false;
+
+            var allMatched = textParts.All(part =>
+                part.IsExact
+                    ? ContainsExactSearchPart(pageContent, part.Value)
+                    : pageContent.Contains(part.Value, StringComparison.OrdinalIgnoreCase));
+
+            if (allMatched)
+            {
+                var term = textParts[0].Value;
+                snippet = NotionContentIndexService.ExtractSnippet(pageContent, term);
+                return true;
+            }
+
+            return false;
         }
 
         private sealed record FlexibleSearchPart(
@@ -992,6 +1088,11 @@ namespace Anfeta.UI.Views
                     if (_extFilter == "img") return ext is "png" or "jpg" or "jpeg" or "webp" or "gif" or "bmp";
                     return ext == _extFilter;
                 });
+            }
+
+            if (_onlyContent)
+            {
+                items = items.Where(x => x.MatchedInContent);
             }
 
             return items;

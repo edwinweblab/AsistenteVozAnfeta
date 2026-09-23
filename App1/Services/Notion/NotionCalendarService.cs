@@ -168,7 +168,7 @@ namespace Anfeta.UI.Services.Notion
         private static bool _lastIncrementalRefreshChanged;
 
         private static readonly TimeSpan IncrementalRefreshReuseWindow =
-            TimeSpan.FromSeconds(15);
+            TimeSpan.FromSeconds(5);
 
         private const string NotionBaseUrl = "https://api.notion.com/v1/";
         private const string NotionVersion = "2026-03-11";

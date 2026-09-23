@@ -820,6 +820,15 @@
                     CornerRadius="13"
                     ToolTipService.ToolTip="Solo carpetas · type:folder · .folder" />
 
+                    <ToggleButton
+                    x:Name="ChipContent"
+                    MinHeight="25"
+                    Padding="10,0"
+                    Click="ChipFilter_Click"
+                    Content="📝 Contenido"
+                    CornerRadius="13"
+                    ToolTipService.ToolTip="Buscar dentro del contenido y bloques de páginas de Notion y documentos" />
+
                     <Border
                     Width="1"
                     Height="14"
@@ -995,6 +1004,7 @@
                         <ComboBoxItem Content="Proyecto / estado (sin cobrar/pagar)" Tag="domain_nobilling" />
                         <ComboBoxItem Content="Mes" Tag="month" />
                         <ComboBoxItem Content="Nombre asignado" Tag="name" />
+                        <ComboBoxItem Content="Nombre asignado (sin terminadas)" Tag="name_noterminated" />
                         <ComboBoxItem Content="Tipo / área" Tag="area" />
                         <ComboBoxItem Content="Tipo / área (sin cobrar/pagar)" Tag="area_nobilling" />
                     </ComboBox>
@@ -2895,12 +2905,6 @@
                                             <Button Content="Resumen del día · IA" Click="DailyAiSummary_Click"
                                                 HorizontalAlignment="Stretch" MinWidth="0"
                                                 ToolTipService.ToolTip="Resumen local y análisis opcional con OpenAI de las actividades cargadas de hoy." />
-                                            <ComboBox x:Name="ActiveTodayProjectStateFilter"
-                                                Header="Estado de actividades de hoy"
-                                                PlaceholderText="Todos los estados"
-                                                MinWidth="0" HorizontalAlignment="Stretch"
-                                                SelectionChanged="ActiveTodayProjectStateFilter_SelectionChanged"
-                                                ToolTipService.ToolTip="Muestra dominios con actividades de hoy en el estado seleccionado. No cambia la búsqueda ni el estado del proyecto." />
                                             <StackPanel
                                                 x:Name="ActiveTodayProjectsPanel"
                                                 HorizontalAlignment="Stretch"
@@ -3704,20 +3708,44 @@
                                                     Text="{x:Bind OrderChipText, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                             </Border>
 
+                                            <!-- Chip En Contenido (Notion Body Match) -->
+                                            <Border Margin="0,0,4,0" Padding="5,2" CornerRadius="7"
+                                                VerticalAlignment="Center"
+                                                Background="#258B5CF6" BorderBrush="#70A78BFA" BorderThickness="1"
+                                                Visibility="{x:Bind ContentMatchBadgeVisibility, Mode=OneWay}"
+                                                ToolTipService.ToolTip="{x:Bind ContentSnippet, Mode=OneWay}">
+                                                <TextBlock FontSize="8" FontWeight="SemiBold" Foreground="#DDD6FE"
+                                                    Text="📝 En contenido" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                            </Border>
+
                                         </StackPanel>
 
-                                        <TextBlock
-                                            x:Name="NameText"
+                                        <StackPanel
                                             Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            DataContextChanged="NameText_DataContextChanged"
-                                            FontFamily="Segoe UI"
-                                            FontSize="12"
-                                            FontWeight="SemiBold"
-                                            Foreground="{x:Bind ResultNameBrush, Mode=OneWay}"
-                                            MaxLines="1"
-                                            TextTrimming="CharacterEllipsis"
-                                            TextWrapping="NoWrap" />
+                                            VerticalAlignment="Center">
+                                            <TextBlock
+                                                x:Name="NameText"
+                                                DataContextChanged="NameText_DataContextChanged"
+                                                FontFamily="Segoe UI"
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Foreground="{x:Bind ResultNameBrush, Mode=OneWay}"
+                                                MaxLines="1"
+                                                TextTrimming="CharacterEllipsis"
+                                                TextWrapping="NoWrap" />
+
+                                            <TextBlock
+                                                FontFamily="Segoe UI"
+                                                FontSize="10"
+                                                FontStyle="Italic"
+                                                Foreground="#94A3B8"
+                                                MaxLines="1"
+                                                Margin="0,2,0,0"
+                                                TextTrimming="CharacterEllipsis"
+                                                TextWrapping="NoWrap"
+                                                Text="{x:Bind ContentSnippet, Mode=OneWay}"
+                                                Visibility="{x:Bind ContentSnippetVisibility, Mode=OneWay}" />
+                                        </StackPanel>
 
                                         <!-- Chip de Progreso Checklist - Separado a su propia columna -->
                                         <Border MaxWidth="92" Margin="8,0,2,0" Padding="6,2" CornerRadius="7"

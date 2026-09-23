@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Data;
+using Anfeta.UI.Data;
 using Anfeta.UI.Services;
 using Anfeta.UI.Services.Activity;
 using Anfeta.UI.Services.Auth;
@@ -48,6 +48,7 @@ namespace Anfeta.UI
         public static DispatcherQueue? UIQueue { get; private set; }
         public static HomeViewModel HomeVM => AppHost.Services.GetRequiredService<HomeViewModel>();
         public static LocalIndexService LocalIndex { get; } = new LocalIndexService();
+        public static NotionContentIndexService NotionContentIndex { get; } = new();
         private readonly List<Microsoft.UI.Xaml.Window> _openWindows = new();
         private const string WeblabBaseUrl = "https://wlserver-production.up.railway.app";
 

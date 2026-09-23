@@ -1,4 +1,5 @@
 using Anfeta.UI.Models.Search;
+using Anfeta.UI.Models.Weblab;
 using Anfeta.UI.Views.Dialogs;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -33,6 +34,27 @@ namespace Anfeta.UI.Views
             {
                 case nameof(ChipBookmarks): _onlyBookmarks = chip.IsChecked == true; break;
                 case nameof(ChipFolders): _onlyFolders = chip.IsChecked == true; break;
+                case nameof(ChipContent):
+                    _onlyContent = chip.IsChecked == true;
+                    if (_onlyContent)
+                    {
+                        StatusText.Text = "Búsqueda en contenido activada 📝";
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await App.NotionContentIndex.InitializeAsync();
+                                var token = ApplicationData.Current.LocalSettings.Values["Notion.Token"] as string;
+                                if (!string.IsNullOrWhiteSpace(token))
+                                {
+                                    var notionRows = App.LocalIndex.GetAll().Where(r => r.Source == SearchSource.Notion).ToList();
+                                    await App.NotionContentIndex.IndexPendingPagesAsync(notionRows, token, null, CancellationToken.None);
+                                }
+                            }
+                            catch { }
+                        });
+                    }
+                    break;
             }
 
             string? newExt = chip.Name switch
@@ -86,6 +108,7 @@ namespace Anfeta.UI.Views
                 "domain_nobilling" => ResultGroupingMode.DomainNoBilling,
                 "month" => ResultGroupingMode.Month,
                 "name" => ResultGroupingMode.Name,
+                "name_noterminated" or "name_nocompleted" => ResultGroupingMode.NameNoCompleted,
                 "area" => ResultGroupingMode.Area,
                 "area_nobilling" => ResultGroupingMode.AreaNoBilling,
                 _ => ResultGroupingMode.None
@@ -138,6 +161,7 @@ namespace Anfeta.UI.Views
                 ResultGroupingMode.DomainNoBilling => "proyecto / estado (sin cobrar/pagar)",
                 ResultGroupingMode.Month => "mes",
                 ResultGroupingMode.Name => "persona asignada",
+                ResultGroupingMode.NameNoCompleted => "nombre asignado (sin terminadas)",
                 ResultGroupingMode.Area => "tipo / área",
                 ResultGroupingMode.AreaNoBilling => "tipo / área (sin cobrar/pagar)",
                 _ => "ninguno"
@@ -170,6 +194,7 @@ namespace Anfeta.UI.Views
             {
                 _onlyBookmarks = false;
                 _onlyFolders = false;
+                _onlyContent = false;
                 _extFilter = null;
                 _mode = ViewMode.Explorer;
 
@@ -181,6 +206,7 @@ namespace Anfeta.UI.Views
                 ChipRecent.IsChecked = false;
                 ChipBookmarks.IsChecked = false;
                 ChipFolders.IsChecked = false;
+                if (ChipContent != null) ChipContent.IsChecked = false;
 
                 switch (tag)
                 {
@@ -1511,11 +1537,11 @@ namespace Anfeta.UI.Views
                 {
                     // Los estados prtuz/rtuz/sprtuz/zREVISION son búsquedas
                     // normales y NO activan automáticamente la base.
-                    PrimaryAlias = "revisiones",
+                    PrimaryAlias = "zrevisiones",
                     SourceName = "Revisiones",
                     PathLabel = "Revisiones",
                     DisplayLabel = "Revisiones",
-                    Aliases = new[] { "revision", "zrevisiones", "zrevbase" }
+                    Aliases = new[] { "zrevision", "zrevbase" }
                 },
                 new NotionBaseShortcut
                 {
@@ -1523,7 +1549,7 @@ namespace Anfeta.UI.Views
                     SourceName = "Clientes",
                     PathLabel = "zCLIENTES",
                     DisplayLabel = "Clientes",
-                    Aliases = new[] { "zcliente", "clientes", "cliente" }
+                    Aliases = new[] { "zcliente" }
                 },
                 new NotionBaseShortcut
                 {
@@ -1531,7 +1557,7 @@ namespace Anfeta.UI.Views
                     SourceName = "Dominios",
                     PathLabel = "zDOMINIOS",
                     DisplayLabel = "Dominios",
-                    Aliases = new[] { "zdominio", "zd", "dominios" }
+                    Aliases = new[] { "zdominio" }
                 },
                 new NotionBaseShortcut
                 {
@@ -1539,7 +1565,7 @@ namespace Anfeta.UI.Views
                     SourceName = "Programas y proyectos",
                     PathLabel = "zPROYECTOS",
                     DisplayLabel = "Proyectos",
-                    Aliases = new[] { "zproyecto", "zprogramas", "zprograma", "zproy", "zprog", "proyectos", "programas" }
+                    Aliases = new[] { "zproyecto", "zprogramas", "zprograma", "zproy", "zprog" }
                 },
                 new NotionBaseShortcut
                 {
@@ -1547,7 +1573,7 @@ namespace Anfeta.UI.Views
                     SourceName = "Correos Contraseñas",
                     PathLabel = "zCORREOS",
                     DisplayLabel = "Correos",
-                    Aliases = new[] { "zcorreo", "zpass", "zpasswords", "zcontraseñas", "correos", "contraseñas" }
+                    Aliases = new[] { "zcorreo", "zpass", "zpasswords", "zcontraseñas" }
                 },
                 new NotionBaseShortcut
                 {

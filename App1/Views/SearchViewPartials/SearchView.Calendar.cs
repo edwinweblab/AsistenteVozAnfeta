@@ -814,6 +814,7 @@ namespace Anfeta.UI.Views
         // Se actualizan por separado para evitar reconstruir todo el Canvas.
         private long _calendarExternalOverlayIndexVersion = -1;
         private long _calendarCobroCacheIndexVersion = -1;
+        private long _calendarPagoCacheIndexVersion = -1;
 
         // Primer paso del render incremental: los porcentajes de checklist
         // actualizan únicamente el badge de las tarjetas ya dibujadas.
@@ -905,32 +906,7 @@ namespace Anfeta.UI.Views
         private double CalendarFontScale => Math.Clamp(_calendarZoom, 0.70, 1.35);
 
         private IReadOnlyList<NotionCalendarActivity> _activeTodayProjectSource = Array.Empty<NotionCalendarActivity>();
-        private string _activeTodayProjectState = "";
-        private bool _updatingActiveTodayProjectFilter;
-        private bool _activeTodayProjectPaintQueued;
 
-        private static bool IsActiveTodayProjectUnassigned(NotionCalendarActivity activity) =>
-            !SplitPersons(activity.Person ?? "").Select(NormalizeCalendarPerson)
-                .Any(person => !string.IsNullOrWhiteSpace(person) &&
-                    !string.Equals(person, "Sin asignar", StringComparison.OrdinalIgnoreCase));
-
-        private void ActiveTodayProjectStateFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_updatingActiveTodayProjectFilter ||
-                sender is not ComboBox { SelectedItem: ComboBoxItem selected }) return;
-            var state = selected.Tag?.ToString() ?? "";
-            if (state == _activeTodayProjectState) return;
-            _activeTodayProjectState = state;
-            if (_activeTodayProjectPaintQueued) return;
-            _activeTodayProjectPaintQueued = true;
-            // Never clear/repopulate the ComboBox while WinUI is committing a selection.
-            if (!DispatcherQueue.TryEnqueue(() =>
-                {
-                    _activeTodayProjectPaintQueued = false;
-                    UpdateActiveTodayProjects(_activeTodayProjectSource, refreshFilterOptions: false);
-                }))
-                _activeTodayProjectPaintQueued = false;
-        }
 
         private void UpdateActiveTodayProjects(
             IReadOnlyList<NotionCalendarActivity>? activities,
@@ -947,41 +923,7 @@ namespace Anfeta.UI.Views
                         !activity.IsReviewMirror &&
                         activity.Start != default &&
                         activity.Start.Date == DateTime.Today).ToList();
-            if (refreshFilterOptions && ActiveTodayProjectStateFilter != null)
-            {
-                _updatingActiveTodayProjectFilter = true;
-                try
-                {
-                    var previousLabel = (ActiveTodayProjectStateFilter.SelectedItem as ComboBoxItem)?.Content?.ToString();
-                    var options = today.Select(GetCalendarProjectPhaseInfo).Where(phase => phase != null)
-                        .GroupBy(phase => phase!.Token).Select(group => group.First()!)
-                        .OrderBy(phase => phase.Order).ToList();
-                    var desired = new List<(string Tag, string Label)> { ("", "Todos los estados") };
-                    foreach (var phase in options)
-                        desired.Add((phase.Token, phase.Label));
-                    if (today.Any(IsActiveTodayProjectUnassigned))
-                        desired.Add(("unassigned", "POR ASIGNAR"));
-                    if (!desired.Any(item => item.Tag == _activeTodayProjectState))
-                        desired.Add((_activeTodayProjectState, previousLabel ?? _activeTodayProjectState));
-                    var existing = ActiveTodayProjectStateFilter.Items.OfType<ComboBoxItem>()
-                        .Select(item => (Tag: item.Tag?.ToString() ?? "", Label: item.Content?.ToString() ?? ""));
-                    if (!existing.SequenceEqual(desired))
-                    {
-                        ActiveTodayProjectStateFilter.Items.Clear();
-                        foreach (var item in desired)
-                            ActiveTodayProjectStateFilter.Items.Add(new ComboBoxItem { Tag = item.Tag, Content = item.Label });
-                    }
-                    var selectedItem = ActiveTodayProjectStateFilter.Items.OfType<ComboBoxItem>()
-                        .First(item => item.Tag?.ToString() == _activeTodayProjectState);
-                    if (!ReferenceEquals(ActiveTodayProjectStateFilter.SelectedItem, selectedItem))
-                        ActiveTodayProjectStateFilter.SelectedItem = selectedItem;
-                }
-                finally { _updatingActiveTodayProjectFilter = false; }
-            }
             var projects = today
-                    .Where(activity => _activeTodayProjectState.Length == 0 ||
-                        (_activeTodayProjectState == "unassigned" ? IsActiveTodayProjectUnassigned(activity) :
-                         GetCalendarProjectPhaseInfo(activity)?.Token == _activeTodayProjectState))
                     .Select(activity =>
                     {
                         var domain =
@@ -1045,9 +987,7 @@ namespace Anfeta.UI.Views
             if (projects.Count == 0)
             {
                 ActiveTodayProjectsHintText.Text =
-                    _activeTodayProjectState.Length == 0
-                        ? "No hay proyectos con dominio programados para hoy."
-                        : "No hay proyectos con actividades de hoy que coincidan con este estado.";
+                    "No hay proyectos con dominio programados para hoy.";
                 ActiveTodayProjectsHintText.Visibility =
                     Visibility.Visible;
                 return;
@@ -1191,7 +1131,7 @@ namespace Anfeta.UI.Views
                     $"{project.Domain} · " +
                     $"{project.ActivityCount} actividad(es) hoy · " +
                     "clic izquierdo: buscar · clic derecho: abrir sitio web · " +
-                    (_activeTodayProjectState.Length == 0 ? "todas las actividades de hoy" : "conteo del estado seleccionado hoy"));
+                    "todas las actividades de hoy");
 
                 button.Click +=
                     ActiveTodayProject_Click;
@@ -1651,9 +1591,8 @@ namespace Anfeta.UI.Views
             {
                 _calendarChangesTimer = new DispatcherTimer
                 {
-                    // Menos consultas automáticas y más margen para Notion.
-                    // El botón Actualizar sigue disponible en todo momento.
-                    Interval = TimeSpan.FromSeconds(180)
+                    // Sondeo inteligente cada 15s (~4 req/min vs límite de 180 req/min de Notion, apenas ~2.2% de carga)
+                    Interval = TimeSpan.FromSeconds(15)
                 };
 
                 _calendarChangesTimer.Tick += async (_, __) =>
@@ -1857,11 +1796,11 @@ namespace Anfeta.UI.Views
             {
                 return saved
                     .ToUniversalTime()
-                    .Subtract(TimeSpan.FromSeconds(20));
+                    .Subtract(TimeSpan.FromSeconds(10));
             }
 
             return _calendarLastChangesCheckUtc
-                .Subtract(TimeSpan.FromSeconds(20));
+                .Subtract(TimeSpan.FromSeconds(10));
         }
 
         private void SaveCalendarChangesCheckpoint(
@@ -1879,7 +1818,8 @@ namespace Anfeta.UI.Views
         private async Task RefreshCalendarChangesSilentlyAsync()
         {
             if (!_calendarViewActive ||
-                _calendarChangesRefreshRunning)
+                _calendarChangesRefreshRunning ||
+                IsMainWindowMinimized())
             {
                 return;
             }
@@ -2489,7 +2429,8 @@ namespace Anfeta.UI.Views
         private async Task RefreshCalendarDaySilentlyAsync(
             DateTime requestedDate,
             long loadVersion,
-            bool userInitiated = false)
+            bool userInitiated = false,
+            bool? forceNetworkCheck = null)
         {
             if (_calendarChangesRefreshRunning)
             {
@@ -2516,14 +2457,11 @@ namespace Anfeta.UI.Views
             var refreshStartedUtc =
                 DateTimeOffset.UtcNow;
 
-            var processVersion =
-                BeginCalendarProcess(
-                    userInitiated
-                        ? "Actualizando calendario"
-                        : "Mostrando caché",
-                    userInitiated
-                        ? "Preparando consulta incremental prioritaria..."
-                        : "Comprobando cambios recientes en segundo plano...");
+            var processVersion = userInitiated
+                ? BeginCalendarProcess(
+                    "Actualizando calendario",
+                    "Preparando consulta incremental prioritaria...")
+                : 0L;
 
             try
             {
@@ -2531,12 +2469,15 @@ namespace Anfeta.UI.Views
                     new CancellationTokenSource(
                         TimeSpan.FromMinutes(4));
 
-                var progress =
-                    new Progress<NotionCalendarProgress>(
+                var progress = userInitiated
+                    ? new Progress<NotionCalendarProgress>(
                         report =>
                             UpdateCalendarProcess(
                                 processVersion,
-                                report));
+                                report))
+                    : null;
+
+                var shouldForce = forceNetworkCheck ?? userInitiated;
 
                 var changed =
                     await _notionCalendarService.RefreshChangedSinceAsync(
@@ -2544,7 +2485,7 @@ namespace Anfeta.UI.Views
                         GetCalendarChangesAnchorUtc(),
                         cts.Token,
                         progress,
-                        forceNetworkCheck: userInitiated);
+                        forceNetworkCheck: shouldForce);
 
                 var reconcile =
                     await _notionCalendarService.ReconcileDayAsync(
@@ -2594,11 +2535,14 @@ namespace Anfeta.UI.Views
 
                 if (activities == null)
                 {
-                    CompleteCalendarProcess(
-                        processVersion,
-                        "Sin caché disponible",
-                        "Pulsa Actualizar para realizar una recarga completa del día.",
-                        success: false);
+                    if (processVersion > 0)
+                    {
+                        CompleteCalendarProcess(
+                            processVersion,
+                            "Sin caché disponible",
+                            "Pulsa Actualizar para realizar una recarga completa del día.",
+                            success: false);
+                    }
                     return;
                 }
 
@@ -2693,18 +2637,28 @@ namespace Anfeta.UI.Views
                           $" · {reconcile.Added} nueva(s)"
                         : string.Empty;
 
-                StatusText.Text = anyChanges
-                    ? $"Estado: Calendario actualizado ✅ ({activities.Count}){reconcileSummary}"
-                    : $"Estado: Calendario al día ✅ ({activities.Count})";
+                if (anyChanges)
+                {
+                    StatusText.Text =
+                        $"Estado: Calendario actualizado ✅ ({activities.Count}){reconcileSummary}";
+                }
+                else if (userInitiated)
+                {
+                    StatusText.Text =
+                        $"Estado: Calendario al día ✅ ({activities.Count})";
+                }
 
-                CompleteCalendarProcess(
-                    processVersion,
-                    anyChanges
-                        ? "Cambios reconciliados"
-                        : "Calendario al día",
-                    anyChanges
-                        ? $"{activities.Count} actividades listas{reconcileSummary}."
-                        : "No se encontraron cambios ni páginas ausentes en Notion.");
+                if (processVersion > 0)
+                {
+                    CompleteCalendarProcess(
+                        processVersion,
+                        anyChanges
+                            ? "Cambios reconciliados"
+                            : "Calendario al día",
+                        anyChanges
+                            ? $"{activities.Count} actividades listas{reconcileSummary}."
+                            : "No se encontraron cambios ni páginas ausentes en Notion.");
+                }
 
                 // Revisión es enriquecimiento secundario: empieza SOLO cuando la
                 // comprobación principal terminó y nunca mantiene abierto el panel
@@ -2716,22 +2670,31 @@ namespace Anfeta.UI.Views
             }
             catch (OperationCanceledException)
             {
-                CompleteCalendarProcess(
-                    processVersion,
-                    "Comprobación cancelada",
-                    "La caché continúa visible.",
-                    success: false);
+                if (processVersion > 0)
+                {
+                    CompleteCalendarProcess(
+                        processVersion,
+                        "Comprobación cancelada",
+                        "La caché continúa visible.",
+                        success: false);
+                }
             }
             catch (Exception ex)
             {
-                StatusText.Text =
-                    "Estado: No se pudo comprobar Notion; se conserva la caché.";
+                if (userInitiated)
+                {
+                    StatusText.Text =
+                        "Estado: No se pudo comprobar Notion; se conserva la caché.";
+                }
 
-                CompleteCalendarProcess(
-                    processVersion,
-                    "No se pudo comprobar Notion",
-                    ex.Message,
-                    success: false);
+                if (processVersion > 0)
+                {
+                    CompleteCalendarProcess(
+                        processVersion,
+                        "No se pudo comprobar Notion",
+                        ex.Message,
+                        success: false);
+                }
             }
             finally
             {
@@ -8533,9 +8496,10 @@ namespace Anfeta.UI.Views
             if (!isCobrarPagarSource)
                 return false;
 
+            var title = string.Join(" ", row.DisplayName ?? string.Empty, row.Name ?? string.Empty);
             return Regex.IsMatch(
-                row.DisplayName ?? string.Empty,
-                @"(?<![\p{L}\p{Nd}_])(?:sprtuz|prtuz|rtuz|z)?cobrar(?![\p{L}\p{Nd}_])",
+                title,
+                @"(?<!\p{L})(?:a?prtuz|sprtuz|rtuz|z)?cobr(?:ar|o|os)?(?!\p{L})",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
@@ -8549,17 +8513,19 @@ namespace Anfeta.UI.Views
                 NormalizeCalendarSearchText(
                     row.ExternalSourceName);
 
-            if (!source.Contains("cobrar", StringComparison.OrdinalIgnoreCase) &&
-                !source.Contains("pagar", StringComparison.OrdinalIgnoreCase) &&
-                !source.Contains("cobro", StringComparison.OrdinalIgnoreCase) &&
-                !source.Contains("pago", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
+            var isCobrarPagarSource =
+                source.Contains("cobrar", StringComparison.OrdinalIgnoreCase) ||
+                source.Contains("pagar", StringComparison.OrdinalIgnoreCase) ||
+                source.Contains("cobro", StringComparison.OrdinalIgnoreCase) ||
+                source.Contains("pago", StringComparison.OrdinalIgnoreCase);
 
+            if (!isCobrarPagarSource)
+                return false;
+
+            var title = string.Join(" ", row.DisplayName ?? string.Empty, row.Name ?? string.Empty);
             return Regex.IsMatch(
-                row.DisplayName ?? string.Empty,
-                @"(?<![\p{L}\p{Nd}_])(?:sprtuz|prtuz|rtuz|z)?pagar(?![\p{L}\p{Nd}_])",
+                title,
+                @"(?<!\p{L})(?:a?prtuz|sprtuz|rtuz|z)?pag(?:ar|o|os)?(?!\p{L})",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
@@ -8575,14 +8541,10 @@ namespace Anfeta.UI.Views
             if (string.IsNullOrWhiteSpace(raw))
                 return false;
 
-            // Solo eventos con hora explícita. Las fechas sin hora no se dibujan.
-            if (!Regex.IsMatch(
-                    raw,
-                    @"(?:T|\s)\d{1,2}:\d{2}",
-                    RegexOptions.CultureInvariant))
-            {
-                return false;
-            }
+            var hasExplicitTime = Regex.IsMatch(
+                raw,
+                @"(?:T|\s)\d{1,2}:\d{2}",
+                RegexOptions.CultureInvariant);
 
             var separatorIndex = raw.IndexOf(" - ", StringComparison.Ordinal);
             var startRaw = separatorIndex > 0
@@ -8629,6 +8591,12 @@ namespace Anfeta.UI.Views
             }
             else
             {
+                end = start.AddHours(1);
+            }
+
+            if (!hasExplicitTime)
+            {
+                start = start.Date.AddHours(CalendarStartHour);
                 end = start.AddHours(1);
             }
 
@@ -8708,10 +8676,10 @@ namespace Anfeta.UI.Views
             var indexVersion =
                 App.LocalIndex.Version;
 
-            if (_calendarCobroCacheIndexVersion != indexVersion)
+            if (_calendarPagoCacheIndexVersion != indexVersion)
             {
                 _calendarPagoOverlayCache.Clear();
-                _calendarCobroCacheIndexVersion = indexVersion;
+                _calendarPagoCacheIndexVersion = indexVersion;
             }
 
             var key = day.Date.ToString(
@@ -8790,6 +8758,8 @@ namespace Anfeta.UI.Views
                 _calendarPagoOverlayCache.Clear();
                 _calendarCobroCacheIndexVersion =
                     indexVersion;
+                _calendarPagoCacheIndexVersion =
+                    indexVersion;
 
                 DrawCalendarPreservingView(
                     _calendarActivities,
@@ -8817,6 +8787,7 @@ namespace Anfeta.UI.Views
             _calendarCobroOverlayCache.Clear();
             _calendarPagoOverlayCache.Clear();
             _calendarCobroCacheIndexVersion = indexVersion;
+            _calendarPagoCacheIndexVersion = indexVersion;
 
             var persons =
                 _calendarPeopleOrder
@@ -18172,10 +18143,7 @@ private static bool HasExactCalendarPhase(
                             maxResolvedWidth))
                     .ToList();
 
-            var hasCobros =
-                _calendarShowCobros &&
-                GetCalendarCobroItems(
-                    _calendarSelectedDate).Count > 0;
+            var hasCobros = _calendarShowCobros;
 
             if (hasCobros)
             {
@@ -18186,10 +18154,7 @@ private static bool HasExactCalendarPhase(
                         240d);
             }
 
-            var hasPagos =
-                _calendarShowPagos &&
-                GetCalendarPagoItems(
-                    _calendarSelectedDate).Count > 0;
+            var hasPagos = _calendarShowPagos;
 
             if (hasPagos)
             {
@@ -21965,9 +21930,8 @@ private static bool HasExactCalendarPhase(
             ApplicationData.Current.LocalSettings.Values[
                 LS_CalendarShowPagos] = _calendarShowPagos;
 
-            // PAGOS solo cambia visibilidad. No reconstruye la BD al encenderse:
-            // la columna ya usa App.LocalIndex y su caché propia.
             _calendarPagoOverlayCache.Clear();
+            _calendarPagoCacheIndexVersion = App.LocalIndex.Version;
 
             UpdateCalendarPagosToggleVisual();
 
@@ -21977,8 +21941,20 @@ private static bool HasExactCalendarPhase(
                     force: true);
 
                 StatusText.Text = _calendarShowPagos
-                    ? $"Estado: PAGOS visible ✅ ({GetCalendarPagoItems(_calendarSelectedDate).Count} evento(s) con hora)"
+                    ? $"Estado: PAGOS visible ✅ ({GetCalendarPagoItems(_calendarSelectedDate).Count} evento(s))..."
                     : "Estado: PAGOS oculto ✅";
+            }
+
+            if (_calendarShowPagos)
+            {
+                await EnsureCobrosCalendarIndexMappingAsync();
+                _calendarPagoOverlayCache.Clear();
+                _calendarPagoCacheIndexVersion = App.LocalIndex.Version;
+                if (_calendarViewActive)
+                {
+                    RefreshCalendarExternalOverlaysIfNeeded(force: true);
+                    StatusText.Text = $"Estado: PAGOS visible ✅ ({GetCalendarPagoItems(_calendarSelectedDate).Count} evento(s))";
+                }
             }
 
             await Task.CompletedTask;

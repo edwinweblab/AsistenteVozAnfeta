@@ -1,4 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using System.IO;
 using Windows.Storage;
 
@@ -100,6 +100,18 @@ VALUES (@k, @s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
             using var connection = new SqliteConnection($"Data Source={dbPath}");
             connection.Open();
+
+            // Optimizaciones de rendimiento para SQLite
+            using (var pragmaCmd = connection.CreateCommand())
+            {
+                pragmaCmd.CommandText = @"
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA temp_store = MEMORY;
+PRAGMA cache_size = -20000;
+";
+                pragmaCmd.ExecuteNonQuery();
+            }
 
             using var command = connection.CreateCommand();
             command.CommandText = @"
@@ -291,6 +303,64 @@ ON local_app_synonyms(synonym);
 
 CREATE INDEX IF NOT EXISTS idx_local_apps_enabled
 ON local_apps(enabled);
+
+-- ========================
+-- ÍNDICE DE BÚSQUEDA LOCAL Y NOTION
+-- ========================
+CREATE TABLE IF NOT EXISTS search_index (
+    item_key TEXT PRIMARY KEY,
+    source INTEGER NOT NULL DEFAULT 0,
+    name TEXT NOT NULL,
+    target TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'FILE',
+    size INTEGER NOT NULL DEFAULT 0,
+    server_modified TEXT,
+    description TEXT,
+    search_text TEXT,
+    node_id TEXT,
+    external_id TEXT,
+    external_url TEXT,
+    external_source_name TEXT,
+    project_update_status TEXT,
+    scheduled_date TEXT,
+    assignment_data_version INTEGER NOT NULL DEFAULT 0,
+    assignment_keys TEXT,
+    notion_edited_utc TEXT,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
+    root_path TEXT,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_index_source ON search_index(source);
+CREATE INDEX IF NOT EXISTS idx_search_index_external_id ON search_index(external_id);
+CREATE INDEX IF NOT EXISTS idx_search_index_target ON search_index(target);
+CREATE INDEX IF NOT EXISTS idx_search_index_ext_source ON search_index(external_source_name);
+CREATE INDEX IF NOT EXISTS idx_search_index_sched_date ON search_index(scheduled_date);
+
+-- ========================
+-- CONTENIDO DE PÁGINAS NOTION (DEEP SEARCH / AUDIT)
+-- ========================
+CREATE TABLE IF NOT EXISTS notion_page_content (
+    page_id TEXT PRIMARY KEY,
+    title TEXT,
+    content_text TEXT,
+    last_edited_utc TEXT,
+    cached_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_notion_page_content_edited ON notion_page_content(last_edited_utc);
+
+-- ========================
+-- ESTADO DE SINCRONIZACIÓN DE NOTION
+-- ========================
+CREATE TABLE IF NOT EXISTS notion_sync_state (
+    data_source_id TEXT PRIMARY KEY,
+    data_source_name TEXT,
+    last_sync_utc TEXT,
+    last_edited_utc TEXT,
+    item_count INTEGER DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 ";
 
             command.ExecuteNonQuery();

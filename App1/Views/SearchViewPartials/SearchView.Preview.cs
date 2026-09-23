@@ -1,4 +1,5 @@
 using Anfeta.UI.Models.Notion;
+using Anfeta.UI.Services.Notion;
 using Anfeta.UI.Models.Weblab;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -140,6 +141,9 @@ namespace Anfeta.UI.Views
                 }
 
                 _activePreviewBlocks = blocks;
+                var pageText = NotionContentIndexService.ExtractTextFromBlocks(blocks);
+                App.NotionContentIndex.StoreContent(pageId, row.Name, pageText, row.NotionEditedUtc);
+
                 RenderNotionPreviewBlocks(
                     row,
                     blocks);

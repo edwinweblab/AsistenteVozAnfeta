@@ -1,4 +1,4 @@
-﻿using Anfeta.UI.Models;
+using Anfeta.UI.Models;
 using Anfeta.UI.Models.Search;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -58,7 +58,13 @@ namespace Anfeta.UI.Views
                 ChipXlsx.IsChecked = _extFilter == "xlsx";
                 ChipImg.IsChecked = _extFilter == "img";
                 ChipUrl.IsChecked = _extFilter == "url";
-                SelectComboItemByTag(GroupResultsCombo, _resultGroupingMode.ToString().ToLowerInvariant());
+                SelectComboItemByTag(GroupResultsCombo, _resultGroupingMode switch
+                {
+                    ResultGroupingMode.DomainNoBilling => "domain_nobilling",
+                    ResultGroupingMode.AreaNoBilling => "area_nobilling",
+                    ResultGroupingMode.NameNoCompleted => "name_noterminated",
+                    _ => _resultGroupingMode.ToString().ToLowerInvariant()
+                });
                 UpdateColumnSortIndicators();
             }
             finally { _loadingModulePreferences = false; }

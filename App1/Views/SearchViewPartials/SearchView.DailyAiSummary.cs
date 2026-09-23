@@ -96,10 +96,13 @@ public sealed partial class SearchView
             for (var i = 0; i < 2; i++) suggestions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             suggestions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             suggestions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            suggestions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var quickQuestions = new[]
             {
                 ("🔥 Prioridades reales", "Identifica las 10 actividades prioritarias de hoy en viñetas limpias numeradas (1., 2., 3.). Para cada una indica responsable, horario y motivo. No uses tablas."),
                 ("👥 Agenda por persona", "Resume la agenda de hoy por responsable en viñetas limpias de hasta 10 actividades. Incluye cantidades y ejemplos con horario. No uses tablas."),
+                ("🔍 Auditar errores y riesgos", "Audita las actividades y proyectos de hoy buscando errores, inconsistencias, tareas rezagadas sin seguimiento, actividades sin responsable y proyectos en riesgo. Entrega un resumen ejecutivo claro para dirección con semáforo y acciones inmediatas recomendadas. No uses tablas."),
+                ("⚡ Urgencias del equipo", "¿Cuáles son las urgencias críticas de hoy para alinear al equipo? Lista los bloqueos, actividades rezagadas y lo que requiere atención inmediata para que todos estén sincronizados. No uses tablas."),
                 ("⏰ Próximas actividades", "Lista las próximas 10 actividades de hoy en orden cronológico en viñetas limpias. No uses tablas."),
                 ("⚠ Sin responsable", "Lista las actividades sin responsable y su proyecto, horario y estado en viñetas limpias. No uses tablas.")
             };
