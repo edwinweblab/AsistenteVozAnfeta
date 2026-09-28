@@ -574,7 +574,7 @@ namespace Anfeta.UI.Views
 
             var destDropboxRadio = new RadioButton
             {
-                Content = "📦 Dropbox · RX/{dominio}",
+                Content = "📦 Dropbox · DRX/{dominio}.Carpeta",
                 GroupName = "GlobalPasteDestGroup",
                 IsChecked = false,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
@@ -619,14 +619,14 @@ namespace Anfeta.UI.Views
             var disclaimerStack = new StackPanel { Spacing = 3 };
             disclaimerStack.Children.Add(new TextBlock
             {
-                Text = "📁 Aviso de Dropbox · Creación de carpeta:",
+                Text = "📁 Aviso de Dropbox · Carpeta DRX:",
                 FontSize = 11,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 253, 224, 71))
             });
             disclaimerStack.Children.Add(new TextBlock
             {
-                Text = "ANFETA creará automáticamente la subcarpeta 'RX/{dominio}' dentro de tu Dropbox local si aún no existe. El archivo (.url o .txt) se guardará allí para sincronizarse en la nube e indexarse al instante.",
+                Text = "ANFETA guardará el archivo (.url o .txt) dentro de 'DRX/{dominio}.Carpeta' en tu Dropbox local. Si la carpeta ya existe la reutilizará, y si no existe la creará automáticamente para sincronizarse en la nube e indexarse al instante.",
                 FontSize = 10.5,
                 Opacity = 0.9,
                 TextWrapping = TextWrapping.Wrap
@@ -735,7 +735,7 @@ namespace Anfeta.UI.Views
                 if (isDropbox)
                 {
                     dropboxDisclaimerCard.Visibility = Visibility.Visible;
-                    destHintText.Text = $"📦 Se guardará en Dropbox: RX/{domain}/ como {(isUrl ? "acceso directo (.url)" : "archivo de texto (.txt)")}";
+                    destHintText.Text = $"📦 Se guardará en Dropbox: DRX/{domain}.Carpeta/ como {(isUrl ? "acceso directo (.url)" : "archivo de texto (.txt)")}";
                     dialog.PrimaryButtonText = isUrl ? "Guardar enlace .url en Dropbox" : "Guardar archivo .txt en Dropbox";
                     titleBox.Header = isUrl ? "Nombre del enlace en Dropbox (.url):" : "Nombre del archivo de texto en Dropbox (.txt):";
                     titleBox.PlaceholderText = "Ej: notas-reunion o [dominio.com] [tipo] [persona] [descripcion]...";
@@ -746,7 +746,7 @@ namespace Anfeta.UI.Views
 
                     if (dialogTitleBlock != null)
                     {
-                        dialogTitleBlock.Text = isUrl ? $"🔗 Guardar enlace en Dropbox · RX/{domain}" : $"📄 Guardar texto en Dropbox · RX/{domain}";
+                        dialogTitleBlock.Text = isUrl ? $"🔗 Guardar enlace en Dropbox · DRX/{domain}.Carpeta" : $"📄 Guardar texto en Dropbox · DRX/{domain}.Carpeta";
                     }
                 }
                 else
@@ -919,11 +919,60 @@ namespace Anfeta.UI.Views
             }
 
             var domain = ExtractClientDomainFromPaste(title, body);
-            var targetFolder = Path.Combine(dropboxRoot, "RX", domain);
+
+            // 1. Resolver la carpeta DRX dentro de la raíz de Dropbox
+            string drxRoot;
+            if (string.Equals(Path.GetFileName(dropboxRoot.TrimEnd('\\', '/')), "DRX", StringComparison.OrdinalIgnoreCase))
+            {
+                drxRoot = dropboxRoot;
+            }
+            else
+            {
+                drxRoot = Path.Combine(dropboxRoot, "DRX");
+            }
 
             try
             {
-                Directory.CreateDirectory(targetFolder);
+                if (!Directory.Exists(drxRoot))
+                {
+                    Directory.CreateDirectory(drxRoot);
+                }
+
+                // 2. Si ya existe una carpeta con ese dominio (ej: {dominio}.Carpeta), reutilizarla; si no, crearla
+                var expectedFolderName = $"{domain}.Carpeta";
+                var domainPrefix = domain.EndsWith(".com", StringComparison.OrdinalIgnoreCase)
+                    ? domain.Substring(0, domain.Length - 4)
+                    : domain;
+
+                string targetFolder;
+                var existingDir = Directory.EnumerateDirectories(drxRoot)
+                    .FirstOrDefault(d =>
+                    {
+                        var dirName = Path.GetFileName(d);
+                        if (string.Equals(dirName, expectedFolderName, StringComparison.OrdinalIgnoreCase))
+                            return true;
+
+                        if (dirName.EndsWith(".Carpeta", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var cleanDirBase = dirName.Substring(0, dirName.Length - ".Carpeta".Length);
+                            if (string.Equals(cleanDirBase, domain, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(cleanDirBase, domainPrefix, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
+                    });
+
+                if (!string.IsNullOrEmpty(existingDir))
+                {
+                    targetFolder = existingDir;
+                }
+                else
+                {
+                    targetFolder = Path.Combine(drxRoot, expectedFolderName);
+                    Directory.CreateDirectory(targetFolder);
+                }
 
                 var trimmedBody = (body ?? string.Empty).Trim();
                 var isUrl = Uri.TryCreate(trimmedBody, UriKind.Absolute, out var uriResult) &&
@@ -972,7 +1021,8 @@ namespace Anfeta.UI.Views
 
                 ShowDiscreteActivityToast(cleanTitle, matchedPerson ?? "", detectedVariant, filePath);
 
-                StatusText.Text = $"Estado: Guardado en Dropbox ✅ ({cleanTitle} → RX/{domain})";
+                var savedFolderName = Path.GetFileName(targetFolder);
+                StatusText.Text = $"Estado: Guardado en Dropbox ✅ ({cleanTitle} → DRX/{savedFolderName})";
             }
             catch (Exception ex)
             {

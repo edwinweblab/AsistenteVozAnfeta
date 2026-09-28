@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -1363,6 +1363,7 @@ namespace Anfeta.UI.Services.Notion
                 return false;
             }
 
+            // 1. Coincidencia exacta (ej. "vitapop.mx" == "vitapop.mx")
             if (string.Equals(
                     normalizedView,
                     normalizedDomain,
@@ -1371,13 +1372,38 @@ namespace Anfeta.UI.Services.Notion
                 return true;
             }
 
+            // 2. Nomenclatura tartamuda (ej. "vvitapop.mx" con "vitapop.mx")
             var stutteredDomain =
                 normalizedDomain[0] + normalizedDomain;
 
-            return string.Equals(
-                normalizedView,
-                stutteredDomain,
-                StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(
+                    normalizedView,
+                    stutteredDomain,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // 3. Si la vista contiene el dominio completo (ej. "20 vvitapop.mx", "Proyecto vitapop.mx")
+            if (normalizedView.Contains(normalizedDomain, StringComparison.OrdinalIgnoreCase) ||
+                normalizedView.Contains(stutteredDomain, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // 4. Si la vista contiene la raíz del dominio (ej. "vitapop" de "vitapop.mx")
+            var domainRoot = normalizedDomain.Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(domainRoot) && domainRoot.Length >= 4)
+            {
+                var stutteredRoot = domainRoot[0] + domainRoot;
+                if (normalizedView.Contains(domainRoot, StringComparison.OrdinalIgnoreCase) ||
+                    normalizedView.Contains(stutteredRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool NamesEqual(
@@ -1405,6 +1431,12 @@ namespace Anfeta.UI.Services.Notion
                 normalized =
                     normalized.Substring(4);
             }
+
+            // Quitar prefijos numéricos o viñetas comunes tipo "20 ", "01. ", "01 - "
+            normalized = System.Text.RegularExpressions.Regex.Replace(
+                normalized,
+                @"^\d+[\s.\-_/]+\s*",
+                string.Empty).Trim();
 
             return normalized.TrimEnd('.');
         }

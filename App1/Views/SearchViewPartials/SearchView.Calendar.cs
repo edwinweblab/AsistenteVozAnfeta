@@ -1109,6 +1109,25 @@ namespace Anfeta.UI.Views
                             }
                     };
 
+                var container =
+                    new Grid
+                    {
+                        ColumnSpacing = 4,
+                        HorizontalAlignment = HorizontalAlignment.Stretch
+                    };
+
+                container.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = new GridLength(1, GridUnitType.Star)
+                    });
+
+                container.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = GridLength.Auto
+                    });
+
                 Grid.SetColumn(
                     domainText,
                     0);
@@ -1137,9 +1156,112 @@ namespace Anfeta.UI.Views
                     ActiveTodayProject_Click;
                 button.RightTapped += ActiveTodayProject_RightTapped;
 
+                var notionBtn =
+                    new Button
+                    {
+                        Tag = project.Domain,
+                        Width = 26,
+                        Height = 29,
+                        MinWidth = 0,
+                        Padding = new Thickness(0),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalContentAlignment = HorizontalAlignment.Center,
+                        VerticalContentAlignment = VerticalAlignment.Center,
+                        Background =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    35, 56, 189, 248)),
+                        BorderBrush =
+                            new SolidColorBrush(
+                                Color.FromArgb(
+                                    90, 56, 189, 248)),
+                        BorderThickness =
+                            new Thickness(1),
+                        CornerRadius =
+                            new CornerRadius(7),
+                        Content =
+                            new TextBlock
+                            {
+                                Text = "N",
+                                FontSize = 10.5,
+                                FontWeight =
+                                    Microsoft.UI.Text.FontWeights.Bold,
+                                Foreground =
+                                    new SolidColorBrush(
+                                        Color.FromArgb(
+                                            255, 125, 211, 252)),
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment = VerticalAlignment.Center
+                            }
+                    };
+
+                ToolTipService.SetToolTip(
+                    notionBtn,
+                    $"Abrir vista de {project.Domain} en Notion (VS zPROYECTOS)\n" +
+                    "Clic derecho: forzar actualización de la vista.");
+
+                notionBtn.Click += ActiveTodayProjectNotion_Click;
+                notionBtn.RightTapped += ActiveTodayProjectNotion_RightTapped;
+
+                Grid.SetColumn(button, 0);
+                Grid.SetColumn(notionBtn, 1);
+
+                container.Children.Add(button);
+                container.Children.Add(notionBtn);
+
                 ActiveTodayProjectsPanel.Children.Add(
-                    button);
+                    container);
             }
+        }
+
+        private async void ActiveTodayProjectNotion_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element)
+                return;
+
+            var domain = (element.Tag?.ToString() ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(domain))
+                return;
+
+            var criteria = new CalendarProjectGroupCriteria(
+                string.Empty,
+                "PROYECTO",
+                domain,
+                "Todas las personas",
+                _calendarSelectedDate.Year,
+                _calendarSelectedDate.Month,
+                _calendarSelectedDate.ToString("yyyyMM"),
+                IncludeAllProjectTypes: true);
+
+            await OpenCalendarProjectNotionViewAsync(criteria, forceReselect: false);
+        }
+
+        private async void ActiveTodayProjectNotion_RightTapped(
+            object sender,
+            RightTappedRoutedEventArgs e)
+        {
+            e.Handled = true;
+            if (sender is not FrameworkElement element)
+                return;
+
+            var domain = (element.Tag?.ToString() ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(domain))
+                return;
+
+            var criteria = new CalendarProjectGroupCriteria(
+                string.Empty,
+                "PROYECTO",
+                domain,
+                "Todas las personas",
+                _calendarSelectedDate.Year,
+                _calendarSelectedDate.Month,
+                _calendarSelectedDate.ToString("yyyyMM"),
+                IncludeAllProjectTypes: true);
+
+            await OpenCalendarProjectNotionViewAsync(criteria, forceReselect: true);
         }
 
         private async void ActiveTodayProject_Click(
