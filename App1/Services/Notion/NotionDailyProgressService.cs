@@ -233,6 +233,14 @@ namespace Anfeta.UI.Services.Notion
             bool EstablishedBeforeThisRead,
             DateTimeOffset TrackingStartedAt);
 
+        public static bool IsFtfActivity(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return false;
+
+            return Regex.IsMatch(title, @"(?i)(?<![\p{L}\p{Nd}_])(?:ftf|fftf|ccale)(?![\p{L}\p{Nd}_])");
+        }
+
         public static async Task<IReadOnlyDictionary<
             string,
             CalendarCardChecklistBaseline>>
@@ -248,7 +256,8 @@ namespace Anfeta.UI.Services.Notion
                         activity != null &&
                         !activity.IsReviewMirror &&
                         !string.IsNullOrWhiteSpace(
-                            activity.PageId))
+                            activity.PageId) &&
+                        !IsFtfActivity(activity.Title))
                     .GroupBy(
                         activity => activity.PageId,
                         StringComparer.OrdinalIgnoreCase)
@@ -879,12 +888,59 @@ namespace Anfeta.UI.Services.Notion
                 var key = day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 if (!store.Days.TryGetValue(key, out var daySnapshots))
                 {
+                    // Fallback to calendar cache when snapshot is not available for this day
+                    var calService = new NotionCalendarService();
+                    var cachedActivities = await calService.TryGetCachedDayAsync(day, cancellationToken);
+                    if (cachedActivities != null && cachedActivities.Count > 0)
+                    {
+                        foreach (var act in cachedActivities.Where(a => a != null && !a.IsReviewMirror && !string.IsNullOrWhiteSpace(a.PageId) && !IsFtfActivity(a.Title)))
+                        {
+                            var start = act.Start;
+                            var scheduled = Math.Max(0, (int)Math.Round((act.End - start).TotalMinutes));
+                            var status = string.IsNullOrWhiteSpace(act.Status) ? "P" : act.Status.Trim();
+                            var isCompleted = string.Equals(status, "Z", StringComparison.OrdinalIgnoreCase);
+                            var isReview = string.Equals(status, "R", StringComparison.OrdinalIgnoreCase);
+                            var isLagging = string.Equals(status, "P", StringComparison.OrdinalIgnoreCase) && day < DateTime.Today;
+
+                            foreach (var person in SplitPeople(act.Person))
+                            {
+                                items.Add(new WeeklyProgressActivityItem
+                                {
+                                    PageId = act.PageId,
+                                    PageUrl = act.PageUrl,
+                                    Title = act.Title,
+                                    Person = person,
+                                    Project = act.Title,
+                                    StateCode = status,
+                                    ReportDate = day,
+                                    OriginalScheduledDate = start.Date,
+                                    CurrentScheduledDate = start.Date,
+                                    MoveCount = 0,
+                                    RouteDates = new List<DateTime> { start.Date },
+                                    ChecklistCompleted = 0,
+                                    ChecklistTotal = 0,
+                                    ChecklistAdvanced = 0,
+                                    ScheduledMinutes = scheduled,
+                                    ProgressMinutes = isCompleted ? scheduled : (isReview ? (int)Math.Round(scheduled * 0.8) : 0),
+                                    IsLagging = isLagging,
+                                    IsReviewMovement = isReview,
+                                    IsCompletedMovement = isCompleted,
+                                    IsFinal = isCompleted
+                                });
+                            }
+                        }
+                        continue;
+                    }
+
                     missingDays.Add(day);
                     continue;
                 }
 
                 foreach (var saved in daySnapshots.Values)
                 {
+                    if (IsFtfActivity(saved.Title))
+                        continue;
+
                     var reportDate = saved.ReportDate == default ? day : saved.ReportDate.Date;
                     var start = saved.Start;
                     var scheduled = Math.Max(0, (int)Math.Round((saved.End - start).TotalMinutes));
@@ -1064,7 +1120,8 @@ namespace Anfeta.UI.Services.Notion
                     .Where(activity =>
                         activity != null &&
                         !activity.IsReviewMirror &&
-                        !string.IsNullOrWhiteSpace(activity.PageId))
+                        !string.IsNullOrWhiteSpace(activity.PageId) &&
+                        !IsFtfActivity(activity.Title))
                     .GroupBy(
                         activity => activity.PageId,
                         StringComparer.OrdinalIgnoreCase)
@@ -1753,6 +1810,9 @@ namespace Anfeta.UI.Services.Notion
 
             foreach (var item in items)
             {
+                if (IsFtfActivity(item.FullTitle))
+                    continue;
+
                 var people =
                     SplitPeople(
                         item.Person);

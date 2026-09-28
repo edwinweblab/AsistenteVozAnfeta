@@ -1239,7 +1239,7 @@ namespace Anfeta.UI.Models.Weblab
                 "wwebs" => "WEB",
                 "aads" => "ADS",
                 "aapli" => "APLICACIÓN",
-                "pprog" => "PROGRAMACIÓN",
+                "pprog" => "PROGRAMAS",
                 "ddise" => "DISEÑO",
                 "rrede" => "REDES",
                 "mmaps" => "MAPS",

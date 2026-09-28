@@ -76,6 +76,16 @@ namespace Anfeta.UI.Views
             var pageId =
                 (row.ExternalId ?? string.Empty).Trim();
 
+            if (!string.IsNullOrWhiteSpace(pageId) &&
+                string.Equals(_activePreviewPageId, pageId, StringComparison.OrdinalIgnoreCase) &&
+                NotionPreviewContent != null &&
+                NotionPreviewContent.Children.Count > 0)
+            {
+                // La página ya está cargada; no limpiar ni relanzar peticiones al maximizar o redimensionar
+                NotionPreviewCard.Visibility = Visibility.Visible;
+                return;
+            }
+
             NotionPreviewCard.Visibility = Visibility.Visible;
             _activePreviewRow = row;
             NotionPreviewContent.Children.Clear();

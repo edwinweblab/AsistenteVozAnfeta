@@ -3042,30 +3042,128 @@ namespace Anfeta.UI.Views.DailyProgress
                     $"{FormatMinutes(person.ProgressMinutes)} / {FormatMinutes(person.ScheduledMinutes)} · " +
                     $"+{person.ChecklistAdvanced} checks · {person.NoProgressCount} sin avance · {person.MovedCount} movidas",
                     AccentBrush));
+            }
 
-                if (selected == null) continue;
-                foreach (var item in person.Items
-                    .OrderByDescending(item => item.IsLagging)
-                    .ThenByDescending(item => item.IsCompletedMovement || item.IsReviewMovement)
-                    .ThenBy(item => item.ReportDate)
-                    .ThenBy(item => item.Title))
+            // Desglose Día por Día (Lunes a Sábado)
+            WeeklyReportItems.Children.Add(BuildWeeklyTextCard(
+                "📅 DESGLOSE DÍA POR DÍA (Lunes a Sábado)",
+                "Auditoría diaria: minutos agendados vs ejecutados, estados de entrega y tareas rezagadas",
+                AccentBrush));
+
+            var culture = new CultureInfo("es-MX");
+            var allItems = (selected != null ? selected.Items : report.People.SelectMany(p => p.Items)).Where(i => !NotionDailyProgressService.IsFtfActivity(i.Title)).ToList();
+
+            for (var day = report.WeekStart.Date; day <= report.WeekEnd.Date; day = day.AddDays(1))
+            {
+                if (day.DayOfWeek == DayOfWeek.Sunday && !allItems.Any(i => i.ReportDate.Date == day))
+                    continue;
+
+                var dayItems = allItems.Where(i => i.ReportDate.Date == day).ToList();
+                var dayName = culture.TextInfo.ToTitleCase(day.ToString("dddd dd/MM", culture));
+
+                if (dayItems.Count > 0)
                 {
-                    var route = item.RouteDates.Count > 1
-                        ? " · ruta " + string.Join(" → ", item.RouteDates.Select(date => date.ToString("dd/MM")))
-                        : string.Empty;
-                    var movement = item.IsCompletedMovement ? "✓ Z" :
-                        item.IsReviewMovement ? "↗ R" :
-                        item.IsLagging ? "⚠ REZAGADA" :
-                        item.MoveCount > 0 ? "↪ MOVIDA" :
-                        item.HasProgress ? "● AVANCE" : "○ SIN AVANCE";
+                    var sched = dayItems.Sum(i => i.ScheduledMinutes);
+                    var prog = dayItems.Sum(i => i.ProgressMinutes);
+                    var cov = sched > 0 ? (int)Math.Round(prog * 100d / sched) : 0;
+                    var comp = dayItems.Count(i => i.IsCompletedMovement || IsActivityCompleted(i.StateCode, i.Title));
+                    var rev = dayItems.Count(i => (i.IsReviewMovement || IsActivityInReview(i.StateCode, i.Title)) && !IsActivityCompleted(i.StateCode, i.Title));
+                    var lag = dayItems.Count(i => IsActivityLagging(i, day));
+                    var unq = dayItems.Select(i => i.PageId).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+
+                    WeeklyReportItems.Children.Add(BuildWeeklyDayHeader(
+                        dayName,
+                        unq,
+                        prog,
+                        sched,
+                        cov,
+                        comp,
+                        rev,
+                        lag));
+
+                    foreach (var item in dayItems
+                        .OrderByDescending(item => IsActivityLagging(item, day))
+                        .ThenByDescending(item => item.IsCompletedMovement || IsActivityCompleted(item.StateCode, item.Title))
+                        .ThenByDescending(item => item.IsReviewMovement || IsActivityInReview(item.StateCode, item.Title))
+                        .ThenBy(item => item.Title))
+                    {
+                        var route = item.RouteDates.Count > 1
+                            ? " · ruta " + string.Join(" → ", item.RouteDates.Select(date => date.ToString("dd/MM")))
+                            : string.Empty;
+
+                        var isC = item.IsCompletedMovement || IsActivityCompleted(item.StateCode, item.Title);
+                        var isR = !isC && (item.IsReviewMovement || IsActivityInReview(item.StateCode, item.Title));
+                        var isL = !isC && !isR && IsActivityLagging(item, day);
+
+                        string statusText;
+                        Color statusBg, statusFg, statusBorder;
+
+                        if (isC)
+                        {
+                            statusText = "✓ TERMINADA";
+                            statusBg = Color.FromArgb(40, 34, 197, 94);
+                            statusFg = Color.FromArgb(255, 74, 222, 128);
+                            statusBorder = Color.FromArgb(160, 34, 197, 94);
+                        }
+                        else if (isR)
+                        {
+                            statusText = "↗ EN REVISIÓN";
+                            statusBg = Color.FromArgb(40, 56, 189, 248);
+                            statusFg = Color.FromArgb(255, 56, 189, 248);
+                            statusBorder = Color.FromArgb(160, 56, 189, 248);
+                        }
+                        else if (isL)
+                        {
+                            statusText = "⚠ REZAGADA";
+                            statusBg = Color.FromArgb(40, 239, 68, 68);
+                            statusFg = Color.FromArgb(255, 248, 113, 113);
+                            statusBorder = Color.FromArgb(160, 239, 68, 68);
+                        }
+                        else if (item.MoveCount > 0)
+                        {
+                            statusText = "↪ MOVIDA";
+                            statusBg = Color.FromArgb(40, 168, 85, 247);
+                            statusFg = Color.FromArgb(255, 192, 132, 252);
+                            statusBorder = Color.FromArgb(160, 168, 85, 247);
+                        }
+                        else if (item.HasProgress)
+                        {
+                            statusText = "● AVANCE";
+                            statusBg = Color.FromArgb(35, 59, 130, 246);
+                            statusFg = Color.FromArgb(255, 96, 165, 250);
+                            statusBorder = Color.FromArgb(140, 59, 130, 246);
+                        }
+                        else
+                        {
+                            statusText = "○ SIN AVANCE";
+                            statusBg = Color.FromArgb(25, 148, 163, 184);
+                            statusFg = Color.FromArgb(200, 148, 163, 184);
+                            statusBorder = Color.FromArgb(70, 148, 163, 184);
+                        }
+
+                        WeeklyReportItems.Children.Add(BuildWeeklyActivityCard(
+                            statusText,
+                            statusBg,
+                            statusFg,
+                            statusBorder,
+                            item.Title,
+                            selected == null ? item.Person : "",
+                            item.Project,
+                            item.StateCode,
+                            item.ChecklistCompleted,
+                            item.ChecklistTotal,
+                            item.ChecklistAdvanced,
+                            item.ProgressMinutes,
+                            item.ScheduledMinutes,
+                            route));
+                    }
+                }
+                else if (day <= DateTime.Today)
+                {
                     WeeklyReportItems.Children.Add(BuildWeeklyTextCard(
-                        $"{movement} · {item.ReportDate:ddd dd/MM} · {item.Title}",
-                        $"{item.Project} · {item.StateCode} · checks {item.ChecklistCompleted}/{item.ChecklistTotal} " +
-                        $"(+{item.ChecklistAdvanced}) · {FormatMinutes(item.ProgressMinutes)}/{FormatMinutes(item.ScheduledMinutes)}" + route,
-                        item.IsLagging ? DangerBrush :
-                        item.IsCompletedMovement ? CompletedBrush :
-                        item.IsReviewMovement ? ReviewBrush :
-                        item.HasProgress ? ProgressBrush : MutedBrush));
+                        $"📅 {dayName}",
+                        "Sin actividades registradas",
+                        MutedBrush));
                 }
             }
 
@@ -3099,6 +3197,218 @@ namespace Anfeta.UI.Views.DailyProgress
                 CornerRadius = new CornerRadius(10),
                 Child = panel
             };
+        }
+
+        private static bool IsActivityCompleted(string? stateCode, string? title)
+        {
+            var s = (stateCode ?? string.Empty).ToLowerInvariant().Trim();
+            var t = (title ?? string.Empty).ToLowerInvariant().Trim();
+
+            if (t.StartsWith("zrevision") || t.StartsWith("z-revision") || t.StartsWith("z_revision"))
+                return true;
+
+            return s.Contains("cobrado terminado") ||
+                   s.Contains("pendiente cobrar") ||
+                   s.Contains("terminad") ||
+                   s.Equals("z");
+        }
+
+        private static bool IsActivityInReview(string? stateCode, string? title)
+        {
+            var s = (stateCode ?? string.Empty).ToLowerInvariant().Trim();
+            var t = (title ?? string.Empty).ToLowerInvariant().Trim();
+
+            if (t.StartsWith("rtuzrevision") || t.StartsWith("rtuz"))
+                return true;
+
+            return s.Contains("revisar revisiones") ||
+                   s.Contains("terminado rev cobro") ||
+                   s.Contains("en revision") ||
+                   s.Contains("en revisión") ||
+                   s.Contains("revi") ||
+                   s.Equals("r");
+        }
+
+        private static bool IsActivityLagging(WeeklyProgressActivityItem item, DateTime day)
+        {
+            if (item.IsCompletedMovement || IsActivityCompleted(item.StateCode, item.Title))
+                return false;
+            if (item.IsReviewMovement || IsActivityInReview(item.StateCode, item.Title))
+                return false;
+
+            if (item.IsLagging)
+                return true;
+
+            return day.Date < DateTime.Today;
+        }
+
+        private static string CleanActivityDisplayTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return string.Empty;
+            var clean = title.Trim();
+            clean = Regex.Replace(clean, @"^(?:z|rtuz|prtuz|aprtuz|sprtuz)REVISION\s*", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\d{2}-\[\d{2}[A-Z]{3}\]\s*", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"0{5,}\s+[a-z0-9_\-\s]+MOVER AL TERMINAR", "", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\s+", " ").Trim();
+            return string.IsNullOrWhiteSpace(clean) ? title.Trim() : clean;
+        }
+
+        private static Border BuildWeeklyDayHeader(
+            string dayName,
+            int count,
+            int progMin,
+            int schedMin,
+            int cov,
+            int comp,
+            int rev,
+            int lag)
+        {
+            var root = new Border
+            {
+                Padding = new Thickness(14, 9, 14, 9),
+                Background = new SolidColorBrush(Color.FromArgb(255, 15, 23, 34)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(140, 56, 189, 248)),
+                BorderThickness = new Thickness(2, 1, 1, 1),
+                CornerRadius = new CornerRadius(8),
+                Margin = new Thickness(0, 10, 0, 4)
+            };
+
+            var stack = new StackPanel { Spacing = 4 };
+
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            titleRow.Children.Add(new TextBlock
+            {
+                Text = $"📅 {dayName}",
+                FontSize = 13.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248))
+            });
+
+            titleRow.Children.Add(new TextBlock
+            {
+                Text = $"{count} actividades · {FormatMinutes(progMin)} / {FormatMinutes(schedMin)} ({cov}%)",
+                FontSize = 11.5,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush(Color.FromArgb(210, 255, 255, 255))
+            });
+
+            stack.Children.Add(titleRow);
+
+            var statsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+            statsRow.Children.Add(new TextBlock { Text = $"✓ {comp} Terminadas", FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(255, 74, 222, 128)) });
+            statsRow.Children.Add(new TextBlock { Text = $"↗ {rev} En Revisión", FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)) });
+            statsRow.Children.Add(new TextBlock { Text = $"⚠ {lag} Rezagadas", FontSize = 11, Foreground = lag > 0 ? DangerBrush : MutedBrush });
+
+            stack.Children.Add(statsRow);
+            root.Child = stack;
+            return root;
+        }
+
+        private static Border BuildWeeklyActivityCard(
+            string statusText,
+            Color statusBg,
+            Color statusFg,
+            Color statusBorder,
+            string title,
+            string person,
+            string project,
+            string stateCode,
+            int checksDone,
+            int checksTotal,
+            int checksAdv,
+            int progMin,
+            int schedMin,
+            string route)
+        {
+            var root = new Border
+            {
+                Padding = new Thickness(14, 9, 14, 9),
+                Background = new SolidColorBrush(Color.FromArgb(255, 17, 24, 34)),
+                BorderBrush = new SolidColorBrush(statusBorder),
+                BorderThickness = new Thickness(3, 1, 1, 1),
+                CornerRadius = new CornerRadius(7),
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+
+            var stack = new StackPanel { Spacing = 5 };
+
+            var headerRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8
+            };
+
+            var badge = new Border
+            {
+                Background = new SolidColorBrush(statusBg),
+                BorderBrush = new SolidColorBrush(statusBorder),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(7, 2, 7, 2)
+            };
+            badge.Child = new TextBlock
+            {
+                Text = statusText,
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(statusFg)
+            };
+            headerRow.Children.Add(badge);
+
+            if (!string.IsNullOrWhiteSpace(person))
+            {
+                var personPill = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(30, 255, 255, 255)),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 2, 6, 2)
+                };
+                personPill.Child = new TextBlock
+                {
+                    Text = $"👤 {person}",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Color.FromArgb(220, 255, 255, 255))
+                };
+                headerRow.Children.Add(personPill);
+            }
+
+            if (!string.IsNullOrWhiteSpace(project))
+            {
+                headerRow.Children.Add(new TextBlock
+                {
+                    Text = project,
+                    FontSize = 11,
+                    Opacity = 0.7,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = MutedBrush,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                });
+            }
+
+            stack.Children.Add(headerRow);
+
+            var titleBlock = new TextBlock
+            {
+                Text = CleanActivityDisplayTitle(title),
+                FontSize = 12.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Colors.White),
+                TextWrapping = TextWrapping.Wrap
+            };
+            ToolTipService.SetToolTip(titleBlock, title);
+            stack.Children.Add(titleBlock);
+
+            var metricsText = new TextBlock
+            {
+                Text = $"⏱ {FormatMinutes(progMin)} / {FormatMinutes(schedMin)} · checks {checksDone}/{checksTotal} (+{checksAdv}){route} · {stateCode}",
+                FontSize = 10.5,
+                Foreground = MutedBrush,
+                Opacity = 0.8
+            };
+            stack.Children.Add(metricsText);
+
+            root.Child = stack;
+            return root;
         }
 
         private void SetLoading(

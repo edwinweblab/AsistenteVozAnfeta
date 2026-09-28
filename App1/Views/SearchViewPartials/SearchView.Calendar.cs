@@ -4922,7 +4922,7 @@ namespace Anfeta.UI.Views
                 };
 
         private const string CalendarTemplateHubUrl =
-            "https://app.notion.com/p/393abd7d91b7804993bdd14809e1b27b?source=copy_link";
+            "https://app.notion.com/p/393abd7d91b7804993bdd14809e1b27b?v=393abd7d91b7804aae7a000cb9486782&source=copy_link";
 
         private readonly NotionQuickActivityService
             _calendarQuickActivityService = new();
@@ -5475,11 +5475,34 @@ namespace Anfeta.UI.Views
 
             var flyout = new MenuFlyout();
 
+            static string GetTemplateIcon(string id) => id switch
+            {
+                "actividad-rapida" => "⚡",
+                "cliente" => "👤",
+                "acceso-correo" => "✉️",
+                "acceso-dominio" => "🌐",
+                "cotizacion" => "📑",
+                "web" => "💻",
+                "seo" => "🔍",
+                "ads" => "🎯",
+                "cobros" => "💰",
+                "bibliotecas" => "📚",
+                "programas" => "⚙️",
+                "diseno" => "🎨",
+                "apps" => "📱",
+                _ => "⚡"
+            };
+
             foreach (var template in CalendarQuickTemplates)
             {
+                if (template.Key == "web" || template.Key == "cobros")
+                {
+                    flyout.Items.Add(new MenuFlyoutSeparator());
+                }
+
                 var item = new MenuFlyoutItem
                 {
-                    Text = $"⚡ {template.Label}",
+                    Text = $"{GetTemplateIcon(template.Key)} {template.Label}",
                     Tag = template
                 };
 
@@ -5492,6 +5515,49 @@ namespace Anfeta.UI.Views
 
                 flyout.Items.Add(item);
             }
+
+            // Submenú estilizado de Redes Sociales con sub-opciones
+            flyout.Items.Add(new MenuFlyoutSeparator());
+            var redesSubItem = new MenuFlyoutSubItem
+            {
+                Text = "📣 Redes Sociales"
+            };
+
+            var redesOptions = new (string Label, string Token, string Icon)[]
+            {
+                ("TikTok", "ttikt", "🎵"),
+                ("Instagram", "iinst", "📸"),
+                ("Facebook", "fface", "📘"),
+                ("LinkedIn", "llink", "💼"),
+                ("Todas las Redes", "rrede", "🌐")
+            };
+
+            foreach (var red in redesOptions)
+            {
+                var redItem = new MenuFlyoutItem
+                {
+                    Text = $"{red.Icon} {red.Label}"
+                };
+
+                var redDef = new CalendarQuickTemplateDefinition(
+                    $"redes-{red.Token}",
+                    $"Redes · {red.Label}",
+                    red.Token,
+                    CalendarTemplateHubUrl,
+                    60,
+                    $"Plantillas de {red.Label}");
+
+                redItem.Click += async (_, __) =>
+                {
+                    await ShowCalendarQuickTemplateCatalogAsync(
+                        redDef,
+                        forceRefresh: false);
+                };
+
+                redesSubItem.Items.Add(redItem);
+            }
+
+            flyout.Items.Add(redesSubItem);
 
             flyout.Items.Add(new MenuFlyoutSeparator());
 
@@ -5556,7 +5622,56 @@ namespace Anfeta.UI.Views
                 "ccobr" =>
                     Regex.IsMatch(
                         normalized,
-                        @"(?<![\p{L}\p{Nd}_])(?:ccobr|cobro|cobros)(?![\p{L}\p{Nd}_])",
+                        @"(?<![\p{L}\p{Nd}_])(?:aprtuz)?(?:ccobr|ccobro|cobro|cobros|cobrar)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "ddise" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:ddise|diseño|diseno)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "aapli" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:aapli|apli|aplicacion|aplicación)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "rrede" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:rrede|redes|tiktok|tik\s*tok|instagram|insta|facebook|fb|linkedin|linked\s*in)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "ttikt" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:ttikt|tiktok|tik\s*tok)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "iinst" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:iinst|instagram|insta)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "fface" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:fface|facebook|fb)(?![\p{L}\p{Nd}_])",
+                        RegexOptions.IgnoreCase |
+                        RegexOptions.CultureInvariant),
+
+                "llink" =>
+                    Regex.IsMatch(
+                        normalized,
+                        @"(?<![\p{L}\p{Nd}_])(?:llink|linkedin|linked\s*in)(?![\p{L}\p{Nd}_])",
                         RegexOptions.IgnoreCase |
                         RegexOptions.CultureInvariant),
 
@@ -5762,12 +5877,21 @@ namespace Anfeta.UI.Views
                         Title =
                             $"Plantillas · {template.Label}",
                         Content =
-                            $"La view {template.Label} respondió correctamente, " +
-                            "pero su filtro no devolvió páginas.",
-                        CloseButtonText = "Cerrar"
+                            $"La categoría {template.Label} no devolvió páginas en la caché local.\n\n" +
+                            "¿Deseas forzar una sincronización con Notion ahora?",
+                        PrimaryButtonText = "Refrescar desde Notion",
+                        CloseButtonText = "Cerrar",
+                        DefaultButton = ContentDialogButton.Primary
                     };
 
-                await emptyDialog.ShowAsync();
+                var res = await emptyDialog.ShowAsync();
+                if (res == ContentDialogResult.Primary)
+                {
+                    await ShowCalendarQuickTemplateCatalogAsync(
+                        template,
+                        forceRefresh: true,
+                        seed);
+                }
                 return;
             }
 
@@ -14008,6 +14132,16 @@ private static bool HasExactCalendarPhase(
                 "💬 WhatsApp…",
                 CalendarContextWhatsApp_Click);
 
+            if (!activity.IsReviewMirror)
+            {
+                AddItem(
+                    "Renombrar página…",
+                    CalendarContextRename_Click);
+
+                flyout.Items.Add(
+                    new MenuFlyoutSeparator());
+            }
+
             AddItem(
                 "Copiar nombre",
                 CalendarContextCopyName_Click);
@@ -14034,10 +14168,6 @@ private static bool HasExactCalendarPhase(
 
             flyout.Items.Add(
                 new MenuFlyoutSeparator());
-
-            AddItem(
-                "Renombrar página…",
-                CalendarContextRename_Click);
 
             AddItem(
                 "Duplicar actividad…",
@@ -14170,7 +14300,7 @@ private static bool HasExactCalendarPhase(
                 ("wwebs", "WEB"),
                 ("aads", "ADS"),
                 ("aapli", "APLICACIÓN"),
-                ("pprog", "PROGRAMACIÓN"),
+                ("pprog", "PROGRAMAS"),
                 ("ddise", "DISEÑO"),
                 ("rrede", "REDES"),
                 ("mmaps", "MAPS")
@@ -37819,8 +37949,8 @@ private static bool HasExactCalendarPhase(
                                         isCurrent
                                             ? Color.FromArgb(255, 255, 255, 255)
                                             : Color.FromArgb(245, 241, 245, 249)),
-                                TextWrapping = TextWrapping.NoWrap,
-                                MaxLines = 1,
+                                TextWrapping = TextWrapping.Wrap,
+                                MaxLines = 2,
                                 TextTrimming = TextTrimming.CharacterEllipsis
                             };
 
@@ -38718,9 +38848,30 @@ private static bool HasExactCalendarPhase(
                       StringComparison.OrdinalIgnoreCase) &&
                   (RootLayout?.ActualWidth ?? 0) >= 1150));
 
-            var previewWidth = _calendarActivityPreviewScrollViewer?.ActualWidth ?? 0;
-            if (previewWidth <= 0) previewWidth = _calendarActivityPreviewPopupCard?.Width ?? 0;
-            if (previewWidth <= 0 && RootLayout != null) previewWidth = RootLayout.ActualWidth * 0.60;
+            double calculatedWidth = 600d;
+            if (RootLayout != null)
+            {
+                var usableWidth = Math.Max(1, RootLayout.ActualWidth - 24);
+                if (_calendarActivityPreviewPinned)
+                {
+                    if (string.Equals(previewSizeMode, "max", StringComparison.OrdinalIgnoreCase))
+                        calculatedWidth = Math.Clamp(usableWidth * 0.90, 1200d, 3000d);
+                    else if (string.Equals(previewSizeMode, "xlarge", StringComparison.OrdinalIgnoreCase))
+                        calculatedWidth = Math.Clamp(usableWidth * 0.78, 1080d, 1900d);
+                    else if (string.Equals(previewSizeMode, "large", StringComparison.OrdinalIgnoreCase))
+                        calculatedWidth = Math.Clamp(usableWidth * 0.62, 880d, 1300d);
+                    else
+                        calculatedWidth = Math.Clamp(usableWidth * 0.90, 1200d, 3000d);
+                }
+                else
+                {
+                    calculatedWidth = RootLayout.ActualWidth >= 2200 ? 520d : 460d;
+                }
+            }
+
+            var previewWidth = calculatedWidth;
+            if (_calendarActivityPreviewScrollViewer?.ActualWidth > calculatedWidth)
+                previewWidth = _calendarActivityPreviewScrollViewer.ActualWidth;
 
             // En Grande, Extra grande y Máximo se distribuye en 2 columnas
             // (actividad seleccionada a la izquierda, lista a la derecha).
@@ -38780,12 +38931,49 @@ private static bool HasExactCalendarPhase(
                             GridUnitType.Star)
                 });
 
+            var leftScrollHeightCap =
+                string.Equals(
+                    previewSizeMode,
+                    "max",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? 1900d
+                    : string.Equals(
+                        previewSizeMode,
+                        "xlarge",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? 1500d
+                        : 1040d;
+
+            var leftScroll =
+                new ScrollViewer
+                {
+                    Content = root,
+                    VerticalScrollMode =
+                        ScrollMode.Auto,
+                    VerticalScrollBarVisibility =
+                        ScrollBarVisibility.Auto,
+                    HorizontalScrollMode =
+                        ScrollMode.Disabled,
+                    HorizontalScrollBarVisibility =
+                        ScrollBarVisibility.Disabled,
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment =
+                        HorizontalAlignment.Stretch,
+                    MaxHeight =
+                        Math.Max(
+                            420,
+                            Math.Min(
+                                leftScrollHeightCap,
+                                (RootLayout?.ActualHeight ?? 900) - 150))
+                };
+
             Grid.SetColumn(
-                root,
+                leftScroll,
                 0);
 
             wideRoot.Children.Add(
-                root);
+                leftScroll);
 
             var rightPanel =
                 new StackPanel
@@ -38906,6 +39094,15 @@ private static bool HasExactCalendarPhase(
 
             _calendarActivityPreviewPinnedPageId =
                 nextPinnedPageId;
+
+            if (pinned)
+            {
+                var curMode = ApplicationData.Current.LocalSettings.Values[LS_CalendarActivityPreviewSizeMode] as string;
+                if (string.IsNullOrWhiteSpace(curMode))
+                {
+                    ApplicationData.Current.LocalSettings.Values[LS_CalendarActivityPreviewSizeMode] = "max";
+                }
+            }
 
             if (pinned &&
                 !string.IsNullOrWhiteSpace(
@@ -39055,15 +39252,15 @@ private static bool HasExactCalendarPhase(
             var relatedCriteria =
                 BuildCalendarAllProjectTypesCriteria(criteria);
 
+            SetCalendarActivityPreviewPinned(
+                activity.PageId,
+                true);
+
             ShowCalendarActivityPreviewFlyout(
                 button,
                 BuildCalendarProjectHoverLoading(
                     activity,
                     criteria));
-
-            SetCalendarActivityPreviewPinned(
-                activity.PageId,
-                true);
 
             var token =
                 ApplicationData.Current.LocalSettings.Values[
@@ -39542,28 +39739,34 @@ private static bool HasExactCalendarPhase(
                 rootWidth >= 3000d ||
                 rootHeight >= 1600d;
 
+            var isLargeScreen =
+                rootWidth >= 2400d ||
+                rootHeight >= 1350d;
+
             return mode switch
             {
-                "large" => 1.08d,
+                "normal" => 1d,
 
-                // Pantallas grandes: además del modal ancho, la tipografía
-                // y los controles aumentan de forma perceptible.
+                "large" =>
+                    veryLargeScreen
+                        ? 1.15d
+                        : (isLargeScreen ? 1.06d : 1.0d),
+
                 "xlarge" =>
                     veryLargeScreen
-                        ? 1.30d
-                        : 1.22d,
+                        ? 1.25d
+                        : (isLargeScreen ? 1.12d : 1.0d),
 
-                // Máximo está pensado para las pantallas muy grandes de John.
-                // El contenido escala más, pero mantiene scroll interno.
+                // En pantallas estándar (1080p y laptops), Máximo conserva una escala
+                // compacta (1.02x) para que toda la información y botones quepan sin desbordar.
+                // En pantallas 2K/1440p escala a 1.16x, y en monitores gigantes/4K (John) a 1.38x.
                 "max" =>
                     veryLargeScreen
-                        ? 1.52d
-                        : 1.38d,
+                        ? 1.38d
+                        : (isLargeScreen ? 1.16d : 1.02d),
 
-                // Automático conserva el aspecto normal, salvo en monitores
-                // realmente grandes donde aplica una ayuda ligera de lectura.
                 "auto" =>
-                    rootWidth >= 3000d
+                    veryLargeScreen
                         ? 1.12d
                         : 1d,
 
@@ -39892,7 +40095,8 @@ private static bool HasExactCalendarPhase(
                 ?.Trim()
                 ?.ToLowerInvariant();
 
-            if (string.IsNullOrWhiteSpace(raw) || raw == "auto")
+            // Por defecto siempre Máximo (2 columnas)
+            if (string.IsNullOrWhiteSpace(raw))
             {
                 return "max";
             }
@@ -39903,6 +40107,7 @@ private static bool HasExactCalendarPhase(
                 "large" => "large",
                 "xlarge" => "xlarge",
                 "max" => "max",
+                "auto" => "auto",
                 _ => "max"
             };
         }
@@ -40802,19 +41007,15 @@ private static bool HasExactCalendarPhase(
                 }
                 else if (_calendarActivityPreviewPinned)
                 {
-                    // AUTO: editor amplio y responsive. La posición se
-                    // resuelve después junto a la actividad seleccionada.
+                    // Por defecto para fijada: Máximo muy grande en 2 columnas
                     preferredWidth =
                         Math.Clamp(
-                            usableWidth * 0.48,
-                            560d,
-                            820d);
+                            usableWidth * 0.90,
+                            1200d,
+                            3000d);
 
                     preferredHeight =
-                        Math.Clamp(
-                            availableHeight * 0.88,
-                            640d,
-                            980d);
+                        availableHeight * 0.96;
                 }
                 else
                 {
@@ -41209,8 +41410,24 @@ private static bool HasExactCalendarPhase(
             _calendarActivityPreviewPendingContent =
                 null;
 
+            if (!_calendarActivityPreviewDragActive &&
+                _calendarHoveredActivityButton != null)
+            {
+                PositionCalendarActivityPreviewPopup(
+                    _calendarHoveredActivityButton);
+            }
+
             _calendarActivityPreviewHost.Content =
                 content;
+
+            try
+            {
+                content.InvalidateMeasure();
+                content.UpdateLayout();
+            }
+            catch
+            {
+            }
 
             _calendarActivityPreviewScrollViewer?
                 .ChangeView(
@@ -41222,10 +41439,14 @@ private static bool HasExactCalendarPhase(
             if (!_calendarActivityPreviewDragActive &&
                 _calendarHoveredActivityButton != null)
             {
+                PositionCalendarActivityPreviewPopup(
+                    _calendarHoveredActivityButton);
+
                 DispatcherQueue.TryEnqueue(
                     () =>
                     {
-                        if (!_calendarActivityPreviewDragActive)
+                        if (!_calendarActivityPreviewDragActive &&
+                            _calendarHoveredActivityButton != null)
                         {
                             PositionCalendarActivityPreviewPopup(
                                 _calendarHoveredActivityButton);

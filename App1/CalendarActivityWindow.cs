@@ -233,8 +233,8 @@ namespace Anfeta.UI
 
                 appWindow?.Resize(
                     new Windows.Graphics.SizeInt32(
-                        900,
-                        900));
+                        1450,
+                        950));
             }
             catch (Exception ex)
             {

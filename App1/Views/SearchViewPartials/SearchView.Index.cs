@@ -739,7 +739,17 @@ namespace Anfeta.UI.Views
         #region 
         private async void BtnRefreshNotion_Click(object sender, RoutedEventArgs e)
         {
-            await RefreshNotionIncrementalAsync();
+            BtnRefreshNotion.IsEnabled = false;
+            // BtnRefreshNotionText removed (icon only)
+            try
+            {
+                await RefreshNotionIncrementalAsync();
+            }
+            finally
+            {
+                BtnRefreshNotion.IsEnabled = true;
+                // BtnRefreshNotionText removed (icon only)
+            }
         }
 
         private static bool ShouldReplaceNotionRow(
@@ -1002,7 +1012,8 @@ namespace Anfeta.UI.Views
                 return;
 
             _notionSyncRunning = true;
-            BtnRefreshNotion.Visibility = Visibility.Collapsed;
+            BtnRefreshNotion.IsEnabled = false;
+            // BtnRefreshNotionText removed (icon only)
 
             // Cuando el usuario está viendo solo Dropbox, la revisión automática
             // de Notion debe ser silenciosa: actualiza el índice interno, pero no
@@ -1245,7 +1256,7 @@ namespace Anfeta.UI.Views
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] =
                     syncAnchorUtc.ToString("O");
 
-                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+                BtnRefreshNotion.Visibility = Visibility.Visible;
 
                 if (showNotionUi)
                 {
@@ -1267,8 +1278,8 @@ namespace Anfeta.UI.Views
             finally
             {
                 _notionSyncRunning = false;
-                BtnRefreshNotion.Visibility = Visibility.Collapsed;
                 BtnRefreshNotion.IsEnabled = true;
+                // BtnRefreshNotionText removed (icon only)
                 SharedNotionSyncGate.Release();
 
                 // No hay overlay central que cerrar para Notion.
@@ -2592,7 +2603,7 @@ namespace Anfeta.UI.Views
                     ApplicationData.Current.LocalSettings.Values[
                         LS_NotionLastSyncUtc] as string;
 
-                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+                BtnRefreshNotion.Visibility = Visibility.Visible;
 
                 if (string.IsNullOrWhiteSpace(token) ||
                     string.IsNullOrWhiteSpace(dataSourceId) ||
@@ -2636,7 +2647,7 @@ namespace Anfeta.UI.Views
             }
             catch
             {
-                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+                BtnRefreshNotion.Visibility = Visibility.Visible;
                 if (force)
                 {
                     ShowNotionSyncNotice(
@@ -2780,7 +2791,7 @@ namespace Anfeta.UI.Views
                 var now = DateTimeOffset.UtcNow.ToString("O");
                 ApplicationData.Current.LocalSettings.Values[LS_NotionLastSyncUtc] = now;
 
-                BtnRefreshNotion.Visibility = Visibility.Collapsed;
+                BtnRefreshNotion.Visibility = Visibility.Visible;
                 ShowNotionSyncNotice(
                     "Notion al día",
                     visibleSeconds: 4);

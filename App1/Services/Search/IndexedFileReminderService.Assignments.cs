@@ -85,7 +85,9 @@ public sealed partial class IndexedFileReminderService
             });
             _assignmentVersion = hasUnresolved ? -1 : version;
             _assignmentUser = user;
-            if (!_started || _disposed || NormalizeReminderPersonTag(ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] as string) != tag) return;
+            var currentTag = NormalizeReminderPersonTag(ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] as string);
+            var isSupervisor = string.Equals(currentTag, "jjohn", StringComparison.OrdinalIgnoreCase);
+            if (!_started || _disposed || (!isSupervisor && currentTag != tag)) return;
             foreach (var row in rows.Where(r => changed.Contains(r.Id)))
             {
                 if (!AssignmentChangeTracker.IsActivityEligible(row.Name)) continue;
@@ -105,7 +107,9 @@ public sealed partial class IndexedFileReminderService
                 _fired[identity] = DateTimeOffset.Now;
                 SaveFiredReminders();
 
-                var title = parsed.ToastTitle;
+                var title = isSupervisor && currentTag != tag
+                    ? $"👀 [{tag}] {parsed.ToastTitle}"
+                    : parsed.ToastTitle;
                 var message = $"{parsed.CleanTitle}\nEstado: {(string.IsNullOrWhiteSpace(stateStr) ? "Sin estado" : stateStr)}\nFecha: {(string.IsNullOrWhiteSpace(row.ScheduledDate) ? "Sin fecha" : row.ScheduledDate)}";
 
                 // PageId vacío intencional: Enterado NO modifica la actividad ni crea mensajes en Notion.

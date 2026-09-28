@@ -137,6 +137,6 @@ public sealed class DailyAiSnapshotBuilder
     private static string ResolveArea(string title) => AreaToken.Match(title ?? string.Empty).Groups["area"].Value.ToLowerInvariant() switch
     {
         "sseo" => "SEO", "wwebs" => "WEB", "aads" => "ADS", "aapli" => "APLICACIÓN",
-        "pprog" => "PROGRAMACIÓN", "ddise" => "DISEÑO", "rrede" => "REDES", "mmaps" => "MAPS", _ => "S/T"
+        "pprog" => "PROGRAMAS", "ddise" => "DISEÑO", "rrede" => "REDES", "mmaps" => "MAPS", _ => "S/T"
     };
 }

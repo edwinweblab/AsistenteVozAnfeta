@@ -400,22 +400,24 @@
                         Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
                     <!--  GRUPO 2: CALENDARIO Y VISTAS  -->
-                    <!--  Actualizar Notion  -->
+                    <!--  Actualizar Notion (Icono solo para evitar scroll horizontal)  -->
                     <Button
                         x:Name="BtnRefreshNotion"
-                        Grid.Column="7"
+                        Width="36"
                         MinHeight="32"
-                        Padding="12,0"
+                        Padding="0"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
                         VerticalAlignment="Center"
-                        Background="#FFB020"
+                        Background="{StaticResource AnfetaSurfaceSoftBrush}"
+                        BorderBrush="{StaticResource AnfetaBorderBrush}"
+                        BorderThickness="1"
                         Click="BtnRefreshNotion_Click"
                         CornerRadius="7"
-                        Foreground="Black"
-                        Visibility="Collapsed">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon FontSize="14" Glyph="&#xE895;" />
-                            <TextBlock x:Name="BtnRefreshNotionText" Text="Notion" />
-                        </StackPanel>
+                        Foreground="White"
+                        ToolTipService.ToolTip="🔄 Sincronizar Notion ahora (actualiza cambios y actividades recientes)"
+                        Visibility="Visible">
+                        <FontIcon FontSize="14" Glyph="&#xE72C;" />
                     </Button>
 
                     <!--  Calendario de Revisiones  -->
@@ -3903,6 +3905,13 @@
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
+                                    x:Name="CtxMenuRenameItem"
+                                    Click="CtxRename_Click"
+                                    Text="Renombrar…" />
+
+                                <MenuFlyoutSeparator />
+
+                                <MenuFlyoutItem
                                     Click="CtxCopyName_Click"
                                     Text="Copiar nombre" />
 
@@ -3957,11 +3966,6 @@
                                     x:Name="CtxMenuDuplicateItem"
                                     Click="CtxDuplicate_Click"
                                     Text="Duplicar…" />
-
-                                <MenuFlyoutItem
-                                    x:Name="CtxMenuRenameItem"
-                                    Click="CtxRename_Click"
-                                    Text="Renombrar…" />
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuDeleteItem"
@@ -4497,6 +4501,11 @@
                                 <MenuFlyout x:Name="DetailsMoreFlyout" Opening="DetailsMoreFlyout_Opening">
 
                                     <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
+                                    <MenuFlyoutItem
+                                        x:Name="DetailsRenameItem"
+                                        Click="CtxRename_Click"
+                                        Text="Renombrar..." />
+                                    <MenuFlyoutSeparator />
                                     <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar nombre" />
                                     <MenuFlyoutItem Click="CtxCopyContent_Click" Text="Copiar contenido" />
 
@@ -4521,11 +4530,6 @@
                                     </MenuFlyoutSubItem>
 
                                     <MenuFlyoutSeparator />
-
-                                    <MenuFlyoutItem
-                                        x:Name="DetailsRenameItem"
-                                        Click="CtxRename_Click"
-                                        Text="Renombrar..." />
 
                                     <MenuFlyoutItem
                                         x:Name="DetailsDeleteItem"

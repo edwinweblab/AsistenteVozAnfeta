@@ -1621,7 +1621,7 @@ namespace Anfeta.UI.Views
 
             if (options.Layout == NotionUploadLayout.DropboxOnly)
             {
-                await ChooseDropboxUploadDestinationAsync(options.Files);
+                await ChooseDropboxUploadDestinationAsync(options.Files, options.PageTitle, options.SeparatePageTitles);
                 return;
             }
             if (string.IsNullOrWhiteSpace(token))
@@ -2728,12 +2728,13 @@ namespace Anfeta.UI.Views
             });
             titleGuideCard.Child = titleGuideStack;
 
-            titleSection.Children.Add(new TextBlock
+            var titleSectionHeader = new TextBlock
             {
                 Text = "Título de la página:",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 FontSize = 12.5
-            });
+            };
+            titleSection.Children.Add(titleSectionHeader);
             titleSection.Children.Add(titleGuideCard);
             titleSection.Children.Add(titleBox);
 
@@ -2917,7 +2918,7 @@ namespace Anfeta.UI.Views
             typeCombo.Items.Add(new ComboBoxItem { Content = "wwebs (WEB)", Tag = "wwebs" });
             typeCombo.Items.Add(new ComboBoxItem { Content = "aapli (APLICACIONES)", Tag = "aapli" });
             typeCombo.Items.Add(new ComboBoxItem { Content = "rrede (REDES)", Tag = "rrede" });
-            typeCombo.Items.Add(new ComboBoxItem { Content = "pprog (PROGRAMACIÓN)", Tag = "pprog" });
+            typeCombo.Items.Add(new ComboBoxItem { Content = "pprog (PROGRAMAS)", Tag = "pprog" });
             Grid.SetColumn(typeCombo, 2);
             compRow1.Children.Add(typeCombo);
 
@@ -3729,10 +3730,21 @@ namespace Anfeta.UI.Views
             refreshDialogState = () =>
             {
                 var onlyDropbox = dropboxOnlyOption.IsChecked == true;
-                titleCard.Visibility = tagsCard.Visibility = reminderCard.Visibility =
+                titleCard.Visibility = Visibility.Visible;
+                tagsCard.Visibility = reminderCard.Visibility =
                     onlyDropbox ? Visibility.Collapsed : Visibility.Visible;
+
+                titleSectionHeader.Text = onlyDropbox
+                    ? "Nombre con el que se guardará en Dropbox:"
+                    : "Título de la página:";
+
+                if (onlyDropbox && string.IsNullOrWhiteSpace(titleBox.Text) && selectedFiles.Count > 0)
+                {
+                    titleBox.Text = Path.GetFileNameWithoutExtension(selectedFiles[0].Name);
+                }
+
                 var separate =
-                    separatePagesOption.IsChecked == true;
+                    separatePagesOption.IsChecked == true || (onlyDropbox && selectedFiles.Count > 1);
 
                 titleSection.Visibility = separate
                     ? Visibility.Collapsed
@@ -3769,7 +3781,7 @@ namespace Anfeta.UI.Views
                      customDelayValid);
 
                 dialog.IsPrimaryButtonEnabled =
-                    selectedFiles.Count > 0 && (onlyDropbox || (titlesValid && reminderValid));
+                    selectedFiles.Count > 0 && titlesValid && (onlyDropbox || reminderValid);
             };
 
             titleBox.TextChanged +=
@@ -3837,7 +3849,7 @@ namespace Anfeta.UI.Views
                 (titleBox.Text ?? string.Empty).Trim();
 
             if (dropboxOnlyOption.IsChecked == true)
-                return new NotionUploadOptions(NotionUploadLayout.DropboxOnly, "", Array.Empty<string>(), selectedFiles.ToList());
+                return new NotionUploadOptions(NotionUploadLayout.DropboxOnly, singleTitle, separateTitles, selectedFiles.ToList());
 
             if (reminderCheck.IsChecked == true &&
                 reminderRecipientCombo.SelectedItem is ComboBoxItem recipientItem)
@@ -4063,7 +4075,10 @@ namespace Anfeta.UI.Views
             await UploadSelectedFilesToDropboxAsync(validFiles, destinationLocal, destinationRemote);
         }
 
-        private async Task ChooseDropboxUploadDestinationAsync(IReadOnlyList<StorageFile> files)
+        private async Task ChooseDropboxUploadDestinationAsync(
+            IReadOnlyList<StorageFile> files,
+            string singleTitle = "",
+            IReadOnlyList<string>? separateTitles = null)
         {
             try
             {
@@ -4077,12 +4092,17 @@ namespace Anfeta.UI.Views
                     StatusText.Text = $"Estado: {error}";
                     return;
                 }
-                await UploadSelectedFilesToDropboxAsync(files, folder.Path, remote);
+                await UploadSelectedFilesToDropboxAsync(files, folder.Path, remote, singleTitle, separateTitles);
             }
             catch (Exception ex) { StatusText.Text = $"Estado: No se pudo subir a Dropbox: {ex.Message}"; }
         }
 
-        private async Task UploadSelectedFilesToDropboxAsync(IReadOnlyList<StorageFile> validFiles, string destinationLocal, string destinationRemote)
+        private async Task UploadSelectedFilesToDropboxAsync(
+            IReadOnlyList<StorageFile> validFiles,
+            string destinationLocal,
+            string destinationRemote,
+            string singleTitle = "",
+            IReadOnlyList<string>? separateTitles = null)
         {
             var uploadedCount = 0;
             var skippedCount = 0;
@@ -4100,11 +4120,36 @@ namespace Anfeta.UI.Views
                     var pickedFile = validFiles[index];
                     var position = index + 1;
                     var originalName = pickedFile.Name;
+                    var ext = Path.GetExtension(originalName);
+
+                    string targetName = string.Empty;
+                    if (separateTitles != null && index < separateTitles.Count && !string.IsNullOrWhiteSpace(separateTitles[index]))
+                    {
+                        targetName = separateTitles[index].Trim();
+                    }
+                    else if (!string.IsNullOrWhiteSpace(singleTitle))
+                    {
+                        targetName = validFiles.Count == 1 ? singleTitle.Trim() : $"{singleTitle.Trim()}_{position}";
+                    }
+
+                    if (string.IsNullOrWhiteSpace(targetName))
+                    {
+                        targetName = originalName;
+                    }
+                    else if (!Path.HasExtension(targetName) && !string.IsNullOrEmpty(ext))
+                    {
+                        targetName += ext;
+                    }
+
+                    foreach (var invalidChar in Path.GetInvalidFileNameChars())
+                    {
+                        targetName = targetName.Replace(invalidChar, '_');
+                    }
 
                     var remoteFilePath =
                         _dropboxPathMapper.CombineDropboxPath(
                             destinationRemote,
-                            originalName);
+                            targetName);
 
                     var overwrite = false;
                     var autorename = false;
@@ -4112,7 +4157,7 @@ namespace Anfeta.UI.Views
                     try
                     {
                         UpdateLoadingState(
-                            $"Estado: Revisando {position} de {validFiles.Count} → {originalName}",
+                            $"Estado: Revisando {position} de {validFiles.Count} → {targetName}",
                             "Comprobando si ya existe en la carpeta de Dropbox.");
 
                         using var checkCts =
@@ -4132,7 +4177,7 @@ namespace Anfeta.UI.Views
 
                             var choice =
                                 await PromptDropboxDuplicateChoiceAsync(
-                                    originalName);
+                                    targetName);
 
                             LoadingOverlay.Visibility = Visibility.Visible;
 
@@ -4150,7 +4195,7 @@ namespace Anfeta.UI.Views
                         }
 
                         UpdateLoadingState(
-                            $"Estado: Subiendo {position} de {validFiles.Count} → {originalName}",
+                            $"Estado: Subiendo {position} de {validFiles.Count} → {targetName}",
                             $"Destino: {destinationLocal}");
 
                         using var uploadCts =

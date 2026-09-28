@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -92,8 +92,9 @@ namespace Anfeta.UI.Services.Notion
             await EnsureCacheLoadedAsync(
                 cancellationToken);
 
-            // Después de la primera lectura de Fase1, todas las categorías
-            // salen 100% local.
+            // Si la categoría existe en caché de Fase1, se entrega directo.
+            // Si la categoría arroja 0 páginas, se permite consultar a Notion
+            // para no quedar bloqueado si se agregaron plantillas recientemente.
             if (!forceRefresh &&
                 _phase1Templates.Count > 0)
             {
@@ -102,11 +103,14 @@ namespace Anfeta.UI.Services.Notion
                         _phase1Templates,
                         projectToken);
 
-                progress?.Report(
-                    $"Plantilla Fase1 desde caché ✅ · " +
-                    $"{cachedCategory.Count} de {_phase1Templates.Count}");
+                if (cachedCategory.Count > 0)
+                {
+                    progress?.Report(
+                        $"Plantilla Fase1 desde caché ✅ · " +
+                        $"{cachedCategory.Count} de {_phase1Templates.Count}");
 
-                return cachedCategory;
+                    return cachedCategory;
+                }
             }
 
             using var http =
@@ -531,6 +535,22 @@ namespace Anfeta.UI.Services.Notion
                             ? IsAccessTemplateTitle(item.Title, "ccorre")
                             : token == "aacce-ddomi"
                                 ? IsAccessTemplateTitle(item.Title, "ddomi")
+                            : token == "ccobr"
+                                ? IsCobrosTemplateTitle(item.Title)
+                            : token == "rrede"
+                                ? IsRedesTemplateTitle(item.Title, null)
+                            : token == "ttikt"
+                                ? IsRedesTemplateTitle(item.Title, "tiktok")
+                            : token == "iinst"
+                                ? IsRedesTemplateTitle(item.Title, "instagram")
+                            : token == "fface"
+                                ? IsRedesTemplateTitle(item.Title, "facebook")
+                            : token == "llink"
+                                ? IsRedesTemplateTitle(item.Title, "linkedin")
+                            : token == "ddise"
+                                ? IsDisenoTemplateTitle(item.Title)
+                            : token == "aapli"
+                                ? IsApliTemplateTitle(item.Title)
                         : TitleContainsExactToken(
                             item.Title,
                             token)))
@@ -569,6 +589,51 @@ namespace Anfeta.UI.Services.Notion
                 ? TitleContainsExactToken(title, "ddomi")
                 : TitleContainsExactToken(title, "ccorr") ||
                   TitleContainsExactToken(title, "ccorre");
+        }
+
+        private static bool IsCobrosTemplateTitle(
+            string title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return false;
+
+            return TitleContainsExactToken(title, "ccobr") ||
+                   TitleContainsExactToken(title, "ccobro") ||
+                   TitleContainsExactToken(title, "cobro") ||
+                   TitleContainsExactToken(title, "cobros") ||
+                   Regex.IsMatch(title, @"\b(?:aprtuz)?cobr(?:ar|os?)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private static bool IsRedesTemplateTitle(string title, string? subNetwork)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return false;
+
+            var hasRedes = Regex.IsMatch(title, @"\b(?:rrede|redes|tiktok|tik\s*tok|instagram|insta|facebook|fb|linkedin|linked\s*in)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!hasRedes) return false;
+
+            if (string.IsNullOrWhiteSpace(subNetwork))
+                return true;
+
+            return subNetwork.ToLowerInvariant() switch
+            {
+                "tiktok" => Regex.IsMatch(title, @"\b(?:ttikt|tiktok|tik\s*tok)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+                "instagram" => Regex.IsMatch(title, @"\b(?:iinst|instagram|insta)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+                "facebook" => Regex.IsMatch(title, @"\b(?:fface|facebook|fb)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+                "linkedin" => Regex.IsMatch(title, @"\b(?:llink|linkedin|linked\s*in)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+                _ => true
+            };
+        }
+
+        private static bool IsDisenoTemplateTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return false;
+            return Regex.IsMatch(title, @"\b(?:ddise|diseño|diseno)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private static bool IsApliTemplateTitle(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return false;
+            return Regex.IsMatch(title, @"\b(?:aapli|apli|aplicacion|aplicación)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
         private static bool TitleContainsExactToken(
@@ -633,6 +698,9 @@ namespace Anfeta.UI.Services.Notion
 
                 "393abd7d91b7803e9921000c068624c5" =>
                     "rrapi",
+
+                "393abd7d91b7804aae7a000cb9486782" =>
+                    "pprog",
 
                 _ =>
                     string.Empty

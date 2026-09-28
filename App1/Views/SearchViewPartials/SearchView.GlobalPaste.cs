@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
@@ -277,20 +278,22 @@ namespace Anfeta.UI.Views
             };
 
             var guideStack = new StackPanel { Spacing = 3 };
-            guideStack.Children.Add(new TextBlock
+            var guideTitleBlock = new TextBlock
             {
                 Text = "💡 Convención recomendada de título:",
                 FontSize = 11.5,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 130, 215, 255))
-            });
-            guideStack.Children.Add(new TextBlock
+            };
+            guideStack.Children.Add(guideTitleBlock);
+            var guideDescBlock = new TextBlock
             {
                 Text = "[dominio.com] → [Tipo: sseo | aapli | aads | wwebs] → [Persona/Mes: jjuli | jjohn] → [Descripción]",
                 FontSize = 10.5,
                 Opacity = 0.88,
                 TextWrapping = TextWrapping.Wrap
-            });
+            };
+            guideStack.Children.Add(guideDescBlock);
             guideCard.Child = guideStack;
 
             var variantNormalRadio = new RadioButton
@@ -424,12 +427,13 @@ namespace Anfeta.UI.Views
             variant003Radio.Checked += (_, __) => OnVariantSelectionChanged();
 
             var tagsStack = new StackPanel { Spacing = 7 };
-            tagsStack.Children.Add(new TextBlock
+            var tagsHeaderBlock = new TextBlock
             {
                 Text = "🏷️ Etiquetas y Estados (Tags):",
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 FontSize = 12
-            });
+            };
+            tagsStack.Children.Add(tagsHeaderBlock);
 
             // Selector de variantes (00 Urgente, 001 Importante, 002 Secundaria, 003 Recordar-usar)
             var variantsHeader = new TextBlock
@@ -558,21 +562,113 @@ namespace Anfeta.UI.Views
                 900d,
                 1060d);
 
+            // Selector de destino: Notion vs Dropbox
+            var destNotionRadio = new RadioButton
+            {
+                Content = "🌐 Notion · Revisiones",
+                GroupName = "GlobalPasteDestGroup",
+                IsChecked = true,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 16, 0)
+            };
+
+            var destDropboxRadio = new RadioButton
+            {
+                Content = "📦 Dropbox · RX/{dominio}",
+                GroupName = "GlobalPasteDestGroup",
+                IsChecked = false,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            };
+
+            var destHintText = new TextBlock
+            {
+                Text = "Destino actual: Se creará una nueva actividad en Notion (Revisiones).",
+                FontSize = 11,
+                Opacity = 0.8,
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var destCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(35, 14, 116, 144)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12, 9, 12, 9)
+            };
+
+            var destStack = new StackPanel { Spacing = 6 };
+            destStack.Children.Add(new TextBlock
+            {
+                Text = "🎯 Destino del pegado:",
+                FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 130, 215, 255))
+            });
+
+            var dropboxDisclaimerCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 245, 158, 11)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 245, 158, 11)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 8, 12, 8),
+                Visibility = Visibility.Collapsed
+            };
+
+            var disclaimerStack = new StackPanel { Spacing = 3 };
+            disclaimerStack.Children.Add(new TextBlock
+            {
+                Text = "📁 Aviso de Dropbox · Creación de carpeta:",
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 253, 224, 71))
+            });
+            disclaimerStack.Children.Add(new TextBlock
+            {
+                Text = "ANFETA creará automáticamente la subcarpeta 'RX/{dominio}' dentro de tu Dropbox local si aún no existe. El archivo (.url o .txt) se guardará allí para sincronizarse en la nube e indexarse al instante.",
+                FontSize = 10.5,
+                Opacity = 0.9,
+                TextWrapping = TextWrapping.Wrap
+            });
+            dropboxDisclaimerCard.Child = disclaimerStack;
+
+            var destRadios = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8
+            };
+            destRadios.Children.Add(destNotionRadio);
+            destRadios.Children.Add(destDropboxRadio);
+            destStack.Children.Add(destRadios);
+            destStack.Children.Add(destHintText);
+            destStack.Children.Add(dropboxDisclaimerCard);
+            destCard.Child = destStack;
+
             var content = new StackPanel
             {
                 Width = desiredGlobalPasteWidth - 40,
                 Spacing = 12
             };
 
+            content.Children.Add(destCard);
             content.Children.Add(guideCard);
             content.Children.Add(titleBox);
             content.Children.Add(tagsCard);
             content.Children.Add(bodyBox);
 
+            var contentScrollViewer = new ScrollViewer
+            {
+                Content = content,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                MaxHeight = Math.Clamp((XamlRoot?.Size.Height ?? 900) * 0.78, 480, 720)
+            };
+
             var dialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
-                Content = content,
+                Content = contentScrollViewer,
                 PrimaryButtonText = "Crear actividad",
                 CloseButtonText = "Cancelar",
                 DefaultButton =
@@ -625,11 +721,63 @@ namespace Anfeta.UI.Views
                 dialog,
                 "📋 Pegar texto en Notion · Revisiones");
 
+            var dialogTitleBlock = (dialog.Title as Border)?.Child as TextBlock;
+
+            void UpdateDestUi()
+            {
+                var isDropbox = destDropboxRadio.IsChecked == true;
+                var currentTitle = (titleBox.Text ?? string.Empty).Trim();
+                var domain = ExtractClientDomainFromPaste(currentTitle, clipboardText);
+                var trimmed = (clipboardText ?? string.Empty).Trim();
+                var isUrl = Uri.TryCreate(trimmed, UriKind.Absolute, out var uriRes) &&
+                            (uriRes.Scheme == Uri.UriSchemeHttp || uriRes.Scheme == Uri.UriSchemeHttps);
+
+                if (isDropbox)
+                {
+                    dropboxDisclaimerCard.Visibility = Visibility.Visible;
+                    destHintText.Text = $"📦 Se guardará en Dropbox: RX/{domain}/ como {(isUrl ? "acceso directo (.url)" : "archivo de texto (.txt)")}";
+                    dialog.PrimaryButtonText = isUrl ? "Guardar enlace .url en Dropbox" : "Guardar archivo .txt en Dropbox";
+                    titleBox.Header = isUrl ? "Nombre del enlace en Dropbox (.url):" : "Nombre del archivo de texto en Dropbox (.txt):";
+                    titleBox.PlaceholderText = "Ej: notas-reunion o [dominio.com] [tipo] [persona] [descripcion]...";
+                    bodyBox.Header = isUrl ? "URL del acceso directo (.url):" : "Contenido del archivo .txt (Texto pegado):";
+                    guideTitleBlock.Text = "💡 Convención recomendada para archivo en Dropbox:";
+                    guideDescBlock.Text = "[dominio.com] → [Tipo opcional] → [Persona/Mes opcional] → [Nombre descriptivo del archivo]";
+                    tagsHeaderBlock.Text = "🏷️ Etiquetas y Sufijos para nombre del archivo (opcional):";
+
+                    if (dialogTitleBlock != null)
+                    {
+                        dialogTitleBlock.Text = isUrl ? $"🔗 Guardar enlace en Dropbox · RX/{domain}" : $"📄 Guardar texto en Dropbox · RX/{domain}";
+                    }
+                }
+                else
+                {
+                    dropboxDisclaimerCard.Visibility = Visibility.Collapsed;
+                    destHintText.Text = "🌐 Se creará una página de actividad en Notion · Revisiones.";
+                    dialog.PrimaryButtonText = "Crear actividad";
+                    titleBox.Header = "Título de la nueva página en Notion:";
+                    titleBox.PlaceholderText = "Ej: dominio.com sseo jjuli Descripción de la actividad…";
+                    bodyBox.Header = "Contenido / BODY (Texto de la nueva página en Notion):";
+                    guideTitleBlock.Text = "💡 Convención recomendada de título:";
+                    guideDescBlock.Text = "[dominio.com] → [Tipo: sseo | aapli | aads | wwebs] → [Persona/Mes: jjuli | jjohn] → [Descripción]";
+                    tagsHeaderBlock.Text = "🏷️ Etiquetas y Estados (Tags para Notion):";
+
+                    if (dialogTitleBlock != null)
+                    {
+                        dialogTitleBlock.Text = "📋 Pegar texto en Notion · Revisiones";
+                    }
+                }
+            }
+
+            destNotionRadio.Checked += (_, __) => UpdateDestUi();
+            destDropboxRadio.Checked += (_, __) => UpdateDestUi();
+            UpdateDestUi();
+
             void RefreshCreateState()
             {
                 dialog.IsPrimaryButtonEnabled =
                     !string.IsNullOrWhiteSpace(titleBox.Text) &&
                     !string.IsNullOrWhiteSpace(bodyBox.Text);
+                UpdateDestUi();
             }
 
             titleBox.TextChanged +=
@@ -650,6 +798,18 @@ namespace Anfeta.UI.Views
                 return;
             }
 
+            var title =
+                (titleBox.Text ?? string.Empty).Trim();
+
+            var body =
+                bodyBox.Text ?? string.Empty;
+
+            if (destDropboxRadio.IsChecked == true)
+            {
+                await SaveGlobalPasteToDropboxAsync(title, body);
+                return;
+            }
+
             var token =
                 ApplicationData.Current.LocalSettings.Values[
                     "Notion.Token"] as string;
@@ -661,11 +821,7 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            var title =
-                (titleBox.Text ?? string.Empty).Trim();
-
-            var body =
-                bodyBox.Text ?? string.Empty;
+            // title y body ya definidos para Notion
 
             try
             {
@@ -717,6 +873,110 @@ namespace Anfeta.UI.Views
             finally
             {
                 HideLoadingState();
+            }
+        }
+
+        private static readonly Regex GlobalPasteDomainRegex = new(
+            @"(?:https?://)?(?:www\.)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev))",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+        private static string ExtractClientDomainFromPaste(string title, string body)
+        {
+            var combined = $"{(title ?? string.Empty)} {(body ?? string.Empty)}";
+            var match = GlobalPasteDomainRegex.Match(combined);
+            if (match.Success)
+            {
+                var candidate = match.Groups[1].Value.ToLowerInvariant().Trim();
+                if (!candidate.Contains("notion.so") && !candidate.Contains("google.com") && !candidate.Contains("notion.site"))
+                {
+                    return candidate;
+                }
+            }
+
+            if (combined.Contains(".apli", StringComparison.OrdinalIgnoreCase) ||
+                combined.Contains(".pro", StringComparison.OrdinalIgnoreCase) ||
+                combined.Contains("pprog", StringComparison.OrdinalIgnoreCase) ||
+                combined.Contains("anfeta", StringComparison.OrdinalIgnoreCase))
+            {
+                return "anfeta.com";
+            }
+
+            return match.Success ? match.Groups[1].Value.ToLowerInvariant().Trim() : "anfeta.com";
+        }
+
+        private async Task SaveGlobalPasteToDropboxAsync(string title, string body)
+        {
+            var dropboxRoot = DROPBOX_ROOT;
+            if (string.IsNullOrWhiteSpace(dropboxRoot) || !Directory.Exists(dropboxRoot))
+            {
+                dropboxRoot = ApplicationData.Current.LocalSettings.Values[Anfeta.UI.Helpers.AppSettingsKeys.LS_DropboxRoot] as string;
+            }
+
+            if (string.IsNullOrWhiteSpace(dropboxRoot) || !Directory.Exists(dropboxRoot))
+            {
+                StatusText.Text = "Estado: No se encontró la ruta de Dropbox configurada en Ajustes.";
+                return;
+            }
+
+            var domain = ExtractClientDomainFromPaste(title, body);
+            var targetFolder = Path.Combine(dropboxRoot, "RX", domain);
+
+            try
+            {
+                Directory.CreateDirectory(targetFolder);
+
+                var trimmedBody = (body ?? string.Empty).Trim();
+                var isUrl = Uri.TryCreate(trimmedBody, UriKind.Absolute, out var uriResult) &&
+                            (uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps);
+
+                var rawTitle = string.IsNullOrWhiteSpace(title)
+                    ? (isUrl ? uriResult!.Host : domain)
+                    : title.Trim();
+
+                var invalidChars = Path.GetInvalidFileNameChars();
+                var cleanTitle = string.Join("_", rawTitle.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries)).Trim();
+                if (string.IsNullOrWhiteSpace(cleanTitle))
+                {
+                    cleanTitle = $"{domain}_{DateTime.Now:yyyyMMdd_HHmmss}";
+                }
+
+                string filePath;
+                if (isUrl)
+                {
+                    if (!cleanTitle.EndsWith(".url", StringComparison.OrdinalIgnoreCase))
+                        cleanTitle += ".url";
+
+                    filePath = Path.Combine(targetFolder, cleanTitle);
+                    var shortcutContent = $"[InternetShortcut]\r\nURL={trimmedBody}\r\n";
+                    await File.WriteAllTextAsync(filePath, shortcutContent, System.Text.Encoding.UTF8);
+                }
+                else
+                {
+                    if (!cleanTitle.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+                        cleanTitle += ".txt";
+
+                    filePath = Path.Combine(targetFolder, cleanTitle);
+                    await File.WriteAllTextAsync(filePath, body ?? string.Empty, System.Text.Encoding.UTF8);
+                }
+
+                var fileInfo = new FileInfo(filePath);
+                await AddUploadedFileToIndexAsync(filePath, fileInfo.Name, fileInfo.Length, DateTime.UtcNow);
+
+                var matchedPerson = NotionUploadPersonTags.FirstOrDefault(p =>
+                    title.Contains(p, StringComparison.OrdinalIgnoreCase));
+                string detectedVariant = "";
+                if (title.Contains("001", StringComparison.OrdinalIgnoreCase)) detectedVariant = "001";
+                else if (title.Contains("002", StringComparison.OrdinalIgnoreCase)) detectedVariant = "002";
+                else if (title.Contains("003", StringComparison.OrdinalIgnoreCase)) detectedVariant = "003";
+                else if (title.Contains("00", StringComparison.OrdinalIgnoreCase)) detectedVariant = "00";
+
+                ShowDiscreteActivityToast(cleanTitle, matchedPerson ?? "", detectedVariant, filePath);
+
+                StatusText.Text = $"Estado: Guardado en Dropbox ✅ ({cleanTitle} → RX/{domain})";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: No se pudo guardar en Dropbox → {ex.Message}";
             }
         }
     }
