@@ -1889,6 +1889,26 @@ namespace Anfeta.UI.Services.Notion
                         .OrderByDescending(ci => ci.CompletedAt)
                         .ToList();
 
+                    var enrichedCompletedItemsToday = all
+                        .SelectMany(activity => (activity.CompletedItemsToday ?? Array.Empty<NotionCompletedChecklistItem>())
+                            .Select(ci => new DailyProgressCompletedCheckItem
+                            {
+                                BlockId = ci.BlockId,
+                                Text = ci.Text,
+                                CompletedAt = ci.CompletedAt,
+                                DateKey = ci.DateKey,
+                                ActivityTitle = string.IsNullOrWhiteSpace(activity.FullTitle) ? activity.Source.Title : activity.FullTitle,
+                                ActivityShortTitle = string.IsNullOrWhiteSpace(activity.ShortTitle) ? activity.Source.Title : activity.ShortTitle,
+                                ActivityDomain = string.IsNullOrWhiteSpace(activity.Domain) ? activity.Source.Project : activity.Domain,
+                                ActivityProject = string.IsNullOrWhiteSpace(activity.Source.Project) ? activity.Domain : activity.Source.Project,
+                                PageUrl = activity.PageUrl,
+                                StateCode = activity.StateCode,
+                                StateLabel = activity.StateLabel,
+                                Person = name
+                            }))
+                        .OrderByDescending(ci => ci.CompletedAt)
+                        .ToList();
+
                     return new DailyProgressPersonSnapshot
                     {
                         Name =
@@ -1929,6 +1949,9 @@ namespace Anfeta.UI.Services.Notion
 
                         CompletedItemsToday =
                             completedItemsToday,
+
+                        EnrichedCompletedItemsToday =
+                            enrichedCompletedItemsToday,
 
                         // En V2 son movimientos del día.
                         ReviewCount =

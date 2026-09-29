@@ -171,12 +171,32 @@ namespace Anfeta.UI.Models.DailyProgress
         public IReadOnlyList<NotionCompletedChecklistItem> CompletedItemsToday { get; init; } =
             Array.Empty<NotionCompletedChecklistItem>();
 
+        public IReadOnlyList<DailyProgressCompletedCheckItem> EnrichedCompletedItemsToday { get; init; } =
+            Array.Empty<DailyProgressCompletedCheckItem>();
+
         public int ReviewCount { get; init; }
         public int CompletedCount { get; init; }
         public int PendingCount { get; init; }
         public int MissingChecklistCount { get; init; }
         public int HistoricalCount { get; init; }
         public int IncompleteChecklistCount { get; init; }
+    }
+
+    public sealed class DailyProgressCompletedCheckItem
+    {
+        public string BlockId { get; init; } = "";
+        public string Text { get; init; } = "";
+        public DateTimeOffset CompletedAt { get; init; }
+        public string DateKey { get; init; } = "";
+
+        public string ActivityTitle { get; init; } = "";
+        public string ActivityShortTitle { get; init; } = "";
+        public string ActivityDomain { get; init; } = "";
+        public string ActivityProject { get; init; } = "";
+        public string PageUrl { get; init; } = "";
+        public string StateCode { get; init; } = "P";
+        public string StateLabel { get; init; } = "Pendiente";
+        public string Person { get; init; } = "";
     }
 
     public sealed class DailyProgressSnapshot

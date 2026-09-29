@@ -723,6 +723,7 @@ namespace Anfeta.UI.Views.DailyProgress
                 new Border
                 {
                     MinWidth = 0,
+                    MinHeight = 440,
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch,
                     Margin = new Thickness(0, 0, 10, 10),
@@ -733,10 +734,19 @@ namespace Anfeta.UI.Views.DailyProgress
                     CornerRadius = new CornerRadius(12)
                 };
 
-            var stack =
+            var mainGrid =
+                new Grid
+                {
+                    RowSpacing = 12
+                };
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 0: Header & Bar
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 1: Sections
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 2: Footer
+
+            var headerStack =
                 new StackPanel
                 {
-                    Spacing = 12
+                    Spacing = 10
                 };
 
             var header =
@@ -967,7 +977,7 @@ namespace Anfeta.UI.Views.DailyProgress
             header.Children.Add(
                 headerActions);
 
-            stack.Children.Add(
+            headerStack.Children.Add(
                 header);
 
             var coverageBar =
@@ -986,8 +996,17 @@ namespace Anfeta.UI.Views.DailyProgress
                                 : DangerBrush
                 };
 
-            stack.Children.Add(
+            headerStack.Children.Add(
                 coverageBar);
+
+            Grid.SetRow(headerStack, 0);
+            mainGrid.Children.Add(headerStack);
+
+            var sectionsStack =
+                new StackPanel
+                {
+                    Spacing = 8
+                };
 
             var carryOverItems =
                 person.AllActivities
@@ -998,7 +1017,7 @@ namespace Anfeta.UI.Views.DailyProgress
 
             if (carryOverItems.Count > 0)
             {
-                stack.Children.Add(
+                sectionsStack.Children.Add(
                     BuildMiniSection(
                         "VIENEN DE DÍAS ANTERIORES",
                         carryOverItems,
@@ -1016,7 +1035,7 @@ namespace Anfeta.UI.Views.DailyProgress
 
             if (historicalItems.Count > 0)
             {
-                stack.Children.Add(
+                sectionsStack.Children.Add(
                     BuildMiniSection(
                         "HISTÓRICO DEL DÍA",
                         historicalItems,
@@ -1024,20 +1043,29 @@ namespace Anfeta.UI.Views.DailyProgress
                         carryOver: true));
             }
 
-            stack.Children.Add(
+            sectionsStack.Children.Add(
                 BuildMiniSection(
                     "REZAGOS",
                     person.Lagging,
                     danger: true));
 
-            stack.Children.Add(
+            sectionsStack.Children.Add(
                 BuildMiniSection(
                     "AVANCE HOY",
                     person.Progress,
                     danger: false));
 
+            Grid.SetRow(sectionsStack, 1);
+            mainGrid.Children.Add(sectionsStack);
+
             var footer =
-                new Grid();
+                new Border
+                {
+                    Padding = new Thickness(0, 8, 0, 0),
+                    BorderThickness = new Thickness(0, 1, 0, 0),
+                    BorderBrush = Brush(255, 33, 44, 54),
+                    VerticalAlignment = VerticalAlignment.Bottom
+                };
 
             var counts =
                 new TextBlock
@@ -1055,14 +1083,14 @@ namespace Anfeta.UI.Views.DailyProgress
                     Foreground = MutedBrush
                 };
 
-            footer.Children.Add(
-                counts);
+            footer.Child =
+                counts;
 
-            stack.Children.Add(
-                footer);
+            Grid.SetRow(footer, 2);
+            mainGrid.Children.Add(footer);
 
             root.Child =
-                stack;
+                mainGrid;
 
             return root;
         }
@@ -1552,6 +1580,24 @@ namespace Anfeta.UI.Views.DailyProgress
                     100)
                 : 0;
 
+            var completedToday =
+                source
+                    .SelectMany(person =>
+                        person.CompletedItemsToday ?? Array.Empty<NotionCompletedChecklistItem>())
+                    .GroupBy(item => item.BlockId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderByDescending(item => item.CompletedAt)
+                    .ToList();
+
+            var enrichedCompletedToday =
+                source
+                    .SelectMany(person =>
+                        person.EnrichedCompletedItemsToday ?? Array.Empty<DailyProgressCompletedCheckItem>())
+                    .GroupBy(item => item.BlockId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderByDescending(item => item.CompletedAt)
+                    .ToList();
+
             return new DailyProgressPersonSnapshot
             {
                 Name =
@@ -1574,6 +1620,10 @@ namespace Anfeta.UI.Views.DailyProgress
                     progress,
                 AllActivities =
                     all,
+                CompletedItemsToday =
+                    completedToday,
+                EnrichedCompletedItemsToday =
+                    enrichedCompletedToday,
                 ReviewCount =
                     progress.Count(item =>
                         item.IsReviewMovement),
@@ -1734,10 +1784,11 @@ namespace Anfeta.UI.Views.DailyProgress
             PersonDetailItems.Children.Add(
                 BuildDetailSectionTitle(
                     "CHECKLISTS COMPLETADOS HOY",
-                    person.CompletedItemsToday?.Count ?? 0,
+                    person.EnrichedCompletedItemsToday?.Count ?? person.CompletedItemsToday?.Count ?? 0,
                     danger: false));
 
-            if ((person.CompletedItemsToday?.Count ?? 0) == 0)
+            var completedChecksCount = person.EnrichedCompletedItemsToday?.Count ?? person.CompletedItemsToday?.Count ?? 0;
+            if (completedChecksCount == 0)
             {
                 PersonDetailItems.Children.Add(
                     BuildEmptyDetailCard(
@@ -1746,37 +1797,48 @@ namespace Anfeta.UI.Views.DailyProgress
             else
             {
                 PersonDetailItems.Children.Add(
-                    BuildDetailCompletedChecksList(
-                        person.CompletedItemsToday!));
+                    BuildDetailCompletedChecksList(person));
             }
 
             ShowPersonMode();
             DispatcherQueue.TryEnqueue(ApplyTextZoom);
         }
 
-        private UIElement BuildDetailCompletedChecksList(
-            IReadOnlyList<NotionCompletedChecklistItem> items)
+        private UIElement BuildDetailCompletedChecksList(DailyProgressPersonSnapshot person)
         {
             var stack = new StackPanel
             {
-                Spacing = 6,
-                Margin = new Thickness(0, 4, 0, 10)
+                Spacing = 8,
+                Margin = new Thickness(0, 4, 0, 14)
             };
 
-            foreach (var item in items)
+            // Usamos la lista enriquecida que tiene la actividad, dominio y revisión de origen
+            var enrichedItems = person.EnrichedCompletedItemsToday;
+            if (enrichedItems != null && enrichedItems.Count > 0)
+            {
+                foreach (var item in enrichedItems)
+                {
+                    stack.Children.Add(BuildEnrichedCheckCard(item));
+                }
+                return stack;
+            }
+
+            // Fallback en caso de que solo existan los items estándar
+            var fallbackItems = person.CompletedItemsToday ?? Array.Empty<NotionCompletedChecklistItem>();
+            foreach (var item in fallbackItems)
             {
                 var card = new Border
                 {
-                    Padding = new Thickness(12, 8, 12, 8),
-                    Background = SurfaceBrush,
+                    Padding = new Thickness(14, 10, 14, 10),
+                    Background = Brush(255, 17, 24, 32),
                     BorderBrush = BorderBrush,
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(6)
+                    CornerRadius = new CornerRadius(8)
                 };
 
                 var grid = new Grid
                 {
-                    ColumnSpacing = 8
+                    ColumnSpacing = 10
                 };
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1787,8 +1849,8 @@ namespace Anfeta.UI.Views.DailyProgress
                     Background = ProgressBackgroundBrush,
                     BorderBrush = ProgressBrush,
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(4),
-                    Padding = new Thickness(6, 2, 6, 2),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(7, 3, 7, 3),
                     VerticalAlignment = VerticalAlignment.Center,
                     Child = new TextBlock
                     {
@@ -1804,9 +1866,10 @@ namespace Anfeta.UI.Views.DailyProgress
                 var tb = new TextBlock
                 {
                     Text = item.Text,
-                    FontSize = 11.5,
+                    FontSize = 12,
                     TextWrapping = TextWrapping.Wrap,
-                    VerticalAlignment = VerticalAlignment.Center
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = Brush(255, 241, 245, 249)
                 };
                 Grid.SetColumn(tb, 1);
                 grid.Children.Add(tb);
@@ -1826,6 +1889,173 @@ namespace Anfeta.UI.Views.DailyProgress
             }
 
             return stack;
+        }
+
+        private UIElement BuildEnrichedCheckCard(DailyProgressCompletedCheckItem item)
+        {
+            var card = new Border
+            {
+                Padding = new Thickness(14, 10, 14, 10),
+                Background = Brush(255, 17, 24, 32),
+                BorderBrush = Brush(255, 36, 52, 67),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(9)
+            };
+
+            var mainGrid = new Grid
+            {
+                RowSpacing = 6
+            };
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            // Fila Superior: Badges de Proyecto / Revisión y Hora / Acción
+            var topRow = new Grid
+            {
+                ColumnSpacing = 8
+            };
+            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var badgesPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 7,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            // Badge de Estado (Hecho)
+            var checkBadge = new Border
+            {
+                Background = ProgressBackgroundBrush,
+                BorderBrush = ProgressBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(6, 2, 6, 2),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = "✓ Hecho",
+                    FontSize = 9.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = ProgressBrush
+                }
+            };
+            badgesPanel.Children.Add(checkBadge);
+
+            // Badge de Proyecto / Dominio
+            var domainText = !string.IsNullOrWhiteSpace(item.ActivityDomain) ? item.ActivityDomain : item.ActivityProject;
+            if (!string.IsNullOrWhiteSpace(domainText))
+            {
+                var domainBadge = new Border
+                {
+                    Background = Brush(255, 12, 34, 46),
+                    BorderBrush = Brush(255, 28, 77, 105),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(7, 2, 7, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = domainText,
+                        FontSize = 9.5,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        Foreground = AccentBrush
+                    }
+                };
+                badgesPanel.Children.Add(domainBadge);
+            }
+
+            // Badge de Revisión / Tarea
+            var revisionTitle = !string.IsNullOrWhiteSpace(item.ActivityShortTitle)
+                ? item.ActivityShortTitle
+                : item.ActivityTitle;
+
+            if (!string.IsNullOrWhiteSpace(revisionTitle))
+            {
+                var revBadge = new Border
+                {
+                    Background = Brush(255, 24, 33, 44),
+                    BorderBrush = Brush(255, 51, 65, 85),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(7, 2, 7, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = $"Revisión: {revisionTitle}",
+                        FontSize = 9.5,
+                        FontWeight = Microsoft.UI.Text.FontWeights.Medium,
+                        Foreground = Brush(255, 226, 232, 240)
+                    }
+                };
+                badgesPanel.Children.Add(revBadge);
+            }
+
+            Grid.SetColumn(badgesPanel, 0);
+            topRow.Children.Add(badgesPanel);
+
+            // Lado derecho de la fila superior: Hora y botón Abrir en Notion (si tiene Url)
+            var rightPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var timeBadge = new TextBlock
+            {
+                Text = item.CompletedAt.ToLocalTime().ToString("hh:mm tt", CultureInfo.CurrentCulture),
+                FontSize = 10.5,
+                Foreground = MutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            rightPanel.Children.Add(timeBadge);
+
+            if (!string.IsNullOrWhiteSpace(item.PageUrl))
+            {
+                var openBtn = new Button
+                {
+                    Content = "↗ Abrir",
+                    MinHeight = 22,
+                    Padding = new Thickness(7, 0, 7, 0),
+                    Background = Brush(255, 18, 45, 60),
+                    BorderBrush = Brush(255, 34, 85, 115),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    FontSize = 9.5,
+                    Foreground = Brush(255, 186, 230, 253),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                openBtn.Click += (_, _) =>
+                {
+                    OpenActivityRequested?.Invoke(
+                        this,
+                        new DailyProgressOpenActivityEventArgs(item.PageUrl, item.ActivityTitle));
+                };
+                rightPanel.Children.Add(openBtn);
+            }
+
+            Grid.SetColumn(rightPanel, 1);
+            topRow.Children.Add(rightPanel);
+
+            Grid.SetRow(topRow, 0);
+            mainGrid.Children.Add(topRow);
+
+            // Fila Inferior: Texto completo del Checklist
+            var checkText = new TextBlock
+            {
+                Text = item.Text,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Brush(255, 241, 245, 249),
+                Margin = new Thickness(2, 2, 0, 0)
+            };
+            Grid.SetRow(checkText, 1);
+            mainGrid.Children.Add(checkText);
+
+            card.Child = mainGrid;
+            return card;
         }
 
         private UIElement BuildDetailCardsGrid(
