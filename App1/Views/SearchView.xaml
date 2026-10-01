@@ -1004,6 +1004,7 @@
                         <ComboBoxItem Content="Ninguno" Tag="none" />
                         <ComboBoxItem Content="Proyecto / estado" Tag="domain" />
                         <ComboBoxItem Content="Proyecto / estado (sin cobrar/pagar)" Tag="domain_nobilling" />
+                        <ComboBoxItem Content="📁 Proyecto / Sufijo (.webs, .ads...)" Tag="project_suffix" />
                         <ComboBoxItem Content="Mes" Tag="month" />
                         <ComboBoxItem Content="Nombre asignado" Tag="name" />
                         <ComboBoxItem Content="Nombre asignado (sin terminadas)" Tag="name_noterminated" />

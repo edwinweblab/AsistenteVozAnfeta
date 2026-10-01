@@ -106,6 +106,7 @@ namespace Anfeta.UI.Views
             {
                 "domain" => ResultGroupingMode.Domain,
                 "domain_nobilling" => ResultGroupingMode.DomainNoBilling,
+                "project_suffix" => ResultGroupingMode.ProjectSuffix,
                 "month" => ResultGroupingMode.Month,
                 "name" => ResultGroupingMode.Name,
                 "name_noterminated" or "name_nocompleted" => ResultGroupingMode.NameNoCompleted,
@@ -159,6 +160,7 @@ namespace Anfeta.UI.Views
             {
                 ResultGroupingMode.Domain => "proyecto / estado",
                 ResultGroupingMode.DomainNoBilling => "proyecto / estado (sin cobrar/pagar)",
+                ResultGroupingMode.ProjectSuffix => "proyecto y sufijo (.webs, .ads, .ceo...)",
                 ResultGroupingMode.Month => "mes",
                 ResultGroupingMode.Name => "persona asignada",
                 ResultGroupingMode.NameNoCompleted => "nombre asignado (sin terminadas)",

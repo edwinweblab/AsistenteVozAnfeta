@@ -61,6 +61,7 @@ namespace Anfeta.UI.Views
                 SelectComboItemByTag(GroupResultsCombo, _resultGroupingMode switch
                 {
                     ResultGroupingMode.DomainNoBilling => "domain_nobilling",
+                    ResultGroupingMode.ProjectSuffix => "project_suffix",
                     ResultGroupingMode.AreaNoBilling => "area_nobilling",
                     ResultGroupingMode.NameNoCompleted => "name_noterminated",
                     _ => _resultGroupingMode.ToString().ToLowerInvariant()

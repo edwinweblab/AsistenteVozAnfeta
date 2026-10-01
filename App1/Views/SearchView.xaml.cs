@@ -58,6 +58,7 @@ namespace Anfeta.UI.Views
             None,
             Domain,
             DomainNoBilling,
+            ProjectSuffix,
             Month,
             Name,
             NameNoCompleted,
@@ -1219,6 +1220,22 @@ namespace Anfeta.UI.Views
                         OrderWorkflowRows(state))));
             }
 
+            if (_resultGroupingMode == ResultGroupingMode.ProjectSuffix)
+            {
+                var domainGroups = rows
+                    .GroupBy(GetDomainGroupName)
+                    .OrderBy(group => IsFallbackGroup(group.Key) ? 1 : 0)
+                    .ThenBy(group => group.Key);
+
+                return domainGroups.SelectMany(domainGroup => domainGroup
+                    .GroupBy(GetProjectSuffixGroupName)
+                    .OrderBy(suffixGroup => suffixGroup.Key.Contains("General") ? 1 : 0)
+                    .ThenBy(suffixGroup => suffixGroup.Key)
+                    .Select(suffixGroup => new SearchResultGroup(
+                        $"{domainGroup.Key} · {suffixGroup.Key}",
+                        OrderWorkflowRows(suffixGroup))));
+            }
+
             if (_resultGroupingMode == ResultGroupingMode.Month)
             {
                 var monthGroups = rows
@@ -1411,6 +1428,7 @@ namespace Anfeta.UI.Views
             {
                 ResultGroupingMode.Domain => GetDomainGroupName(row),
                 ResultGroupingMode.DomainNoBilling => GetDomainGroupName(row),
+                ResultGroupingMode.ProjectSuffix => GetProjectSuffixGroupName(row),
                 ResultGroupingMode.Month => string.IsNullOrWhiteSpace(row?.MonthChipText) ? "Sin mes" : row.MonthChipText,
                 ResultGroupingMode.Name => GetAssignedPersonGroupName(row),
                 ResultGroupingMode.NameNoCompleted => GetAssignedPersonGroupName(row),
@@ -1418,6 +1436,14 @@ namespace Anfeta.UI.Views
                 ResultGroupingMode.AreaNoBilling => row?.AreaGroupName ?? "Otros",
                 _ => "Resultados"
             };
+        }
+
+        private static string GetProjectSuffixGroupName(SearchResultRow row)
+        {
+            if (row == null) return "Sin clasificar";
+            var text = $"{row.DisplayName} {row.Name} {row.PathColumn} {row.SearchText}";
+            var info = Anfeta.UI.Helpers.ProjectSuffixHelper.Parse(text);
+            return !string.IsNullOrEmpty(info.Suffix) ? info.CategoryLabel : "General / Sin sufijo";
         }
 
         private static string GetDomainGroupName(SearchResultRow row)
@@ -1886,6 +1912,7 @@ namespace Anfeta.UI.Views
                 {
                     "domain" => ResultGroupingMode.Domain,
                     "domain_nobilling" => ResultGroupingMode.DomainNoBilling,
+                    "project_suffix" => ResultGroupingMode.ProjectSuffix,
                     "month" => ResultGroupingMode.Month,
                     "name" => ResultGroupingMode.Name,
                     "name_noterminated" or "name_nocompleted" => ResultGroupingMode.NameNoCompleted,

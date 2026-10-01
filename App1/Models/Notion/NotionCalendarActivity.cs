@@ -93,6 +93,36 @@ namespace Anfeta.UI.Models.Notion
         public string UpdateText { get; set; } = "";
         public string Description { get; set; } = "";
 
+        // Propiedades de match para Sufijos y Carpetas de Dropbox (Weblab)
+        private string? _parsedDomain;
+        public string ParsedDomain =>
+            _parsedDomain ??= Anfeta.UI.Helpers.ProjectSuffixHelper.Parse(string.IsNullOrWhiteSpace(Project) ? Title : Project).Domain;
+
+        private string? _parsedSuffix;
+        public string ParsedSuffix =>
+            _parsedSuffix ??= Anfeta.UI.Helpers.ProjectSuffixHelper.Parse(string.IsNullOrWhiteSpace(Project) ? Title : Project).Suffix;
+
+        public string SuffixCategoryLabel =>
+            Anfeta.UI.Helpers.ProjectSuffixHelper.SuffixLabels.TryGetValue(ParsedSuffix, out var lbl) ? lbl : (string.IsNullOrEmpty(ParsedSuffix) ? "General" : ParsedSuffix);
+
+        // Diferenciación entre Crítico y Recurrente
+        public bool IsRecurring =>
+            Title.IndexOf("recurrente", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            Title.IndexOf("habito", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            Title.IndexOf("hábito", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            Project.IndexOf("recurrente", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        public bool IsCritical =>
+            !IsRecurring && (
+                IsActivityOverdue ||
+                Title.IndexOf("urgente", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                Title.IndexOf("00 ", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                Title.IndexOf("001", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                Title.IndexOf("critico", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                Title.IndexOf("crítico", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                string.Equals(Status, "Atrasado", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Status, "Rezagada", StringComparison.OrdinalIgnoreCase));
+
         // Fechas de control para mostrar antigüedad y presupuesto visual
         // dentro del calendario. Se leen directamente desde Notion.
         public DateTime? ActivityCreatedDate { get; set; }

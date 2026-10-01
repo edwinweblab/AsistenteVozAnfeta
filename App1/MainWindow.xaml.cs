@@ -820,6 +820,15 @@ namespace Anfeta.UI
             if (string.IsNullOrWhiteSpace(currentUserTag))
                 return false;
 
+            // John (jjohn) supervisa la creación de páginas nuevas en Notion.
+            // Si el usuario configurado es John y es una actividad/página de Notion,
+            // se le notifica para revisión inmediata tal como solicitó.
+            if (string.Equals(currentUserTag, "jjohn", StringComparison.OrdinalIgnoreCase) &&
+                reminder.Source == Models.Weblab.SearchSource.Notion)
+            {
+                return true;
+            }
+
             return string.Equals(
                 recipientTag,
                 currentUserTag,

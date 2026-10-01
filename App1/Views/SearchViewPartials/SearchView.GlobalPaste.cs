@@ -502,6 +502,54 @@ namespace Anfeta.UI.Views
             }
             tagsStack.Children.Add(mainTagsRow);
 
+            // Fila de sufijos de proyecto estándar pedidos por John (.webs, .ads, .ceo, etc.)
+            var suffixesRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+            suffixesRow.Children.Add(new TextBlock
+            {
+                Text = "Sufijos John:",
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = 0.8
+            });
+
+            var quickSuffixes = new[]
+            {
+                (".webs", "🌐 Web"),
+                (".ads", "📢 Ads"),
+                (".ceo", "🔍 SEO"),
+                (".auditoria", "📋 Auditoría"),
+                (".cotizacion", "💰 Cotización"),
+                (".preproyecto", "🚀 Pre-Proyecto"),
+                (".software", "💻 Software"),
+                (".aplicacion", "📱 Aplicación")
+            };
+
+            foreach (var (suf, label) in quickSuffixes)
+            {
+                var sBtn = new Button
+                {
+                    Content = suf,
+                    Padding = new Thickness(7, 2, 7, 2),
+                    CornerRadius = new CornerRadius(5),
+                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(100, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    FontSize = 11
+                };
+                ToolTipService.SetToolTip(sBtn, $"Agrega sufijo estándar {label} ({suf})");
+                sBtn.Click += (_, __) =>
+                {
+                    var cur = (titleBox.Text ?? string.Empty).Trim();
+                    if (!cur.Contains(suf, StringComparison.OrdinalIgnoreCase))
+                    {
+                        titleBox.Text = string.IsNullOrWhiteSpace(cur) ? suf : $"{cur} {suf}";
+                        titleBox.SelectionStart = titleBox.Text.Length;
+                    }
+                };
+                suffixesRow.Children.Add(sBtn);
+            }
+            tagsStack.Children.Add(suffixesRow);
+
             // Personas
             var personCombo = new ComboBox
             {
@@ -734,8 +782,13 @@ namespace Anfeta.UI.Views
 
                 if (isDropbox)
                 {
+                    var sInfo = Anfeta.UI.Helpers.ProjectSuffixHelper.Parse($"{currentTitle} {clipboardText}");
+                    var targetFolderLabel = !string.IsNullOrEmpty(sInfo.Suffix)
+                        ? $"DRX/{sInfo.Domain}.{sInfo.Suffix}/"
+                        : $"DRX/{domain}.Carpeta/";
+
                     dropboxDisclaimerCard.Visibility = Visibility.Visible;
-                    destHintText.Text = $"📦 Se guardará en Dropbox: DRX/{domain}.Carpeta/ como {(isUrl ? "acceso directo (.url)" : "archivo de texto (.txt)")}";
+                    destHintText.Text = $"📦 Se guardará en Dropbox: {targetFolderLabel} como {(isUrl ? "acceso directo (.url)" : "archivo de texto (.txt)")}";
                     dialog.PrimaryButtonText = isUrl ? "Guardar enlace .url en Dropbox" : "Guardar archivo .txt en Dropbox";
                     titleBox.Header = isUrl ? "Nombre del enlace en Dropbox (.url):" : "Nombre del archivo de texto en Dropbox (.txt):";
                     titleBox.PlaceholderText = "Ej: notas-reunion o [dominio.com] [tipo] [persona] [descripcion]...";
@@ -918,7 +971,9 @@ namespace Anfeta.UI.Views
                 return;
             }
 
-            var domain = ExtractClientDomainFromPaste(title, body);
+            var suffixInfo = Anfeta.UI.Helpers.ProjectSuffixHelper.Parse($"{title} {body}");
+            var domain = !string.IsNullOrEmpty(suffixInfo.Domain) ? suffixInfo.Domain : ExtractClientDomainFromPaste(title, body);
+            var suffix = suffixInfo.Suffix;
 
             // 1. Resolver la carpeta DRX dentro de la raíz de Dropbox
             string drxRoot;
@@ -938,39 +993,10 @@ namespace Anfeta.UI.Views
                     Directory.CreateDirectory(drxRoot);
                 }
 
-                // 2. Si ya existe una carpeta con ese dominio (ej: {dominio}.Carpeta), reutilizarla; si no, crearla
-                var expectedFolderName = $"{domain}.Carpeta";
-                var domainPrefix = domain.EndsWith(".com", StringComparison.OrdinalIgnoreCase)
-                    ? domain.Substring(0, domain.Length - 4)
-                    : domain;
-
-                string targetFolder;
-                var existingDir = Directory.EnumerateDirectories(drxRoot)
-                    .FirstOrDefault(d =>
-                    {
-                        var dirName = Path.GetFileName(d);
-                        if (string.Equals(dirName, expectedFolderName, StringComparison.OrdinalIgnoreCase))
-                            return true;
-
-                        if (dirName.EndsWith(".Carpeta", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var cleanDirBase = dirName.Substring(0, dirName.Length - ".Carpeta".Length);
-                            if (string.Equals(cleanDirBase, domain, StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(cleanDirBase, domainPrefix, StringComparison.OrdinalIgnoreCase))
-                            {
-                                return true;
-                            }
-                        }
-                        return false;
-                    });
-
-                if (!string.IsNullOrEmpty(existingDir))
+                // 2. Resolver carpeta con coincidencia de sufijo o carpeta general
+                var targetFolder = Anfeta.UI.Helpers.ProjectSuffixHelper.ResolveDropboxFolderPath(drxRoot, domain, suffix);
+                if (!Directory.Exists(targetFolder))
                 {
-                    targetFolder = existingDir;
-                }
-                else
-                {
-                    targetFolder = Path.Combine(drxRoot, expectedFolderName);
                     Directory.CreateDirectory(targetFolder);
                 }
 
