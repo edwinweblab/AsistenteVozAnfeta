@@ -19736,23 +19736,35 @@ private static bool HasExactCalendarPhase(
             var activities =
                 GetCalendarPersonPreviewActivities(person);
 
-            await HydrateCalendarChecklistStatsAsync(
-                activities,
-                $"Cargando avance de {person}",
-                forceRefresh: false);
-
-            if (CalendarPersonPreviewPanel?.Visibility ==
-                    Visibility.Visible &&
-                string.Equals(
-                    _calendarPersonPreviewPerson,
-                    person,
-                    StringComparison.OrdinalIgnoreCase))
+            var previewCts = _calendarPersonPreviewCts;
+            _ = Task.Run(async () =>
             {
-                RenderCalendarPersonPreviewItems(person);
-                UpdateCalendarChecklistVisuals(
-                    activities.Select(
-                        activity => activity.PageId));
-            }
+                var ct = previewCts?.Token ?? CancellationToken.None;
+                await HydrateCalendarChecklistStatsAsync(
+                    activities,
+                    $"Cargando avance de {person}",
+                    forceRefresh: false,
+                    cancellationToken: ct);
+
+                if (ct.IsCancellationRequested)
+                    return;
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (CalendarPersonPreviewPanel?.Visibility ==
+                            Visibility.Visible &&
+                        string.Equals(
+                            _calendarPersonPreviewPerson,
+                            person,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        RenderCalendarPersonPreviewItems(person);
+                        UpdateCalendarChecklistVisuals(
+                            activities.Select(
+                                activity => activity.PageId));
+                    }
+                });
+            });
         }
 
         private void CalendarPersonPreviewClose_Click(
@@ -19772,7 +19784,14 @@ private static bool HasExactCalendarPhase(
             }
             else if (!string.IsNullOrWhiteSpace(_calendarPersonPreviewPerson))
             {
-                RenderCalendarPersonPreviewItems(_calendarPersonPreviewPerson);
+                if (_calendarPersonPanelMode == CalendarPersonPanelViewMode.QuickProgress)
+                {
+                    await LoadAndRenderQuickDailyProgressAsync(_calendarPersonPreviewPerson);
+                }
+                else
+                {
+                    RenderCalendarPersonPreviewItems(_calendarPersonPreviewPerson);
+                }
             }
         }
 
@@ -19832,6 +19851,8 @@ private static bool HasExactCalendarPhase(
 
             CalendarPersonPreviewDate.Text =
                 FormatCalendarDate(_calendarSelectedDate);
+
+            InitializeCalendarPersonPanelHeader(person);
 
             RenderCalendarPersonPreviewItems(person);
 
@@ -21241,7 +21262,7 @@ private static bool HasExactCalendarPhase(
             }
             else
             {
-                // Vista por persona: conserva el diseño anterior.
+                // Vista por persona: cabecera con hora, título y botón de avance rápido
                 heading.ColumnDefinitions.Add(
                     new ColumnDefinition
                     {
@@ -21254,6 +21275,12 @@ private static bool HasExactCalendarPhase(
                         Width = new GridLength(
                             1,
                             GridUnitType.Star)
+                    });
+
+                heading.ColumnDefinitions.Add(
+                    new ColumnDefinition
+                    {
+                        Width = GridLength.Auto
                     });
 
                 var time = new TextBlock
@@ -21285,11 +21312,36 @@ private static bool HasExactCalendarPhase(
                     TextTrimming = TextTrimming.None
                 };
 
+                var quickProgressBtn = new Button
+                {
+                    Content = "📊 Avance diario rápido 〉",
+                    FontSize = Math.Max(8.0, 10.0 * cardScale),
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Padding = new Thickness(8, 3, 8, 3),
+                    MinHeight = 24,
+                    CornerRadius = new CornerRadius(6),
+                    Background = new SolidColorBrush(Color.FromArgb(30, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(140, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 125, 211, 252)),
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(4, 0, 0, 0),
+                    Tag = activity
+                };
+                quickProgressBtn.Click += (_, __) =>
+                {
+                    SwitchToCalendarPersonQuickProgressMode();
+                };
+                ToolTipService.SetToolTip(quickProgressBtn, "Ver todos los checklists completados hoy");
+
                 Grid.SetColumn(time, 0);
                 heading.Children.Add(time);
 
                 Grid.SetColumn(title, 1);
                 heading.Children.Add(title);
+
+                Grid.SetColumn(quickProgressBtn, 2);
+                heading.Children.Add(quickProgressBtn);
             }
 
             root.Children.Add(heading);
@@ -21712,6 +21764,15 @@ private static bool HasExactCalendarPhase(
                 actions.Children.Add(cardStopSpeechButton);
 
             root.Children.Add(actions);
+
+            // Checks completados hoy en esta actividad específica
+            var todayChecksForThisCard = GetCalendarPersonCardCompletedChecksToday(activity);
+            if (todayChecksForThisCard.Count > 0)
+            {
+                var cardChecksSection = BuildCalendarPersonCardChecksSection(todayChecksForThisCard);
+                root.Children.Add(cardChecksSection);
+            }
+
             root.Children.Add(contentHost);
 
             return new Border
@@ -26777,6 +26838,17 @@ private static bool HasExactCalendarPhase(
                 CalendarHeaderReturnActivities_Click;
 
             flyout.Items.Add(returnActivities);
+
+            var quickProgressItem = new MenuFlyoutItem
+            {
+                Text = "📊 Avance diario rápido",
+                Tag = person
+            };
+
+            quickProgressItem.Click +=
+                CalendarHeaderQuickDailyProgress_Click;
+
+            flyout.Items.Add(quickProgressItem);
             flyout.Items.Add(new MenuFlyoutSeparator());
 
             var moveLeft = new MenuFlyoutItem

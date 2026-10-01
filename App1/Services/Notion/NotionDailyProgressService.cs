@@ -1067,7 +1067,8 @@ namespace Anfeta.UI.Services.Notion
             bool forceRefresh = false,
             bool requireFreshDay = false,
             IProgress<string>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? targetPerson = null)
         {
             if (calendarService == null)
                 throw new ArgumentNullException(nameof(calendarService));
@@ -1115,13 +1116,18 @@ namespace Anfeta.UI.Services.Notion
 
             cancellationToken.ThrowIfCancellationRequested();
 
+            var normalizedTarget = !string.IsNullOrWhiteSpace(targetPerson)
+                ? NormalizePersonDisplay(targetPerson)
+                : null;
+
             var operational =
                 activities
                     .Where(activity =>
                         activity != null &&
                         !activity.IsReviewMirror &&
                         !string.IsNullOrWhiteSpace(activity.PageId) &&
-                        !IsFtfActivity(activity.Title))
+                        !IsFtfActivity(activity.Title) &&
+                        (normalizedTarget == null || string.Equals(NormalizePersonDisplay(activity.Person), normalizedTarget, StringComparison.OrdinalIgnoreCase)))
                     .GroupBy(
                         activity => activity.PageId,
                         StringComparer.OrdinalIgnoreCase)

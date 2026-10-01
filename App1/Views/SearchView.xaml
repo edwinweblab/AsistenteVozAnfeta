@@ -2350,7 +2350,7 @@
                     <Border
                         x:Name="CalendarPersonPreviewPanel"
                         Grid.Column="1"
-                        Width="420"
+                        Width="440"
                         Margin="8,0,0,0"
                         Padding="14"
                         Background="#11171D"
@@ -2365,13 +2365,36 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
-                            <Grid Grid.Row="0" ColumnSpacing="8">
+                            <!-- Cabecera principal con Avatar, Nombre, KPIs y Acciones -->
+                            <Grid Grid.Row="0" ColumnSpacing="10">
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <StackPanel Spacing="2">
+                                <!-- Avatar con Inicial -->
+                                <Border
+                                    x:Name="CalendarPersonPreviewAvatarBadge"
+                                    Grid.Column="0"
+                                    Width="36"
+                                    Height="36"
+                                    Background="#123248"
+                                    BorderBrush="#2B698E"
+                                    BorderThickness="1"
+                                    CornerRadius="18"
+                                    VerticalAlignment="Center">
+                                    <TextBlock
+                                        x:Name="CalendarPersonPreviewAvatarText"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontSize="15"
+                                        FontWeight="SemiBold"
+                                        Foreground="#BAE6FD"
+                                        Text="N" />
+                                </Border>
+
+                                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                     <TextBlock
                                         x:Name="CalendarPersonPreviewTitle"
                                         FontSize="16"
@@ -2386,7 +2409,7 @@
                                 </StackPanel>
 
                                 <StackPanel
-                                    Grid.Column="1"
+                                    Grid.Column="2"
                                     Orientation="Horizontal"
                                     Spacing="4"
                                     VerticalAlignment="Center">
@@ -2396,33 +2419,172 @@
                                         Click="CalendarPersonPreviewRefresh_Click"
                                         Content="🔄"
                                         FontSize="11"
-                                        ToolTipService.ToolTip="Actualizar y depurar actividades eliminadas en Notion" />
+                                        ToolTipService.ToolTip="Actualizar datos y depurar eliminadas" />
                                     <Button
                                         Style="{StaticResource CalendarIconButtonStyle}"
                                         Click="CalendarPersonPreviewClose_Click"
                                         Content="✕"
-                                        ToolTipService.ToolTip="Cerrar vista previa por persona" />
+                                        ToolTipService.ToolTip="Cerrar panel" />
                                 </StackPanel>
                             </Grid>
 
-                            <TextBlock
-                                x:Name="CalendarPersonPreviewSummary"
-                                Grid.Row="1"
-                                FontSize="11"
-                                Foreground="#94A3B8"
-                                Text="Selecciona una persona para ver sus actividades."
-                                TextWrapping="Wrap" />
+                            <!-- Subcabecera con selector de Pestañas y Resumen / KPIs -->
+                            <Grid Grid.Row="1" RowSpacing="6">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
 
+                                <!-- Selector de Modo (Actividades vs Avance rápido) -->
+                                <Border
+                                    Grid.Row="0"
+                                    Padding="3"
+                                    Background="#0B1117"
+                                    BorderBrush="#243444"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    HorizontalAlignment="Left">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <ToggleButton
+                                            x:Name="CalendarPersonModeActivitiesToggle"
+                                            Padding="10,4"
+                                            MinHeight="28"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Background="#111820"
+                                            BorderThickness="0"
+                                            CornerRadius="6"
+                                            Foreground="#CBD5E1"
+                                            IsChecked="True"
+                                            Click="CalendarPersonModeToggle_Click"
+                                            Content="📋 Actividades" />
+                                        <ToggleButton
+                                            x:Name="CalendarPersonModeQuickProgressToggle"
+                                            Padding="10,4"
+                                            MinHeight="28"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Background="#111820"
+                                            BorderThickness="0"
+                                            CornerRadius="6"
+                                            Foreground="#CBD5E1"
+                                            Click="CalendarPersonModeToggle_Click"
+                                            Content="📊 Avance rápido" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock
+                                    x:Name="CalendarPersonPreviewSummary"
+                                    Grid.Row="1"
+                                    FontSize="11"
+                                    Foreground="#94A3B8"
+                                    Text="Selecciona una persona para ver sus actividades."
+                                    TextWrapping="Wrap" />
+                            </Grid>
+
+                            <!-- Contenedor 1: Modo Actividades (Tradicional + Checks hoy integrados) -->
                             <ScrollViewer
+                                x:Name="CalendarPersonActivitiesScrollViewer"
                                 Grid.Row="2"
                                 HorizontalScrollBarVisibility="Disabled"
                                 VerticalScrollBarVisibility="Auto"
-                                VerticalScrollMode="Enabled">
+                                VerticalScrollMode="Enabled"
+                                Visibility="Visible">
                                 <StackPanel
                                     x:Name="CalendarPersonPreviewItems"
                                     Padding="0,0,6,8"
                                     Spacing="10" />
                             </ScrollViewer>
+
+                            <!-- Contenedor 2: Modo Avance Rápido (Diseño fiel al boceto) -->
+                            <Grid
+                                x:Name="CalendarPersonQuickProgressHost"
+                                Grid.Row="2"
+                                Visibility="Collapsed">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <!-- Título verde CHECKLISTS COMPLETADOS HOY -->
+                                <Grid Grid.Row="0" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        FontSize="11"
+                                        FontWeight="SemiBold"
+                                        Foreground="#4ADE80"
+                                        Text="CHECKLISTS COMPLETADOS HOY"
+                                        VerticalAlignment="Center" />
+                                    <TextBlock
+                                        x:Name="CalendarPersonQuickCompletedCountText"
+                                        Grid.Column="1"
+                                        FontSize="10.5"
+                                        FontWeight="SemiBold"
+                                        Foreground="#4ADE80"
+                                        Text="0 completados"
+                                        VerticalAlignment="Center" />
+                                </Grid>
+
+                                <!-- Lista de checks enriquecidos -->
+                                <ScrollViewer
+                                    Grid.Row="1"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto"
+                                    VerticalScrollMode="Enabled">
+                                    <StackPanel
+                                        x:Name="CalendarPersonQuickChecklistItems"
+                                        Padding="0,0,6,8"
+                                        Spacing="8" />
+                                </ScrollViewer>
+
+                                <!-- Botón Footer: Ver todos los checklists de hoy -->
+                                <Button
+                                    x:Name="CalendarPersonQuickViewAllButton"
+                                    Grid.Row="2"
+                                    Margin="0,8,0,0"
+                                    Padding="12,8"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center"
+                                    Background="#151D25"
+                                    BorderBrush="#2B3D4D"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Click="CalendarPersonQuickViewAll_Click">
+                                    <Grid ColumnSpacing="8" HorizontalAlignment="Center">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            Text="≔"
+                                            FontSize="14"
+                                            FontWeight="Bold"
+                                            Foreground="#94A3B8"
+                                            VerticalAlignment="Center" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Text="Ver todos los checklists de hoy"
+                                            FontSize="11.5"
+                                            FontWeight="SemiBold"
+                                            Foreground="#E2E8F0"
+                                            VerticalAlignment="Center" />
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            Text="›"
+                                            FontSize="14"
+                                            FontWeight="Bold"
+                                            Foreground="#94A3B8"
+                                            VerticalAlignment="Center" />
+                                    </Grid>
+                                </Button>
+                            </Grid>
                         </Grid>
                     </Border>
                 </Grid>
