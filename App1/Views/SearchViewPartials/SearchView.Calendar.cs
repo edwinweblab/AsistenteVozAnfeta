@@ -2008,22 +2008,22 @@ namespace Anfeta.UI.Views
             {
                 var desired =
                     width >= 3000
-                        ? 520d
+                        ? 980d
                         : width >= 2200
-                            ? 460d
+                            ? 880d
                             : width >= 1500
-                                ? 420d
-                                : 360d;
+                                ? 820d
+                                : 700d;
 
                 var maximum =
                     Math.Max(
-                        300,
-                        width * 0.34);
+                        500,
+                        width * 0.55);
 
                 CalendarPersonPreviewPanel.Width =
                     Math.Clamp(
                         desired,
-                        300,
+                        500,
                         maximum);
             }
 

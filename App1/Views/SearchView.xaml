@@ -2350,7 +2350,7 @@
                     <Border
                         x:Name="CalendarPersonPreviewPanel"
                         Grid.Column="1"
-                        Width="440"
+                        Width="840"
                         Margin="8,0,0,0"
                         Padding="14"
                         Background="#11171D"

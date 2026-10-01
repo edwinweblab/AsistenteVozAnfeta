@@ -408,18 +408,49 @@ namespace Anfeta.UI.Views
         private IReadOnlyList<DailyProgressCompletedCheckItem> GetCalendarPersonCardCompletedChecksToday(
             NotionCalendarActivity activity)
         {
-            if (activity == null || string.IsNullOrWhiteSpace(activity.PageId) || _currentPersonDailySnapshot == null)
+            if (activity == null || string.IsNullOrWhiteSpace(activity.PageId))
                 return Array.Empty<DailyProgressCompletedCheckItem>();
 
-            var enriched = _currentPersonDailySnapshot.EnrichedCompletedItemsToday;
-            if (enriched == null || enriched.Count == 0)
-                return Array.Empty<DailyProgressCompletedCheckItem>();
+            // 1. Intentar obtener los checks completados directamente desde los stats en caché de la actividad
+            var stats = GetCalendarChecklistStats(activity);
+            var completedToday = stats.GetCompletedItemsOn(_calendarSelectedDate.Date);
+            if (completedToday == null || completedToday.Count == 0)
+            {
+                completedToday = stats.GetCompletedItemsOn(DateTime.Today);
+            }
 
-            return enriched.Where(item =>
-                string.Equals(item.BlockId, activity.PageId, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(item.ActivityTitle, activity.Title, StringComparison.OrdinalIgnoreCase) ||
-                (!string.IsNullOrWhiteSpace(item.PageUrl) && string.Equals(item.PageUrl, activity.PageUrl, StringComparison.OrdinalIgnoreCase)))
-                .ToList();
+            if (completedToday != null && completedToday.Count > 0)
+            {
+                return completedToday.Select(item => new DailyProgressCompletedCheckItem
+                {
+                    BlockId = item.BlockId,
+                    Text = item.Text,
+                    CompletedAt = item.CompletedAt,
+                    DateKey = item.DateKey,
+                    ActivityTitle = activity.Title,
+                    ActivityShortTitle = activity.Title,
+                    ActivityDomain = activity.ParsedDomain,
+                    ActivityProject = activity.Project,
+                    PageUrl = activity.PageUrl,
+                    Person = activity.Person
+                }).ToList();
+            }
+
+            // 2. Si no están en stats, intentar desde el snapshot diario enriquecido
+            if (_currentPersonDailySnapshot != null)
+            {
+                var enriched = _currentPersonDailySnapshot.EnrichedCompletedItemsToday;
+                if (enriched != null && enriched.Count > 0)
+                {
+                    return enriched.Where(item =>
+                        string.Equals(item.BlockId, activity.PageId, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(item.ActivityTitle, activity.Title, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(item.PageUrl) && string.Equals(item.PageUrl, activity.PageUrl, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                }
+            }
+
+            return Array.Empty<DailyProgressCompletedCheckItem>();
         }
 
         private UIElement BuildCalendarPersonCardChecksSection(
