@@ -1180,8 +1180,6 @@ namespace Anfeta.UI.Views
 
             DispatcherQueue.TryEnqueue(() =>
             {
-                ApplyTextScaleToVisualTree();
-                ApplyResultColumnWidthsToVisualTree();
                 ApplyResultsViewMode();
             });
         }
@@ -2166,7 +2164,10 @@ namespace Anfeta.UI.Views
         {
             if (args.ItemContainer != null)
             {
-                ApplyTextScaleRecursive(args.ItemContainer);
+                if (Math.Abs(_textScale - 1.0) > 0.001)
+                {
+                    ApplyTextScaleRecursive(args.ItemContainer);
+                }
             }
         }
 
@@ -2632,6 +2633,7 @@ namespace Anfeta.UI.Views
                 grid.ColumnDefinitions[6].Width = new GridLength(schedW);
                 grid.ColumnDefinitions[7].Width = dateW > 0 ? new GridLength(5) : new GridLength(0);
                 grid.ColumnDefinitions[8].Width = new GridLength(dateW);
+                return;
             }
 
             var childCount = VisualTreeHelper.GetChildrenCount(node);

@@ -122,6 +122,7 @@
                                     <ComboBoxItem Content="John" Tag="jjohn" />
                                     <ComboBoxItem Content="Karla" Tag="kkarl" />
                                     <ComboBoxItem Content="Isaias" Tag="iisaia" />
+                                    <ComboBoxItem Content="Andrade" Tag="aandr" />
                                     <ComboBoxItem Content="Brian" Tag="bbria" />
                                     <ComboBoxItem Content="Genaro" Tag="ggena" />
                                     <ComboBoxItem Content="Neftali" Tag="nneft" />

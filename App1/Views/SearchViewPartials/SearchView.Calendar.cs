@@ -10607,19 +10607,39 @@ private static bool HasExactCalendarPhase(
                     : $"Estado: Filtro exacto {_calendarPhaseFilter} aplicado ✅";
         }
 
+        private DispatcherTimer? _calendarSearchDebounceTimer;
+
         private void ApplyCalendarSearchFilter(
             string query)
         {
-            _calendarSearchQuery =
-                (query ?? string.Empty).Trim();
+            var nextQuery = (query ?? string.Empty).Trim();
+            if (string.Equals(_calendarSearchQuery, nextQuery, StringComparison.Ordinal))
+                return;
 
+            _calendarSearchQuery = nextQuery;
             HideCalendarActivityPreviewFlyout();
-            DrawCalendar(_calendarActivities);
 
-            StatusText.Text =
-                string.IsNullOrWhiteSpace(_calendarSearchQuery)
-                    ? $"Estado: Filtro del calendario limpiado ✅ ({_calendarActivities.Count} actividades)"
-                    : $"Estado: Calendario filtrado por “{_calendarSearchQuery}” ✅";
+            if (_calendarSearchDebounceTimer == null)
+            {
+                _calendarSearchDebounceTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(160)
+                };
+
+                _calendarSearchDebounceTimer.Tick += (_, __) =>
+                {
+                    _calendarSearchDebounceTimer.Stop();
+                    DrawCalendar(_calendarActivities);
+
+                    StatusText.Text =
+                        string.IsNullOrWhiteSpace(_calendarSearchQuery)
+                            ? $"Estado: Filtro del calendario limpiado ✅ ({_calendarActivities.Count} actividades)"
+                            : $"Estado: Calendario filtrado por “{_calendarSearchQuery}” ✅";
+                };
+            }
+
+            _calendarSearchDebounceTimer.Stop();
+            _calendarSearchDebounceTimer.Start();
         }
 
         private static IReadOnlyList<NotionCalendarActivity>
@@ -10636,26 +10656,7 @@ private static bool HasExactCalendarPhase(
             return activities
                 .Where(activity =>
                 {
-                    var searchable = string.Join(
-                        " ",
-                        new[]
-                        {
-                            activity.Title,
-                            activity.Person,
-                            activity.OriginalPerson,
-                            activity.Project,
-                            activity.Status,
-                            activity.UpdateText,
-                            activity.Description,
-                            activity.PageUrl,
-                            activity.TimeLabel,
-                            activity.Start.ToString(
-                                "dd/MM/yyyy HH:mm",
-                                CultureInfo.InvariantCulture),
-                            activity.End.ToString(
-                                "dd/MM/yyyy HH:mm",
-                                CultureInfo.InvariantCulture)
-                        });
+                    var searchable = activity.SearchableText;
 
                     return parts.All(part =>
                     {
@@ -18095,6 +18096,9 @@ private static bool HasExactCalendarPhase(
             UpdateCalendarStickyElements();
         }
 
+        private double _calendarLastStickyHorizontal = -1;
+        private double _calendarLastStickyVertical = -1;
+
         private void UpdateCalendarStickyElements()
         {
             if (CalendarScrollViewer == null)
@@ -18106,42 +18110,44 @@ private static bool HasExactCalendarPhase(
             var vertical =
                 CalendarScrollViewer.VerticalOffset;
 
-            foreach (var header in _calendarStickyHeaders)
-            {
-                Canvas.SetTop(header, vertical + 2);
+            var verticalChanged = Math.Abs(vertical - _calendarLastStickyVertical) > 0.5;
+            var horizontalChanged = Math.Abs(horizontal - _calendarLastStickyHorizontal) > 0.5;
 
-                // No basta con mover el header: las tarjetas de PAGOS/COBROS
-                // usan capas superiores a las que tenía el header original.
-                // Se reafirma la capa en cada scroll/zoom para que nunca pase
-                // visualmente detrás de una actividad.
-                Canvas.SetZIndex(
-                    header,
-                    CalendarStickyHeaderZIndex);
+            if (!verticalChanged && !horizontalChanged)
+                return;
+
+            _calendarLastStickyHorizontal = horizontal;
+            _calendarLastStickyVertical = vertical;
+
+            if (verticalChanged)
+            {
+                var top = vertical + 2;
+                foreach (var header in _calendarStickyHeaders)
+                {
+                    Canvas.SetTop(header, top);
+                }
             }
 
-            foreach (var hour in _calendarStickyHours)
+            if (horizontalChanged)
             {
-                var baseLeft =
-                    hour.Tag is CalendarStickyPosition position
-                        ? position.Left
-                        : 8;
+                foreach (var hour in _calendarStickyHours)
+                {
+                    var baseLeft =
+                        hour.Tag is CalendarStickyPosition position
+                            ? position.Left
+                            : 8;
 
-                Canvas.SetLeft(hour, horizontal + baseLeft);
+                    Canvas.SetLeft(hour, horizontal + baseLeft);
+                }
             }
 
             if (_calendarStickyCorner != null)
             {
-                Canvas.SetLeft(
-                    _calendarStickyCorner,
-                    horizontal + 10);
+                if (horizontalChanged)
+                    Canvas.SetLeft(_calendarStickyCorner, horizontal + 10);
 
-                Canvas.SetTop(
-                    _calendarStickyCorner,
-                    vertical + 17 * _calendarZoom);
-
-                Canvas.SetZIndex(
-                    _calendarStickyCorner,
-                    CalendarStickyCornerZIndex);
+                if (verticalChanged)
+                    Canvas.SetTop(_calendarStickyCorner, vertical + 17 * _calendarZoom);
             }
         }
 

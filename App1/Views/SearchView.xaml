@@ -3583,6 +3583,14 @@
                             </Style>
                         </ListView.ItemContainerStyle>
 
+                        <ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ItemsStackPanel
+                                    Orientation="Vertical"
+                                    CacheLength="2.0" />
+                            </ItemsPanelTemplate>
+                        </ListView.ItemsPanel>
+
                         <ListView.GroupStyle>
                             <GroupStyle>
                                 <GroupStyle.HeaderTemplate>

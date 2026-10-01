@@ -26,11 +26,11 @@
 		<None Remove="Views\Dialogs\SavedSearchFilterDialog.xaml" />
 		<None Remove="Views\Dialogs\VoiceCommandEditDialog.xaml" />
 		<None Remove="Views\Dialogs\VoiceCommandsDialog.xaml" />
+		<None Remove="Views\DailyProgressPage.xaml" />
 		<None Remove="Views\GoogleCalendarView.xaml" />
 		<None Remove="Views\LinkSharedAccountView.xaml" />
 		<None Remove="Views\SearchTabsView.xaml" />
 		<None Remove="Views\SearchView.xaml" />
-		<None Remove="Views\TodoistView.xaml" />
 		<None Remove="Views\TroubleshootView.xaml" />
 	</ItemGroup>
 	<ItemGroup>
@@ -79,11 +79,6 @@
 		<Folder Include="Assets\vosk-model-es\" />
 	</ItemGroup>
 	<ItemGroup>
-		<Page Update="Views\TodoistView.xaml">
-			<Generator>MSBuild:Compile</Generator>
-		</Page>
-	</ItemGroup>
-	<ItemGroup>
 		<Page Update="Views\Dialogs\SavedSearchFilterDialog.xaml">
 			<Generator>MSBuild:Compile</Generator>
 		</Page>
@@ -125,6 +120,11 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Page Update="Views\SearchView.xaml">
+			<Generator>MSBuild:Compile</Generator>
+		</Page>
+	</ItemGroup>
+	<ItemGroup>
+		<Page Update="Views\DailyProgressPage.xaml">
 			<Generator>MSBuild:Compile</Generator>
 		</Page>
 	</ItemGroup>

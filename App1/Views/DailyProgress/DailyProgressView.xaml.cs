@@ -1727,6 +1727,38 @@ namespace Anfeta.UI.Views.DailyProgress
                         item.Start)
                     .ToList();
 
+            // Sección principal: todas las actividades asignadas al colaborador para este día
+            var todayAssigned = person.AllActivities
+                .Where(item => !item.IsHistoricalSnapshot)
+                .OrderBy(item => item.Start)
+                .ToList();
+
+            if (todayAssigned.Count > 0)
+            {
+                PersonDetailItems.Children.Add(
+                    BuildDetailSectionTitle(
+                        "ACTIVIDADES DEL DÍA",
+                        todayAssigned.Count,
+                        danger: false));
+
+                PersonDetailItems.Children.Add(
+                    BuildDetailCardsGrid(
+                        todayAssigned,
+                        danger: false));
+            }
+            else
+            {
+                PersonDetailItems.Children.Add(
+                    BuildDetailSectionTitle(
+                        "ACTIVIDADES DEL DÍA",
+                        0,
+                        danger: false));
+
+                PersonDetailItems.Children.Add(
+                    BuildEmptyDetailCard(
+                        "No hay actividades asignadas para este colaborador en esta fecha."));
+            }
+
             if (historicalItems.Count > 0)
             {
                 PersonDetailItems.Children.Add(
@@ -2810,10 +2842,14 @@ namespace Anfeta.UI.Views.DailyProgress
 
             if (_snapshot == null) return;
 
-            if (PersonModeToggle.IsChecked == true)
+            // Al seleccionar del desplegable, pasar directamente al modo por usuario
+            if (PersonModeToggle.IsChecked != true)
             {
-                RenderSelectedPerson();
+                PersonModeToggle.IsChecked = true;
+                GeneralModeToggle.IsChecked = false;
             }
+
+            RenderSelectedPerson();
 
             if (_weeklySnapshot != null)
                 RenderWeeklyReport(_weeklySnapshot);

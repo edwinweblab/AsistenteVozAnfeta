@@ -434,10 +434,10 @@ namespace Anfeta.UI
                 "Commands" => typeof(CommandsView),
                 "AllowedApps" => typeof(AllowedAppsView),
                 "Search" => typeof(SearchTabsView),
+                "DailyProgress" => typeof(DailyProgressPage),
                 "Settings" => typeof(SettingsView),
                 "Tests" => typeof(TestRunner),
                 "GoogleCalendar" => typeof(GoogleCalendarView),
-                "Todoist" => typeof(TodoistView),
                 _ => typeof(SearchTabsView)
             };
 

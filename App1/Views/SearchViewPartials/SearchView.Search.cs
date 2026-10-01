@@ -578,51 +578,9 @@ namespace Anfeta.UI.Views
             }
 
             var nextResults = new List<Anfeta.UI.Models.Weblab.SearchResultRow>(Math.Min(100, 500));
-            var staleLocalTargets = new List<string>();
-
             foreach (var it in items)
             {
                 token.ThrowIfCancellationRequested();
-
-                if (it.Source != Anfeta.UI.Models.Weblab.SearchSource.Notion &&
-                    Path.IsPathRooted(it.Target))
-                {
-                    bool exists;
-                    try
-                    {
-                        exists = File.Exists(it.Target) || Directory.Exists(it.Target);
-                    }
-                    catch
-                    {
-                        exists = false;
-                    }
-
-                    if (!exists)
-                    {
-                        staleLocalTargets.Add(it.Target);
-                        continue;
-                    }
-
-                    if (string.Equals(it.Type, "FILE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            var fi = new FileInfo(it.Target);
-                            if (fi.Exists)
-                            {
-                                var lastWrite = fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm");
-                                if (!string.Equals(it.ServerModified, lastWrite, StringComparison.Ordinal))
-                                {
-                                    it.ServerModified = lastWrite;
-                                    it.Size = fi.Length;
-                                }
-                            }
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
 
                 it.IsBookmarked = _bookmarksService.Exists(_bookmarks, it.Target);
                 it.Icon ??= _iconService.GetIcon(it.Type, it.Target);
@@ -630,11 +588,6 @@ namespace Anfeta.UI.Views
                 nextResults.Add(it);
                 if (nextResults.Count >= 500)
                     break;
-            }
-
-            if (staleLocalTargets.Count > 0)
-            {
-                QueuePruneDeletedLocalTargets(staleLocalTargets);
             }
 
             token.ThrowIfCancellationRequested();
@@ -681,11 +634,32 @@ namespace Anfeta.UI.Views
                 }
             }
 
-            // 2. Reemplazo limpio de elementos en la colección observable
-            Results.Clear();
+            // 2. Reemplazo eficiente para PCs de bajos recursos:
+            // Sobrescribir índices en lugar de Clear() masivo cuando el tamaño es similar,
+            // evitando que WinUI destruya y recree todos los controles visuales.
+            int commonCount = Math.Min(Results.Count, rows.Count);
+            for (int i = 0; i < commonCount; i++)
+            {
+                if (!ReferenceEquals(Results[i], rows[i]))
+                {
+                    Results[i] = rows[i];
+                }
+            }
 
-            foreach (var row in rows)
-                Results.Add(row);
+            if (Results.Count > rows.Count)
+            {
+                for (int i = Results.Count - 1; i >= rows.Count; i--)
+                {
+                    Results.RemoveAt(i);
+                }
+            }
+            else if (rows.Count > Results.Count)
+            {
+                for (int i = Results.Count; i < rows.Count; i++)
+                {
+                    Results.Add(rows[i]);
+                }
+            }
 
             RefreshResultsListView();
         }

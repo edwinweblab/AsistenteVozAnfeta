@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Anfeta.UI.Models.Notion
 {
@@ -9,6 +9,9 @@ namespace Anfeta.UI.Models.Notion
         public string Title { get; set; } = "";
         public string Person { get; set; } = "";
         public string OriginalPerson { get; set; } = "";
+        private string? _cachedSearchableText;
+        public string SearchableText =>
+            _cachedSearchableText ??= $"{Title} {Person} {OriginalPerson} {Project} {Status} {UpdateText} {Description} {PageUrl} {TimeLabel} {Start:dd/MM/yyyy HH:mm} {End:dd/MM/yyyy HH:mm}";
         public string ReviewAssignee { get; set; } = "";
         public string ReviewState { get; set; } = "";
         public DateTimeOffset? ReviewSubmittedAt { get; set; }

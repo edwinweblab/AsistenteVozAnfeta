@@ -375,6 +375,15 @@
                         <FontIcon Glyph="&#xE721;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+
+                <NavigationViewItem
+                    Content="Avance Diario"
+                    Tag="DailyProgress"
+                    ToolTipService.ToolTip="Monitoreo y avance de actividades por colaborador">
+                    <NavigationViewItem.Icon>
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE9D9;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <!--
@@ -390,16 +399,6 @@
                     ToolTipService.ToolTip="Conectar y gestionar Google Calendar">
                     <NavigationViewItem.Icon>
                         <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE787;" />
-                    </NavigationViewItem.Icon>
-                </NavigationViewItem>
-
-                <NavigationViewItem
-                    Content="Todoist"
-                    Tag="Todoist"
-                    ToolTipService.ToolTip="Calendario y tareas de Todoist">
-                    <NavigationViewItem.Icon>
-                        <!--  E8D0: icono de lista de tareas en Segoe MDL2  -->
-                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D0;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
