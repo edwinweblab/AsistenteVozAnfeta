@@ -142,6 +142,134 @@ namespace Anfeta.UI.Services.Notion
             }
         }
 
+        public async Task<string> UpdatePageStatusOrSelectAsync(
+            string token,
+            string pageId,
+            string targetStatus = "TERMINADO",
+            CancellationToken cancellationToken = default)
+        {
+            ValidateTokenAndPage(token, pageId);
+            using var http = CreateClient(token);
+
+            using var getResponse = await NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"pages/{NormalizeId(pageId)}"),
+                cancellationToken);
+
+            var getJson = await getResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!getResponse.IsSuccessStatusCode)
+            {
+                throw CreateNotionException("leer las propiedades de la página", getResponse, getJson);
+            }
+
+            using var doc = JsonDocument.Parse(getJson);
+            if (!doc.RootElement.TryGetProperty("properties", out var props) ||
+                props.ValueKind != JsonValueKind.Object)
+            {
+                throw new InvalidOperationException("Notion no devolvió las propiedades de la página.");
+            }
+
+            string? matchedPropName = null;
+            string? matchedPropType = null;
+
+            // Prioridades para localizar la propiedad de Estado / Opción múltiple
+            string[] preferredNames =
+            {
+                "(bien) Estado opcion multiple revisiones",
+                "Estado opcion multiple revisiones",
+                "Estado opción múltiple revisiones",
+                "Estado opcion multiple",
+                "Estado opción múltiple",
+                "Estado",
+                "Status",
+                "Estado de trabajo",
+                "Seguimiento Estado Proyecto"
+            };
+
+            foreach (var pref in preferredNames)
+            {
+                foreach (var p in props.EnumerateObject())
+                {
+                    if (string.Equals(p.Name.Trim(), pref, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var type = ReadString(p.Value, "type");
+                        if (type.Equals("status", StringComparison.OrdinalIgnoreCase) ||
+                            type.Equals("select", StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchedPropName = p.Name;
+                            matchedPropType = type;
+                            break;
+                        }
+                    }
+                }
+                if (matchedPropName != null) break;
+            }
+
+            // Fallback: cualquier propiedad que contenga "estado" o "status" y sea status o select
+            if (matchedPropName == null)
+            {
+                foreach (var p in props.EnumerateObject())
+                {
+                    var lower = p.Name.ToLowerInvariant();
+                    if (lower.Contains("estado") || lower.Contains("status"))
+                    {
+                        var type = ReadString(p.Value, "type");
+                        if (type.Equals("status", StringComparison.OrdinalIgnoreCase) ||
+                            type.Equals("select", StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchedPropName = p.Name;
+                            matchedPropType = type;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (matchedPropName == null || matchedPropType == null)
+            {
+                throw new InvalidOperationException("No se encontró una propiedad de tipo Estado (opción múltiple o status) en esta página.");
+            }
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["properties"] = new Dictionary<string, object?>
+                {
+                    [matchedPropName] = new Dictionary<string, object?>
+                    {
+                        [matchedPropType] = new Dictionary<string, object?>
+                        {
+                            ["name"] = targetStatus
+                        }
+                    }
+                }
+            };
+
+            var payloadJson = JsonSerializer.Serialize(payload);
+
+            using var patchResponse = await NotionRequestCoordinator.SendAsync(
+                http,
+                () => new HttpRequestMessage(
+                    HttpMethod.Patch,
+                    $"pages/{NormalizeId(pageId)}")
+                {
+                    Content = new StringContent(
+                        payloadJson,
+                        Encoding.UTF8,
+                        "application/json")
+                },
+                cancellationToken);
+
+            var patchJson = await patchResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!patchResponse.IsSuccessStatusCode)
+            {
+                throw CreateNotionException($"actualizar el estado a {targetStatus}", patchResponse, patchJson);
+            }
+
+            return matchedPropName;
+        }
+
         public async Task<bool> IsPageActiveAsync(
             string token,
             string pageId,

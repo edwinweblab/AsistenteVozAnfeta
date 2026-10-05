@@ -316,9 +316,15 @@ namespace Anfeta.UI.Views
 
         // Resumen lateral de proyectos con actividad programada HOY.
         // Se construye desde la caché del calendario; no consulta Notion.
+        private sealed record ActiveTodayProjectItem(
+            string Title,
+            string Type,
+            NotionCalendarActivity Activity);
+
         private sealed record ActiveTodayProjectSummary(
             string Domain,
-            int ActivityCount);
+            int ActivityCount,
+            IReadOnlyList<ActiveTodayProjectItem> Activities);
 
         private IReadOnlyList<ActiveTodayProjectSummary>
             _activeTodayProjects =
@@ -923,44 +929,94 @@ namespace Anfeta.UI.Views
                         !activity.IsReviewMirror &&
                         activity.Start != default &&
                         activity.Start.Date == DateTime.Today).ToList();
-            var projects = today
+            var projectItems = today
                     .Select(activity =>
                     {
-                        var domain =
-                            TryExtractFirstDomain(
-                                BuildCalendarSearchRow(activity));
+                        var row = BuildCalendarSearchRow(activity);
+                        var rawDomain =
+                            TryExtractFirstDomain(row);
 
-                        domain =
+                        var cleanDomain =
+                            SearchResultRow.CleanProjectDomain(
+                                rawDomain,
+                                out var detectedType);
+
+                        cleanDomain =
                             NormalizeCalendarProjectDomain(
-                                domain);
+                                string.IsNullOrWhiteSpace(cleanDomain)
+                                    ? rawDomain
+                                    : cleanDomain);
+
+                        // 1. Usar el chip/área oficial que ya tiene asignado SearchResultRow (ej. COTIZACIÓN, SEO, etc.)
+                        if (string.IsNullOrWhiteSpace(detectedType) && row != null)
+                        {
+                            var rowArea = row.AreaChipText;
+                            if (!string.IsNullOrWhiteSpace(rowArea) &&
+                                !string.Equals(rowArea, "S/T", StringComparison.OrdinalIgnoreCase) &&
+                                !string.Equals(rowArea, "ACT", StringComparison.OrdinalIgnoreCase))
+                            {
+                                detectedType = rowArea;
+                            }
+                        }
+
+                        // 2. Extraer área codificada de la actividad o su título (ccoti, coti, cotización, etc.)
+                        if (string.IsNullOrWhiteSpace(detectedType))
+                        {
+                            detectedType = SearchResultRow.DetectAreaFromTitleOrProject(
+                                activity.Title,
+                                activity.Project);
+                        }
+
+                        // 3. Sufijo del helper de proyectos
+                        if (string.IsNullOrWhiteSpace(detectedType) && !string.IsNullOrWhiteSpace(activity.ParsedSuffix))
+                        {
+                            detectedType = SearchResultRow.NormalizeEncodedArea(activity.ParsedSuffix);
+                        }
+
+                        if (string.IsNullOrWhiteSpace(detectedType))
+                        {
+                            detectedType = "ACT";
+                        }
+
+                        var compactTitle =
+                            GetCalendarCompactActivityTitle(activity);
 
                         return new
                         {
                             Activity = activity,
-                            Domain = domain
+                            Domain = cleanDomain,
+                            Type = detectedType.ToUpperInvariant(),
+                            Title = compactTitle
                         };
                     })
                     .Where(item =>
-                        !string.IsNullOrWhiteSpace(
-                            item.Domain))
+                        !string.IsNullOrWhiteSpace(item.Domain) &&
+                        !SearchResultRow.IsPlaceholderDomain(item.Domain))
+                    .ToList();
+
+            var projects = projectItems
                     .GroupBy(
                         item => item.Domain,
                         StringComparer.OrdinalIgnoreCase)
                     .Select(group =>
-                        new ActiveTodayProjectSummary(
+                    {
+                        var distinctActivities = group
+                            .GroupBy(
+                                x => string.IsNullOrWhiteSpace(x.Activity.PageId)
+                                    ? x.Activity.Title
+                                    : x.Activity.PageId,
+                                StringComparer.OrdinalIgnoreCase)
+                            .Select(g => new ActiveTodayProjectItem(
+                                g.First().Title,
+                                g.First().Type,
+                                g.First().Activity))
+                            .ToList();
+
+                        return new ActiveTodayProjectSummary(
                             group.Key,
-                            group
-                                .Select(item =>
-                                    string.IsNullOrWhiteSpace(
-                                        item.Activity.PageId)
-                                        ? item.Activity.Title
-                                        : item.Activity.PageId)
-                                .Where(value =>
-                                    !string.IsNullOrWhiteSpace(
-                                        value))
-                                .Distinct(
-                                    StringComparer.OrdinalIgnoreCase)
-                                .Count()))
+                            distinctActivities.Count,
+                            distinctActivities);
+                    })
                     .OrderBy(item =>
                         item.Domain,
                         StringComparer.OrdinalIgnoreCase)
@@ -971,12 +1027,20 @@ namespace Anfeta.UI.Views
             _activeTodayProjects =
                 projects;
 
+            _activeTodayProjectExpanders.Clear();
+
             if (ActiveTodayProjectsPanel == null ||
                 ActiveTodayProjectsCountText == null ||
                 ActiveTodayProjectsHintText == null)
             {
                 return;
             }
+
+            if (ToggleAllActiveTodayProjectsBtn != null)
+            {
+                ToggleAllActiveTodayProjectsBtn.IsEnabled = projects.Count > 0;
+            }
+            UpdateToggleAllActiveTodayProjectsButtonText();
 
             ActiveTodayProjectsPanel.Children.Clear();
 
@@ -995,13 +1059,50 @@ namespace Anfeta.UI.Views
 
             ActiveTodayProjectsHintText.Text =
                 projects.Count == 1
-                    ? "1 proyecto con actividad hoy · clic para buscarlo"
-                    : $"{projects.Count} proyectos con actividad hoy · clic para buscar";
+                    ? "1 dominio con actividad hoy · clic para buscar"
+                    : $"{projects.Count} dominios con actividad hoy · clic para buscar";
             ActiveTodayProjectsHintText.Visibility =
                 Visibility.Visible;
 
             foreach (var project in projects)
             {
+                var projectContainer = new StackPanel
+                {
+                    Spacing = 2,
+                    HorizontalAlignment = HorizontalAlignment.Stretch
+                };
+
+                var headerGrid = new Grid
+                {
+                    ColumnSpacing = 4,
+                    HorizontalAlignment = HorizontalAlignment.Stretch
+                };
+
+                headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var chevronIcon = new FontIcon
+                {
+                    Glyph = "\uE76C",
+                    FontSize = 8.5,
+                    Foreground = new SolidColorBrush(Color.FromArgb(220, 147, 197, 253))
+                };
+
+                var expandBtn = new Button
+                {
+                    Width = 22,
+                    Height = 29,
+                    MinWidth = 0,
+                    Padding = new Thickness(0),
+                    Background = new SolidColorBrush(Color.FromArgb(20, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(70, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Content = chevronIcon
+                };
+                ToolTipService.SetToolTip(expandBtn, $"Desplegar {project.ActivityCount} actividad(es) de {project.Domain} hoy");
+
                 var button =
                     new Button
                     {
@@ -1109,25 +1210,6 @@ namespace Anfeta.UI.Views
                             }
                     };
 
-                var container =
-                    new Grid
-                    {
-                        ColumnSpacing = 4,
-                        HorizontalAlignment = HorizontalAlignment.Stretch
-                    };
-
-                container.ColumnDefinitions.Add(
-                    new ColumnDefinition
-                    {
-                        Width = new GridLength(1, GridUnitType.Star)
-                    });
-
-                container.ColumnDefinitions.Add(
-                    new ColumnDefinition
-                    {
-                        Width = GridLength.Auto
-                    });
-
                 Grid.SetColumn(
                     domainText,
                     0);
@@ -1149,8 +1231,7 @@ namespace Anfeta.UI.Views
                     button,
                     $"{project.Domain} · " +
                     $"{project.ActivityCount} actividad(es) hoy · " +
-                    "clic izquierdo: buscar · clic derecho: abrir sitio web · " +
-                    "todas las actividades de hoy");
+                    "clic: buscar dominio · clic derecho: abrir sitio web");
 
                 button.Click +=
                     ActiveTodayProject_Click;
@@ -1204,15 +1285,184 @@ namespace Anfeta.UI.Views
                 notionBtn.Click += ActiveTodayProjectNotion_Click;
                 notionBtn.RightTapped += ActiveTodayProjectNotion_RightTapped;
 
-                Grid.SetColumn(button, 0);
-                Grid.SetColumn(notionBtn, 1);
+                Grid.SetColumn(expandBtn, 0);
+                Grid.SetColumn(button, 1);
+                Grid.SetColumn(notionBtn, 2);
 
-                container.Children.Add(button);
-                container.Children.Add(notionBtn);
+                headerGrid.Children.Add(expandBtn);
+                headerGrid.Children.Add(button);
+                headerGrid.Children.Add(notionBtn);
 
-                ActiveTodayProjectsPanel.Children.Add(
-                    container);
+                var subItemsPanel = new StackPanel
+                {
+                    Margin = new Thickness(18, 2, 0, 4),
+                    Spacing = 3,
+                    Visibility = Visibility.Collapsed
+                };
+
+                foreach (var item in project.Activities)
+                {
+                    var itemCard = new Button
+                    {
+                        Tag = item.Activity,
+                        MinWidth = 0,
+                        Padding = new Thickness(6, 4, 6, 4),
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                        Background = new SolidColorBrush(Color.FromArgb(25, 15, 23, 42)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(50, 56, 189, 248)),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(6)
+                    };
+
+                    var itemGrid = new Grid { ColumnSpacing = 6 };
+                    itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                    var (chipBg, chipBorder, chipFg) = GetActiveTodayAreaChipColors(item.Type);
+                    var typeChip = new Border
+                    {
+                        Padding = new Thickness(4, 1, 4, 1),
+                        CornerRadius = new CornerRadius(4),
+                        Background = new SolidColorBrush(chipBg),
+                        BorderBrush = new SolidColorBrush(chipBorder),
+                        BorderThickness = new Thickness(1),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Child = new TextBlock
+                        {
+                            Text = item.Type,
+                            FontSize = 7.5,
+                            FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                            Foreground = new SolidColorBrush(chipFg)
+                        }
+                    };
+
+                    var titleText = new TextBlock
+                    {
+                        Text = item.Title,
+                        FontSize = 8.5,
+                        Foreground = new SolidColorBrush(Color.FromArgb(240, 226, 232, 240)),
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        MaxLines = 1
+                    };
+
+                    Grid.SetColumn(typeChip, 0);
+                    Grid.SetColumn(titleText, 1);
+                    itemGrid.Children.Add(typeChip);
+                    itemGrid.Children.Add(titleText);
+                    itemCard.Content = itemGrid;
+
+                    ToolTipService.SetToolTip(
+                        itemCard,
+                        $"{item.Type} · {item.Title}\nClic: buscar actividad · Clic derecho: abrir en Notion");
+
+                    itemCard.Click += (s, e) =>
+                    {
+                        if (s is FrameworkElement fe && fe.Tag is NotionCalendarActivity act)
+                        {
+                            var q = !string.IsNullOrWhiteSpace(act.Title) ? act.Title : project.Domain;
+                            SearchBox.Text = q;
+                            _ = RunSearchAsync(q);
+                        }
+                    };
+
+                    itemCard.RightTapped += (s, e) =>
+                    {
+                        if (s is FrameworkElement fe && fe.Tag is NotionCalendarActivity act && !string.IsNullOrWhiteSpace(act.PageUrl))
+                        {
+                            _ = Windows.System.Launcher.LaunchUriAsync(new Uri(act.PageUrl));
+                        }
+                    };
+
+                    subItemsPanel.Children.Add(itemCard);
+                }
+
+                _activeTodayProjectExpanders.Add((expandBtn, chevronIcon, subItemsPanel));
+
+                if (_areAllActiveTodayProjectsExpanded)
+                {
+                    subItemsPanel.Visibility = Visibility.Visible;
+                    chevronIcon.Glyph = "\uE70D";
+                }
+
+                expandBtn.Click += (s, e) =>
+                {
+                    if (subItemsPanel.Visibility == Visibility.Visible)
+                    {
+                        subItemsPanel.Visibility = Visibility.Collapsed;
+                        chevronIcon.Glyph = "\uE76C";
+                    }
+                    else
+                    {
+                        subItemsPanel.Visibility = Visibility.Visible;
+                        chevronIcon.Glyph = "\uE70D";
+                    }
+                    UpdateToggleAllActiveTodayProjectsButtonText();
+                };
+
+                projectContainer.Children.Add(headerGrid);
+                projectContainer.Children.Add(subItemsPanel);
+                ActiveTodayProjectsPanel.Children.Add(projectContainer);
             }
+        }
+
+        private readonly List<(Button ExpandBtn, FontIcon Chevron, StackPanel SubItems)>
+            _activeTodayProjectExpanders = new();
+        private bool _areAllActiveTodayProjectsExpanded;
+
+        private void ToggleAllActiveTodayProjects_Click(object sender, RoutedEventArgs e)
+        {
+            _areAllActiveTodayProjectsExpanded = !_areAllActiveTodayProjectsExpanded;
+            foreach (var (btn, chevron, panel) in _activeTodayProjectExpanders)
+            {
+                panel.Visibility = _areAllActiveTodayProjectsExpanded ? Visibility.Visible : Visibility.Collapsed;
+                chevron.Glyph = _areAllActiveTodayProjectsExpanded ? "\uE70D" : "\uE76C";
+            }
+            UpdateToggleAllActiveTodayProjectsButtonText();
+        }
+
+        private void UpdateToggleAllActiveTodayProjectsButtonText()
+        {
+            if (ToggleAllActiveTodayProjectsText == null || ToggleAllActiveTodayProjectsIcon == null)
+                return;
+
+            if (_activeTodayProjectExpanders.Count == 0)
+            {
+                ToggleAllActiveTodayProjectsText.Text = "Desplegar todos";
+                ToggleAllActiveTodayProjectsIcon.Glyph = "\uE76C";
+                return;
+            }
+
+            bool anyCollapsed = _activeTodayProjectExpanders.Any(x => x.SubItems.Visibility != Visibility.Visible);
+            _areAllActiveTodayProjectsExpanded = !anyCollapsed;
+
+            ToggleAllActiveTodayProjectsText.Text = _areAllActiveTodayProjectsExpanded ? "Contraer todos" : "Desplegar todos";
+            ToggleAllActiveTodayProjectsIcon.Glyph = _areAllActiveTodayProjectsExpanded ? "\uE70D" : "\uE76C";
+        }
+
+        private static (Color Background, Color Border, Color Foreground) GetActiveTodayAreaChipColors(string? type)
+        {
+            var t = (type ?? string.Empty).Trim().ToUpperInvariant();
+            if (t.Contains("ADS"))
+                return (Color.FromArgb(50, 14, 165, 233), Color.FromArgb(140, 56, 189, 248), Color.FromArgb(255, 186, 230, 253));
+            if (t.Contains("SEO"))
+                return (Color.FromArgb(50, 16, 185, 129), Color.FromArgb(140, 52, 211, 153), Color.FromArgb(255, 167, 243, 208));
+            if (t.Contains("WEB"))
+                return (Color.FromArgb(50, 139, 92, 246), Color.FromArgb(140, 167, 139, 250), Color.FromArgb(255, 221, 214, 254));
+            if (t.Contains("COTI") || t.Contains("COTIZ"))
+                return (Color.FromArgb(50, 245, 158, 11), Color.FromArgb(140, 251, 191, 36), Color.FromArgb(255, 254, 243, 199));
+            if (t.Contains("MAP"))
+                return (Color.FromArgb(50, 244, 63, 94), Color.FromArgb(140, 251, 113, 133), Color.FromArgb(255, 254, 205, 211));
+            if (t.Contains("RED"))
+                return (Color.FromArgb(50, 236, 72, 153), Color.FromArgb(140, 244, 114, 182), Color.FromArgb(255, 252, 231, 243));
+            if (t.Contains("APP") || t.Contains("PROG"))
+                return (Color.FromArgb(50, 99, 102, 241), Color.FromArgb(140, 129, 140, 248), Color.FromArgb(255, 224, 231, 255));
+            if (t.Contains("BIBL"))
+                return (Color.FromArgb(50, 168, 85, 247), Color.FromArgb(140, 192, 132, 252), Color.FromArgb(255, 243, 232, 255));
+            if (t.Contains("DISE"))
+                return (Color.FromArgb(50, 234, 88, 12), Color.FromArgb(140, 251, 146, 60), Color.FromArgb(255, 255, 237, 213));
+            return (Color.FromArgb(45, 71, 85, 105), Color.FromArgb(120, 148, 163, 184), Color.FromArgb(255, 226, 232, 240));
         }
 
         private async void ActiveTodayProjectNotion_Click(
@@ -5028,6 +5278,27 @@ namespace Anfeta.UI.Views
                         30,
                         "Plantillas reales de Cobros."),
                     new CalendarQuickTemplateDefinition(
+                        "maps",
+                        "MAPS",
+                        "mmaps",
+                        CalendarTemplateHubUrl,
+                        60,
+                        "Plantillas reales para proyectos MAPS."),
+                    new CalendarQuickTemplateDefinition(
+                        "redes",
+                        "Redes Sociales",
+                        "rrede",
+                        CalendarTemplateHubUrl,
+                        60,
+                        "Plantillas reales para proyectos de Redes Sociales."),
+                    new CalendarQuickTemplateDefinition(
+                        "aplicacion",
+                        "Aplicación",
+                        "aapli",
+                        CalendarTemplateHubUrl,
+                        60,
+                        "Plantillas reales para proyectos de Aplicaciones / Software."),
+                    new CalendarQuickTemplateDefinition(
                         "bibliotecas",
                         "Bibliotecas",
                         "bbibl",
@@ -5873,10 +6144,10 @@ namespace Anfeta.UI.Views
                 var sourcePage = new NotionQuickTemplateItem(
                     idMatch.Value,
                     template.Key == "cotizacion"
-                        ? "prtUzREVISION ccoti 26-08AGO Cotizacion Etapas dominio com n-neft k-karl b-bria g-gena j-john"
+                        ? "prtuzREVISION ccoti 26-[08AGO] Cotizacion Etapas cotizacion.dominio.com mmata john"
                         : template.Key == "acceso-dominio"
-                            ? "aprtuzDOMINIO @dominio.com acceso contraseña aacce ccont [wword o hhost o ssite o ccpane] [ddomi]"
-                            : "[correo@midominio.com] [dominio] [ttags] Acceso correo aacce ccorr",
+                            ? "aprtuzDOMINIO acceso.dominio.com acceso contraseña aacce ccont ddomi"
+                            : "correo.dominio.com acceso contraseña aacce ccorr",
                     sourceUrl);
 
                 // El MenuFlyout todavía puede estar cerrándose durante Click.
@@ -6623,16 +6894,45 @@ namespace Anfeta.UI.Views
                 seed);
         }
 
+        private static string ExtractCalendarQuickTemplateDomain(
+            string title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return string.Empty;
+
+            var match = Regex.Match(
+                title,
+                @"\[\s*(?<domain>(?:[a-z0-9_.-]+\.)*(?:dominio|midominio|ejemplo|[a-z0-9-]+)\.(?:com|com\.mx|mx|org|net|io|app|dev))\s*\]",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            if (match.Success)
+            {
+                return match.Groups["domain"].Value.Trim();
+            }
+
+            var unbracketedMatch = Regex.Match(
+                title,
+                @"(?<![\w@])(?<domain>(?:[a-z0-9-]+\.)+(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|app|dev))(?![a-z0-9_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            return unbracketedMatch.Success
+                ? unbracketedMatch.Groups["domain"].Value.Trim()
+                : string.Empty;
+        }
+
         private static string ExtractCalendarQuickTemplateOrder(
             string title)
         {
+            if (string.IsNullOrWhiteSpace(title))
+                return string.Empty;
+
             var match = Regex.Match(
-                title ?? string.Empty,
-                @"(?<!\d)(?<order>\d{1,3}\.\d{1,3})(?!\d)",
-                RegexOptions.CultureInvariant);
+                title,
+                @"(?<![\p{L}\p{Nd}_])(?<order>(?:mes|fase)?\s*\d{1,3}\.\d{1,3})(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             return match.Success
-                ? match.Groups["order"].Value
+                ? Regex.Replace(match.Groups["order"].Value, @"\s+", "").ToLowerInvariant()
                 : string.Empty;
         }
 
@@ -6665,6 +6965,13 @@ namespace Anfeta.UI.Views
                     RegexOptions.CultureInvariant);
             }
 
+            // Tokens técnicos de áreas
+            value = Regex.Replace(
+                value,
+                @"(?<![\p{L}\p{Nd}_])(?:ccoti|coti|sseo|aads|wwebs|pprog|ddise|rrede|mmaps|bbibl)(?![\p{L}\p{Nd}_])",
+                " ",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
             value = Regex.Replace(
                 value,
                 @"\b\d{2}-\[\d{2}[A-ZÁÉÍÓÚÑ]{3,4}\]|\b\d{2}-\d{2}[A-ZÁÉÍÓÚÑ]{3,4}\b|\(\s*\d{2,4}[A-ZÁÉÍÓÚÑ]{0,12}\s*\)",
@@ -6674,22 +6981,55 @@ namespace Anfeta.UI.Views
 
             value = Regex.Replace(
                 value,
-                @"(?<!\d)\d{1,3}\.\d{1,3}(?!\d)",
+                @"(?<![\p{L}\p{Nd}_])(?:mes|fase)?\s*\d{1,3}\.\d{1,3}(?![\p{L}\p{Nd}_])|\b\d{2}-F\d{2}\b",
                 " ",
-                RegexOptions.CultureInvariant);
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             value = Regex.Replace(
                 value,
-                @"(?<![\p{L}\p{Nd}_])(?:n-neft|e-emma|a-andr|k-karl|b-bria|g-gena|j-john|i-isai|s-sote|a-acal|nneft|eemma|aandr|kkarl|bbria|ggena|jjohn|iisaia|iisai|eedua|aacal)(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?:mes|fase)(?![\p{L}\p{Nd}_])",
+                " ",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            // Tokens técnicos de plantillas antiguas: 00plantilla, 00rev, ttuto, etc.
+            value = Regex.Replace(
+                value,
+                @"(?<![\p{L}\p{Nd}_])(?:00rev\d*|00plantilla|00plant|00act\d*|ttuto|hhace|ccorr|ccorp|ssite|ggrou|ootor|hhost|hhostinger|ddivi|eelem|rresp|ssiti|pplan)(?![\p{L}\p{Nd}_])",
+                " ",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            // Tags antiguos y modernos de personas
+            value = Regex.Replace(
+                value,
+                @"(?<![\p{L}\p{Nd}_])(?:n-neft|e-emma|a-andr|k-karl|b-bria|g-gena|j-john|i-isai|s-sote|a-acal|nneft|eemma|aandr|kkarl|bbria|ggena|jjohn|iisaia|iisai|eedua|aacal|mmata|neft|karl|bria|gena|john|isai|edua|acal|andr|emma)(?![\p{L}\p{Nd}_])",
                 " ",
                 RegexOptions.IgnoreCase |
                 RegexOptions.CultureInvariant);
+
+            // Quitar dominios genéricos y plantillas
+            value = Regex.Replace(
+                value,
+                @"\b(?:dominio|midominio|ejemplo)\s+(?:com|com\.mx|mx|org|net)\b",
+                " ",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            value = Regex.Replace(
+                value,
+                @"\[\s*(?:[a-z0-9_.-]+\.)*(?:dominio|midominio|ejemplo|tudominio)\.(?:com|com\.mx|mx|org|net)\s*\]",
+                " ",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             value = Regex.Replace(
                 value,
                 @"(?<![\w@])(?:https?://)?(?:www\.)?(?:[a-z0-9-]+\.)+(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev)(?![\w])",
                 " ",
                 RegexOptions.IgnoreCase |
+                RegexOptions.CultureInvariant);
+
+            value = Regex.Replace(
+                value,
+                @"\[\s*\]|\(\s*\)",
+                " ",
                 RegexOptions.CultureInvariant);
 
             value = Regex.Replace(
@@ -6726,27 +7066,118 @@ namespace Anfeta.UI.Views
             return $"{yy}-[{mm}{abbr}]";
         }
 
+        private static string GetCalendarReviewerTag(string person)
+        {
+            return NormalizeCalendarPerson(person) switch
+            {
+                "John" => "john",
+                "Karla" => "karl",
+                "Isaias" => "isai",
+                "Sotelo" => "edua",
+                "Acalli" => "acal",
+                "Andrade" => "andr",
+                "Emmanuel" => "emma",
+                "Brian" => "bria",
+                "Genaro" => "gena",
+                "Neftali" => "neft",
+                _ => string.Empty
+            };
+        }
+
         private string BuildCalendarQuickTemplateFinalTitle(
             CalendarQuickTemplateDefinition template,
             DateTime selectedDate,
             string orderToken,
             string description,
             string domain,
-            string personTag)
+            string personTag,
+            string reviewerTag = "",
+            string templateOriginalTitle = "")
         {
             var monthTag =
                 BuildCalendarTemplateMonthTag(
                     selectedDate.Date);
 
+            var cleanDom = (domain ?? string.Empty).Trim().Trim('[', ']');
+            var formattedDomain = string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(cleanDom))
+            {
+                string domainPrefix = string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(templateOriginalTitle))
+                {
+                    var prefixMatch = Regex.Match(
+                        templateOriginalTitle,
+                        @"(?:\[)?(?<prefix>[a-z0-9_.-]+\.)(?:dominio|midominio|ejemplo)\.(?:com|com\.mx|mx|org|net)(?:\])?",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                    if (prefixMatch.Success && prefixMatch.Groups["prefix"].Success)
+                    {
+                        domainPrefix = prefixMatch.Groups["prefix"].Value.ToLowerInvariant();
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(domainPrefix) && template != null)
+                {
+                    domainPrefix = (template.ProjectToken ?? string.Empty).ToLowerInvariant() switch
+                    {
+                        "sseo" or "seo" => "seo.",
+                        "aads" or "ads" => "ads.",
+                        "wwebs" or "webs" => "webs.",
+                        "ccoti" or "coti" => "cotizacion.",
+                        "mmaps" or "maps" => "maps.",
+                        "rrede" or "redes" or "ttikt" or "iinst" or "fface" or "llink" => "redes.",
+                        "aapli" or "apli" => "app.",
+                        "pprog" or "prog" => "prog.",
+                        "bbibl" or "bibl" => "biblioteca.",
+                        _ => string.Empty
+                    };
+                }
+
+                if (!string.IsNullOrWhiteSpace(domainPrefix) &&
+                    cleanDom.StartsWith(domainPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    formattedDomain = cleanDom;
+                }
+                else
+                {
+                    formattedDomain = $"{domainPrefix}{cleanDom}";
+                }
+
+                bool originalHadBrackets = !string.IsNullOrWhiteSpace(templateOriginalTitle) &&
+                    Regex.IsMatch(templateOriginalTitle, @"\[\s*(?:[a-z0-9_.-]+\.)*(?:dominio|midominio|ejemplo|[a-z0-9-]+)\.(?:com|com\.mx|mx|org|net)\s*\]", RegexOptions.IgnoreCase);
+
+                if (originalHadBrackets || (domain ?? string.Empty).Contains('['))
+                {
+                    formattedDomain = $"[{formattedDomain}]";
+                }
+            }
+
+            // Si no se especificó persona ni revisor, conservar el bloque de equipo original de la plantilla si existe
+            string teamTags = string.Empty;
+            if (string.IsNullOrWhiteSpace(personTag) && string.IsNullOrWhiteSpace(reviewerTag) && !string.IsNullOrWhiteSpace(templateOriginalTitle))
+            {
+                var teamMatch = Regex.Match(
+                    templateOriginalTitle,
+                    @"(?:\b[a-z]-[a-z0-9]+\s*)+$",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                if (teamMatch.Success)
+                {
+                    teamTags = teamMatch.Value.Trim();
+                }
+            }
+
             var titleParts = new[]
             {
                 "prtuzREVISION",
-                template.ProjectToken,
+                template?.ProjectToken,
                 monthTag,
                 orderToken,
                 description,
-                domain,
-                personTag
+                formattedDomain,
+                personTag,
+                reviewerTag,
+                teamTags
             };
 
             return Regex.Replace(
@@ -6757,7 +7188,6 @@ namespace Anfeta.UI.Views
                 @"\s+",
                 " ").Trim();
         }
-
 
         private async Task<Dictionary<string, NotionQuickPropertyCatalog>>
             LoadCalendarQuickTemplatePropertyCatalogsAsync(
@@ -6982,12 +7412,18 @@ namespace Anfeta.UI.Views
                 _calendarActivityPreviewLastCriteria ??
                 _calendarProjectPreviewCriteria;
 
+            var initialBatchDomain = !string.IsNullOrWhiteSpace(criteria?.Domain)
+                ? criteria.Domain
+                : (selectedTemplates.Count > 0
+                    ? ExtractCalendarQuickTemplateDomain(selectedTemplates[0].Title)
+                    : string.Empty);
+
             var domainBox =
                 new TextBox
                 {
                     Header = "Dominio / proyecto",
                     PlaceholderText = "ej. proyecto.com",
-                    Text = criteria?.Domain ?? string.Empty,
+                    Text = initialBatchDomain,
                     HorizontalAlignment =
                         HorizontalAlignment.Stretch
                 };
@@ -7100,6 +7536,38 @@ namespace Anfeta.UI.Views
             {
                 personCombo.SelectedIndex = 0;
             }
+
+            var reviewerCombo =
+                new ComboBox
+                {
+                    Header = "Revisor (opcional)",
+                    HorizontalAlignment =
+                        HorizontalAlignment.Stretch
+                };
+
+            reviewerCombo.Items.Add(
+                new ComboBoxItem
+                {
+                    Content = "— Sin revisor —",
+                    Tag = string.Empty
+                });
+
+            foreach (var candidatePerson in
+                     OrderRecentCalendarPeople(ActiveCalendarPeople).Where(person =>
+                         !string.Equals(
+                             person,
+                             "Sin asignar",
+                             StringComparison.OrdinalIgnoreCase)))
+            {
+                var rTag = GetCalendarReviewerTag(candidatePerson);
+                reviewerCombo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = $"{candidatePerson}{(string.IsNullOrWhiteSpace(rTag) ? "" : $" ({rTag})")}",
+                        Tag = candidatePerson
+                    });
+            }
+            reviewerCombo.SelectedIndex = 0;
 
             var datePicker =
                 new DatePicker
@@ -7240,6 +7708,24 @@ namespace Anfeta.UI.Views
                     NormalizeCalendarPerson(raw));
             }
 
+            string GetSelectedReviewerTag()
+            {
+                if (reviewerCombo.SelectedItem is not
+                        ComboBoxItem revItem)
+                {
+                    return string.Empty;
+                }
+
+                var raw =
+                    (revItem.Tag?.ToString() ??
+                     string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(raw))
+                    return string.Empty;
+
+                return GetCalendarReviewerTag(raw);
+            }
+
             void UpdateBatchPreview()
             {
                 var domain =
@@ -7253,6 +7739,9 @@ namespace Anfeta.UI.Views
 
                 var personTag =
                     GetSelectedPersonTag();
+
+                var reviewerTag =
+                    GetSelectedReviewerTag();
 
                 var lines =
                     selectedTemplates
@@ -7274,7 +7763,9 @@ namespace Anfeta.UI.Views
                                 order,
                                 activity,
                                 domain,
-                                personTag);
+                                personTag,
+                                reviewerTag,
+                                source.Title);
                         })
                         .ToList();
 
@@ -7298,6 +7789,10 @@ namespace Anfeta.UI.Views
                 (_, __) =>
                     UpdateBatchPreview();
 
+            reviewerCombo.SelectionChanged +=
+                (_, __) =>
+                    UpdateBatchPreview();
+
             datePicker.DateChanged +=
                 (_, __) =>
                     UpdateBatchPreview();
@@ -7313,7 +7808,16 @@ namespace Anfeta.UI.Views
                 {
                     Width =
                         new GridLength(
-                            1.4,
+                            1.3,
+                            GridUnitType.Star)
+                });
+
+            fields.ColumnDefinitions.Add(
+                new ColumnDefinition
+                {
+                    Width =
+                        new GridLength(
+                            1,
                             GridUnitType.Star)
                 });
 
@@ -7334,11 +7838,18 @@ namespace Anfeta.UI.Views
                 personCombo,
                 1);
 
+            Grid.SetColumn(
+                reviewerCombo,
+                2);
+
             fields.Children.Add(
                 domainBox);
 
             fields.Children.Add(
                 personCombo);
+
+            fields.Children.Add(
+                reviewerCombo);
 
             var scheduleRow =
                 new Grid
@@ -7573,6 +8084,9 @@ namespace Anfeta.UI.Views
             var personTag =
                 GetSelectedPersonTag();
 
+            var reviewerTag =
+                GetSelectedReviewerTag();
+
             var distributeSequentially =
                 sequentialCheck.IsChecked == true;
 
@@ -7621,7 +8135,9 @@ namespace Anfeta.UI.Views
                         order,
                         activity,
                         domain,
-                        personTag);
+                        personTag,
+                        reviewerTag,
+                        source.Title);
 
                 requests.Add(
                     new NotionQuickTemplateBatchRequest(
@@ -7924,20 +8440,24 @@ namespace Anfeta.UI.Views
                     sourceTemplate.Title,
                     template.ProjectToken);
 
+            var initialDomain = !string.IsNullOrWhiteSpace(criteria?.Domain)
+                ? criteria.Domain
+                : ExtractCalendarQuickTemplateDomain(sourceTemplate.Title);
+
             var domainBox = new TextBox
             {
                 Header = "Dominio / proyecto",
                 PlaceholderText = "ej. anfeta.com",
-                Text = criteria?.Domain ?? string.Empty,
+                Text = initialDomain,
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
             var orderBox = new TextBox
             {
                 Header = "Orden",
-                PlaceholderText = "ej. 2.03",
+                PlaceholderText = "ej. mes2.00 o 2.03",
                 Text = parsedOrder,
-                MaxLength = 12,
+                MaxLength = 20,
                 Width = 150,
                 HorizontalAlignment = HorizontalAlignment.Left
             };
@@ -8095,6 +8615,36 @@ namespace Anfeta.UI.Views
                 personCombo.SelectedIndex = 0;
             }
 
+            var reviewerCombo = new ComboBox
+            {
+                Header = "Revisor (opcional)",
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            reviewerCombo.Items.Add(
+                new ComboBoxItem
+                {
+                    Content = "— Sin revisor —",
+                    Tag = string.Empty
+                });
+
+            foreach (var candidatePerson in OrderRecentCalendarPeople(ActiveCalendarPeople)
+                         .Where(candidatePerson =>
+                             !string.Equals(
+                                 candidatePerson,
+                                 "Sin asignar",
+                                 StringComparison.OrdinalIgnoreCase)))
+            {
+                var rTag = GetCalendarReviewerTag(candidatePerson);
+                reviewerCombo.Items.Add(
+                    new ComboBoxItem
+                    {
+                        Content = $"{candidatePerson}{(string.IsNullOrWhiteSpace(rTag) ? "" : $" ({rTag})")}",
+                        Tag = candidatePerson
+                    });
+            }
+            reviewerCombo.SelectedIndex = 0;
+
             var datePicker = new DatePicker
             {
                 Header = "Fecha",
@@ -8219,6 +8769,21 @@ namespace Anfeta.UI.Views
                         : GetCalendarMessageRecipientTag(
                             previewPerson);
 
+                var previewRawReviewer =
+                    reviewerCombo.SelectedItem is ComboBoxItem previewRevItem
+                        ? (previewRevItem.Tag?.ToString() ?? string.Empty)
+                        : (reviewerCombo.SelectedItem?.ToString() ?? string.Empty);
+
+                var previewReviewer =
+                    NormalizeCalendarPerson(
+                        previewRawReviewer);
+
+                var previewReviewerTag =
+                    string.IsNullOrWhiteSpace(previewRawReviewer)
+                        ? string.Empty
+                        : GetCalendarReviewerTag(
+                            previewReviewer);
+
                 var previewDomain =
                     NormalizeCalendarProjectDomain(
                         domainBox.Text);
@@ -8228,10 +8793,8 @@ namespace Anfeta.UI.Views
                     @"\s+",
                     " ");
 
-                var previewOrder = Regex.Replace(
-                    (orderBox.Text ?? string.Empty).Trim(),
-                    @"[^0-9.]",
-                    string.Empty);
+                var previewOrder =
+                    (orderBox.Text ?? string.Empty).Trim();
 
                 previewText.Text =
                     BuildCalendarQuickTemplateFinalTitle(
@@ -8240,13 +8803,16 @@ namespace Anfeta.UI.Views
                         previewOrder,
                         previewDescription,
                         previewDomain,
-                        previewPersonTag);
+                        previewPersonTag,
+                        previewReviewerTag,
+                        sourceTemplate.Title);
             }
 
             domainBox.TextChanged += (_, __) => UpdatePreview();
             orderBox.TextChanged += (_, __) => UpdatePreview();
             descriptionBox.TextChanged += (_, __) => UpdatePreview();
             personCombo.SelectionChanged += (_, __) => UpdatePreview();
+            reviewerCombo.SelectionChanged += (_, __) => UpdatePreview();
             datePicker.DateChanged += (_, __) => UpdatePreview();
 
             var selectedTemplateButton = new Button
@@ -8373,9 +8939,19 @@ namespace Anfeta.UI.Views
 
             Grid.SetColumn(domainBox, 0);
             Grid.SetColumn(orderBox, 1);
-
             identityRow.Children.Add(domainBox);
             identityRow.Children.Add(orderBox);
+
+            var peopleRow = new Grid
+            {
+                ColumnSpacing = 10
+            };
+            peopleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            peopleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Grid.SetColumn(personCombo, 0);
+            Grid.SetColumn(reviewerCombo, 1);
+            peopleRow.Children.Add(personCombo);
+            peopleRow.Children.Add(reviewerCombo);
 
             var panel = new StackPanel
             {
@@ -8401,7 +8977,7 @@ namespace Anfeta.UI.Views
                     identityRow,
                     descriptionBox,
                     singlePropertiesSection,
-                    personCombo,
+                    peopleRow,
                     row,
                     previewBorder,
                     selectedTemplateButton
@@ -8580,10 +9156,18 @@ namespace Anfeta.UI.Views
                 start.AddMinutes(
                     Math.Max(15, duration));
 
-            var orderToken = Regex.Replace(
-                (orderBox.Text ?? string.Empty).Trim(),
-                @"[^0-9.]",
-                string.Empty);
+            var orderToken =
+                (orderBox.Text ?? string.Empty).Trim();
+
+            var reviewerRaw =
+                reviewerCombo.SelectedItem is ComboBoxItem revItem
+                    ? (revItem.Tag?.ToString() ?? string.Empty)
+                    : (reviewerCombo.SelectedItem?.ToString() ?? string.Empty);
+            var reviewerTag =
+                string.IsNullOrWhiteSpace(reviewerRaw)
+                    ? string.Empty
+                    : GetCalendarReviewerTag(
+                        NormalizeCalendarPerson(reviewerRaw));
 
             var title =
                 BuildCalendarQuickTemplateFinalTitle(
@@ -8592,7 +9176,9 @@ namespace Anfeta.UI.Views
                     orderToken,
                     description,
                     domain,
-                    personTag);
+                    personTag,
+                    reviewerTag,
+                    sourceTemplate.Title);
 
             var singlePropertyValues = singlePropertyBoxes
                 .Where(pair => !string.IsNullOrWhiteSpace(pair.Value.Text))
@@ -14281,6 +14867,10 @@ private static bool HasExactCalendarPhase(
                 CalendarContextCopyDomain_Click);
 
             AddItem(
+                "Copiar dominio y tipo",
+                CalendarContextCopyDomainType_Click);
+
+            AddItem(
                 "Ir al dominio",
                 CalendarContextOpenDomain_Click);
 
@@ -14632,10 +15222,10 @@ private static bool HasExactCalendarPhase(
                 " ",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-            // Tipo de proyecto técnico y canales (sseo, aads, wwebs, aapli, pprog, ddise, rrede, cchat, rrapi, mmapi, bblib, etc.):
+            // Tipo de proyecto técnico y canales (sseo, aads, wwebs, aapli, pprog, ddise, rrede, cchat, rrapi, mmapi, bblib, ccoti, coti, etc.):
             clean = Regex.Replace(
                 clean,
-                @"(?<![\p{L}\p{Nd}_])(?:sseo|wwebs|aads|aapli|pprog|ddise|rrede|cchat|rrapi|mmapi|bblib)(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?:sseo|wwebs|aads|aapli|pprog|ddise|rrede|cchat|rrapi|mmapi|bblib|ccoti|coti)(?![\p{L}\p{Nd}_])",
                 " ",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
@@ -17267,6 +17857,37 @@ private static bool HasExactCalendarPhase(
             CopyCalendarText(
                 domain,
                 $"Estado: Dominio copiado ✅ {domain}");
+        }
+
+        private void CalendarContextCopyDomainType_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var activity =
+                GetCalendarActivityFromMenuSender(sender);
+
+            if (activity == null)
+                return;
+
+            var row =
+                BuildCalendarSearchRow(activity);
+
+            var chatCode = row.GetDomainAndTypeForChat();
+            if (string.IsNullOrWhiteSpace(chatCode))
+            {
+                var domain = TryExtractFirstDomain(row);
+                if (string.IsNullOrWhiteSpace(domain))
+                {
+                    StatusText.Text =
+                        "Estado: No se encontró un dominio o tipo en esta revisión.";
+                    return;
+                }
+                chatCode = domain;
+            }
+
+            CopyCalendarText(
+                chatCode,
+                $"Estado: Dominio y tipo copiado para chat ✅ {chatCode}");
         }
 
         private async void CalendarContextOpenDomain_Click(

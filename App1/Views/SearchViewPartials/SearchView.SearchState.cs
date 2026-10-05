@@ -161,23 +161,37 @@ namespace Anfeta.UI.Views
             // texto visible/editable al SearchBox y usan el motor normal.
             var quickItems = new[]
             {
+                // Archivos / Extensiones
                 (Title: "PDF", Query: "ext:pdf", Subtitle: "Agregar ext:pdf"),
                 (Title: "Documentos", Query: "ext:doc;docx", Subtitle: "Agregar DOC / DOCX"),
                 (Title: "Hojas de cálculo", Query: "ext:xls;xlsx", Subtitle: "Agregar XLS / XLSX"),
                 (Title: "Imágenes", Query: "ext:png;jpg;jpeg;webp;gif;bmp", Subtitle: "Filtrar imágenes"),
 
+                // Tipos de Proyecto
+                (Title: "WEB", Query: "wwebs", Subtitle: "Proyectos WEB · wwebs"),
+                (Title: "SEO", Query: "sseo", Subtitle: "Proyectos SEO · sseo"),
+                (Title: "ADS", Query: "aads", Subtitle: "Campañas ADS · aads"),
+                (Title: "Cotización", Query: "ccoti", Subtitle: "Cotización por etapas · ccoti"),
+                (Title: "Google Maps", Query: "mmaps", Subtitle: "Proyectos Maps · mmaps"),
+                (Title: "Redes Sociales", Query: "rrede", Subtitle: "Redes y contenido · rrede"),
+                (Title: "Aplicaciones", Query: "aapli", Subtitle: "Software / Apps · aapli"),
+                (Title: "Programas", Query: "pprog", Subtitle: "Agregar tag pprog"),
+                (Title: "Biblioteca", Query: "bbibl", Subtitle: "Agregar tag bbibl"),
+
+                // Estados de flujo
                 (Title: "Pendientes", Query: "prtuzREVISION", Subtitle: "Agregar prtuzREVISION"),
                 (Title: "Solicitudes de revisión", Query: "rtuzREVISION", Subtitle: "Agregar rtuzREVISION"),
                 (Title: "Terminados", Query: "zREVISION", Subtitle: "Agregar zREVISION"),
-                (Title: "Programas", Query: "pprog", Subtitle: "Agregar tag pprog"),
-                (Title: "Biblioteca", Query: "bbibl", Subtitle: "Agregar tag bbibl"),
                 (Title: "Respuesta", Query: "[RESPUESTA]", Subtitle: "Agregar [RESPUESTA]"),
 
+                // Personas
+                (Title: "Neftali", Query: "nNeft", Subtitle: "Buscar actividades de Neftali"),
+                (Title: "John", Query: "jjohn", Subtitle: "Buscar actividades de John"),
+                (Title: "Karla", Query: "kKarl", Subtitle: "Buscar actividades de Karla"),
                 (Title: "Brian", Query: "bbria", Subtitle: "Buscar actividades de Brian"),
                 (Title: "Genaro", Query: "ggena", Subtitle: "Buscar actividades de Genaro"),
                 (Title: "Isaias", Query: "iisai", Subtitle: "Buscar actividades de Isaias"),
-                (Title: "Karla", Query: "kKarl", Subtitle: "Buscar actividades de Karla"),
-                (Title: "Neftali", Query: "nNeft", Subtitle: "Buscar actividades de Neftali")
+                (Title: "Sotelo", Query: "eedua", Subtitle: "Buscar actividades de Sotelo")
             };
 
             var currentTerms = SplitAutoAndTerms(current)

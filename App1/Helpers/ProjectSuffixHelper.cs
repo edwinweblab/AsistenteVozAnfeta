@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Anfeta.UI.Models.Weblab;
 
 namespace Anfeta.UI.Helpers
 {
@@ -16,7 +17,17 @@ namespace Anfeta.UI.Helpers
 
     public static class ProjectSuffixHelper
     {
-        // Sufijos estándar pedidos por John para Weblab/ANFETA
+        public static string CleanProjectDomain(string rawDomain, out string detectedType) =>
+            SearchResultRow.CleanProjectDomain(rawDomain, out detectedType);
+
+        public static string ExtractDomain(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            var match = ProjectSuffixRegex.Match(text);
+            return match.Success ? match.Groups["domain"].Value.ToLowerInvariant() : string.Empty;
+        }
+
+        // Sufijos y categorías estándar pedidos por John para Weblab/ANFETA
         public const string SUFFIX_WEBS = "webs";
         public const string SUFFIX_ADS = "ads";
         public const string SUFFIX_CEO = "ceo"; // SEO
@@ -25,6 +36,51 @@ namespace Anfeta.UI.Helpers
         public const string SUFFIX_PREPROYECTO = "preproyecto";
         public const string SUFFIX_SOFTWARE = "software";
         public const string SUFFIX_APLICACION = "aplicacion";
+
+        // Categorías preestablecidas para PROYECTO (John Shaw)
+        public static readonly IReadOnlyList<string> ProjectCategories = new[]
+        {
+            "cotizacion",
+            "disenos",
+            "facebook",
+            "instagram",
+            "linkedin",
+            "proyecto",
+            "presentacion",
+            "seo",
+            "tiktok",
+            "webs",
+            "biblioteca"
+        };
+
+        // Categorías preestablecidas para SOFTWARE (John Shaw)
+        public static readonly IReadOnlyList<string> SoftwareCategories = new[]
+        {
+            "instalador",
+            "tutoriales",
+            "cliente",
+            "software"
+        };
+
+        public static readonly IReadOnlyDictionary<string, string> CategoryDisplayLabels =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "cotizacion", "💰 Cotización" },
+                { "disenos", "🎨 Diseños" },
+                { "facebook", "📘 Facebook" },
+                { "instagram", "📸 Instagram" },
+                { "linkedin", "💼 LinkedIn" },
+                { "proyecto", "📁 Proyecto General" },
+                { "presentacion", "📊 Presentación" },
+                { "seo", "🔍 SEO" },
+                { "tiktok", "🎵 TikTok" },
+                { "webs", "🌐 Webs" },
+                { "biblioteca", "📚 Biblioteca" },
+                { "instalador", "💿 Instalador / Instalación" },
+                { "tutoriales", "🎓 Tutoriales" },
+                { "cliente", "👤 Cliente" },
+                { "software", "💻 Software" }
+            };
 
         public static readonly IReadOnlyDictionary<string, string> SuffixLabels =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -57,7 +113,7 @@ namespace Anfeta.UI.Helpers
                     Domain: "anfeta.com",
                     Suffix: string.Empty,
                     FullProjectName: "anfeta.com",
-                    LocalFolderName: "anfeta.com.Carpeta",
+                    LocalFolderName: "anfeta.com.proyecto",
                     CategoryLabel: "General",
                     IsStandardSuffix: false);
             }
@@ -70,7 +126,7 @@ namespace Anfeta.UI.Helpers
                     Domain: clean,
                     Suffix: string.Empty,
                     FullProjectName: clean,
-                    LocalFolderName: $"{clean}.Carpeta",
+                    LocalFolderName: $"{clean}.proyecto",
                     CategoryLabel: "General",
                     IsStandardSuffix: false);
             }
@@ -87,10 +143,10 @@ namespace Anfeta.UI.Helpers
                 ? domain
                 : $"{domain}.{normalizedSuffix}";
 
-            // Carpeta en Dropbox DRX: Si tiene sufijo estándar puede ser {dominio}.{sufijo} o dentro de {dominio}.Carpeta
+            // Carpeta en Dropbox DRX: Formato preferido .proyecto o .software
             var folderName = string.IsNullOrEmpty(normalizedSuffix)
-                ? $"{domain}.Carpeta"
-                : $"{domain}.{normalizedSuffix}";
+                ? $"{domain}.proyecto"
+                : (normalizedSuffix is "software" or "prog" ? $"{domain}.software" : $"{domain}.proyecto");
 
             return new ProjectSuffixInfo(
                 Domain: domain,
@@ -129,8 +185,161 @@ namespace Anfeta.UI.Helpers
         }
 
         /// <summary>
+        /// Sugiere automáticamente si es Software o Proyecto según el nombre de archivo o palabras clave.
+        /// </summary>
+        public static bool GuessIsSoftware(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            var lower = text.ToLowerInvariant();
+            return lower.Contains("instalador") ||
+                   lower.Contains("instalacion") ||
+                   lower.Contains("instalación") ||
+                   lower.Contains("setup") ||
+                   lower.Contains("msix") ||
+                   lower.Contains(".exe") ||
+                   lower.Contains("tutorial") ||
+                   (lower.Contains("software") && !lower.Contains("proyecto"));
+        }
+
+        /// <summary>
+        /// Sugiere la categoría de carpeta preestablecida según el nombre del archivo.
+        /// </summary>
+        public static string GuessCategory(string? fileName, bool isSoftware)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+                return isSoftware ? "software" : "proyecto";
+
+            var lower = fileName.ToLowerInvariant();
+
+            if (isSoftware)
+            {
+                if (lower.Contains("instalador") || lower.Contains("setup") || lower.Contains("msix") || lower.Contains("exe") || lower.Contains("instalacion") || lower.Contains("instalación"))
+                    return "instalador";
+                if (lower.Contains("tutorial") || lower.Contains("manual") || lower.Contains("guia") || lower.Contains("guía") || lower.Contains("video"))
+                    return "tutoriales";
+                if (lower.Contains("cliente"))
+                    return "cliente";
+                return "software";
+            }
+
+            if (lower.Contains("coti") || lower.Contains("presupuesto") || lower.Contains("precio"))
+                return "cotizacion";
+            if (lower.Contains("disen") || lower.Contains("diseñ") || lower.Contains("logo") || lower.Contains("flyer") || lower.Contains("banner") || lower.Contains(".png") || lower.Contains(".jpg") || lower.Contains(".jpeg") || lower.Contains(".svg"))
+                return "disenos";
+            if (lower.Contains("face") || lower.Contains("fb"))
+                return "facebook";
+            if (lower.Contains("insta") || lower.Contains("ig"))
+                return "instagram";
+            if (lower.Contains("link") || lower.Contains("linkedin"))
+                return "linkedin";
+            if (lower.Contains("present") || lower.Contains("pitch") || lower.Contains("slide") || lower.Contains("propuesta"))
+                return "presentacion";
+            if (lower.Contains("seo") || lower.Contains("posicion"))
+                return "seo";
+            if (lower.Contains("tiktok") || lower.Contains("tik"))
+                return "tiktok";
+            if (lower.Contains("web") || lower.Contains("sitio") || lower.Contains("wpress") || lower.Contains("wordpress"))
+                return "webs";
+            if (lower.Contains("biblio"))
+                return "biblioteca";
+
+            return "proyecto";
+        }
+
+        /// <summary>
+        /// Resuelve y asegura (creando automáticamente si no existen) las carpetas de Proyecto/Software
+        /// y subcarpetas preestablecidas en DRX, siguiendo el flujo solicitado por John.
+        /// </summary>
+        public static string ResolveAndEnsureSmartDropboxDestination(
+            string drxRoot,
+            string domain,
+            bool isSoftware,
+            string? category,
+            out string relativeDisplay)
+        {
+            relativeDisplay = string.Empty;
+            if (string.IsNullOrWhiteSpace(drxRoot))
+                return string.Empty;
+
+            var cleanDomain = (domain ?? "anfeta.com").Trim().Trim('.').ToLowerInvariant();
+            var domainPrefix = cleanDomain.EndsWith(".com", StringComparison.OrdinalIgnoreCase)
+                ? cleanDomain[..^4]
+                : cleanDomain;
+
+            // 1. Encontrar o crear la carpeta principal del dominio en DRX
+            string projectFolder = string.Empty;
+            if (Directory.Exists(drxRoot))
+            {
+                var existingDirs = Directory.EnumerateDirectories(drxRoot).ToList();
+                projectFolder = existingDirs.FirstOrDefault(d =>
+                {
+                    var name = Path.GetFileName(d);
+                    return string.Equals(name, $"{cleanDomain}.proyecto", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{cleanDomain}.software", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{cleanDomain}.carpeta", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{cleanDomain}.Carpeta", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, cleanDomain, StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{domainPrefix}.proyecto", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{domainPrefix}.software", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{domainPrefix}.carpeta", StringComparison.OrdinalIgnoreCase);
+                }) ?? string.Empty;
+            }
+
+            if (string.IsNullOrEmpty(projectFolder))
+            {
+                var folderSuffix = isSoftware ? "software" : "proyecto";
+                projectFolder = Path.Combine(drxRoot, $"{cleanDomain}.{folderSuffix}");
+                try { Directory.CreateDirectory(projectFolder); } catch { }
+            }
+
+            // 2. Si no se especificó subcarpeta o es raíz, retornar la carpeta principal
+            var cat = (category ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(cat) || cat is "raiz" or "raíz" or "general")
+            {
+                relativeDisplay = Path.GetFileName(projectFolder);
+                return projectFolder;
+            }
+
+            // 3. Encontrar o crear la subcarpeta de categoría dentro de la carpeta principal
+            string targetSubfolder = string.Empty;
+            if (Directory.Exists(projectFolder))
+            {
+                var subDirs = Directory.EnumerateDirectories(projectFolder).ToList();
+                targetSubfolder = subDirs.FirstOrDefault(s =>
+                {
+                    var name = Path.GetFileName(s);
+                    return string.Equals(name, $"{cat}.{cleanDomain}", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{cleanDomain}.{cat}", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, cat, StringComparison.OrdinalIgnoreCase) ||
+                           name.StartsWith($"{cat}.", StringComparison.OrdinalIgnoreCase) ||
+                           name.EndsWith($".{cat}", StringComparison.OrdinalIgnoreCase) ||
+                           name.Contains(cat, StringComparison.OrdinalIgnoreCase);
+                }) ?? string.Empty;
+            }
+
+            if (string.IsNullOrEmpty(targetSubfolder))
+            {
+                // Convención de nombrado para subcarpetas creadas automáticamente
+                // Proyecto: webs.agapetoursconcordia.com / agapetoursconcordia.com.biblioteca
+                // Software: anfeta.com.tutoriales / anfeta.com.instalador
+                string subName = isSoftware
+                    ? $"{cleanDomain}.{cat}"
+                    : (cat is "webs" ? $"{cat}.{cleanDomain}" : $"{cleanDomain}.{cat}");
+
+                targetSubfolder = Path.Combine(projectFolder, subName);
+                try { Directory.CreateDirectory(targetSubfolder); } catch { }
+            }
+
+            var projName = Path.GetFileName(projectFolder);
+            var subNameDisplay = Path.GetFileName(targetSubfolder);
+            relativeDisplay = $"{projName}\\{subNameDisplay}";
+
+            return targetSubfolder;
+        }
+
+        /// <summary>
         /// Resuelve la ruta física en Dropbox local para el dominio y sufijo especificado,
-        /// buscando compatibilidad con DRX/{dominio}.{sufijo} o DRX/{dominio}.Carpeta/{sufijo}.
+        /// buscando compatibilidad con DRX/{dominio}.proyecto, DRX/{dominio}.Carpeta o {dominio}.{sufijo}.
         /// </summary>
         public static string ResolveDropboxFolderPath(string drxRoot, string domain, string? suffix = null)
         {
@@ -152,18 +361,21 @@ namespace Anfeta.UI.Helpers
                 if (Directory.Exists(candidateExactPrefix)) return candidateExactPrefix;
             }
 
-            // 2. Buscar en la carpeta general del dominio: DRX/{dominio}.Carpeta
-            var expectedFolderName = $"{domain}.Carpeta";
+            // 2. Buscar en la carpeta general del dominio: DRX/{dominio}.proyecto o DRX/{dominio}.Carpeta
             var existingDir = Directory.EnumerateDirectories(drxRoot)
                 .FirstOrDefault(d =>
                 {
                     var dirName = Path.GetFileName(d);
-                    if (string.Equals(dirName, expectedFolderName, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(dirName, $"{domain}.proyecto", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(dirName, $"{domain}.Carpeta", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(dirName, $"{domain}.software", StringComparison.OrdinalIgnoreCase))
                         return true;
 
-                    if (dirName.EndsWith(".Carpeta", StringComparison.OrdinalIgnoreCase))
+                    if (dirName.EndsWith(".proyecto", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.EndsWith(".Carpeta", StringComparison.OrdinalIgnoreCase) ||
+                        dirName.EndsWith(".software", StringComparison.OrdinalIgnoreCase))
                     {
-                        var cleanDirBase = dirName[..^".Carpeta".Length];
+                        var cleanDirBase = dirName.Split('.')[0];
                         if (string.Equals(cleanDirBase, domain, StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(cleanDirBase, domainPrefix, StringComparison.OrdinalIgnoreCase))
                         {
@@ -187,7 +399,7 @@ namespace Anfeta.UI.Helpers
             // 3. Fallback: la ruta predeterminada esperada
             return !string.IsNullOrEmpty(normSuffix)
                 ? Path.Combine(drxRoot, $"{domain}.{normSuffix}")
-                : Path.Combine(drxRoot, expectedFolderName);
+                : Path.Combine(drxRoot, $"{domain}.proyecto");
         }
     }
 }

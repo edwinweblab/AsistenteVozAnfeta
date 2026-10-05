@@ -807,6 +807,9 @@ namespace Anfeta.UI.Views
                 {
                     row.DisplayName,
                     row.Name,
+                    row.DomainChipText,
+                    row.AreaChipText,
+                    row.DisplayLocation,
                     row.Target,
                     row.PathColumn,
                     row.SearchText,
@@ -816,6 +819,8 @@ namespace Anfeta.UI.Views
                     row.ExternalSourceName
                 }.Where(value =>
                     !string.IsNullOrWhiteSpace(value)));
+
+            var searchableWithSpaces = searchable.Replace('.', ' ').Replace('-', ' ').Replace('_', ' ');
 
             var parts = ParseFlexibleSearchParts(query);
 
@@ -853,9 +858,12 @@ namespace Anfeta.UI.Views
                     ? ContainsExactSearchPart(
                         searchable,
                         part.Value)
-                    : searchable.Contains(
+                    : (searchable.Contains(
                         part.Value,
-                        StringComparison.OrdinalIgnoreCase);
+                        StringComparison.OrdinalIgnoreCase) ||
+                       searchableWithSpaces.Contains(
+                        part.Value,
+                        StringComparison.OrdinalIgnoreCase));
             });
 
             var contentMatched = false;
@@ -935,6 +943,30 @@ namespace Anfeta.UI.Views
 
                 if (!string.IsNullOrWhiteSpace(value))
                 {
+                    // Si el usuario escribe tipo.dominio (ej. ads.agapetours.com, seo.icacalderas.com, tzp.maps.agape...)
+                    // y no está entre comillas exactas, descomponer en tokens para búsqueda flexible
+                    if (!exact && value.Contains('.') && !value.StartsWith('.') && !value.EndsWith('.'))
+                    {
+                        var prefixMatch = Regex.Match(
+                            value,
+                            @"^(?<prefix>tzp|tzs|ads|aads|seo|sseo|webs?|wwebs|maps?|mmaps|app|apli|aapli|software|prog|pprog|coti|cotizacion|cotización|redes|rrede|disen[oó]|diseñ[oó]|ddise)\.(?<rest>.+)$",
+                            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+                        if (prefixMatch.Success)
+                        {
+                            var pfx = prefixMatch.Groups["prefix"].Value;
+                            var rest = prefixMatch.Groups["rest"].Value;
+
+                            if (!string.IsNullOrWhiteSpace(pfx))
+                                result.Add(new FlexibleSearchPart(pfx, false));
+
+                            if (!string.IsNullOrWhiteSpace(rest))
+                                result.Add(new FlexibleSearchPart(rest, false));
+
+                            continue;
+                        }
+                    }
+
                     result.Add(
                         new FlexibleSearchPart(
                             value,

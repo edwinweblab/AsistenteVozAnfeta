@@ -12,9 +12,11 @@
 		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		<EnableMsixTooling>true</EnableMsixTooling>
 		<Nullable>enable</Nullable>
-		<Version>1.0.12.0</Version>
-		<AssemblyVersion>1.0.12.0</AssemblyVersion>
-		<FileVersion>1.0.12.0</FileVersion>
+		<SelfContained>true</SelfContained>
+		<WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+		<Version>1.0.123.0</Version>
+		<AssemblyVersion>1.0.123.0</AssemblyVersion>
+		<FileVersion>1.0.123.0</FileVersion>
 	</PropertyGroup>
 	<ItemGroup>
 		<None Remove="FunctionTests\TestRunner.xaml" />
@@ -32,6 +34,8 @@
 		<None Remove="Views\SearchTabsView.xaml" />
 		<None Remove="Views\SearchView.xaml" />
 		<None Remove="Views\TroubleshootView.xaml" />
+		<Compile Remove="scratch\**" />
+		<None Remove="scratch\**" />
 	</ItemGroup>
 	<ItemGroup>
 		<Page Remove="Resources\Styles.xaml" />

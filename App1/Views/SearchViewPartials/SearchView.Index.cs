@@ -1355,6 +1355,15 @@ namespace Anfeta.UI.Views
             await RemoveCompletedReminderNotificationsFromLocalIndexAsync(
                 token);
 
+            try
+            {
+                await PurgeProcessedAndCompletedRepliesAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PURGE_REPLIES_STARTUP] {ex.Message}");
+            }
+
             if (!App.LocalIndex.HasData)
                 return;
 

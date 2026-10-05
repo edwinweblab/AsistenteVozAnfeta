@@ -1248,6 +1248,28 @@ namespace Anfeta.UI.Views
                 .Distinct(StringComparer.OrdinalIgnoreCase);
         }
 
+        private async void QuickDropdownFilterItem_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuFlyoutItem item && item.Tag is string queryTerm && !string.IsNullOrWhiteSpace(queryTerm))
+            {
+                await ExecuteQuickFilterTermAsync(queryTerm);
+            }
+        }
+
+        private async Task ExecuteQuickFilterTermAsync(string queryTerm)
+        {
+            var currentText = SearchBox?.Text ?? string.Empty;
+            var finalQuery = BuildQueryByAppendingPredictiveTerm(currentText, queryTerm);
+            if (!string.IsNullOrWhiteSpace(finalQuery) && SearchBox != null)
+            {
+                _suppressSuggest = true;
+                SearchBox.Text = finalQuery;
+                _suppressSuggest = false;
+                MoveSearchBoxCaretToEnd();
+                await RunSearchAsync(finalQuery);
+            }
+        }
+
         private static bool IsCurrentPartialAliasForScope(string current, NotionBaseScope scope)
         {
             var q = NormalizeSuggestionText(current);

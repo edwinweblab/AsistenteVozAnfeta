@@ -2915,12 +2915,7 @@
                                         Opacity="0.65"
                                         Text="Accesos rápidos" />
 
-                                    <ItemsWrapGrid
-                                        Orientation="Horizontal"
-                                        MaximumRowsOrColumns="2"
-                                        ItemWidth="94"
-                                        ItemHeight="32" />
-
+                                    <!-- ACCESOS RÁPIDOS AGRUPADOS EN DROPDOWNS -->
                                     <Grid
                                         x:Name="QuickSidebarButtonsGrid"
                                         ColumnSpacing="4"
@@ -2933,75 +2928,175 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
 
-                                        <!--
-                                            Estos botones son deliberadamente compactos.
-                                            A 130–150% siguen cabiendo en dos columnas
-                                            sin depender del tamaño de fuente global.
-                                        -->
-                                        <Button Grid.Row="0" Grid.Column="0" Content="PDF" Tag="ext:pdf" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="0" Grid.Column="1" Content="DOCX" Tag="ext:doc;docx" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <!-- DROPDOWN: ARCHIVOS / EXTENSIONES -->
+                                        <Button
+                                            Grid.Row="0"
+                                            Grid.Column="0"
+                                            HorizontalAlignment="Stretch"
+                                            MinHeight="28"
+                                            Padding="4,0"
+                                            Background="#1E293B"
+                                            BorderBrush="#334155"
+                                            BorderThickness="1"
+                                            CornerRadius="12"
+                                            ToolTipService.ToolTip="Filtrar por archivo o extensión (PDF, Word, Excel, imágenes, etc.)">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
+                                                <FontIcon FontSize="11" Glyph="&#xE8B7;" Foreground="#38BDF8" />
+                                                <TextBlock VerticalAlignment="Center" FontSize="11" Text="Archivos" />
+                                                <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.6" Margin="1,1,0,0" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <MenuFlyout>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ext:pdf" Text="📕 PDF (.pdf)">
+                                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A5;" /></MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ext:doc;docx" Text="📘 Word / DOCX (.docx)">
+                                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A5;" /></MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ext:xls;xlsx" Text="📊 Excel / XLSX (.xlsx)">
+                                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A5;" /></MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ext:png;jpg;jpeg;webp;gif;bmp" Text="🖼 Imágenes (PNG, JPG, WebP)">
+                                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xEB9F;" /></MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ext:url" Text="🔗 Enlaces y accesos directos (.url)">
+                                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutSeparator />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag=".folder" Text="📁 Solo carpetas (.folder)">
+                                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ext:doc;docx;pdf;xls;xlsx;txt" Text="📋 Todos los documentos">
+                                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
+                                                    </MenuFlyoutItem>
+                                                </MenuFlyout>
+                                            </Button.Flyout>
+                                        </Button>
 
-                                        <Button Grid.Row="1" Grid.Column="0" Content="XLSX" Tag="ext:xls;xlsx" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="1" Grid.Column="1" Content="Imágenes" Tag="ext:png;jpg;jpeg;webp;gif;bmp" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <!-- DROPDOWN: PERSONAS -->
+                                        <Button
+                                            Grid.Row="0"
+                                            Grid.Column="1"
+                                            HorizontalAlignment="Stretch"
+                                            MinHeight="28"
+                                            Padding="4,0"
+                                            Background="#1E293B"
+                                            BorderBrush="#334155"
+                                            BorderThickness="1"
+                                            CornerRadius="12"
+                                            ToolTipService.ToolTip="Filtrar por persona asignada en Notion">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
+                                                <FontIcon FontSize="11" Glyph="&#xE77B;" Foreground="#A78BFA" />
+                                                <TextBlock VerticalAlignment="Center" FontSize="11" Text="Personas" />
+                                                <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.6" Margin="1,1,0,0" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <MenuFlyout>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="nneft" Text="👤 Neftali (nneft)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="jjohn" Text="👤 John (jjohn)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="kkarl" Text="👤 Karla (kkarl)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="bbria" Text="👤 Brian (bbria)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ggena" Text="👤 Genaro (ggena)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="iisai" Text="👤 Isaias (iisai)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="eedua" Text="👤 Sotelo (eedua)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="aacal" Text="👤 Acalli (aacal)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="aandr" Text="👤 Andrade (aandr)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="eemma" Text="👤 Emmanuel (eemma)" />
+                                                </MenuFlyout>
+                                            </Button.Flyout>
+                                        </Button>
 
-                                        <Button Grid.Row="2" Grid.Column="0" Content="Pendientes" Tag="prtuzREVISION" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="2" Grid.Column="1" Content="Revisión" Tag="rtuzREVISION" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <!-- DROPDOWN: TIPOS DE PROYECTO -->
+                                        <Button
+                                            Grid.Row="1"
+                                            Grid.Column="0"
+                                            HorizontalAlignment="Stretch"
+                                            MinHeight="28"
+                                            Padding="4,0"
+                                            Background="#1E293B"
+                                            BorderBrush="#334155"
+                                            BorderThickness="1"
+                                            CornerRadius="12"
+                                            ToolTipService.ToolTip="Filtrar por tipo o área de proyecto">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
+                                                <FontIcon FontSize="11" Glyph="&#xE774;" Foreground="#34D399" />
+                                                <TextBlock VerticalAlignment="Center" FontSize="11" Text="Proyectos" />
+                                                <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.6" Margin="1,1,0,0" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <MenuFlyout>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="wwebs" Text="🌐 WEB (wwebs)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="sseo" Text="🔍 SEO (sseo)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="aads" Text="📢 ADS (aads)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="ccoti" Text="💼 Cotización (ccoti)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="mmaps" Text="📍 Google Maps (mmaps)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="rrede" Text="📱 Redes Sociales (rrede)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="aapli" Text="💻 Aplicaciones (aapli)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="pprog" Text="⚙ Programas (pprog)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="bbibl" Text="📚 Bibliotecas (bbibl)" />
+                                                </MenuFlyout>
+                                            </Button.Flyout>
+                                        </Button>
 
-                                        <Button Grid.Row="3" Grid.Column="0" Content="Terminados" Tag="zREVISION" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="3" Grid.Column="1" Content="Programas" Tag="pprog" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <!-- DROPDOWN: BASES NOTION -->
+                                        <Button
+                                            Grid.Row="1"
+                                            Grid.Column="1"
+                                            HorizontalAlignment="Stretch"
+                                            MinHeight="28"
+                                            Padding="4,0"
+                                            Background="#1E293B"
+                                            BorderBrush="#334155"
+                                            BorderThickness="1"
+                                            CornerRadius="12"
+                                            ToolTipService.ToolTip="Filtrar por bases de datos de Notion">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
+                                                <FontIcon FontSize="11" Glyph="&#xEA69;" Foreground="#FBBF24" />
+                                                <TextBlock VerticalAlignment="Center" FontSize="11" Text="Notion" />
+                                                <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.6" Margin="1,1,0,0" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <MenuFlyout>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="revisiones" Text="🔄 Revisiones" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="zclientes" Text="👥 zClientes" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="zdominios" Text="🌐 zDominios" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="zproyectos" Text="📂 zProyectos" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="zpagar" Text="💳 zPAGAR" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="zcobrar" Text="💰 zCOBRAR" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="zcorreos" Text="✉ zCorreos" />
+                                                </MenuFlyout>
+                                            </Button.Flyout>
+                                        </Button>
 
-                                        <Button Grid.Row="4" Grid.Column="0" Content="Biblioteca" Tag="bbibl" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="4" Grid.Column="1" Content="Respuesta" Tag="[RESPUESTA]" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-
-                                        <Button Grid.Row="5" Grid.Column="0" Content="Revisiones" Tag="revisiones" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="5" Grid.Column="1" Content="zClientes" Tag="zclientes" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-
-                                        <Button Grid.Row="6" Grid.Column="0" Content="zDominios" Tag="zdominios" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="6" Grid.Column="1" Content="zProyectos" Tag="zproyectos" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-
-                                        <Button Grid.Row="7" Grid.Column="0" Content="zPAGAR" Tag="zpagar" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="7" Grid.Column="1" Content="zCOBRAR" Tag="zcobrar" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-
-                                        <Button Grid.Row="8" Grid.Column="0" Content="Brian" Tag="bbria" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="8" Grid.Column="1" Content="Genaro" Tag="ggena" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-
-                                        <Button Grid.Row="9" Grid.Column="0" Content="Isaias" Tag="iisai" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="9" Grid.Column="1" Content="Karla" Tag="kKarl" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-
-                                        <Button Grid.Row="10" Grid.Column="0" Content="Neftali" Tag="nNeft" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
-                                        <Button Grid.Row="10" Grid.Column="1" Content="zCorreos" Tag="zcorreos" Click="SidebarQuickQuery_Click"
-                                                MinWidth="0" MinHeight="25" Padding="2,1" FontSize="8" HorizontalAlignment="Stretch" />
+                                        <!-- DROPDOWN: ESTADOS Y FLUJO -->
+                                        <Button
+                                            Grid.Row="2"
+                                            Grid.Column="0"
+                                            Grid.ColumnSpan="2"
+                                            HorizontalAlignment="Stretch"
+                                            MinHeight="28"
+                                            Padding="4,0"
+                                            Background="#1E293B"
+                                            BorderBrush="#334155"
+                                            BorderThickness="1"
+                                            CornerRadius="12"
+                                            ToolTipService.ToolTip="Filtrar por estado o flujo de actividades">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
+                                                <FontIcon FontSize="11" Glyph="&#xE823;" Foreground="#F472B6" />
+                                                <TextBlock VerticalAlignment="Center" FontSize="11" Text="Estados / Flujo" />
+                                                <FontIcon FontSize="8" Glyph="&#xE70D;" Opacity="0.6" Margin="1,1,0,0" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <MenuFlyout>
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="prtuzREVISION" Text="⏳ Pendientes (prtuzREVISION)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="rtuzREVISION" Text="🔍 En Revisión (rtuzREVISION)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="zREVISION" Text="✅ Terminados (zREVISION)" />
+                                                    <MenuFlyoutItem Click="QuickDropdownFilterItem_Click" Tag="[RESPUESTA]" Text="💬 Con Respuesta ([RESPUESTA])" />
+                                                </MenuFlyout>
+                                            </Button.Flyout>
+                                        </Button>
                                     </Grid>
 
                                     <!--
@@ -3067,9 +3162,38 @@
                                                 Text="Cargando proyectos del día…"
                                                 TextWrapping="Wrap" />
 
-                                            <Button Content="Resumen del día · IA" Click="DailyAiSummary_Click"
-                                                HorizontalAlignment="Stretch" MinWidth="0"
-                                                ToolTipService.ToolTip="Resumen local y análisis opcional con OpenAI de las actividades cargadas de hoy." />
+                                            <Grid ColumnDefinitions="*, *" ColumnSpacing="4">
+                                                <Button
+                                                    x:Name="ToggleAllActiveTodayProjectsBtn"
+                                                    Click="ToggleAllActiveTodayProjects_Click"
+                                                    HorizontalAlignment="Stretch"
+                                                    MinHeight="25"
+                                                    Padding="4,0"
+                                                    FontSize="8.5"
+                                                    CornerRadius="6"
+                                                    Background="#1B2B38"
+                                                    BorderBrush="#335670"
+                                                    BorderThickness="1"
+                                                    ToolTipService.ToolTip="Desplegar o contraer las actividades de todos los proyectos de hoy">
+                                                    <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                                                        <FontIcon x:Name="ToggleAllActiveTodayProjectsIcon" Glyph="&#xE76C;" FontSize="8" Foreground="#38BDF8" />
+                                                        <TextBlock x:Name="ToggleAllActiveTodayProjectsText" Text="Desplegar todos" VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button
+                                                    Grid.Column="1"
+                                                    Content="Resumen IA"
+                                                    Click="DailyAiSummary_Click"
+                                                    HorizontalAlignment="Stretch"
+                                                    MinHeight="25"
+                                                    Padding="4,0"
+                                                    FontSize="8.5"
+                                                    CornerRadius="6"
+                                                    Background="#1A332B"
+                                                    BorderBrush="#245C4B"
+                                                    BorderThickness="1"
+                                                    ToolTipService.ToolTip="Resumen local y análisis opcional con OpenAI de las actividades cargadas de hoy." />
+                                            </Grid>
                                             <StackPanel
                                                 x:Name="ActiveTodayProjectsPanel"
                                                 HorizontalAlignment="Stretch"
@@ -4058,77 +4182,166 @@
 
                         <ListView.ContextFlyout>
                             <MenuFlyout x:Name="ResultsContextFlyout" Opening="ResultsContextFlyout_Opening">
+                                <MenuFlyout.MenuFlyoutPresenterStyle>
+                                    <Style TargetType="MenuFlyoutPresenter">
+                                        <Setter Property="Background" Value="#F20D1522" />
+                                        <Setter Property="BorderBrush" Value="#4D00C8FF" />
+                                        <Setter Property="BorderThickness" Value="1.2" />
+                                        <Setter Property="CornerRadius" Value="12" />
+                                        <Setter Property="Padding" Value="4,6,4,6" />
+                                    </Style>
+                                </MenuFlyout.MenuFlyoutPresenterStyle>
+
                                 <MenuFlyoutSubItem x:Name="CtxActivityState" Text="Cambiar estado">
-                                    <MenuFlyoutItem x:Name="CtxActivityReview" Text="Enviar a revisión…" Click="ResultsActivityState_Click" />
-                                    <MenuFlyoutItem x:Name="CtxActivityComplete" Text="T · Terminar…" Click="ResultsActivityState_Click" />
+                                    <MenuFlyoutSubItem.Icon>
+                                        <FontIcon Glyph="&#xE7C3;" Foreground="#F59E0B" />
+                                    </MenuFlyoutSubItem.Icon>
+                                    <MenuFlyoutItem x:Name="CtxActivityReview" Text="Enviar a revisión…" Click="ResultsActivityState_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE76E;" Foreground="#38BDF8" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem x:Name="CtxActivityComplete" Text="T · Terminar…" Click="ResultsActivityState_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE73E;" Foreground="#22C55E" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                 </MenuFlyoutSubItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuOpenItem"
                                     Click="CtxOpen_Click"
-                                    Text="Abrir" />
+                                    Text="Abrir">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE7AC;" Foreground="#00C8FF" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuOpenExplorerItem"
                                     Click="CtxOpenPathReliable_Click"
-                                    Text="Abrir en Explorador" />
+                                    Text="Abrir en Explorador">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE838;" Foreground="#FFB900" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuRenameItem"
                                     Click="CtxRename_Click"
-                                    Text="Renombrar…" />
+                                    Text="Renombrar…">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE70F;" Foreground="#A78BFA" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
                                     Click="CtxCopyName_Click"
-                                    Text="Copiar nombre" />
+                                    Text="Copiar nombre">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8C8;" Foreground="#94A3B8" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuCopyPathItem"
                                     Click="CtxCopyPath_Click"
-                                    Text="Copiar ruta" />
+                                    Text="Copiar ruta">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE71B;" Foreground="#38BDF8" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuCopyLinkItem"
                                     Click="CtxCopyLink_Click"
-                                    Text="Copiar link" />
+                                    Text="Copiar link">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE71B;" Foreground="#00B4FF" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuCopyDomainItem"
                                     Click="CtxCopyDomain_Click"
-                                    Text="Copiar dominio" />
+                                    Text="Copiar dominio">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE774;" Foreground="#34D399" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+
+                                <MenuFlyoutItem
+                                    x:Name="CtxMenuCopyDomainTypeItem"
+                                    Click="CtxCopyDomainType_Click"
+                                    Text="Copiar dominio y tipo">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8BD;" Foreground="#22C55E" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuCopyContentItem"
                                     Click="CtxCopyContent_Click"
-                                    Text="Copiar contenido" />
+                                    Text="Copiar contenido">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8A5;" Foreground="#CBD5E1" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuOpenDomainItem"
                                     Click="CtxOpenDomain_Click"
-                                    Text="Ir al dominio" />
+                                    Text="Ir al dominio">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE774;" Foreground="#38BDF8" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuCreateDropboxFolderItem"
                                     Click="CtxCreateDropboxFolder_Click"
-                                    Text="Crear carpeta aquí..." />
+                                    Text="Crear carpeta aquí...">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8F4;" Foreground="#00C8FF" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutSubItem
                                     x:Name="CtxMenuUploadFileSubItem"
                                     Text="Subir archivo">
+                                    <MenuFlyoutSubItem.Icon>
+                                        <FontIcon Glyph="&#xE898;" Foreground="#60A5FA" />
+                                    </MenuFlyoutSubItem.Icon>
+                                    <MenuFlyoutItem
+                                        x:Name="CtxMenuUploadSmartDropboxItem"
+                                        Click="CtxUploadSmartDropbox_Click"
+                                        Text="A Dropbox (DRX Inteligente)...">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE753;" Foreground="#00E5FF" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                     <MenuFlyoutItem
                                         x:Name="CtxMenuUploadDropboxFileItem"
                                         Click="CtxUploadDropboxFile_Click"
-                                        Text="A Dropbox..." />
+                                        Text="A esta carpeta en Dropbox...">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE8B7;" Foreground="#38BDF8" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                     <MenuFlyoutItem
                                         x:Name="CtxMenuUploadNotionFileItem"
                                         Click="CtxUploadNotionFile_Click"
-                                        Text="A Notion — Revisiones..." />
+                                        Text="A Notion — Revisiones...">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE70B;" Foreground="#A78BFA" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                 </MenuFlyoutSubItem>
 
                                 <MenuFlyoutSeparator />
@@ -4136,19 +4349,31 @@
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuDuplicateItem"
                                     Click="CtxDuplicate_Click"
-                                    Text="Duplicar…" />
+                                    Text="Duplicar…">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE77F;" Foreground="#818CF8" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuDeleteItem"
                                     Click="CtxDelete_Click"
-                                    Text="Eliminar" />
+                                    Text="Eliminar">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE74D;" Foreground="#F87171" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
 
                                 <MenuFlyoutSeparator />
 
                                 <MenuFlyoutItem
                                     x:Name="CtxMenuBookmarkItem"
                                     Click="CtxBookmark_Click"
-                                    Text="Agregar a Favoritos" />
+                                    Text="Agregar a Favoritos">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE734;" Foreground="#FBBF24" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
                             </MenuFlyout>
                         </ListView.ContextFlyout>
                     </ListView>
@@ -4670,34 +4895,87 @@
                             FontSize="13">
                             <Button.Flyout>
                                 <MenuFlyout x:Name="DetailsMoreFlyout" Opening="DetailsMoreFlyout_Opening">
+                                    <MenuFlyout.MenuFlyoutPresenterStyle>
+                                        <Style TargetType="MenuFlyoutPresenter">
+                                            <Setter Property="Background" Value="#F20D1522" />
+                                            <Setter Property="BorderBrush" Value="#4D00C8FF" />
+                                            <Setter Property="BorderThickness" Value="1.2" />
+                                            <Setter Property="CornerRadius" Value="12" />
+                                            <Setter Property="Padding" Value="4,6,4,6" />
+                                        </Style>
+                                    </MenuFlyout.MenuFlyoutPresenterStyle>
 
-                                    <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info" />
+                                    <MenuFlyoutItem Click="BtnDetailsInfo_Click" Text="Info">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE946;" Foreground="#38BDF8" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                     <MenuFlyoutItem
                                         x:Name="DetailsRenameItem"
                                         Click="CtxRename_Click"
-                                        Text="Renombrar..." />
+                                        Text="Renombrar...">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE70F;" Foreground="#A78BFA" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                     <MenuFlyoutSeparator />
-                                    <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar nombre" />
-                                    <MenuFlyoutItem Click="CtxCopyContent_Click" Text="Copiar contenido" />
+                                    <MenuFlyoutItem Click="CtxCopyName_Click" Text="Copiar nombre">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE8C8;" Foreground="#94A3B8" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Click="CtxCopyDomainType_Click" Text="Copiar dominio y tipo">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE8BD;" Foreground="#22C55E" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Click="CtxCopyContent_Click" Text="Copiar contenido">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE8A5;" Foreground="#CBD5E1" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
 
                                     <MenuFlyoutSeparator />
 
                                     <MenuFlyoutItem
                                         x:Name="DetailsCreateDropboxFolderItem"
                                         Click="CtxCreateDropboxFolder_Click"
-                                        Text="Crear carpeta aquí..." />
+                                        Text="Crear carpeta aquí...">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE8F4;" Foreground="#00C8FF" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
 
                                     <MenuFlyoutSubItem
                                         x:Name="DetailsUploadFileSubItem"
                                         Text="Subir archivo">
+                                        <MenuFlyoutSubItem.Icon>
+                                            <FontIcon Glyph="&#xE898;" Foreground="#60A5FA" />
+                                        </MenuFlyoutSubItem.Icon>
+                                        <MenuFlyoutItem
+                                            x:Name="DetailsUploadSmartDropboxItem"
+                                            Click="CtxUploadSmartDropbox_Click"
+                                            Text="A Dropbox (DRX Inteligente)...">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE753;" Foreground="#00E5FF" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
                                         <MenuFlyoutItem
                                             x:Name="DetailsUploadDropboxFileItem"
                                             Click="CtxUploadDropboxFile_Click"
-                                            Text="A Dropbox..." />
+                                            Text="A esta carpeta en Dropbox...">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE8B7;" Foreground="#38BDF8" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
                                         <MenuFlyoutItem
                                             x:Name="DetailsUploadNotionFileItem"
                                             Click="CtxUploadNotionFile_Click"
-                                            Text="A Notion — Revisiones..." />
+                                            Text="A Notion — Revisiones...">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE70B;" Foreground="#A78BFA" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
                                     </MenuFlyoutSubItem>
 
                                     <MenuFlyoutSeparator />
@@ -4705,7 +4983,11 @@
                                     <MenuFlyoutItem
                                         x:Name="DetailsDeleteItem"
                                         Click="CtxDelete_Click"
-                                        Text="Eliminar" />
+                                        Text="Eliminar">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE74D;" Foreground="#F87171" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
                                 </MenuFlyout>
                             </Button.Flyout>
                         </Button>

@@ -29,6 +29,7 @@ using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 using Windows.System;
 using WinRT.Interop;
+using Anfeta.UI.Helpers;
 using static Anfeta.UI.Helpers.AppSettingsKeys;
 
 namespace Anfeta.UI.Views
@@ -384,6 +385,45 @@ namespace Anfeta.UI.Views
                 $"Estado: Dominio copiado ✅ {domain}";
         }
 
+        private void CtxCopyDomainType_Click(
+            object sender,
+            RoutedEventArgs e)
+        {
+            var row = GetCtxRowOrSelected(sender);
+
+            if (row == null)
+            {
+                StatusText.Text =
+                    "Estado: Selecciona un resultado.";
+                return;
+            }
+
+            var chatCode = row.GetDomainAndTypeForChat();
+            if (string.IsNullOrWhiteSpace(chatCode))
+            {
+                var domain = TryExtractFirstDomain(row);
+                if (string.IsNullOrWhiteSpace(domain))
+                {
+                    StatusText.Text =
+                        "Estado: No se encontró un dominio o tipo en este resultado.";
+                    return;
+                }
+                chatCode = domain;
+            }
+
+            var package =
+                new Windows.ApplicationModel.DataTransfer
+                    .DataPackage();
+
+            package.SetText(chatCode);
+
+            Windows.ApplicationModel.DataTransfer
+                .Clipboard.SetContent(package);
+
+            StatusText.Text =
+                $"Estado: Dominio y tipo copiado para chat ✅ {chatCode}";
+        }
+
         private async void CtxCopyContent_Click(
             object sender,
             RoutedEventArgs e)
@@ -548,6 +588,13 @@ namespace Anfeta.UI.Views
         private static string TryExtractFirstDomain(
             SearchResultRow row)
         {
+            if (row != null &&
+                !string.IsNullOrWhiteSpace(row.DomainChipText) &&
+                !SearchResultRow.IsPlaceholderDomain(row.DomainChipText))
+            {
+                return row.DomainChipText.Trim().ToLowerInvariant();
+            }
+
             // Buscar únicamente en el nombre visible del resultado.
             // No se toma el dominio desde URL, descripción, estado o ruta.
             var candidates = new[]
@@ -576,11 +623,14 @@ namespace Anfeta.UI.Views
 
                 if (match.Success)
                 {
-                    return match.Groups["domain"]
+                    var raw = match.Groups["domain"]
                         .Value
                         .Trim()
                         .TrimEnd('.')
                         .ToLowerInvariant();
+
+                    var cleaned = SearchResultRow.CleanProjectDomain(raw, out _);
+                    return string.IsNullOrWhiteSpace(cleaned) ? raw : cleaned;
                 }
             }
 
@@ -1318,6 +1368,7 @@ namespace Anfeta.UI.Views
                 "bbria" or "bbrian" or "brian" => "Brian",
                 "ggena" or "genaro" => "Genaro",
                 "nneft" or "neftali" => "Neftali",
+                "aandr" or "andrade" => "Andrade",
                 _ => tag
             };
         }
@@ -1361,15 +1412,23 @@ namespace Anfeta.UI.Views
         private enum NotionUploadLayout
         {
             SinglePage,
-            SeparatePages,
-            DropboxOnly
+            SeparatePages
         }
+
+        private enum UploadDestination { NotionWithDropbox, DropboxOnly, NotionOnly }
+
+        private sealed record DropboxUploadReference(string Title, string RemotePath);
 
         private sealed record NotionUploadOptions(
             NotionUploadLayout Layout,
             string PageTitle,
             IReadOnlyList<string> SeparatePageTitles,
-            IReadOnlyList<StorageFile> Files);
+            IReadOnlyList<StorageFile> Files,
+            UploadDestination Destination,
+            string DropboxLocalPath,
+            string DropboxRemotePath,
+            string AssignedPersonTag,
+            string? DropboxFileTitle = null);
 
         private async void CtxUploadNotionFile_Click(
             object sender,
@@ -1572,7 +1631,9 @@ namespace Anfeta.UI.Views
         private async Task UploadFilesToNotionRevisionsAsync(
             IReadOnlyList<StorageFile> files,
             string source,
-            string? suggestedTitleOverride = null)
+            string? suggestedTitleOverride = null,
+            UploadDestination initialDestination = UploadDestination.NotionWithDropbox,
+            string? suggestedDomain = null)
         {
             const string notionTokenKey = "Notion.Token";
 
@@ -1601,33 +1662,83 @@ namespace Anfeta.UI.Views
             var currentSearchTitle =
                 (SearchBox?.Text ?? string.Empty).Trim();
 
-            var suggestedTitle =
-                suggestedTitleOverride != null
-                    ? suggestedTitleOverride
-                    : !string.IsNullOrWhiteSpace(currentSearchTitle)
-                        ? currentSearchTitle
-                        : validFiles.Count == 1
-                            ? Path.GetFileNameWithoutExtension(
-                                validFiles[0].Name)
-                            : $"Archivos {DateTime.Now:yyyy-MM-dd HH-mm}";
+            var structuredPasteTitle = ShouldUseStructuredPasteTitle(source, suggestedTitleOverride, validFiles.Select(file => file.Name));
+            var suggestedTitle = structuredPasteTitle
+                ? suggestedTitleOverride ?? string.Empty
+                : suggestedTitleOverride ?? (!string.IsNullOrWhiteSpace(currentSearchTitle)
+                    ? currentSearchTitle
+                    : validFiles.Count == 1 ? Path.GetFileNameWithoutExtension(validFiles[0].Name) : string.Empty);
 
             var options =
                 await PromptNotionRevisionUploadOptionsAsync(
                     validFiles,
-                    suggestedTitle);
+                    suggestedTitle, initialDestination, suggestedDomain, structuredPasteTitle);
 
             if (options == null)
                 return;
 
-            if (options.Layout == NotionUploadLayout.DropboxOnly)
-            {
-                await ChooseDropboxUploadDestinationAsync(options.Files, options.PageTitle, options.SeparatePageTitles);
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(token))
+            if (options.Destination != UploadDestination.DropboxOnly && string.IsNullOrWhiteSpace(token))
             {
                 StatusText.Text = "Estado: Configura el token de Notion para este destino, o elige Solo Dropbox.";
                 return;
+            }
+
+            if (options.Destination != UploadDestination.NotionOnly)
+            {
+                try
+                {
+                    Directory.CreateDirectory(options.DropboxLocalPath);
+                    var backups = await UploadSelectedFilesToDropboxAsync(
+                        options.Files, options.DropboxLocalPath, options.DropboxRemotePath,
+                        options.DropboxFileTitle ?? options.PageTitle,
+                        options.Layout == NotionUploadLayout.SeparatePages && !string.IsNullOrWhiteSpace(options.DropboxFileTitle ?? options.PageTitle)
+                            ? options.SeparatePageTitles : null);
+
+                    if (options.Destination == UploadDestination.DropboxOnly)
+                        return;
+
+                    // Solo las cargas confirmadas generan actividad; la referencia conserva
+                    // la ruta remota real, incluso si la sincronización local sigue pendiente.
+                    using var activityCts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                    var activityService = new NotionFilePageService();
+                    foreach (var backup in backups)
+                    {
+                        var person = options.AssignedPersonTag;
+                        var activityTitle = $"{DateTime.Now:yyyy-MM-dd HH:mm} {person} Respaldo Dropbox: {backup.Title}".Trim();
+                        var fileUrl = "https://www.dropbox.com/home" + string.Join("/",
+                            backup.RemotePath.Split('/').Select(Uri.EscapeDataString));
+                        var activity = await activityService.CreateRevisionFromTextAsync(
+                            token!, activityTitle,
+                            $"Actividad temporal de respaldo\nPersona asignada: {person}\nArchivo: {backup.Title}\nDropbox: {fileUrl}\nRuta: {backup.RemotePath}",
+                            activityCts.Token);
+                        var calendarActivity = await _notionCalendarService.GetActivityByIdAsync(
+                            token!, activity.PageId, activityCts.Token);
+                        if (calendarActivity == null)
+                            throw new InvalidOperationException("No se pudo leer la actividad temporal creada.");
+                        await _notionCalendarService.UpdateActivityScheduleAsync(
+                            token!, calendarActivity, DateTime.Now, activityCts.Token);
+                        if (!string.IsNullOrWhiteSpace(person))
+                        {
+                            var basePersonTag = Regex.Replace(person, @"(?:0000|001|002|003|00)$", "");
+                            // El título conserva también el tag para bases sin propiedad de asignación.
+                            await _notionCalendarService.UpdateActivityAssigneeAsync(
+                                token!, activity.PageId, GetNotionPersonDisplayName(basePersonTag), activityCts.Token);
+                        }
+                        await AddCreatedNotionPageToIndexAsync(activity.PageId, activity.PageUrl, activity.Title);
+                        ShowDiscreteActivityToast(activity.Title, person, "", activity.PageUrl);
+                    }
+
+                    if (backups.Count != options.Files.Count)
+                    {
+                        StatusText.Text = "Estado: Respaldo parcial en Dropbox. Se registraron las cargas confirmadas; vuelve a intentar para completar la subida.";
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    StatusText.Text = $"Estado: No se completó el respaldo o su actividad en Notion → {ex.Message}";
+                    return;
+                }
             }
 
             validFiles = options.Files
@@ -1681,6 +1792,7 @@ namespace Anfeta.UI.Views
                             progress,
                             cts.Token);
 
+                    await AssignUploadReviewerAsync(token, created.PageId, options.AssignedPersonTag, cts.Token);
                     await AddCreatedNotionPageToIndexAsync(
                         created.PageId,
                         created.PageUrl,
@@ -1727,6 +1839,7 @@ namespace Anfeta.UI.Views
                                 pageTitle,
                                 cts.Token);
 
+                        await AssignUploadReviewerAsync(token, created.PageId, options.AssignedPersonTag, cts.Token);
                         await AddCreatedNotionPageToIndexAsync(
                             created.PageId,
                             created.PageUrl,
@@ -2083,1872 +2196,509 @@ namespace Anfeta.UI.Views
 
         private async Task<NotionUploadOptions?> PromptNotionRevisionUploadOptionsAsync(
             IReadOnlyList<StorageFile> files,
-            string suggestedTitle)
+            string suggestedTitle,
+            UploadDestination initialDestination = UploadDestination.NotionWithDropbox,
+            string? suggestedDomain = null,
+            bool structuredPasteTitle = false)
         {
-            var selectedFiles =
-                new ObservableCollection<StorageFile>(
-                    (files ?? Array.Empty<StorageFile>())
-                    .Where(file => file != null)
-                    .DistinctBy(
-                        file => file.Path,
-                        StringComparer.OrdinalIgnoreCase));
+            var selectedFiles = files.Where(f => f != null && File.Exists(f.Path))
+                .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToList();
+            var detectionSources = new[] { suggestedDomain, suggestedTitle, SearchBox?.Text }
+                .Concat(selectedFiles.Select(f => f.Name)).Where(value => !string.IsNullOrWhiteSpace(value)).ToList();
+            var detectionText = string.Join(" ", detectionSources);
+            var detectedDomain = detectionSources.Select(value => ProjectSuffixHelper.ExtractDomain(value!))
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? suggestedDomain ?? string.Empty;
+            detectedDomain = ProjectSuffixHelper.CleanProjectDomain(detectedDomain, out _);
+            var detectedSoftware = ProjectSuffixHelper.GuessIsSoftware(detectionText);
+            // File extensions identify software, but do not outweigh explicit labels
+            // such as "web" when choosing the project category (e.g. web.png).
+            var categoryText = string.Join(" ", new[] { suggestedTitle, SearchBox?.Text }
+                .Concat(selectedFiles.Select(file => Path.GetFileNameWithoutExtension(file.Name))));
+            var detectedCategory = ProjectSuffixHelper.GuessCategory(categoryText, detectedSoftware);
+            string[] monthNames = { "ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC" };
+            var today = DateTime.Today;
+            var currentMonth = $"{today:yy}-[{today:MM}{monthNames[today.Month - 1]}]";
 
-            var originalFilePaths =
-                new HashSet<string>(
-                    selectedFiles.Select(file => file.Path),
-                    StringComparer.OrdinalIgnoreCase);
-
-            var addedAttachmentPaths =
-                new HashSet<string>(
-                    StringComparer.OrdinalIgnoreCase);
-
+            var domainSuggestBox = new AutoSuggestBox { Header = "Dominio", Text = detectedDomain, PlaceholderText = "dominio.com" };
+            var typeCombo = new ComboBox { Header = "Tipo", HorizontalAlignment = HorizontalAlignment.Stretch };
+            typeCombo.Items.Add(new ComboBoxItem { Content = "Proyecto", Tag = "proyecto" });
+            typeCombo.Items.Add(new ComboBoxItem { Content = "Software", Tag = "software" });
+            typeCombo.SelectedIndex = detectedSoftware ? 1 : 0;
+            var categoryCombo = new ComboBox { Header = "Categoría", HorizontalAlignment = HorizontalAlignment.Stretch };
+            var monthBox = new TextBox { Header = "Mes", Text = currentMonth };
             var titleBox = new TextBox
             {
-                HorizontalAlignment =
-                    HorizontalAlignment.Stretch,
-                Text = suggestedTitle,
-                PlaceholderText =
-                    "dominio.com → sseo aapli aads wwebs → jjuli → Título Descripción Detalles"
+                Header = "Título / nombre del archivo", Text = suggestedTitle, PlaceholderText = "Descripción del archivo",
+                AcceptsReturn = false, TextWrapping = TextWrapping.NoWrap, FontSize = 14,
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 241, 245, 249)),
+                Padding = new Thickness(12, 8, 42, 8)
+            };
+            var clearTitleButton = new Button
+            {
+                Content = "×", FontSize = 20, Width = 30, Height = 30, Padding = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, 5, 3), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(6)
+            };
+            ToolTipService.SetToolTip(clearTitleButton, "Limpiar título");
+            var titleRow = new Grid { Children = { titleBox, clearTitleButton } };
+            var titleStatus = new TextBlock { FontSize = 11, Opacity = 0.75, TextTrimming = TextTrimming.CharacterEllipsis };
+            var filesSummary = new TextBlock { FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+            var pathPreview = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
+            var previewCard = new Border
+            {
+                Padding = new Thickness(12, 9, 12, 9), CornerRadius = new CornerRadius(10),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(38, 14, 116, 144)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(50, 34, 211, 238)), BorderThickness = new Thickness(1),
+                Child = pathPreview
+            };
+            pathPreview.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 103, 232, 249));
+            var destinations = new Grid { ColumnSpacing = 6 };
+            for (var i = 0; i < 3; i++) destinations.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            ToggleButton DestinationButton(string label, UploadDestination destination) => new ToggleButton
+            {
+                Content = label, IsChecked = initialDestination == destination,
+                Padding = new Thickness(12, 8, 12, 8), MinHeight = 36, CornerRadius = new CornerRadius(10),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 30, 41, 59)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 51, 65, 85)), BorderThickness = new Thickness(1),
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 203, 213, 225))
+            };
+            var backupOption = DestinationButton("🌐 Notion + Dropbox", UploadDestination.NotionWithDropbox);
+            var dropboxOption = DestinationButton("📦 Solo Dropbox", UploadDestination.DropboxOnly);
+            var notionOption = DestinationButton("📝 Solo Notion", UploadDestination.NotionOnly);
+            ToggleButton[] destinationButtons = { backupOption, dropboxOption, notionOption };
+            for (var i = 0; i < destinationButtons.Length; i++) { Grid.SetColumn(destinationButtons[i], i); destinations.Children.Add(destinationButtons[i]); }
+            var destinationCard = new Border
+            {
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(180, 30, 41, 59)),
+                CornerRadius = new CornerRadius(12), Padding = new Thickness(5), Child = destinations
             };
 
-            var titleSuggestionsLabel = new TextBlock
+            UploadDestination GetDestination() => dropboxOption.IsChecked == true ? UploadDestination.DropboxOnly
+                : notionOption.IsChecked == true ? UploadDestination.NotionOnly : UploadDestination.NotionWithDropbox;
+
+            string assignedPerson = string.Empty;
+            string selectedFilenameTag = string.Empty;
+            var selectedTags = new List<string>();
+            bool updatingTitle = false;
+            bool populatingCategories = false;
+            bool drxValid = false;
+            string localPath = string.Empty;
+            string remotePath = string.Empty;
+            Action refreshState = () => { };
+            var layoutCombo = new ComboBox { Width = 245, HorizontalAlignment = HorizontalAlignment.Stretch };
+            layoutCombo.Items.Add(new ComboBoxItem { Content = "Una sola entrada / página para todos", Tag = "single" });
+            layoutCombo.Items.Add(new ComboBoxItem { Content = "Páginas separadas", Tag = "separate" });
+            layoutCombo.SelectedIndex = 0;
+            ToolTipService.SetToolTip(layoutCombo, "Una sola entrada / página para todos, o páginas separadas por archivo.");
+
+            // These fields live in a flyout and never enlarge the upload dialog.
+            var reminderCheck = new CheckBox { Content = "Programar recordatorio" };
+            var reminderRecipient = new ComboBox { PlaceholderText = "Destinatario", MinWidth = 260 };
+            foreach (var tag in NotionUploadPersonTags.Concat(new[] { "aandr" }).Distinct())
+                reminderRecipient.Items.Add(new ComboBoxItem { Content = tag == "aandr" ? "Andrade" : GetNotionPersonDisplayName(tag), Tag = tag });
+            var reminderAmount = new NumberBox { Header = "En cuántos", Minimum = 1, Maximum = 999, Value = 5, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
+            var reminderUnit = new ComboBox { SelectedIndex = -1, MinWidth = 260 };
+            reminderUnit.Items.Add(new ComboBoxItem { Content = "Minutos", Tag = 1d });
+            reminderUnit.Items.Add(new ComboBoxItem { Content = "Horas", Tag = 60d });
+            reminderUnit.Items.Add(new ComboBoxItem { Content = "Días", Tag = 1440d });
+            reminderUnit.SelectedIndex = 0;
+            var savedPerson = ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] as string;
+            reminderRecipient.SelectedItem = reminderRecipient.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Tag?.ToString() == savedPerson);
+            var reminderButton = new Button
             {
-                Text = "Completa la estructura del título",
-                FontSize = 11,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Opacity = 0.82,
-                Visibility = Visibility.Collapsed
+                Content = "Recordatorio", Padding = new Thickness(9, 4, 9, 4),
+                Flyout = new Flyout { Content = new StackPanel { Spacing = 8, Children = { reminderCheck, reminderRecipient, reminderAmount, reminderUnit } } }
             };
 
-            var titleSuggestionsPanel = new VariableSizedWrapGrid
+            string BuildUploadTitle()
             {
-                Orientation = Orientation.Horizontal,
-                MaximumRowsOrColumns = 3,
-                ItemWidth = 205,
-                ItemHeight = 42,
-                Visibility = Visibility.Collapsed
-            };
-
-            string BuildVisualNotionTitleSuggestion(
-                string suggestion)
-            {
-                var clean = Regex.Replace(
-                    (suggestion ?? string.Empty).Trim(),
-                    @"\s+",
-                    " ");
-
-                var tokens = clean.Split(
-                    ' ',
-                    StringSplitOptions.RemoveEmptyEntries);
-
-                if (tokens.Length < 2)
-                    return clean;
-
-                var projectTypes = new[]
+                var title = (titleBox.Text ?? string.Empty).Trim();
+                if (!string.IsNullOrEmpty(selectedFilenameTag) && !title.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(selectedFilenameTag, StringComparer.OrdinalIgnoreCase))
+                    title = $"{title} {selectedFilenameTag}".Trim();
+                if (GetDestination() != UploadDestination.DropboxOnly && reminderCheck.IsChecked == true &&
+                    reminderRecipient.SelectedItem is ComboBoxItem recipient)
                 {
-                    "sseo", "aapli", "aads", "wwebs"
+                    var delay = reminderAmount.Value * ((reminderUnit.SelectedItem as ComboBoxItem)?.Tag is double factor ? factor : 1d);
+                    var at = DateTime.Now.AddMinutes(double.IsNaN(delay) ? 5 : delay);
+                    if (TryParseNaturalReminderCommand(title, DateTime.Now, out var command)) { title = command.CleanTitle; at = command.ReminderAt; }
+                    var sender = (ApplicationData.Current.LocalSettings.Values[LS_CurrentUserTag] as string ?? "").Trim();
+                    title = $"{at:yyyy-MM-dd HH:mm} {recipient.Tag}{(sender.Length == 0 ? "" : $" de:{sender}")} {title}";
+                }
+                return title;
+            }
+
+            void RefreshPreview()
+            {
+                drxValid = false;
+                var domain = ProjectSuffixHelper.CleanProjectDomain(domainSuggestBox.Text ?? "", out _);
+                var suffix = (typeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "proyecto";
+                var category = (categoryCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "proyecto";
+                var includesDropbox = GetDestination() != UploadDestination.NotionOnly;
+                previewCard.Visibility = includesDropbox ? Visibility.Visible : Visibility.Collapsed;
+                // Path calculation is pure: no Dropbox folders are created before confirmation.
+                if (includesDropbox && !string.IsNullOrWhiteSpace(domain) && domain.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
+                    !string.IsNullOrWhiteSpace(DROPBOX_ROOT) && Directory.Exists(DROPBOX_ROOT))
+                {
+                    localPath = GetUploadDropboxDestination(DROPBOX_ROOT, domain, suffix, category);
+                    drxValid = _dropboxPathMapper.TryToDropboxPath(DROPBOX_ROOT, localPath, out remotePath, out _);
+                }
+                var title = BuildUploadTitle();
+                var filename = selectedFiles.Count == 0 ? "Sin archivos" :
+                    GetDropboxUploadFileName(selectedFiles[0].Name, title, 0, selectedFiles.Count);
+                var rootCategory = IsUploadRootCategory(category, suffix);
+                var route = rootCategory ? $"DRX → {domain}.{suffix}" : $"DRX → {domain}.{suffix} → {domain}.{category}";
+                pathPreview.Text = $"📁 Ruta: {route} → {filename}" + (selectedFiles.Count > 1 ? $" (+{selectedFiles.Count - 1})" : "");
+                ToolTipService.SetToolTip(pathPreview, localPath + "\n" + string.Join("\n", selectedFiles.Select((file, index) =>
+                    GetDropboxUploadFileName(file.Name, title, index, selectedFiles.Count))));
+                clearTitleButton.Visibility = string.IsNullOrEmpty(titleBox.Text) ? Visibility.Collapsed : Visibility.Visible;
+                filesSummary.Text = selectedFiles.Count == 1 ? selectedFiles[0].Name : $"📦 {selectedFiles.Count} archivos seleccionados";
+                ToolTipService.SetToolTip(filesSummary, string.Join("\n", selectedFiles.Select(f => f.Name)));
+                var reminderValid = GetDestination() == UploadDestination.DropboxOnly || reminderCheck.IsChecked != true ||
+                    (reminderRecipient.SelectedItem != null && !double.IsNaN(reminderAmount.Value) && reminderAmount.Value >= 1);
+                titleStatus.Text = includesDropbox && !drxValid ? "Completa el dominio y configura la raíz de Dropbox en Ajustes." :
+                    !reminderValid ? "Selecciona el destinatario y el tiempo del recordatorio." :
+                    reminderCheck.IsChecked == true && GetDestination() != UploadDestination.DropboxOnly ? "Recordatorio programado · Enter para subir" : "Enter para subir";
+                refreshState();
+            }
+
+            // Only prefix segments are replaced; the editable description is retained.
+            string composedPrefix = string.Empty;
+            void ApplyComposedTitle()
+            {
+                if (updatingTitle || populatingCategories) return;
+                updatingTitle = true;
+                try
+                {
+                    var text = titleBox.Text ?? "";
+                    var domain = ProjectSuffixHelper.CleanProjectDomain(domainSuggestBox.Text ?? "", out _);
+                    var category = (categoryCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
+                    var serviceType = typeCombo.SelectedIndex == 1 ? "pprog" : category switch
+                    {
+                        "webs" => "wwebs", "seo" => "sseo", "cotizacion" => "ccoti",
+                        "facebook" or "instagram" or "linkedin" or "tiktok" => "rrede", _ => structuredPasteTitle ? "proyecto" : ""
+                    };
+                    var prefix = string.Join(" ", new[] { domain, serviceType, monthBox.Text?.Trim() }.Where(p => !string.IsNullOrWhiteSpace(p)));
+                    titleBox.Text = ReplaceUploadTitlePrefix(text, composedPrefix, prefix);
+                    composedPrefix = prefix;
+                }
+                finally { updatingTitle = false; }
+                RefreshPreview();
+            }
+
+            void PopulateCategories()
+            {
+                populatingCategories = true;
+                var previous = (categoryCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+                categoryCombo.Items.Clear();
+                foreach (var category in typeCombo.SelectedIndex == 1 ? ProjectSuffixHelper.SoftwareCategories : ProjectSuffixHelper.ProjectCategories)
+                    categoryCombo.Items.Add(new ComboBoxItem { Content = ProjectSuffixHelper.CategoryDisplayLabels[category], Tag = category });
+                var preferred = previous ?? detectedCategory;
+                categoryCombo.SelectedItem = categoryCombo.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Tag?.ToString() == preferred) ?? categoryCombo.Items[0];
+                populatingCategories = false;
+                ApplyComposedTitle();
+            }
+
+            var reviewerCombo = new ComboBox { Header = "Persona / Revisor", HorizontalAlignment = HorizontalAlignment.Stretch };
+            var people = new[]
+            {
+                (Label: "(Sin asignar)", Filename: "", Assignee: ""),
+                (Label: "🚨 John 0000 (Urgente)", Filename: "john0000", Assignee: "jjohn00"),
+                (Label: "👤 Neftalí", Filename: "nneft", Assignee: "nneft"),
+                (Label: "👤 Andrade", Filename: "aandr", Assignee: "aandr"),
+                (Label: "👤 Genaro", Filename: "ggena", Assignee: "ggena"),
+                (Label: "👤 Karla", Filename: "kkarl", Assignee: "kkarl")
+            };
+            foreach (var person in people)
+                reviewerCombo.Items.Add(new ComboBoxItem { Content = person.Label, Tag = person.Filename });
+            reviewerCombo.SelectedIndex = 0;
+            reviewerCombo.SelectionChanged += (_, __) =>
+            {
+                if (reviewerCombo.SelectedIndex < 0) return;
+                var person = people[reviewerCombo.SelectedIndex];
+                titleBox.Text = ReplaceUploadReviewerTag(titleBox.Text ?? "", selectedFilenameTag, person.Filename);
+                selectedFilenameTag = person.Filename;
+                assignedPerson = person.Assignee;
+                reminderRecipient.SelectedItem = reminderRecipient.Items.OfType<ComboBoxItem>().FirstOrDefault(i =>
+                    i.Tag?.ToString() == Regex.Replace(person.Assignee, @"(?:0000|001|002|003|00)$", ""));
+                RefreshPreview();
+            };
+            clearTitleButton.Click += (_, __) => { composedPrefix = ""; titleBox.Text = ""; titleBox.Focus(FocusState.Programmatic); };
+            var tagsMenu = new MenuFlyout();
+            foreach (var tag in NotionUploadQuickTags)
+            {
+                var item = new MenuFlyoutItem { Text = tag };
+                item.Click += (_, __) =>
+                {
+                    if (!(titleBox.Text ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(tag, StringComparer.OrdinalIgnoreCase))
+                        titleBox.Text = $"{titleBox.Text} {tag}".Trim();
+                    if (!selectedTags.Contains(tag)) selectedTags.Add(tag);
                 };
-
-                var months = new[]
-                {
-                    "jjane", "ffebr", "mmarz", "aabri",
-                    "mmayo", "jjuni", "jjuli", "aagos",
-                    "ssept", "ooctu", "nnovi", "ddici"
-                };
-
-                var projectIndex = Array.FindIndex(
-                    tokens,
-                    token => projectTypes.Contains(
-                        token,
-                        StringComparer.OrdinalIgnoreCase));
-
-                if (projectIndex < 0)
-                    return clean;
-
-                var monthIndex = Array.FindIndex(
-                    tokens,
-                    projectIndex + 1,
-                    token => months.Contains(
-                        token,
-                        StringComparer.OrdinalIgnoreCase));
-
-                var domain = string.Join(
-                    " ",
-                    tokens.Take(projectIndex));
-
-                var project = tokens[projectIndex];
-
-                if (monthIndex < 0)
-                    return $"{domain}  ›  {project}";
-
-                var month = tokens[monthIndex];
-
-                var detail = string.Join(
-                    " ",
-                    tokens.Skip(monthIndex + 1));
-
-                return string.IsNullOrWhiteSpace(detail)
-                    ? $"{domain}  ›  {project}  ›  {month}"
-                    : $"{domain}  ›  {project}  ›  {month}  ›  {detail}";
+                tagsMenu.Items.Add(item);
             }
-
-            void RefreshTitleSuggestions()
+            var tagsButton = new Button { Content = "Tags", Flyout = tagsMenu, Padding = new Thickness(9, 4, 9, 4) };
+            var attachmentsButton = new Button { Content = "＋ Adjuntos", Padding = new Thickness(9, 4, 9, 4) };
+            attachmentsButton.Click += async (_, __) =>
             {
-                var suggestions =
-                    BuildStructuredNotionTitleSuggestions(
-                        titleBox.Text,
-                        max: 12);
-
-                titleSuggestionsPanel.Children.Clear();
-
-                foreach (var suggestion in suggestions)
+                try
                 {
-                    var suggestionButton = new Button
-                    {
-                        Content = $"◇  {BuildVisualNotionTitleSuggestion(suggestion)}",
-                        Tag = suggestion,
-                        Width = 198,
-                        Height = 36,
-                        Margin = new Thickness(0, 0, 7, 7),
-                        Padding = new Thickness(10, 5, 10, 5),
-                        HorizontalContentAlignment =
-                            HorizontalAlignment.Left,
-                        Background = new SolidColorBrush(
-                            Windows.UI.Color.FromArgb(255, 31, 55, 79)),
-                        BorderBrush = new SolidColorBrush(
-                            Windows.UI.Color.FromArgb(255, 62, 101, 139)),
-                        BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(8)
-                    };
-
-                    ToolTipService.SetToolTip(
-                        suggestionButton,
-                        suggestion);
-
-                    suggestionButton.Click += (_, __) =>
-                    {
-                        titleBox.Text = suggestion;
-                        titleBox.SelectionStart = titleBox.Text.Length;
-                        titleBox.Focus(FocusState.Programmatic);
-                        RefreshTitleSuggestions();
-                    };
-
-                    titleSuggestionsPanel.Children.Add(
-                        suggestionButton);
+                    var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
+                    picker.FileTypeFilter.Add("*");
+                    InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(App.MainWindowInstance));
+                    foreach (var file in await picker.PickMultipleFilesAsync())
+                        if (File.Exists(file.Path) && !selectedFiles.Any(f => string.Equals(f.Path, file.Path, StringComparison.OrdinalIgnoreCase))) selectedFiles.Add(file);
+                    RefreshPreview();
                 }
-
-                var visible = suggestions.Count > 0
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-
-                titleSuggestionsLabel.Visibility = visible;
-                titleSuggestionsPanel.Visibility = visible;
-            }
-
-            DispatcherTimer? titleDebounceTimer = null;
-            void ScheduleDebouncedTitleProcessing()
-            {
-                if (titleDebounceTimer == null)
-                {
-                    titleDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(160) };
-                    titleDebounceTimer.Tick += (_, __) =>
-                    {
-                        titleDebounceTimer.Stop();
-                        RefreshTitleSuggestions();
-                        RefreshNaturalReminderPreview();
-                    };
-                }
-                titleDebounceTimer.Stop();
-                titleDebounceTimer.Start();
-            }
-
-            var onePageOption = new RadioButton
-            {
-                Content =
-                    "Todos los archivos en una sola página",
-                GroupName = "NotionUploadLayout",
-                IsChecked = true
+                catch (Exception ex) { titleStatus.Text = $"No se pudieron agregar adjuntos: {ex.Message}"; }
             };
-
-            var separatePagesOption = new RadioButton
+            var compactFields = new Grid { ColumnSpacing = 8 };
+            foreach (var width in new[] { 1.8, 1.05, 1.6, 1.0, 1.9 }) compactFields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width, GridUnitType.Star) });
+            FrameworkElement[] fields = { domainSuggestBox, typeCombo, categoryCombo, monthBox, reviewerCombo };
+            for (var i = 0; i < fields.Length; i++) { Grid.SetColumn(fields[i], i); compactFields.Children.Add(fields[i]); }
+            var toolbar = new Grid { ColumnSpacing = 10 };
+            toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            toolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            toolbar.Children.Add(filesSummary);
+            var optionalTools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { attachmentsButton, tagsButton, reminderButton, layoutCombo } };
+            Grid.SetColumn(optionalTools, 1);
+            toolbar.Children.Add(optionalTools);
+            var content = new StackPanel
             {
-                Content =
-                    "Crear una página separada por cada archivo",
-                GroupName = "NotionUploadLayout",
-                IsEnabled = files.Count > 1
+                Width = 860, Spacing = 12,
+                Children = { destinationCard, compactFields, titleRow, previewCard, toolbar, titleStatus }
             };
-
-            var titleEditors =
-                new List<TextBox>(files.Count);
-
-            var separateTitlesPanel = new StackPanel
+            // Scale down on small windows; the main modal never introduces scrolling.
+            var compactContent = new Viewbox
             {
-                Spacing = 8,
-                Visibility = Visibility.Collapsed
+                Child = content, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly,
+                Width = Math.Max(300, Math.Min(860, (XamlRoot?.Size.Width ?? 1000) - 100)),
+                MaxHeight = Math.Max(120, (XamlRoot?.Size.Height ?? 700) - 220)
             };
-
-            separateTitlesPanel.Children.Add(
-                new TextBlock
-                {
-                    Text =
-                        "Título de cada página:",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold
-                });
-
-            separateTitlesPanel.Children.Add(
-                new TextBlock
-                {
-                    Text =
-                        "Puedes conservar el nombre del archivo o editarlo antes de subir.",
-                    TextWrapping =
-                        TextWrapping.Wrap,
-                    Opacity = 0.72
-                });
-
-            var editorsStack = new StackPanel
+            var dialog = new ContentDialog
             {
-                Spacing = 8
+                XamlRoot = XamlRoot, Content = compactContent, PrimaryButtonText = "Continuar y subir",
+                CloseButtonText = "Cancelar", DefaultButton = ContentDialogButton.Primary,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch
             };
-
-            for (var index = 0;
-                 index < files.Count;
-                 index++)
+            LinearGradientBrush NeonGradient(Windows.UI.Color start, Windows.UI.Color end) => new LinearGradientBrush
             {
-                var file = files[index];
-
-                var editor = new TextBox
-                {
-                    HorizontalAlignment =
-                        HorizontalAlignment.Stretch,
-                    Text =
-                        Path.GetFileNameWithoutExtension(
-                            file.Name),
-                    PlaceholderText =
-                        $"Título para {file.Name}",
-                    Tag = index
-                };
-
-                titleEditors.Add(editor);
-
-                var row = new Grid
-                {
-                    ColumnSpacing = 10
-                };
-
-                row.ColumnDefinitions.Add(
-                    new ColumnDefinition
-                    {
-                        Width = new GridLength(180)
-                    });
-
-                row.ColumnDefinitions.Add(
-                    new ColumnDefinition
-                    {
-                        Width = new GridLength(
-                            1,
-                            GridUnitType.Star)
-                    });
-
-                var fileNameText =
-                    new TextBlock
-                    {
-                        Text = file.Name,
-                        VerticalAlignment =
-                            VerticalAlignment.Center,
-                        TextTrimming =
-                            TextTrimming.CharacterEllipsis
-                    };
-
-                ToolTipService.SetToolTip(
-                    fileNameText,
-                    file.Name);
-
-                Grid.SetColumn(fileNameText, 0);
-                row.Children.Add(fileNameText);
-
-                Grid.SetColumn(editor, 1);
-                row.Children.Add(editor);
-
-                editorsStack.Children.Add(row);
-            }
-
-            var restoreNamesButton = new Button
-            {
-                Content =
-                    "Restaurar nombres de archivo",
-                HorizontalAlignment =
-                    HorizontalAlignment.Left
+                StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 1),
+                GradientStops = { new GradientStop { Color = start, Offset = 0 }, new GradientStop { Color = end, Offset = 1 } }
             };
-
-            restoreNamesButton.Click += (_, __) =>
+            var neon = NeonGradient(Windows.UI.Color.FromArgb(255, 2, 132, 199), Windows.UI.Color.FromArgb(255, 14, 165, 233));
+            var neonHover = NeonGradient(Windows.UI.Color.FromArgb(255, 14, 165, 233), Windows.UI.Color.FromArgb(255, 34, 211, 238));
+            var cyan = new SolidColorBrush(Windows.UI.Color.FromArgb(150, 34, 211, 238));
+            dialog.RequestedTheme = ElementTheme.Dark;
+            dialog.Resources["ContentDialogMaxWidth"] = 940d;
+            dialog.Resources["ContentDialogMinWidth"] = Math.Min(900d, compactContent.Width + 40);
+            dialog.Resources["ContentDialogBackground"] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 19, 29));
+            dialog.Resources["ContentDialogBorderBrush"] = cyan;
+            dialog.Resources["ContentDialogBorderThickness"] = new Thickness(1);
+            dialog.Resources["ContentDialogCornerRadius"] = new CornerRadius(16);
+            dialog.Resources["ContentDialogForeground"] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 241, 245, 249));
+            var inputBackground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 19, 30, 46));
+            var inputBorder = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 51, 65, 85));
+            var focusBorder = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 56, 189, 248));
+            foreach (var key in new[] { "TextControlBackground", "TextControlBackgroundFocused", "TextControlBackgroundPointerOver", "ComboBoxBackground", "ComboBoxBackgroundPointerOver" }) dialog.Resources[key] = inputBackground;
+            foreach (var key in new[] { "TextControlBorderBrush", "ComboBoxBorderBrush", "ComboBoxBorderBrushPointerOver" }) dialog.Resources[key] = inputBorder;
+            foreach (var key in new[] { "TextControlBorderBrushFocused", "ComboBoxBorderBrushFocused" }) dialog.Resources[key] = focusBorder;
+            dialog.Resources["ControlCornerRadius"] = new CornerRadius(8);
+            dialog.Resources["AccentButtonBackground"] = neon;
+            dialog.Resources["AccentButtonBackgroundPointerOver"] = neonHover;
+            dialog.Resources["AccentButtonForeground"] = new SolidColorBrush(Microsoft.UI.Colors.White);
+            dialog.PrimaryButtonStyle = new Style(typeof(Button))
             {
-                for (var index = 0;
-                     index < titleEditors.Count;
-                     index++)
+                Setters =
                 {
-                    titleEditors[index].Text =
-                        Path.GetFileNameWithoutExtension(
-                            files[index].Name);
+                    new Setter(Control.BackgroundProperty, neon), new Setter(Control.ForegroundProperty, new SolidColorBrush(Microsoft.UI.Colors.White)),
+                    new Setter(Control.FontWeightProperty, Microsoft.UI.Text.FontWeights.Bold), new Setter(Control.CornerRadiusProperty, new CornerRadius(10)),
+                    new Setter(Control.BorderBrushProperty, cyan), new Setter(Control.BorderThicknessProperty, new Thickness(1))
                 }
             };
-
-            separateTitlesPanel.Children.Add(
-                restoreNamesButton);
-
-            separateTitlesPanel.Children.Add(
-                new ScrollViewer
+            dialog.CloseButtonStyle = new Style(typeof(Button))
+            {
+                Setters =
                 {
-                    Content = editorsStack,
-                    MaxHeight = 260,
-                    HorizontalScrollBarVisibility =
-                        ScrollBarVisibility.Disabled,
-                    VerticalScrollBarVisibility =
-                        ScrollBarVisibility.Auto
-                });
-
-            var filesCountText = new TextBlock
-            {
-                FontWeight =
-                    Microsoft.UI.Text.FontWeights.SemiBold
+                    new Setter(Control.BackgroundProperty, new SolidColorBrush(Microsoft.UI.Colors.Transparent)),
+                    new Setter(Control.BorderBrushProperty, inputBorder), new Setter(Control.BorderThicknessProperty, new Thickness(1)),
+                    new Setter(Control.CornerRadiusProperty, new CornerRadius(10))
+                }
             };
-
-            var fileListPanel = new StackPanel
+            dialog.Shadow = new ThemeShadow();
+            dialog.Translation = new System.Numerics.Vector3(0, 0, 32);
+            MakeCalendarContentDialogMovable(dialog, "Subir archivo");
+            if (dialog.Title is Border dragHeader)
             {
-                Spacing = 5
-            };
-
-            var attachmentStatusText = new TextBlock
-            {
-                FontSize = 11,
-                Opacity = 0.72,
-                TextWrapping = TextWrapping.Wrap
-            };
-
-            var selectAttachmentsButton = new Button
-            {
-                Content = "＋ Seleccionar imágenes o archivos",
-                FontSize = 11.5,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Padding = new Thickness(14, 6, 14, 6),
-                CornerRadius = new CornerRadius(6),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 0, 168, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(170, 0, 168, 255)),
-                BorderThickness = new Thickness(1),
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-
-            var attachmentDropContent = new StackPanel
-            {
-                Spacing = 5,
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-
-            attachmentDropContent.Children.Add(
-                new TextBlock
+                dragHeader.Child = new StackPanel
                 {
-                    Text = "📎 Arrastra aquí imágenes o archivos adicionales",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold,
-                    HorizontalAlignment =
-                        HorizontalAlignment.Center
-                });
-
-            attachmentDropContent.Children.Add(
-                new TextBlock
-                {
-                    Text =
-                        "Se agregarán como adjuntos dentro de la misma página de Notion.",
-                    FontSize = 11,
-                    Opacity = 0.70,
-                    TextWrapping = TextWrapping.Wrap,
-                    TextAlignment = TextAlignment.Center,
-                    HorizontalAlignment =
-                        HorizontalAlignment.Center
-                });
-
-            attachmentDropContent.Children.Add(
-                selectAttachmentsButton);
-
-            var attachmentDropZone = new Border
-            {
-                AllowDrop = true,
-                MinHeight = 94,
-                Padding = new Thickness(16, 14, 16, 14),
-                CornerRadius = new CornerRadius(10),
-                BorderThickness = new Thickness(1.5),
-                BorderBrush = new SolidColorBrush(
-                    Windows.UI.Color.FromArgb(160, 0, 168, 255)),
-                Background = new SolidColorBrush(
-                    Windows.UI.Color.FromArgb(28, 0, 140, 240)),
-                Child = attachmentDropContent
-            };
-
-            Action refreshDialogState = () => { };
-
-            void RefreshSelectedFilesUi()
-            {
-                fileListPanel.Children.Clear();
-
-                foreach (var file in selectedFiles)
-                {
-                    var isAdditional =
-                        addedAttachmentPaths.Contains(file.Path);
-
-                    var row = new Grid
+                    Orientation = Orientation.Horizontal, Spacing = 10,
+                    Children =
                     {
-                        ColumnSpacing = 8
-                    };
-
-                    row.ColumnDefinitions.Add(
-                        new ColumnDefinition
+                        new Border
                         {
-                            Width = new GridLength(
-                                1,
-                                GridUnitType.Star)
-                        });
-
-                    row.ColumnDefinitions.Add(
-                        new ColumnDefinition
-                        {
-                            Width = GridLength.Auto
-                        });
-
-                    var fileText = new TextBlock
-                    {
-                        Text = isAdditional
-                            ? $"📎 {file.Name} · Adjunto"
-                            : $"• {file.Name}",
-                        TextTrimming =
-                            TextTrimming.CharacterEllipsis,
-                        VerticalAlignment =
-                            VerticalAlignment.Center,
-                        Opacity = isAdditional
-                            ? 1.0
-                            : 0.82
-                    };
-
-                    ToolTipService.SetToolTip(
-                        fileText,
-                        file.Path);
-
-                    Grid.SetColumn(fileText, 0);
-                    row.Children.Add(fileText);
-
-                    if (isAdditional)
-                    {
-                        var removeButton = new Button
-                        {
-                            Content = "Quitar",
-                            Tag = file,
-                            Padding = new Thickness(8, 3, 8, 3)
-                        };
-
-                        removeButton.Click += (_, __) =>
-                        {
-                            if (removeButton.Tag is not StorageFile selected)
-                                return;
-
-                            selectedFiles.Remove(selected);
-                            addedAttachmentPaths.Remove(selected.Path);
-                            RefreshSelectedFilesUi();
-                        };
-
-                        Grid.SetColumn(removeButton, 1);
-                        row.Children.Add(removeButton);
-                    }
-
-                    fileListPanel.Children.Add(row);
-                }
-
-                filesCountText.Text =
-                    $"Archivos seleccionados: {selectedFiles.Count}";
-
-                if (addedAttachmentPaths.Count > 0)
-                {
-                    onePageOption.IsChecked = true;
-                    separatePagesOption.IsEnabled = false;
-
-                    attachmentStatusText.Text =
-                        $"{addedAttachmentPaths.Count} adjunto(s) adicional(es). " +
-                        "Se subirán junto con el archivo principal en una sola página.";
-                }
-                else
-                {
-                    separatePagesOption.IsEnabled =
-                        files.Count > 1;
-
-                    attachmentStatusText.Text =
-                        "Puedes arrastrar o seleccionar más imágenes y archivos.";
-                }
-
-                refreshDialogState();
-            }
-
-            void AddAdditionalFiles(
-                IEnumerable<StorageFile> additionalFiles)
-            {
-                var added = 0;
-
-                foreach (var file in
-                         additionalFiles ??
-                         Array.Empty<StorageFile>())
-                {
-                    if (file == null ||
-                        string.IsNullOrWhiteSpace(file.Path) ||
-                        !File.Exists(file.Path) ||
-                        selectedFiles.Any(existing =>
-                            string.Equals(
-                                existing.Path,
-                                file.Path,
-                                StringComparison.OrdinalIgnoreCase)))
-                    {
-                        continue;
-                    }
-
-                    selectedFiles.Add(file);
-                    addedAttachmentPaths.Add(file.Path);
-                    added++;
-                }
-
-                attachmentStatusText.Text =
-                    added > 0
-                        ? $"Se agregaron {added} archivo(s) adicional(es) ✅"
-                        : "No se agregaron archivos nuevos.";
-
-                RefreshSelectedFilesUi();
-            }
-
-            selectAttachmentsButton.Click +=
-                async (_, __) =>
-                {
-                    try
-                    {
-                        var picker = new FileOpenPicker
-                        {
-                            SuggestedStartLocation =
-                                PickerLocationId.PicturesLibrary
-                        };
-
-                        picker.FileTypeFilter.Add("*");
-
-                        var hwnd =
-                            WindowNative.GetWindowHandle(
-                                App.MainWindowInstance);
-
-                        InitializeWithWindow.Initialize(
-                            picker,
-                            hwnd);
-
-                        var picked =
-                            await picker.PickMultipleFilesAsync();
-
-                        AddAdditionalFiles(picked);
-                    }
-                    catch (Exception ex)
-                    {
-                        attachmentStatusText.Text =
-                            $"No se pudieron seleccionar archivos → {ex.Message}";
+                            Width = 34, Height = 34, CornerRadius = new CornerRadius(10),
+                            Background = NeonGradient(Windows.UI.Color.FromArgb(80, 34, 211, 238), Windows.UI.Color.FromArgb(30, 2, 132, 199)),
+                            Child = new FontIcon { Glyph = "\uE898", FontSize = 17, Foreground = focusBorder }
+                        },
+                        new TextBlock { Text = "Subir archivo", FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center }
                     }
                 };
-
-            attachmentDropZone.DragOver +=
-                (_, args) =>
-                {
-                    var hasFiles =
-                        args.DataView.Contains(
-                            Windows.ApplicationModel.DataTransfer
-                                .StandardDataFormats.StorageItems);
-
-                    args.AcceptedOperation = hasFiles
-                        ? Windows.ApplicationModel.DataTransfer
-                            .DataPackageOperation.Copy
-                        : Windows.ApplicationModel.DataTransfer
-                            .DataPackageOperation.None;
-
-                    args.DragUIOverride.Caption =
-                        "Agregar como adjunto a la página";
-                    args.DragUIOverride.IsCaptionVisible = true;
-                    args.Handled = true;
-                };
-
-            attachmentDropZone.Drop +=
-                async (_, args) =>
-                {
-                    try
-                    {
-                        if (!args.DataView.Contains(
-                                Windows.ApplicationModel.DataTransfer
-                                    .StandardDataFormats.StorageItems))
-                        {
-                            return;
-                        }
-
-                        var items =
-                            await args.DataView.GetStorageItemsAsync();
-
-                        AddAdditionalFiles(
-                            items.OfType<StorageFile>());
-                    }
-                    catch (Exception ex)
-                    {
-                        attachmentStatusText.Text =
-                            $"No se pudieron agregar los archivos → {ex.Message}";
-                    }
-                };
-
-            var titleSection = new StackPanel
-            {
-                Spacing = 8
-            };
-
-            var titleGuideCard = new Border
-            {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(35, 0, 168, 255)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(70, 0, 168, 255)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(12, 9, 12, 9)
-            };
-
-            var titleGuideStack = new StackPanel { Spacing = 3 };
-            titleGuideStack.Children.Add(new TextBlock
-            {
-                Text = "💡 Convención recomendada de título:",
-                FontSize = 11.5,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 130, 215, 255))
-            });
-            titleGuideStack.Children.Add(new TextBlock
-            {
-                Text = "[dominio.com] → [Tipo: sseo | aapli | aads | wwebs] → [Persona/Mes: jjuli | jjohn] → [Descripción]",
-                FontSize = 10.5,
-                Opacity = 0.88,
-                TextWrapping = TextWrapping.Wrap
-            });
-            titleGuideCard.Child = titleGuideStack;
-
-            var titleSectionHeader = new TextBlock
-            {
-                Text = "Título de la página:",
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                FontSize = 12.5
-            };
-            titleSection.Children.Add(titleSectionHeader);
-            titleSection.Children.Add(titleGuideCard);
-            titleSection.Children.Add(titleBox);
-
-            var selectedUploadTags =
-                new List<string>();
-
-            var variantNormalRadio = new RadioButton
-            {
-                Content = "Normal",
-                GroupName = "UploadVariantGroup",
-                IsChecked = true,
-                Margin = new Thickness(0, 0, 8, 0)
-            };
-
-            var variant00Radio = new RadioButton
-            {
-                Content = "00 (Urgente)",
-                GroupName = "UploadVariantGroup",
-                IsChecked = false,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 120, 120)),
-                Margin = new Thickness(0, 0, 8, 0)
-            };
-
-            var variant001Radio = new RadioButton
-            {
-                Content = "001 (Importante)",
-                GroupName = "UploadVariantGroup",
-                IsChecked = false,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 215, 120)),
-                Margin = new Thickness(0, 0, 8, 0)
-            };
-
-            var variant002Radio = new RadioButton
-            {
-                Content = "002 (Secundaria)",
-                GroupName = "UploadVariantGroup",
-                IsChecked = false,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 120, 200, 255)),
-                Margin = new Thickness(0, 0, 8, 0)
-            };
-
-            var variant003Radio = new RadioButton
-            {
-                Content = "003 (Recordar-usar)",
-                GroupName = "UploadVariantGroup",
-                IsChecked = false,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 192, 132, 252)),
-                Margin = new Thickness(0, 0, 8, 0)
-            };
-
-            string GetActiveVariantSuffix()
-            {
-                if (variant00Radio.IsChecked == true) return "00";
-                if (variant001Radio.IsChecked == true) return "001";
-                if (variant002Radio.IsChecked == true) return "002";
-                if (variant003Radio.IsChecked == true) return "003";
-                return string.Empty;
             }
-
-            // Constructor Estructurado de Título (Dominio, Tipo, Mes actual, Persona y Detalle)
-            var composerCard = new Border
+            void RefreshDestinationStyle()
             {
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(28, 15, 23, 42)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(100, 56, 189, 248)),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(10, 8, 10, 10),
-                Margin = new Thickness(0, 2, 0, 4)
-            };
-
-            var composerStack = new StackPanel { Spacing = 8 };
-
-            var composerHeader = new TextBlock
-            {
-                Text = "🧩 Constructor rápido de título (Dominio + Tipo + Mes):",
-                FontSize = 11.5,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 125, 211, 252))
-            };
-            composerStack.Children.Add(composerHeader);
-
-            var compRow1 = new Grid { ColumnSpacing = 8 };
-            compRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.2, GridUnitType.Star) });
-            compRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            compRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
-
-            // Campo 1: Dominio con autocompletado y búsqueda (solo dominios reales y limpios)
-            var domainSuggestBox = new AutoSuggestBox
-            {
-                Header = "1. Dominio (.com)",
-                PlaceholderText = "Escribe para buscar (ej. agape)...",
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            };
-
-            static bool IsCleanDomain(string? domain)
-            {
-                if (string.IsNullOrWhiteSpace(domain)) return false;
-                var d = domain.Trim().ToLowerInvariant();
-
-                if (d.Contains("notion") || d.Contains("dropbox") || d.Contains("voidtool") || 
-                    d.Contains("google") || d.Contains("github") || d.Contains("localhost"))
-                    return false;
-
-                if (d.StartsWith("pprog") || d.StartsWith("sseo") || d.StartsWith("wwebs") || 
-                    d.StartsWith("aads") || d.StartsWith("aapli") || d.StartsWith("rrede"))
-                    return false;
-
-                var match = Regex.Match(d, @"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.(com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev)$");
-                if (!match.Success) return false;
-
-                var parts = d.Split('.');
-                if (parts.Length > 3) return false;
-                if (parts[0].Length < 2) return false;
-
-                return true;
-            }
-
-            var allKnownDomains = (App.LocalIndex?.GetAll() ?? Enumerable.Empty<SearchResultRow>())
-                .Select(r => r.DomainChipText)
-                .Where(IsCleanDomain)
-                .Select(d => d.Trim().ToLowerInvariant())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(d => d)
-                .ToList();
-
-            void FilterDomainSuggestions(string? query)
-            {
-                var q = (query ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(q))
+                foreach (var button in destinationButtons)
                 {
-                    domainSuggestBox.ItemsSource = allKnownDomains.Take(30).ToList();
-                }
-                else
-                {
-                    domainSuggestBox.ItemsSource = allKnownDomains
-                        .Where(d => d.Contains(q, StringComparison.OrdinalIgnoreCase))
-                        .Take(30)
-                        .ToList();
+                    var active = button.IsChecked == true;
+                    button.Background = active ? NeonGradient(Windows.UI.Color.FromArgb(90, 14, 116, 144), Windows.UI.Color.FromArgb(120, 2, 132, 199)) : inputBackground;
+                    button.BorderBrush = active ? cyan : inputBorder;
+                    button.Foreground = new SolidColorBrush(active ? Microsoft.UI.Colors.White : Windows.UI.Color.FromArgb(255, 203, 213, 225));
+                    button.Resources["ToggleButtonBackgroundChecked"] = button.Background;
+                    button.Resources["ToggleButtonBackgroundCheckedPointerOver"] = neonHover;
+                    button.Resources["ToggleButtonBorderBrushChecked"] = cyan;
+                    button.Resources["ToggleButtonForegroundChecked"] = new SolidColorBrush(Microsoft.UI.Colors.White);
                 }
             }
-
+            foreach (var button in destinationButtons)
+                button.Click += (_, __) =>
+                {
+                    foreach (var other in destinationButtons) other.IsChecked = other == button;
+                    RefreshDestinationStyle();
+                    RefreshPreview();
+                };
+            RefreshDestinationStyle();
+            refreshState = () =>
+            {
+                var onlyDropbox = GetDestination() == UploadDestination.DropboxOnly;
+                reminderButton.Visibility = onlyDropbox ? Visibility.Collapsed : Visibility.Visible;
+                layoutCombo.Visibility = !onlyDropbox && selectedFiles.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+                // Type/category configure DRX; domain/month still compose the Notion title.
+                var onlyNotion = GetDestination() == UploadDestination.NotionOnly;
+                typeCombo.Visibility = categoryCombo.Visibility = onlyNotion ? Visibility.Collapsed : Visibility.Visible;
+                compactFields.ColumnDefinitions[1].Width = new GridLength(onlyNotion ? 0 : 1.1, GridUnitType.Star);
+                compactFields.ColumnDefinitions[2].Width = new GridLength(onlyNotion ? 0 : 1.8, GridUnitType.Star);
+                layoutCombo.IsEnabled = selectedFiles.Count > 1;
+                var reminderValid = onlyDropbox || reminderCheck.IsChecked != true ||
+                    (reminderRecipient.SelectedItem != null && !double.IsNaN(reminderAmount.Value) && reminderAmount.Value >= 1);
+                dialog.IsPrimaryButtonEnabled = selectedFiles.Count > 0 &&
+                    (GetDestination() == UploadDestination.NotionOnly || drxValid) && reminderValid;
+            };
+            var knownDomains = (App.LocalIndex?.GetAll() ?? Enumerable.Empty<SearchResultRow>()).Select(r => r.DomainChipText)
+                .Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(d => d).ToList();
             domainSuggestBox.TextChanged += (sender, args) =>
             {
                 if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
-                {
-                    FilterDomainSuggestions(sender.Text);
-                }
+                    sender.ItemsSource = knownDomains.Where(d => d.Contains(sender.Text ?? "", StringComparison.OrdinalIgnoreCase)).Take(12).ToList();
+                ApplyComposedTitle();
             };
-
-            domainSuggestBox.GotFocus += (_, __) =>
-            {
-                FilterDomainSuggestions(domainSuggestBox.Text);
-            };
-
-            Grid.SetColumn(domainSuggestBox, 0);
-            compRow1.Children.Add(domainSuggestBox);
-
-            // Botón "Ver existentes" con flyout
-            var viewDomainsButton = new Button
-            {
-                Content = "📋 Ver existentes",
-                FontSize = 11,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Padding = new Thickness(8, 6, 8, 6),
-                CornerRadius = new CornerRadius(5),
-                Margin = new Thickness(0, 0, 0, 1)
-            };
-            ToolTipService.SetToolTip(viewDomainsButton, "Muestra dominios indexados limpios para verificar cuáles ya existen.");
-            Grid.SetColumn(viewDomainsButton, 1);
-            compRow1.Children.Add(viewDomainsButton);
-
-            // Campo 2: Tipo de proyecto
-            var typeCombo = new ComboBox
-            {
-                Header = "2. Tipo",
-                PlaceholderText = "Tipo...",
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            };
-            typeCombo.Items.Add(new ComboBoxItem { Content = "sseo (SEO)", Tag = "sseo" });
-            typeCombo.Items.Add(new ComboBoxItem { Content = "aads (ADS)", Tag = "aads" });
-            typeCombo.Items.Add(new ComboBoxItem { Content = "wwebs (WEB)", Tag = "wwebs" });
-            typeCombo.Items.Add(new ComboBoxItem { Content = "aapli (APLICACIONES)", Tag = "aapli" });
-            typeCombo.Items.Add(new ComboBoxItem { Content = "rrede (REDES)", Tag = "rrede" });
-            typeCombo.Items.Add(new ComboBoxItem { Content = "pprog (PROGRAMAS)", Tag = "pprog" });
-            Grid.SetColumn(typeCombo, 2);
-            compRow1.Children.Add(typeCombo);
-
-            composerStack.Children.Add(compRow1);
-
-            // Fila 2: Mes actual (ej. 26-[09SEP]) y Detalle / Tarea
-            var compRow2 = new Grid { ColumnSpacing = 8 };
-            compRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.1, GridUnitType.Star) });
-            compRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.5, GridUnitType.Star) });
-
-            string GetSpanishMonthAbbr(int month) => month switch
-            {
-                1 => "ENE",
-                2 => "FEB",
-                3 => "MAR",
-                4 => "ABR",
-                5 => "MAY",
-                6 => "JUN",
-                7 => "JUL",
-                8 => "AGO",
-                9 => "SEP",
-                10 => "OCT",
-                11 => "NOV",
-                12 => "DIC",
-                _ => "MES"
-            };
-
-            var currentMonthDefault = $"{DateTime.Today:yy}-[{DateTime.Today:MM}{GetSpanishMonthAbbr(DateTime.Today.Month)}]";
-            var monthBox = new TextBox
-            {
-                Header = "3. Mes",
-                Text = currentMonthDefault,
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            };
-            ToolTipService.SetToolTip(monthBox, "Mes actual prellenado automáticamente. Ej: 26-[09SEP]");
-            Grid.SetColumn(monthBox, 0);
-            compRow2.Children.Add(monthBox);
-
-            var detailDescBox = new TextBox
-            {
-                Header = "4. Descripción / Tarea",
-                PlaceholderText = "ej. Optimización Técnica On-Page...",
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            };
-            Grid.SetColumn(detailDescBox, 1);
-            compRow2.Children.Add(detailDescBox);
-
-            composerStack.Children.Add(compRow2);
-
-            void ApplyComposedTitle()
-            {
-                var parts = new List<string>();
-                var dom = domainSuggestBox.Text?.Trim();
-                if (!string.IsNullOrWhiteSpace(dom)) parts.Add(dom);
-
-                if (typeCombo.SelectedItem is ComboBoxItem typeItem && typeItem.Tag is string tVal && !string.IsNullOrWhiteSpace(tVal))
-                {
-                    parts.Add(tVal);
-                }
-
-                var mVal = monthBox.Text?.Trim();
-                if (!string.IsNullOrWhiteSpace(mVal)) parts.Add(mVal);
-
-                var desc = detailDescBox.Text?.Trim();
-                if (!string.IsNullOrWhiteSpace(desc)) parts.Add(desc);
-
-                if (parts.Count > 0)
-                {
-                    titleBox.Text = string.Join(" ", parts);
-                    titleBox.SelectionStart = titleBox.Text.Length;
-                }
-            }
-
-            var domainsFlyout = new MenuFlyout();
-            foreach (var d in allKnownDomains.Take(45))
-            {
-                var domainItem = new MenuFlyoutItem { Text = d };
-                domainItem.Click += (_, __) =>
-                {
-                    domainSuggestBox.Text = d;
-                    ApplyComposedTitle();
-                };
-                domainsFlyout.Items.Add(domainItem);
-            }
-            if (allKnownDomains.Count == 0)
-            {
-                domainsFlyout.Items.Add(new MenuFlyoutItem { Text = "No hay dominios indexados aún", IsEnabled = false });
-            }
-            viewDomainsButton.Flyout = domainsFlyout;
-
-            domainSuggestBox.SuggestionChosen += (sender, args) =>
-            {
-                if (args.SelectedItem is string chosen)
-                {
-                    sender.Text = chosen;
-                    ApplyComposedTitle();
-                }
-            };
-
-            typeCombo.SelectionChanged += (_, __) => ApplyComposedTitle();
+            domainSuggestBox.SuggestionChosen += (sender, args) => sender.Text = args.SelectedItem?.ToString() ?? "";
+            typeCombo.SelectionChanged += (_, __) => PopulateCategories();
+            categoryCombo.SelectionChanged += (_, __) => ApplyComposedTitle();
             monthBox.TextChanged += (_, __) => ApplyComposedTitle();
-            detailDescBox.TextChanged += (_, __) => ApplyComposedTitle();
-            domainSuggestBox.QuerySubmitted += (_, __) => ApplyComposedTitle();
-
-            composerCard.Child = composerStack;
-            titleSection.Children.Insert(1, composerCard);
-
-            string StripVariantSuffix(string tag)
+            titleBox.TextChanged += (_, __) => { if (!updatingTitle) RefreshPreview(); };
+            backupOption.Checked += (_, __) => RefreshPreview();
+            dropboxOption.Checked += (_, __) => RefreshPreview();
+            notionOption.Checked += (_, __) => RefreshPreview();
+            reminderCheck.Checked += (_, __) => RefreshPreview();
+            reminderCheck.Unchecked += (_, __) => RefreshPreview();
+            reminderRecipient.SelectionChanged += (_, __) => RefreshPreview();
+            reminderAmount.ValueChanged += (_, __) => RefreshPreview();
+            reminderUnit.SelectionChanged += (_, __) => RefreshPreview();
+            PopulateCategories();
+            if (structuredPasteTitle && !string.IsNullOrWhiteSpace(savedPerson))
             {
-                var clean = (tag ?? string.Empty).Trim();
-                if (clean.EndsWith("001", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
-                if (clean.EndsWith("002", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
-                if (clean.EndsWith("003", StringComparison.OrdinalIgnoreCase)) return clean[..^3];
-                if (clean.EndsWith("00", StringComparison.OrdinalIgnoreCase)) return clean[..^2];
-                return clean;
+                var personIndex = Array.FindIndex(people, person => string.Equals(person.Assignee, savedPerson, StringComparison.OrdinalIgnoreCase));
+                if (personIndex > 0) reviewerCombo.SelectedIndex = personIndex;
             }
+            dialog.Opened += (_, __) => { RefreshPreview(); titleBox.Focus(FocusState.Programmatic); titleBox.SelectionStart = titleBox.Text.Length; };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return null;
 
-            void AppendTagToTextBox(
-                TextBox editor,
-                string tag)
+            var filenameTitle = BuildUploadTitle();
+            var finalTitle = string.IsNullOrWhiteSpace(filenameTitle)
+                ? selectedFiles.Count == 1 ? Path.GetFileNameWithoutExtension(selectedFiles[0].Name) : $"{selectedFiles.Count} archivos"
+                : filenameTitle;
+            var separateTitles = selectedFiles.Select((file, index) => string.IsNullOrWhiteSpace(filenameTitle)
+                ? Path.GetFileNameWithoutExtension(file.Name)
+                : GetDropboxUploadTitle(file.Name, filenameTitle, index, selectedFiles.Count)).ToList();
+            SaveNotionUploadRecentTags(selectedTags.Concat(string.IsNullOrEmpty(assignedPerson) ? Array.Empty<string>() : new[] { assignedPerson }));
+            return new NotionUploadOptions(layoutCombo.SelectedIndex == 1 ? NotionUploadLayout.SeparatePages : NotionUploadLayout.SinglePage,
+                finalTitle, separateTitles, selectedFiles, GetDestination(), localPath, remotePath, assignedPerson, filenameTitle);
+        }
+
+        private static bool IsUploadRootCategory(string? category, string suffix) =>
+            string.IsNullOrWhiteSpace(category) ||
+            string.Equals(category.Trim(), "proyecto", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(category.Trim(), suffix, StringComparison.OrdinalIgnoreCase);
+
+        private static string GetUploadDropboxDestination(string root, string domain, string suffix, string? category)
+        {
+            var projectRoot = Path.Combine(root, "DRX", $"{domain}.{suffix}");
+            return IsUploadRootCategory(category, suffix) ? projectRoot : Path.Combine(projectRoot, $"{domain}.{category!.Trim()}");
+        }
+
+        private static string ReplaceUploadReviewerTag(string text, string previousTag, string selectedTag)
+        {
+            if (!string.IsNullOrWhiteSpace(previousTag))
+                text = Regex.Replace(text, @"(?<!\S)" + Regex.Escape(previousTag) + @"(?=\s|$)\s*", "").Trim();
+            if (!string.IsNullOrWhiteSpace(selectedTag) &&
+                !text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(selectedTag, StringComparer.OrdinalIgnoreCase))
+                text = $"{text} {selectedTag}".Trim();
+            return text;
+        }
+
+        private static string ReplaceUploadTitlePrefix(string text, string previousPrefix, string newPrefix)
+        {
+            var remainder = text;
+            var previous = string.IsNullOrEmpty(previousPrefix) ? null :
+                Regex.Match(text, @"(?<!\S)" + Regex.Escape(previousPrefix) + @"(?=\s|$)\s*", RegexOptions.IgnoreCase);
+            if (previous?.Success == true)
+                remainder = text.Remove(previous.Index, previous.Length);
+            else
             {
-                var cleanTag = (tag ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(cleanTag))
-                    return;
-
-                var activeVariant = GetActiveVariantSuffix();
-                if (!string.IsNullOrEmpty(activeVariant) &&
-                    !cleanTag.EndsWith("001", StringComparison.OrdinalIgnoreCase) &&
-                    !cleanTag.EndsWith("002", StringComparison.OrdinalIgnoreCase) &&
-                    !cleanTag.EndsWith("003", StringComparison.OrdinalIgnoreCase) &&
-                    !cleanTag.EndsWith("00", StringComparison.OrdinalIgnoreCase))
-                {
-                    cleanTag += activeVariant;
-                }
-
-                var current = (editor.Text ?? string.Empty).Trim();
-                var tokens = current.Split(
-                    ' ',
-                    StringSplitOptions.RemoveEmptyEntries);
-
-                if (tokens.Any(x => string.Equals(
-                        x,
-                        cleanTag,
-                        StringComparison.OrdinalIgnoreCase)))
-                {
-                    return;
-                }
-
-                editor.Text = string.IsNullOrWhiteSpace(current)
-                    ? cleanTag
-                    : $"{cleanTag} {current}";
-
-                editor.SelectionStart = editor.Text.Length;
-                selectedUploadTags.RemoveAll(x => string.Equals(x, cleanTag, StringComparison.OrdinalIgnoreCase));
-                selectedUploadTags.Insert(0, cleanTag);
+                var tags = Regex.Match(text, @"^(?:(?:john|jjohn|nneft|aandr|ggena|kkarl|bbria|iisai)(?:0000|001|002|003|00)?\s+)*", RegexOptions.IgnoreCase).Value;
+                const string pattern = @"^(?:[\w.-]+\.(?:com|mx|org|net|io|co|app|dev)(?=\s|$)\s*)?(?:(?:sseo|aads|wwebs|aapli|rrede|pprog|ccoti|proyecto|software)(?=\s|$)\s*)?(?:(?:\d{2}-\[\d{2}[A-Z]{3}\]|jjane|ffebr|mmarz|aabri|mmayo|jjuni|jjuli|aagos|ssept|ooctu|nnovi|ddici)(?=\s|$)\s*)?";
+                remainder = tags + Regex.Replace(text[tags.Length..], pattern, "", RegexOptions.IgnoreCase);
             }
-
-            void AppendTagToActiveTitles(string tag)
+            var domain = ProjectSuffixHelper.ExtractDomain(newPrefix);
+            if (!string.IsNullOrEmpty(domain))
             {
-                if (separatePagesOption.IsChecked == true)
-                {
-                    foreach (var editor in titleEditors)
-                        AppendTagToTextBox(editor, tag);
-                }
-                else
-                {
-                    AppendTagToTextBox(titleBox, tag);
-                }
+                // Remove standalone repetitions of the generated domain, preserving
+                // links, emails, subdomains and the rest of the manually written text.
+                remainder = Regex.Replace(remainder, @"(?<![\w@./-])" + Regex.Escape(domain) + @"(?![\w./-])[ \t]*", "", RegexOptions.IgnoreCase);
             }
-
-            void ApplyVariantToEditor(TextBox editor, string targetVariant)
-            {
-                var text = (editor.Text ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(text)) return;
-
-                var allTags = NotionUploadQuickTags.Concat(NotionUploadPersonTags).ToArray();
-                var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-                bool modified = false;
-
-                for (int i = 0; i < tokens.Count; i++)
-                {
-                    var token = tokens[i];
-                    foreach (var baseTag in allTags)
-                    {
-                        var rawTokenBase = StripVariantSuffix(token);
-                        if (string.Equals(rawTokenBase, baseTag, StringComparison.OrdinalIgnoreCase))
-                        {
-                            tokens[i] = string.IsNullOrEmpty(targetVariant) ? baseTag : baseTag + targetVariant;
-                            modified = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (modified)
-                {
-                    editor.Text = string.Join(" ", tokens);
-                    editor.SelectionStart = editor.Text.Length;
-                }
-            }
-
-            void OnVariantSelectionChanged()
-            {
-                var variant = GetActiveVariantSuffix();
-                if (separatePagesOption.IsChecked == true)
-                {
-                    foreach (var ed in titleEditors) ApplyVariantToEditor(ed, variant);
-                }
-                else
-                {
-                    ApplyVariantToEditor(titleBox, variant);
-                }
-            }
-
-            variantNormalRadio.Checked += (_, __) => OnVariantSelectionChanged();
-            variant00Radio.Checked += (_, __) => OnVariantSelectionChanged();
-            variant001Radio.Checked += (_, __) => OnVariantSelectionChanged();
-            variant002Radio.Checked += (_, __) => OnVariantSelectionChanged();
-            variant003Radio.Checked += (_, __) => OnVariantSelectionChanged();
-
-            var quickTagsPanel = new StackPanel
-            {
-                Spacing = 9
-            };
-
-            quickTagsPanel.Children.Add(
-                new TextBlock
-                {
-                    Text = "🏷️ Etiquetas y Estados (Tags):",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold,
-                    FontSize = 12.5
-                });
-
-            quickTagsPanel.Children.Add(
-                new TextBlock
-                {
-                    Text = "Haz clic en un tag para insertarlo al inicio del título:",
-                    FontSize = 10.5,
-                    Opacity = 0.72
-                });
-
-            // Selector de variantes (00 Urgente, 001 Importante, 002 Secundaria, 003 Recordar-usar)
-            var variantsHeader = new TextBlock
-            {
-                Text = "Variante de prioridad / asignación:",
-                FontSize = 11,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Opacity = 0.85
-            };
-            quickTagsPanel.Children.Add(variantsHeader);
-
-            var variantsRow = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 4,
-                Margin = new Thickness(0, 0, 0, 2)
-            };
-            variantsRow.Children.Add(variantNormalRadio);
-            variantsRow.Children.Add(variant00Radio);
-            variantsRow.Children.Add(variant001Radio);
-            variantsRow.Children.Add(variant002Radio);
-            variantsRow.Children.Add(variant003Radio);
-            quickTagsPanel.Children.Add(variantsRow);
-
-            // Botón Asignar a Todos (002 Secundario)
-            var assignAll002Button = new Button
-            {
-                Content = "👥 Asignar a Todos (002 Secundario)",
-                Padding = new Thickness(10, 4, 10, 4),
-                CornerRadius = new CornerRadius(6),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(45, 56, 189, 248)),
-                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 56, 189, 248)),
-                BorderThickness = new Thickness(1),
-                HorizontalAlignment = HorizontalAlignment.Left
-            };
-            ToolTipService.SetToolTip(assignAll002Button, "Inserta los tags 002 secundarios de todos los integrantes del equipo. Puedes borrar individualmente a quien no aplique.");
-
-            assignAll002Button.Click += (_, __) =>
-            {
-                foreach (var personTag in NotionUploadPersonTags)
-                {
-                    AppendTagToActiveTitles(personTag + "002");
-                }
-            };
-            quickTagsPanel.Children.Add(assignAll002Button);
-
-            // Tags principales
-            var standardTagsHeader = new TextBlock
-            {
-                Text = "Tags principales:",
-                FontSize = 11,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Opacity = 0.85
-            };
-            quickTagsPanel.Children.Add(standardTagsHeader);
-
-            var quickTagButtons = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 6
-            };
-
-            foreach (var tag in NotionUploadQuickTags)
-            {
-                var button = new Button
-                {
-                    Content = tag,
-                    Padding = new Thickness(9, 4, 9, 4),
-                    Tag = tag,
-                    CornerRadius = new CornerRadius(6)
-                };
-
-                button.Click += (_, __) =>
-                    AppendTagToActiveTitles(tag);
-
-                quickTagButtons.Children.Add(button);
-            }
-
-            quickTagsPanel.Children.Add(quickTagButtons);
-
-            // Personas
-            var personTagCombo = new ComboBox
-            {
-                PlaceholderText = "TAGS de persona (ej. jjohn, nneft...)",
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            };
-
-            var recentPeople = LoadNotionUploadRecentTags()
-                .Select(tag =>
-                {
-                    if (tag.EndsWith("001", StringComparison.OrdinalIgnoreCase)) return tag[..^3];
-                    if (tag.EndsWith("002", StringComparison.OrdinalIgnoreCase)) return tag[..^3];
-                    if (tag.EndsWith("00", StringComparison.OrdinalIgnoreCase)) return tag[..^2];
-                    return tag;
-                })
-                .Where(tag => NotionUploadPersonTags.Contains(tag, StringComparer.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            foreach (var tag in recentPeople.Concat(NotionUploadPersonTags).Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                personTagCombo.Items.Add(
-                    new ComboBoxItem
-                    {
-                        Content = $"{GetNotionPersonDisplayName(tag)} ({tag})" + (recentPeople.Contains(tag, StringComparer.OrdinalIgnoreCase) ? " · Reciente" : ""),
-                        Tag = tag
-                    });
-            }
-
-            personTagCombo.SelectionChanged += (_, __) =>
-            {
-                if (personTagCombo.SelectedItem is not ComboBoxItem item)
-                    return;
-
-                var tag = item.Tag?.ToString() ?? string.Empty;
-                AppendTagToActiveTitles(tag);
-                personTagCombo.SelectedItem = null;
-            };
-
-            quickTagsPanel.Children.Add(personTagCombo);
-
-            var reminderCheck = new CheckBox
-            {
-                Content = "Programar como recordatorio / mensaje",
-                IsChecked = false
-            };
-
-            var reminderRecipientCombo = new ComboBox
-            {
-                PlaceholderText = "Selecciona destinatario",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                IsEnabled = false
-            };
-
-            foreach (var tag in NotionUploadPersonTags)
-            {
-                reminderRecipientCombo.Items.Add(
-                    new ComboBoxItem
-                    {
-                        Content = GetNotionPersonDisplayName(tag),
-                        Tag = tag
-                    });
-            }
-
-            var savedCurrentUserTag =
-                (ApplicationData.Current.LocalSettings.Values[
-                    LS_CurrentUserTag] as string ?? string.Empty).Trim();
-
-            if (!string.IsNullOrWhiteSpace(savedCurrentUserTag))
-            {
-                reminderRecipientCombo.SelectedItem =
-                    reminderRecipientCombo.Items
-                        .OfType<ComboBoxItem>()
-                        .FirstOrDefault(item =>
-                            string.Equals(
-                                item.Tag?.ToString(),
-                                savedCurrentUserTag,
-                                StringComparison.OrdinalIgnoreCase));
-            }
-
-            var reminderDelayCombo = new ComboBox
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                IsEnabled = false,
-                SelectedIndex = 0
-            };
-
-            reminderDelayCombo.Items.Add(
-                new ComboBoxItem { Content = "En 5 minutos", Tag = "5" });
-            reminderDelayCombo.Items.Add(
-                new ComboBoxItem { Content = "En 10 minutos", Tag = "10" });
-            reminderDelayCombo.Items.Add(
-                new ComboBoxItem { Content = "En 15 minutos", Tag = "15" });
-            reminderDelayCombo.Items.Add(
-                new ComboBoxItem { Content = "En 30 minutos", Tag = "30" });
-            reminderDelayCombo.Items.Add(
-                new ComboBoxItem { Content = "En 1 hora", Tag = "60" });
-            reminderDelayCombo.Items.Add(
-                new ComboBoxItem { Content = "Personalizado…", Tag = "custom" });
-
-            var customReminderValueBox = new NumberBox
-            {
-                Header = "Cantidad",
-                Minimum = 1,
-                Maximum = 999,
-                Value = 1,
-                SpinButtonPlacementMode =
-                    NumberBoxSpinButtonPlacementMode.Compact,
-                HorizontalAlignment = HorizontalAlignment.Stretch
-            };
-
-            var customReminderUnitCombo = new ComboBox
-            {
-                Header = "Unidad",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                SelectedIndex = 0
-            };
-
-            customReminderUnitCombo.Items.Add(
-                new ComboBoxItem { Content = "Minutos", Tag = "minutes" });
-            customReminderUnitCombo.Items.Add(
-                new ComboBoxItem { Content = "Horas", Tag = "hours" });
-            customReminderUnitCombo.Items.Add(
-                new ComboBoxItem { Content = "Días", Tag = "days" });
-
-            var customReminderGrid = new Grid
-            {
-                ColumnSpacing = 10,
-                Visibility = Visibility.Collapsed
-            };
-
-            customReminderGrid.ColumnDefinitions.Add(
-                new ColumnDefinition
-                {
-                    Width = new GridLength(1, GridUnitType.Star)
-                });
-            customReminderGrid.ColumnDefinitions.Add(
-                new ColumnDefinition
-                {
-                    Width = new GridLength(1, GridUnitType.Star)
-                });
-
-            Grid.SetColumn(customReminderValueBox, 0);
-            customReminderGrid.Children.Add(customReminderValueBox);
-
-            Grid.SetColumn(customReminderUnitCombo, 1);
-            customReminderGrid.Children.Add(customReminderUnitCombo);
-
-            var reminderPanel = new StackPanel
-            {
-                Spacing = 7
-            };
-
-            var reminderPreviewText = new TextBlock
-            {
-                Text =
-                    "También puedes iniciar el título con: 30 m, 1 h, mañana, mañana 10 am, 10 am o 15:30.",
-                FontSize = 11,
-                Opacity = 0.72,
-                TextWrapping = TextWrapping.Wrap
-            };
-
-            reminderPanel.Children.Add(new TextBlock
-            {
-                Text = "⏰ Programación de Recordatorio (Opcional):",
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                FontSize = 12.5
-            });
-            reminderPanel.Children.Add(reminderCheck);
-            reminderPanel.Children.Add(
-                new TextBlock
-                {
-                    Text = "Destinatario:",
-                    FontSize = 11,
-                    Opacity = 0.72
-                });
-            reminderPanel.Children.Add(reminderRecipientCombo);
-            reminderPanel.Children.Add(
-                new TextBlock
-                {
-                    Text = "Mostrar recordatorio:",
-                    FontSize = 11,
-                    Opacity = 0.72
-                });
-            reminderPanel.Children.Add(reminderDelayCombo);
-            reminderPanel.Children.Add(customReminderGrid);
-            reminderPanel.Children.Add(reminderPreviewText);
-
-            void RefreshNaturalReminderPreview()
-            {
-                if (TryParseNaturalReminderCommand(
-                        titleBox.Text,
-                        DateTime.Now,
-                        out var parsed))
-                {
-                    reminderPreviewText.Text =
-                        $"Comando detectado: “{parsed.CommandText}” → " +
-                        $"{parsed.ReminderAt:dd/MM/yyyy HH:mm}\n" +
-                        $"Título limpio: {parsed.CleanTitle}";
-
-                    reminderPreviewText.Opacity = 1;
-                }
-                else
-                {
-                    reminderPreviewText.Text =
-                        "También puedes iniciar el título con: 30 m, 1 h, mañana, mañana 10 am, 10 am o 15:30.";
-
-                    reminderPreviewText.Opacity = 0.72;
-                }
-            }
-
-            void RefreshCustomReminderVisibility()
-            {
-                var isCustom =
-                    reminderDelayCombo.SelectedItem is ComboBoxItem selectedDelay &&
-                    string.Equals(
-                        selectedDelay.Tag?.ToString(),
-                        "custom",
-                        StringComparison.OrdinalIgnoreCase);
-
-                customReminderGrid.Visibility =
-                    reminderCheck.IsChecked == true && isCustom
-                        ? Visibility.Visible
-                        : Visibility.Collapsed;
-
-                customReminderValueBox.IsEnabled =
-                    reminderCheck.IsChecked == true && isCustom;
-
-                customReminderUnitCombo.IsEnabled =
-                    reminderCheck.IsChecked == true && isCustom;
-            }
-
-            reminderCheck.Checked += (_, __) =>
-            {
-                reminderRecipientCombo.IsEnabled = true;
-                reminderDelayCombo.IsEnabled = true;
-                RefreshCustomReminderVisibility();
-            };
-
-            reminderCheck.Unchecked += (_, __) =>
-            {
-                reminderRecipientCombo.IsEnabled = false;
-                reminderDelayCombo.IsEnabled = false;
-                RefreshCustomReminderVisibility();
-            };
-
-            reminderDelayCombo.SelectionChanged += (_, __) =>
-                RefreshCustomReminderVisibility();
-
-            var activePeopleTags = new[] { "ggena", "kkarl", "jjohn", "bbria", "iisai", "nneft" };
-            var recentTags = LoadNotionUploadRecentTags();
-            var combinedRecent = activePeopleTags
-                .Concat(recentTags.Where(t => !activePeopleTags.Contains(t, StringComparer.OrdinalIgnoreCase)))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            quickTagsPanel.Children.Add(
-                new TextBlock
-                {
-                    Text = "Usados recientemente:",
-                    FontSize = 11,
-                    Opacity = 0.70,
-                    Margin = new Thickness(0, 4, 0, 0)
-                });
-
-            var recentPanel = new VariableSizedWrapGrid
-            {
-                Orientation = Orientation.Horizontal,
-                MaximumRowsOrColumns = 6,
-                ItemWidth = 100,
-                ItemHeight = 36
-            };
-
-            foreach (var tag in combinedRecent.Take(12))
-            {
-                var button = new Button
-                {
-                    Content = tag,
-                    Padding = new Thickness(8, 3, 8, 3),
-                    CornerRadius = new CornerRadius(5)
-                };
-                ToolTipService.SetToolTip(button, $"{GetNotionPersonDisplayName(tag)} ({tag})");
-
-                button.Click += (_, __) =>
-                    AppendTagToActiveTitles(tag);
-
-                recentPanel.Children.Add(button);
-            }
-
-            quickTagsPanel.Children.Add(recentPanel);
-
-            var content = new StackPanel
-            {
-                MaxWidth = 960,
-                MinWidth = 840,
-                Spacing = 14
-            };
-
-            var cardBg = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 20, 29));
-            var cardBorder = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 20, 75, 115));
-            var cardRadius = new CornerRadius(10);
-            var cardPadding = new Thickness(14);
-
-            // Sección 1: Archivos
-            var filesCard = new Border
-            {
-                Background = cardBg,
-                BorderBrush = cardBorder,
-                BorderThickness = new Thickness(1),
-                CornerRadius = cardRadius,
-                Padding = cardPadding
-            };
-            var filesStack = new StackPanel { Spacing = 8 };
-            filesStack.Children.Add(filesCountText);
-            filesStack.Children.Add(
-                new ScrollViewer
-                {
-                    Content = fileListPanel,
-                    MaxHeight = 170,
-                    VerticalScrollBarVisibility =
-                        ScrollBarVisibility.Auto
-                });
-            filesStack.Children.Add(
-                new TextBlock
-                {
-                    Text = "Adjuntos adicionales:",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold
-                });
-            filesStack.Children.Add(attachmentDropZone);
-            filesStack.Children.Add(attachmentStatusText);
-            filesCard.Child = filesStack;
-            content.Children.Add(filesCard);
-
-            // Sección 2: Destino y Organización
-            var orgCard = new Border
-            {
-                Background = cardBg,
-                BorderBrush = cardBorder,
-                BorderThickness = new Thickness(1),
-                CornerRadius = cardRadius,
-                Padding = cardPadding
-            };
-            var orgStack = new StackPanel { Spacing = 8 };
-            var dropboxOnlyOption = new RadioButton
-            {
-                Content = "Solo Dropbox · sin crear página en Notion",
-                GroupName = "NotionUploadLayout"
-            };
-            orgStack.Children.Add(
-                new TextBlock
-                {
-                    Text = "📋 Destino: Notion → Revisiones / Solo Dropbox",
-                    FontWeight =
-                        Microsoft.UI.Text.FontWeights.SemiBold,
-                    FontSize = 12.5,
-                    Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 56, 189, 248))
-                });
-            orgStack.Children.Add(
-                new TextBlock
-                {
-                    Text = "¿Cómo deseas organizar los archivos?",
-                    FontSize = 11,
-                    Opacity = 0.75
-                });
-            orgStack.Children.Add(onePageOption);
-            orgStack.Children.Add(separatePagesOption);
-            orgStack.Children.Add(dropboxOnlyOption);
-            orgCard.Child = orgStack;
-            content.Children.Add(orgCard);
-
-            // Sección 3: Título
-            var titleCard = new Border
-            {
-                Background = cardBg,
-                BorderBrush = cardBorder,
-                BorderThickness = new Thickness(1),
-                CornerRadius = cardRadius,
-                Padding = cardPadding
-            };
-            var titleCardStack = new StackPanel { Spacing = 8 };
-            titleCardStack.Children.Add(titleSection);
-            titleCardStack.Children.Add(separateTitlesPanel);
-            titleCard.Child = titleCardStack;
-            content.Children.Add(titleCard);
-
-            // Sección 4: Tags
-            var tagsCard = new Border
-            {
-                Background = cardBg,
-                BorderBrush = cardBorder,
-                BorderThickness = new Thickness(1),
-                CornerRadius = cardRadius,
-                Padding = cardPadding
-            };
-            tagsCard.Child = quickTagsPanel;
-            content.Children.Add(tagsCard);
-
-            // Sección 5: Recordatorio
-            var reminderCard = new Border
-            {
-                Background = cardBg,
-                BorderBrush = cardBorder,
-                BorderThickness = new Thickness(1),
-                CornerRadius = cardRadius,
-                Padding = cardPadding
-            };
-            reminderCard.Child = reminderPanel;
-            content.Children.Add(reminderCard);
-
-            double desiredDialogWidth = Math.Clamp(
-                (XamlRoot?.Size.Width ?? 1200) * 0.85,
-                920d,
-                1120d);
-
-            var contentScroll = new ScrollViewer
-            {
-                Content = content,
-                MaxHeight = Math.Clamp(
-                    ActualHeight - 110,
-                    560,
-                    880),
-                HorizontalScrollBarVisibility =
-                    ScrollBarVisibility.Disabled,
-                VerticalScrollBarVisibility =
-                    ScrollBarVisibility.Auto,
-                VerticalScrollMode = ScrollMode.Enabled
-            };
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = this.XamlRoot,
-                Content = contentScroll,
-                PrimaryButtonText = "Continuar y subir",
-                CloseButtonText = "Cancelar",
-                DefaultButton =
-                    ContentDialogButton.Primary,
-                IsPrimaryButtonEnabled =
-                    !string.IsNullOrWhiteSpace(
-                        suggestedTitle),
-                HorizontalContentAlignment =
-                    HorizontalAlignment.Stretch
-            };
-
-            dialog.Resources[
-                "ContentDialogMaxWidth"] = desiredDialogWidth;
-
-            dialog.Resources[
-                "ContentDialogMinWidth"] = Math.Min(desiredDialogWidth, 880d);
-
-            dialog.Resources["ContentDialogBackground"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 9, 16, 23));
-            dialog.Resources["ContentDialogBorderBrush"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(220, 0, 168, 255));
-            dialog.Resources["ContentDialogBorderThickness"] =
-                new Thickness(1.5);
-            dialog.Resources["ContentDialogCornerRadius"] =
-                new CornerRadius(14);
-            dialog.Resources["ContentDialogForeground"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 235, 245, 255));
-            dialog.Resources["AccentButtonBackground"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 140, 230));
-            dialog.Resources["AccentButtonBackgroundPointerOver"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255));
-            dialog.Resources["AccentButtonForeground"] =
-                new SolidColorBrush(Microsoft.UI.Colors.White);
-            dialog.Resources["TextControlBackground"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 25, 36));
-            dialog.Resources["TextControlBackgroundPointerOver"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 18, 32, 46));
-            dialog.Resources["TextControlBackgroundFocused"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 12, 22, 32));
-            dialog.Resources["TextControlBorderBrush"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(140, 0, 168, 255));
-            dialog.Resources["TextControlBorderBrushFocused"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 168, 255));
-            dialog.Resources["ComboBoxBackground"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 14, 25, 36));
-            dialog.Resources["ComboBoxBackgroundPointerOver"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(255, 18, 32, 46));
-            dialog.Resources["ComboBoxBorderBrush"] =
-                new SolidColorBrush(Windows.UI.Color.FromArgb(140, 0, 168, 255));
-
-            MakeCalendarContentDialogMovable(
-                dialog,
-                files.Count == 1
-                    ? "🚀 Subir archivo a Notion · Revisiones"
-                    : $"🚀 Subir {files.Count} archivos a Notion · Revisiones");
-
-            refreshDialogState = () =>
-            {
-                var onlyDropbox = dropboxOnlyOption.IsChecked == true;
-                titleCard.Visibility = Visibility.Visible;
-                tagsCard.Visibility = reminderCard.Visibility =
-                    onlyDropbox ? Visibility.Collapsed : Visibility.Visible;
-
-                titleSectionHeader.Text = onlyDropbox
-                    ? "Nombre con el que se guardará en Dropbox:"
-                    : "Título de la página:";
-
-                if (onlyDropbox && string.IsNullOrWhiteSpace(titleBox.Text) && selectedFiles.Count > 0)
-                {
-                    titleBox.Text = Path.GetFileNameWithoutExtension(selectedFiles[0].Name);
-                }
-
-                var separate =
-                    separatePagesOption.IsChecked == true || (onlyDropbox && selectedFiles.Count > 1);
-
-                titleSection.Visibility = separate
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
-
-                separateTitlesPanel.Visibility = separate
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-
-                var titlesValid = separate
-                    ? titleEditors.All(editor =>
-                        !string.IsNullOrWhiteSpace(
-                            editor.Text))
-                    : !string.IsNullOrWhiteSpace(
-                        titleBox.Text);
-
-                var customDelaySelected =
-                    reminderDelayCombo.SelectedItem is ComboBoxItem selectedDelay &&
-                    string.Equals(
-                        selectedDelay.Tag?.ToString(),
-                        "custom",
-                        StringComparison.OrdinalIgnoreCase);
-
-                var customDelayValid =
-                    !customDelaySelected ||
-                    (!double.IsNaN(customReminderValueBox.Value) &&
-                     customReminderValueBox.Value >= 1 &&
-                     customReminderUnitCombo.SelectedItem is ComboBoxItem);
-
-                var reminderValid =
-                    reminderCheck.IsChecked != true ||
-                    (reminderRecipientCombo.SelectedItem is ComboBoxItem &&
-                     reminderDelayCombo.SelectedItem is ComboBoxItem &&
-                     customDelayValid);
-
-                dialog.IsPrimaryButtonEnabled =
-                    selectedFiles.Count > 0 && titlesValid && (onlyDropbox || reminderValid);
-            };
-
-            titleBox.TextChanged +=
-                (_, __) =>
-                {
-                    refreshDialogState();
-                    ScheduleDebouncedTitleProcessing();
-                };
-
-            foreach (var editor in titleEditors)
-            {
-                editor.TextChanged +=
-                    (_, __) => refreshDialogState();
-            }
-
-            onePageOption.Checked +=
-                (_, __) => refreshDialogState();
-            dropboxOnlyOption.Checked += (_, __) => refreshDialogState();
-
-            separatePagesOption.Checked +=
-                (_, __) => refreshDialogState();
-
-            reminderCheck.Checked +=
-                (_, __) => refreshDialogState();
-            reminderCheck.Unchecked +=
-                (_, __) => refreshDialogState();
-            reminderRecipientCombo.SelectionChanged +=
-                (_, __) => refreshDialogState();
-            reminderDelayCombo.SelectionChanged +=
-                (_, __) => refreshDialogState();
-            customReminderValueBox.ValueChanged +=
-                (_, __) => refreshDialogState();
-            customReminderUnitCombo.SelectionChanged +=
-                (_, __) => refreshDialogState();
-
-            dialog.Closed += (_, __) => titleDebounceTimer?.Stop();
-
-            dialog.Opened += (_, __) =>
-            {
-                RefreshSelectedFilesUi();
-                RefreshNaturalReminderPreview();
-                refreshDialogState();
-                titleBox.Focus(
-                    FocusState.Programmatic);
-
-                var innerTitleTextBox =
-                    FindVisualChild<TextBox>(titleBox);
-
-                innerTitleTextBox?.SelectAll();
-            };
-
-            if (await dialog.ShowAsync() !=
-                ContentDialogResult.Primary)
-            {
-                return null;
-            }
-
-            var separateTitles = titleEditors
-                .Select(editor =>
-                    (editor.Text ??
-                     string.Empty).Trim())
-                .ToList();
-
-            var singleTitle =
-                (titleBox.Text ?? string.Empty).Trim();
-
-            if (dropboxOnlyOption.IsChecked == true)
-                return new NotionUploadOptions(NotionUploadLayout.DropboxOnly, singleTitle, separateTitles, selectedFiles.ToList());
-
-            if (reminderCheck.IsChecked == true &&
-                reminderRecipientCombo.SelectedItem is ComboBoxItem recipientItem)
-            {
-                var recipientTag =
-                    (recipientItem.Tag?.ToString() ?? string.Empty).Trim();
-
-                double delayMinutes = 5;
-
-                if (reminderDelayCombo.SelectedItem is ComboBoxItem delayItem)
-                {
-                    var delayTag =
-                        delayItem.Tag?.ToString() ?? string.Empty;
-
-                    if (string.Equals(
-                            delayTag,
-                            "custom",
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        var amount =
-                            double.IsNaN(customReminderValueBox.Value)
-                                ? 1
-                                : Math.Max(1, customReminderValueBox.Value);
-
-                        var unit =
-                            customReminderUnitCombo.SelectedItem is ComboBoxItem unitItem
-                                ? unitItem.Tag?.ToString() ?? "minutes"
-                                : "minutes";
-
-                        delayMinutes = unit switch
-                        {
-                            "hours" => amount * 60,
-                            "days" => amount * 24 * 60,
-                            _ => amount
-                        };
-                    }
-                    else if (double.TryParse(
-                                 delayTag,
-                                 System.Globalization.NumberStyles.Float,
-                                 System.Globalization.CultureInfo.InvariantCulture,
-                                 out var parsedDelay))
-                    {
-                        delayMinutes = parsedDelay;
-                    }
-                }
-
-                string BuildReminderTitle(string originalTitle)
-                {
-                    var cleanTitle =
-                        (originalTitle ?? string.Empty).Trim();
-
-                    var reminderAt =
-                        DateTime.Now.AddMinutes(delayMinutes);
-
-                    if (TryParseNaturalReminderCommand(
-                            cleanTitle,
-                            DateTime.Now,
-                            out var parsedCommand))
-                    {
-                        reminderAt =
-                            parsedCommand.ReminderAt;
-
-                        cleanTitle =
-                            parsedCommand.CleanTitle;
-                    }
-
-                    var senderTag =
-                        (ApplicationData.Current.LocalSettings.Values[
-                            LS_CurrentUserTag] as string ?? string.Empty).Trim();
-
-                    var senderToken =
-                        string.IsNullOrWhiteSpace(senderTag)
-                            ? string.Empty
-                            : $" de:{senderTag}";
-
-                    return
-                        $"{reminderAt:yyyy-MM-dd HH:mm} {recipientTag}{senderToken} {cleanTitle}".Trim();
-                }
-
-                singleTitle =
-                    BuildReminderTitle(singleTitle);
-
-                separateTitles = separateTitles
-                    .Select(BuildReminderTitle)
-                    .ToList();
-
-                selectedUploadTags.Add(recipientTag);
-            }
-
-            SaveNotionUploadRecentTags(
-                selectedUploadTags);
-
-            return new NotionUploadOptions(
-                separatePagesOption.IsChecked == true
-                    ? NotionUploadLayout.SeparatePages
-                    : NotionUploadLayout.SinglePage,
-                singleTitle,
-                separateTitles,
-                selectedFiles.ToList());
+            return $"{newPrefix} {remainder}".Trim();
+        }
+
+
+        private static bool ShouldUseStructuredPasteTitle(string source, string? titleOverride, IEnumerable<string> filenames) =>
+            titleOverride != null && string.IsNullOrWhiteSpace(titleOverride) ||
+            source.Contains("Ctrl+V", StringComparison.OrdinalIgnoreCase) ||
+            source.Contains("portapapeles", StringComparison.OrdinalIgnoreCase) ||
+            filenames.Any(name => Regex.IsMatch(name, @"^(?:ANFETA\s+CtrlV\b|clipboard[_ -]|pasted[_ -]|paste[_ -])", RegexOptions.IgnoreCase));
+
+        private static string GetDropboxUploadTitle(string originalName, string title, int index, int total)
+        {
+            if (string.IsNullOrWhiteSpace(title)) return Path.GetFileNameWithoutExtension(originalName);
+            var extension = Path.GetExtension(originalName);
+            var baseTitle = title.Trim();
+            if (!string.IsNullOrEmpty(extension) && baseTitle.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                baseTitle = baseTitle[..^extension.Length];
+            return total == 1 ? baseTitle : $"{baseTitle}_{index + 1}";
+        }
+
+        private static string GetDropboxUploadFileName(string originalName, string title, int index, int total)
+        {
+            var name = string.IsNullOrWhiteSpace(title) ? originalName :
+                GetDropboxUploadTitle(originalName, title, index, total) + Path.GetExtension(originalName);
+            foreach (var invalid in Path.GetInvalidFileNameChars()) name = name.Replace(invalid, '_');
+            return name;
+        }
+
+        private async Task AssignUploadReviewerAsync(string token, string pageId, string personTag, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(personTag)) return;
+            var baseTag = Regex.Replace(personTag, @"(?:0000|001|002|003|00)$", "");
+            await _notionCalendarService.UpdateActivityAssigneeAsync(token, pageId, GetNotionPersonDisplayName(baseTag), cancellationToken);
         }
 
         private async Task AddCreatedNotionPageToIndexAsync(
@@ -4007,13 +2757,6 @@ namespace Anfeta.UI.Views
                 Results.Insert(0, row);
                 RefreshResultsListView();
             }
-        }
-
-        private enum DropboxDuplicateChoice
-        {
-            Cancel,
-            Replace,
-            AutoRename
         }
 
         private async void CtxUploadDropboxFile_Click(
@@ -4075,35 +2818,47 @@ namespace Anfeta.UI.Views
             await UploadSelectedFilesToDropboxAsync(validFiles, destinationLocal, destinationRemote);
         }
 
-        private async Task ChooseDropboxUploadDestinationAsync(
-            IReadOnlyList<StorageFile> files,
-            string singleTitle = "",
-            IReadOnlyList<string>? separateTitles = null)
+        private async void CtxUploadSmartDropbox_Click(
+            object sender,
+            RoutedEventArgs e)
         {
+            var row = GetCtxRowOrSelected(sender);
+            var seed = row?.DomainChipText ?? row?.Name ?? string.Empty;
+
             try
             {
-                var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.ComputerFolder };
+                var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.Downloads };
                 picker.FileTypeFilter.Add("*");
-                InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(App.MainWindowInstance));
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder == null) return;
-                if (!_dropboxPathMapper.TryToDropboxPath(DROPBOX_ROOT, folder.Path, out var remote, out var error))
-                {
-                    StatusText.Text = $"Estado: {error}";
+                var hwnd = WindowNative.GetWindowHandle(App.MainWindowInstance);
+                InitializeWithWindow.Initialize(picker, hwnd);
+                var pickedFiles = await picker.PickMultipleFilesAsync();
+                if (pickedFiles == null || pickedFiles.Count == 0)
                     return;
-                }
-                await UploadSelectedFilesToDropboxAsync(files, folder.Path, remote, singleTitle, separateTitles);
+
+                var validFiles = pickedFiles
+                    .Where(x => x != null && !string.IsNullOrWhiteSpace(x.Path) && File.Exists(x.Path))
+                    .ToList();
+
+                if (validFiles.Count == 0)
+                    return;
+
+                await UploadFilesToNotionRevisionsAsync(validFiles, "menú Subir a Dropbox", seed,
+                    UploadDestination.DropboxOnly, ProjectSuffixHelper.CleanProjectDomain(seed, out _));
             }
-            catch (Exception ex) { StatusText.Text = $"Estado: No se pudo subir a Dropbox: {ex.Message}"; }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Estado: Error al seleccionar archivos: {ex.Message}";
+            }
         }
 
-        private async Task UploadSelectedFilesToDropboxAsync(
+        private async Task<IReadOnlyList<DropboxUploadReference>> UploadSelectedFilesToDropboxAsync(
             IReadOnlyList<StorageFile> validFiles,
             string destinationLocal,
             string destinationRemote,
             string singleTitle = "",
             IReadOnlyList<string>? separateTitles = null)
         {
+            var uploadedReferences = new List<DropboxUploadReference>();
             var uploadedCount = 0;
             var skippedCount = 0;
             var failedCount = 0;
@@ -4120,31 +2875,10 @@ namespace Anfeta.UI.Views
                     var pickedFile = validFiles[index];
                     var position = index + 1;
                     var originalName = pickedFile.Name;
-                    var ext = Path.GetExtension(originalName);
-
-                    string targetName = string.Empty;
-                    if (separateTitles != null && index < separateTitles.Count && !string.IsNullOrWhiteSpace(separateTitles[index]))
-                    {
-                        targetName = separateTitles[index].Trim();
-                    }
-                    else if (!string.IsNullOrWhiteSpace(singleTitle))
-                    {
-                        targetName = validFiles.Count == 1 ? singleTitle.Trim() : $"{singleTitle.Trim()}_{position}";
-                    }
-
-                    if (string.IsNullOrWhiteSpace(targetName))
-                    {
-                        targetName = originalName;
-                    }
-                    else if (!Path.HasExtension(targetName) && !string.IsNullOrEmpty(ext))
-                    {
-                        targetName += ext;
-                    }
-
-                    foreach (var invalidChar in Path.GetInvalidFileNameChars())
-                    {
-                        targetName = targetName.Replace(invalidChar, '_');
-                    }
+                    var separateTitle = separateTitles != null && index < separateTitles.Count ? separateTitles[index] : null;
+                    var targetName = GetDropboxUploadFileName(originalName,
+                        !string.IsNullOrWhiteSpace(separateTitle) ? separateTitle : singleTitle,
+                        index, !string.IsNullOrWhiteSpace(separateTitle) ? 1 : validFiles.Count);
 
                     var remoteFilePath =
                         _dropboxPathMapper.CombineDropboxPath(
@@ -4169,30 +2903,7 @@ namespace Anfeta.UI.Views
                                 remoteFilePath,
                                 checkCts.Token);
 
-                        if (exists)
-                        {
-                            // Ocultamos temporalmente el overlay para que el diálogo
-                            // de duplicado quede completamente accesible.
-                            LoadingOverlay.Visibility = Visibility.Collapsed;
-
-                            var choice =
-                                await PromptDropboxDuplicateChoiceAsync(
-                                    targetName);
-
-                            LoadingOverlay.Visibility = Visibility.Visible;
-
-                            if (choice == DropboxDuplicateChoice.Cancel)
-                            {
-                                skippedCount++;
-                                continue;
-                            }
-
-                            overwrite =
-                                choice == DropboxDuplicateChoice.Replace;
-
-                            autorename =
-                                choice == DropboxDuplicateChoice.AutoRename;
-                        }
+                        overwrite = exists;
 
                         UpdateLoadingState(
                             $"Estado: Subiendo {position} de {validFiles.Count} → {targetName}",
@@ -4210,6 +2921,7 @@ namespace Anfeta.UI.Views
                                 autorename,
                                 uploadCts.Token);
 
+                        uploadedReferences.Add(new DropboxUploadReference(Path.GetFileNameWithoutExtension(uploaded.Name), uploaded.PathDisplay));
                         var expectedLocalPath = Path.Combine(
                             destinationLocal,
                             uploaded.Name);
@@ -4260,32 +2972,7 @@ namespace Anfeta.UI.Views
             {
                 HideLoadingState();
             }
-        }
-
-        private async Task<DropboxDuplicateChoice> PromptDropboxDuplicateChoiceAsync(
-            string fileName)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = this.XamlRoot,
-                Title = "El archivo ya existe",
-                Content =
-                    $"Ya existe “{fileName}” en esta carpeta de Dropbox.\n\n" +
-                    "Puedes reemplazarlo o subir una copia con un nombre automático.",
-                PrimaryButtonText = "Reemplazar",
-                SecondaryButtonText = "Renombrar automáticamente",
-                CloseButtonText = "Cancelar",
-                DefaultButton = ContentDialogButton.Close
-            };
-
-            var result = await dialog.ShowAsync();
-
-            return result switch
-            {
-                ContentDialogResult.Primary => DropboxDuplicateChoice.Replace,
-                ContentDialogResult.Secondary => DropboxDuplicateChoice.AutoRename,
-                _ => DropboxDuplicateChoice.Cancel
-            };
+            return uploadedReferences;
         }
 
         private static async Task<bool> WaitForLocalFileAsync(
@@ -5946,11 +4633,16 @@ namespace Anfeta.UI.Views
                 ? "Abrir en Notion"
                 : "Abrir";
 
-            CtxMenuOpenExplorerItem.Text = isNotion
-                ? "No aplica: Explorador local"
-                : "Abrir en Explorador Local";
-
-            CtxMenuOpenExplorerItem.IsEnabled = !isNotion;
+            if (isNotion)
+            {
+                CtxMenuOpenExplorerItem.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                CtxMenuOpenExplorerItem.Visibility = Visibility.Visible;
+                CtxMenuOpenExplorerItem.Text = "Abrir en Explorador";
+                CtxMenuOpenExplorerItem.IsEnabled = true;
+            }
 
             CtxMenuCopyPathItem.Text = isNotion
                 ? "Copiar URL de Notion"
@@ -5991,13 +4683,13 @@ namespace Anfeta.UI.Views
 
             CtxMenuUploadNotionFileItem.IsEnabled = hasNotionToken;
 
-                        CtxMenuDuplicateItem.Text = isNotion
+            CtxMenuDuplicateItem.Text = isNotion
                 ? "Duplicar página…"
                 : "Duplicar…";
             CtxMenuDuplicateItem.IsEnabled = row != null;
             CtxMenuDuplicateItem.Visibility = Visibility.Visible;
 
-CtxMenuRenameItem.Text = isNotion
+            CtxMenuRenameItem.Text = isNotion
                 ? "Renombrar página..."
                 : "Renombrar...";
 
@@ -6013,6 +4705,14 @@ CtxMenuRenameItem.Text = isNotion
                 CtxMenuBookmarkItem.Text = row.IsBookmarked
                     ? "Quitar de Favoritos"
                     : "Agregar a Favoritos";
+
+                if (CtxMenuBookmarkItem.Icon is FontIcon bookmarkIcon)
+                {
+                    bookmarkIcon.Glyph = row.IsBookmarked ? "\uE735" : "\uE734";
+                    bookmarkIcon.Foreground = new SolidColorBrush(row.IsBookmarked
+                        ? Windows.UI.Color.FromArgb(255, 255, 193, 7)
+                        : Windows.UI.Color.FromArgb(255, 251, 191, 36));
+                }
             }
             else
             {

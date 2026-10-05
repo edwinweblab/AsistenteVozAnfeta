@@ -26,6 +26,9 @@ using Anfeta.UI.Services.Search;
 using Anfeta.UI.Services.Notion;
 using Windows.Storage;
 using System.Threading;
+using System.Runtime.InteropServices;
+using System.IO;
+using Microsoft.Windows.AppLifecycle;
 
 namespace Anfeta.UI
 {
@@ -55,6 +58,10 @@ namespace Anfeta.UI
         public App()
         {
             InitializeComponent();
+
+            this.UnhandledException += App_UnhandledException;
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+            TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
 
             AppHost = Host.CreateDefaultBuilder()
                 .ConfigureServices((context, services) =>
@@ -313,7 +320,44 @@ namespace Anfeta.UI
         {
             Debug.WriteLine("APP INICIADA");
 
-            DatabaseInitializer.InitializeDatabase();
+            var keyInstance = Microsoft.Windows.AppLifecycle.AppInstance.FindOrRegisterForKey("ANFETA_MAIN_SINGLETON");
+            if (!keyInstance.IsCurrent)
+            {
+                try
+                {
+                    var currentArgs = Microsoft.Windows.AppLifecycle.AppInstance.GetCurrent().GetActivatedEventArgs();
+                    keyInstance.RedirectActivationToAsync(currentArgs).AsTask().Wait(1500);
+                }
+                catch { }
+                Environment.Exit(0);
+                return;
+            }
+
+            keyInstance.Activated += (sender, actArgs) =>
+            {
+                UIQueue?.TryEnqueue(() =>
+                {
+                    if (_window != null)
+                    {
+                        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_window);
+                        if (hwnd != IntPtr.Zero)
+                        {
+                            ShowWindow(hwnd, 9); // SW_RESTORE
+                            SetForegroundWindow(hwnd);
+                        }
+                        _window.Activate();
+                    }
+                });
+            };
+
+            try
+            {
+                DatabaseInitializer.InitializeDatabase();
+            }
+            catch (Exception ex)
+            {
+                LogCrash("DATABASE_INIT_ERROR", ex);
+            }
 
 #if DEBUG
             TestDatabaseConnection();
@@ -342,10 +386,17 @@ namespace Anfeta.UI
                 Debug.WriteLine($"DEVICE ERROR: {ex.Message}");
             }
 
-            _hotkey = AppHost.Services.GetRequiredService<GlobalHotkeyService>();
-            _hotkey.Start();
-            _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
-            _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
+            try
+            {
+                _hotkey = AppHost.Services.GetRequiredService<GlobalHotkeyService>();
+                _hotkey.Start();
+                _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
+                _hotkey.RegistrationFailed += Hotkey_RegistrationFailed;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HOTKEY ERROR] {ex.Message}");
+            }
 
             // No se suscribe HomeVM durante el arranque para evitar cargar
             // el modelo, micrófono y servicios del módulo de voz sin utilizarlos.
@@ -692,16 +743,68 @@ namespace Anfeta.UI
         {
             UIQueue?.TryEnqueue(async () =>
             {
-                var dialog = new ContentDialog
+                var xamlRoot = _window?.Content?.XamlRoot;
+                if (xamlRoot == null)
                 {
-                    Title = "Error al configurar atajo",
-                    Content = message,
-                    CloseButtonText = "Entendido",
-                    XamlRoot = _window?.Content?.XamlRoot
-                };
-                await dialog.ShowAsync();
+                    Debug.WriteLine($"[HOTKEY] Fallo de registro: {message} (sin XamlRoot activo)");
+                    return;
+                }
+
+                try
+                {
+                    var dialog = new ContentDialog
+                    {
+                        Title = "Error al configurar atajo",
+                        Content = message,
+                        CloseButtonText = "Entendido",
+                        XamlRoot = xamlRoot
+                    };
+                    await dialog.ShowAsync();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[HOTKEY] Error al mostrar diálogo: {ex.Message}");
+                }
             });
         }
+
+        private void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+        {
+            LogCrash("XAML_UNHANDLED", e.Exception);
+            Debug.WriteLine($"[APP CRASH XAML] {e.Message}");
+        }
+
+        private void CurrentDomain_UnhandledException(object sender, System.UnhandledExceptionEventArgs e)
+        {
+            if (e.ExceptionObject is Exception ex)
+                LogCrash("APPDOMAIN_UNHANDLED", ex);
+            else
+                LogCrash("APPDOMAIN_UNHANDLED", new Exception(e.ExceptionObject?.ToString() ?? "Unknown error"));
+        }
+
+        private void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+        {
+            LogCrash("UNOBSERVED_TASK", e.Exception);
+            e.SetObserved();
+        }
+
+        private static void LogCrash(string category, Exception ex)
+        {
+            try
+            {
+                var dir = ApplicationData.Current.LocalFolder.Path;
+                var logPath = Path.Combine(dir, "crash.log");
+                var text = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{category}] {ex.Message}\n{ex.StackTrace}\n\n";
+                File.AppendAllText(logPath, text);
+            }
+            catch { }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         private async Task CheckAndWarmupGroqAsync()
         {

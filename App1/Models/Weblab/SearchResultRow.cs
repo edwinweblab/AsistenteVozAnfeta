@@ -938,10 +938,10 @@ namespace Anfeta.UI.Models.Weblab
                 withoutWorkflow = withoutWorkflow.Remove(monthMatch.Index, monthMatch.Length);
             }
 
-            // Extraer área codificada de Notion (ej. sseo, wwebs, aads, bbibl, etc.)
+            // Extraer área codificada de Notion (ej. sseo, wwebs, aads, bbibl, ccoti, etc.)
             var encodedAreaMatch = Regex.Match(
                 withoutWorkflow,
-                @"(?<![\p{L}\p{Nd}_])(?<area>sseo|wwebs|aads|aapli|pprog|ddise|rrede|mmaps|bbibl)(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?<area>sseo|seo|wwebs|webs|web|aads|ads|ad|aapli|apli|apps?|aplicaci[oó]n|pprog|prog|programas?|software|ddise|dise[nñ]o|rrede|redes|mmaps|maps|map|bbibl|bblib|biblia|biblioteca|ccoti|coti|cotizaci[oó]n|cchat|chat|rrapi|api)(?![\p{L}\p{Nd}_])",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             var encodedArea = encodedAreaMatch.Success
                 ? NormalizeEncodedArea(encodedAreaMatch.Groups["area"].Value)
@@ -967,8 +967,14 @@ namespace Anfeta.UI.Models.Weblab
                 ? domainMatch.Groups["domain"].Value.ToLowerInvariant()
                 : string.Empty;
 
+            var cleanedDomain = CleanProjectDomain(rawDomain, out var prefixType);
+            if (string.IsNullOrWhiteSpace(encodedArea) && !string.IsNullOrWhiteSpace(prefixType))
+            {
+                encodedArea = prefixType;
+            }
+
             // Ignorar dominios de plantilla/ejemplo como dominio.com, ejemplo.com, etc.
-            var domain = IsPlaceholderDomain(rawDomain) ? string.Empty : rawDomain;
+            var domain = IsPlaceholderDomain(cleanedDomain) ? string.Empty : cleanedDomain;
 
             // Si es un dominio de plantilla/placeholder, no removerlo del título para que siga siendo visible y buscable
             var titleSource = domainMatch.Success && !IsPlaceholderDomain(rawDomain)
@@ -1231,20 +1237,131 @@ namespace Anfeta.UI.Models.Weblab
             return upper;
         }
 
-        private static string NormalizeEncodedArea(string value) =>
+        public static string NormalizeEncodedArea(string value) =>
             (value ?? string.Empty).Trim().ToLowerInvariant() switch
             {
-                "bbibl" => "BIBLIA",
-                "sseo" => "SEO",
-                "wwebs" => "WEB",
-                "aads" => "ADS",
-                "aapli" => "APLICACIÓN",
-                "pprog" => "PROGRAMAS",
-                "ddise" => "DISEÑO",
-                "rrede" => "REDES",
-                "mmaps" => "MAPS",
+                "bbibl" or "biblia" or "biblioteca" or "bblib" => "BIBLIA",
+                "sseo" or "seo" => "SEO",
+                "wwebs" or "webs" or "web" => "WEB",
+                "aads" or "ads" or "ad" => "ADS",
+                "aapli" or "apli" or "app" or "apps" or "aplicacion" or "aplicación" => "APLICACIÓN",
+                "pprog" or "prog" or "programa" or "programas" or "software" => "PROGRAMAS",
+                "ddise" or "dise" or "diseno" or "diseño" => "DISEÑO",
+                "rrede" or "rede" or "redes" => "REDES",
+                "mmaps" or "maps" or "map" or "mmapi" => "MAPS",
+                "ccoti" or "coti" or "cotizacion" or "cotización" => "COTIZACIÓN",
+                "cchat" or "chat" => "CHAT",
+                "rrapi" or "api" => "API",
                 _ => string.Empty
             };
+
+        public static string DetectAreaFromTitleOrProject(string title, string project = "")
+        {
+            var text = $"{title} {project}".Trim();
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
+
+            var match = Regex.Match(
+                text,
+                @"(?<![\p{L}\p{Nd}_])(?<area>ccoti|coti|cotizaci[oó]n|sseo|seo|wwebs|webs?|aads|ads?|pprog|prog|programas?|software|aapli|apli|apps?|aplicaci[oó]n|bbibl|bblib|biblia|biblioteca|mmaps|maps?|mmapi|rrede|redes?|ddise|dise[nñ]o|cchat|chat|rrapi|api)(?![\p{L}\p{Nd}_])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+            if (match.Success)
+            {
+                var norm = NormalizeEncodedArea(match.Groups["area"].Value);
+                if (!string.IsNullOrWhiteSpace(norm))
+                    return norm;
+            }
+
+            return string.Empty;
+        }
+
+        public static string CleanProjectDomain(string rawDomain, out string detectedType)
+        {
+            detectedType = string.Empty;
+            if (string.IsNullOrWhiteSpace(rawDomain))
+                return string.Empty;
+
+            var d = rawDomain.Trim().Trim('.').ToLowerInvariant();
+
+            // Quitar prefijos operativos de WhatsApp / proyecto tipo tzp. o tzs.
+            if (d.StartsWith("tzp.", StringComparison.OrdinalIgnoreCase))
+                d = d.Substring(4);
+            else if (d.StartsWith("tzs.", StringComparison.OrdinalIgnoreCase))
+                d = d.Substring(4);
+
+            // Quitar prefijos de servicio si preceden a un dominio con TLD (ej. ads.agapetoursconcordia.com -> agapetoursconcordia.com)
+            var prefixes = new (string Prefix, string Area)[]
+            {
+                ("ads.", "ADS"),
+                ("ad.", "ADS"),
+                ("aads.", "ADS"),
+                ("seo.", "SEO"),
+                ("sseo.", "SEO"),
+                ("webs.", "WEB"),
+                ("web.", "WEB"),
+                ("wwebs.", "WEB"),
+                ("maps.", "MAPS"),
+                ("mmaps.", "MAPS"),
+                ("app.", "APLICACIÓN"),
+                ("apli.", "APLICACIÓN"),
+                ("aapli.", "APLICACIÓN"),
+                ("software.", "PROGRAMAS"),
+                ("prog.", "PROGRAMAS"),
+                ("pprog.", "PROGRAMAS"),
+                ("ccoti.", "COTIZACIÓN"),
+                ("coti.", "COTIZACIÓN"),
+                ("cotizacion.", "COTIZACIÓN"),
+                ("cotización.", "COTIZACIÓN"),
+                ("redes.", "REDES"),
+                ("rrede.", "REDES"),
+                ("diseno.", "DISEÑO"),
+                ("diseño.", "DISEÑO"),
+                ("ddise.", "DISEÑO"),
+                ("bbibl.", "BIBLIA"),
+                ("biblioteca.", "BIBLIA"),
+                ("cliente.", "CLIENTE"),
+                ("tutoriales.", "TUTORIALES"),
+                ("instalador.", "INSTALADOR")
+            };
+
+            foreach (var (p, a) in prefixes)
+            {
+                if (d.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                {
+                    var remainder = d.Substring(p.Length);
+                    if (remainder.Contains('.') && !remainder.StartsWith('.'))
+                    {
+                        d = remainder;
+                        detectedType = a;
+                        break;
+                    }
+                }
+            }
+
+            return d;
+        }
+
+        /// <summary>
+        /// Devuelve el código para chat de WhatsApp / Slack en formato TIPO.dominio (ej. SEO.icacalderas.com)
+        /// o el dominio limpio si no se especificó un tipo concreto.
+        /// </summary>
+        public string GetDomainAndTypeForChat()
+        {
+            var domain = DomainChipText;
+            if (string.IsNullOrWhiteSpace(domain) || IsPlaceholderDomain(domain))
+                return string.Empty;
+
+            var area = AreaChipText;
+            if (!string.IsNullOrWhiteSpace(area) &&
+                !string.Equals(area, "S/T", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(area, "Otros", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"{area.ToUpperInvariant()}.{domain}";
+            }
+
+            return domain;
+        }
 
         private static string StripReminderMetadata(string value)
         {

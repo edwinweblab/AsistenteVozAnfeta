@@ -1,5 +1,6 @@
 using Anfeta.UI.Models.Notion;
 using Anfeta.UI.Models.Weblab;
+using Anfeta.UI.Services.Notion;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
@@ -32,21 +33,87 @@ namespace Anfeta.UI.Views
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-                var activity = await _notionCalendarService.GetActivityByIdAsync(GetSavedNotionToken(), row.ExternalId, cts.Token);
-                if (activity == null || GetCalendarProjectPhaseInfo(activity) == null)
-                { StatusText.Text = "Estado: Esta página no es una actividad compatible con las reglas del calendario."; return; }
+                var token = GetSavedNotionToken();
+                var activity = await _notionCalendarService.GetActivityByIdAsync(token, row.ExternalId, cts.Token);
+                
+                bool hasPrtuzStructure = activity != null && GetCalendarProjectPhaseInfo(activity) != null;
+
+                if (item.Name == "CtxActivityComplete")
+                {
+                    if (hasPrtuzStructure && activity != null)
+                    {
+                        await HydrateCalendarReviewFlowAsync(new[] { activity }, cts.Token);
+                        var changed = await CompleteCalendarProjectActivityAsync(activity, XamlRoot);
+                        if (!changed) return;
+                        UpdateActionIndexRow(activity, false);
+                        row.Name = activity.Title;
+                        row.ProjectUpdateStatus = "TERMINADO";
+                    }
+                    else
+                    {
+                        // Flujo directo cuando la actividad NO tiene estructura/formato PRTUZ
+                        var dialog = new ContentDialog
+                        {
+                            XamlRoot = XamlRoot,
+                            Title = "Terminar actividad",
+                            Content = new TextBlock
+                            {
+                                Text = $"¿Marcar el estado de \"{row.DisplayName ?? row.Name}\" como TERMINADO?",
+                                TextWrapping = TextWrapping.Wrap
+                            },
+                            PrimaryButtonText = "Terminar",
+                            CloseButtonText = "Cancelar",
+                            DefaultButton = ContentDialogButton.Primary
+                        };
+
+                        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+                        ShowLoadingState("Estado: Cambiando estado a TERMINADO...", row.DisplayName ?? row.Name);
+                        var pageActions = new NotionPageActionsService();
+                        await pageActions.UpdatePageStatusOrSelectAsync(token, row.ExternalId, "TERMINADO", cts.Token);
+
+                        row.ProjectUpdateStatus = "TERMINADO";
+                        // Reflejar en el índice local
+                        var snapshot = App.LocalIndex.GetAll();
+                        foreach (var r in snapshot)
+                        {
+                            if (string.Equals(r.ExternalId, row.ExternalId, StringComparison.OrdinalIgnoreCase))
+                            {
+                                r.ProjectUpdateStatus = "TERMINADO";
+                                r.SearchText = $"{r.Name} {r.DisplayName} TERMINADO {r.DisplayLocation}";
+                            }
+                        }
+                        App.LocalIndex.Set(snapshot);
+                        StatusText.Text = "Estado: Actividad marcada como TERMINADO ✅";
+                    }
+
+                    RefreshResultsListView();
+                    await RefreshCalendarDayAfterProjectActionAsync();
+                    return;
+                }
+
+                // Enviar a revisión
+                if (activity == null || !hasPrtuzStructure)
+                {
+                    StatusText.Text = "Estado: Para enviar a revisión la actividad debe contar con la estructura del calendario.";
+                    return;
+                }
+
                 await HydrateCalendarReviewFlowAsync(new[] { activity }, cts.Token);
-                var changed = item.Name == "CtxActivityComplete"
-                    ? await CompleteCalendarProjectActivityAsync(activity, XamlRoot)
-                    : await PromptAndSendCalendarActivityToReviewAsync(activity, XamlRoot);
-                if (!changed) return;
+                var reviewChanged = await PromptAndSendCalendarActivityToReviewAsync(activity, XamlRoot);
+                if (!reviewChanged) return;
                 UpdateActionIndexRow(activity, false);
                 row.Name = activity.Title;
                 RefreshResultsListView();
                 await RefreshCalendarDayAfterProjectActionAsync();
             }
             catch (Exception ex) { StatusText.Text = $"Estado: No se pudo cambiar el estado → {ex.Message}"; }
-            finally { item.IsEnabled = true; _pendingActivityActions.Remove(row.ExternalId); }
+            finally 
+            { 
+                HideLoadingState();
+                item.IsEnabled = true; 
+                _pendingActivityActions.Remove(row.ExternalId); 
+            }
         }
         private void UpdateActionIndexRow(NotionCalendarActivity activity, bool updateDate)
         {
