@@ -14190,46 +14190,9 @@ private static bool HasExactCalendarPhase(
                         : $"\n{activity.LatestCommentText}"));
             }
 
-            // Modal enriquecido en hover (idéntico a la versión web)
-            // mostrando estatus, responsable, horario, checklist con barra gradiente,
-            // avance diario registrado (H) y última actualización del día.
-            if (overlapCount <= 1)
-            {
-                var hoverModal = BuildCalendarActivityHoverCard(
-                    activity,
-                    person,
-                    activityTooltipParts);
-
-                var hoverTip = new ToolTip
-                {
-                    Content = hoverModal,
-                    Background = new SolidColorBrush(Colors.Transparent),
-                    BorderBrush = new SolidColorBrush(Colors.Transparent),
-                    BorderThickness = new Thickness(0),
-                    Padding = new Thickness(0),
-                    MaxWidth = 600,
-                    MaxHeight = 900,
-                    VerticalOffset = -6
-                };
-
-                ToolTipService.SetToolTip(
-                    button,
-                    hoverTip);
-
-                ToolTipService.SetPlacementTarget(
-                    button,
-                    button);
-
-                ToolTipService.SetPlacement(
-                    button,
-                    PlacementMode.Top);
-            }
-            else
-            {
-                ToolTipService.SetToolTip(
-                    button,
-                    null);
-            }
+            // Un solo popup interactivo permite desplegar pendientes y editar
+            // el título sin competir con el tooltip de WinUI.
+            ToolTipService.SetToolTip(button, null);
 
             // WinUI aplica un visual PointerOver semitransparente a Button.
             // En tarjetas empalmadas se conserva exactamente el fondo/borde
@@ -14285,6 +14248,7 @@ private static bool HasExactCalendarPhase(
                             $"Estado: Empalme {overlapPosition}/{overlapTotal} · " +
                             $"{overlapIdentity} · {activity.TimeLabel}";
 
+                        CalendarActivity_PointerEntered(sender, args);
                         return;
                     }
 
@@ -14311,6 +14275,7 @@ private static bool HasExactCalendarPhase(
                                     : baseZIndex);
                         }
 
+                        CalendarActivity_PointerExited(sender, args);
                         return;
                     }
 
@@ -37314,9 +37279,8 @@ private static bool HasExactCalendarPhase(
             root.Children.Add(
                 detailHeader);
 
-            // Dentro del modal se muestra el título ORIGINAL de Notion.
-            // El título limpio se conserva únicamente en las tarjetas del
-            // calendario principal.
+            // El título limpio se presenta primero; al editar se conserva
+            // el título original de Notion y se guarda de forma explícita.
             var detail =
                 BuildCalendarActivityPreviewShell(
                     hoveredActivity,
@@ -37353,6 +37317,7 @@ private static bool HasExactCalendarPhase(
                         new Thickness(1),
                     Child = detail
                 });
+            root.Children.Add(BuildCalendarActivityDayChecklist(hoveredActivity));
 
             root.Children.Add(
                 new Border
@@ -40388,6 +40353,9 @@ private static bool HasExactCalendarPhase(
             _calendarPointerOverActivity = true;
             _calendarPendingActivityButton = button;
 
+            _calendarActivityHoverTimer ??= CreateCalendarActivityHoverTimer();
+            _calendarActivityHoverTimer.Stop();
+            _calendarActivityHoverTimer.Start();
             StopCalendarPreviewCloseTimer();
 
             if (button.Tag is NotionCalendarActivity act)
@@ -40397,116 +40365,24 @@ private static bool HasExactCalendarPhase(
             }
         }
 
-        private async void CalendarActivityHoverTimer_Tick(
-            object? sender,
-            object e)
+        private DispatcherTimer CreateCalendarActivityHoverTimer()
+        {
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+            timer.Tick += CalendarActivityHoverTimer_Tick;
+            return timer;
+        }
+
+        private void CalendarActivityHoverTimer_Tick(object? sender, object e)
         {
             _calendarActivityHoverTimer?.Stop();
-
-            var button =
-                _calendarPendingActivityButton;
-
-            if (!_calendarPointerOverActivity ||
-                button == null ||
+            if (_calendarActivityPreviewPinned || !_calendarPointerOverActivity ||
+                _calendarPendingActivityButton is not Button button ||
                 button.Tag is not NotionCalendarActivity activity)
-            {
                 return;
-            }
 
-            _calendarHoveredActivityButton = button;
-
-            try
-            {
-                _calendarHoverPreviewCts?.Cancel();
-                _calendarHoverPreviewCts?.Dispose();
-            }
-            catch
-            {
-            }
-
-            _calendarHoverPreviewCts =
-                new CancellationTokenSource(
-                    TimeSpan.FromSeconds(90));
-
-            var localCts =
-                _calendarHoverPreviewCts;
-
-            if (!TryBuildCalendarProjectGroupCriteria(
-                    activity,
-                    out var criteria))
-            {
-                ShowCalendarActivityPreviewFlyout(
-                    button,
-                    BuildCalendarActivitySummary(
-                        activity));
-
-                return;
-            }
-
-            var relatedCriteria =
-                BuildCalendarAllProjectTypesCriteria(criteria);
-
-            ShowCalendarActivityPreviewFlyout(
-                button,
-                BuildCalendarProjectHoverLoading(
-                    activity,
-                    criteria));
-
-            var token =
-                ApplicationData.Current.LocalSettings.Values[
-                    "Notion.Token"] as string;
-
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                UpdateCalendarActivityPreviewContent(
-                    BuildCalendarActivityErrorPreview(
-                        activity,
-                        "Configura primero el token de Notion."));
-
-                return;
-            }
-
-            try
-            {
-                var related =
-                    await GetCalendarProjectRelatedActivitiesAsync(
-                        activity,
-                        relatedCriteria,
-                        token,
-                        localCts.Token);
-
-                if (localCts.IsCancellationRequested ||
-                    _calendarHoveredActivityButton != button)
-                {
-                    return;
-                }
-
-                UpdateCalendarActivityPreviewContent(
-                    BuildCalendarProjectHoverChecklist(
-                        activity,
-                        criteria,
-                        related));
-
-                _ = WarmOpenCalendarProjectChecklistAsync(
-                    activity,
-                    criteria,
-                    related,
-                    activity.PageId,
-                    localCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                if (_calendarHoveredActivityButton != button)
-                    return;
-
-                UpdateCalendarActivityPreviewContent(
-                    BuildCalendarActivityErrorPreview(
-                        activity,
-                        ex.Message));
-            }
+            // El vistazo carga únicamente la actividad señalada. El clic sigue
+            // abriendo la checklist completa del proyecto y su editor.
+            ShowCalendarActivityPreviewFlyout(button, BuildCalendarActivityHoverCard(activity));
         }
 
         private void CalendarActivity_PointerExited(
@@ -42390,9 +42266,8 @@ private static bool HasExactCalendarPhase(
         {
             return BuildCalendarActivityPreviewShell(
                 activity,
-                content: null,
-                statusText:
-                    "Pasa el cursor un momento para cargar el contenido de la página.");
+                content: BuildCalendarActivityDayChecklist(activity),
+                statusText: string.Empty);
         }
 
         private FrameworkElement BuildCalendarActivityLoadingPreview(
@@ -43049,7 +42924,7 @@ private static bool HasExactCalendarPhase(
             // ── 2. Full Activity Title ──
             var titleBlock = new TextBlock
             {
-                Text = activity.Title ?? string.Empty,
+                Text = GetCalendarOrderedCompactActivityTitle(activity),
                 Foreground = new SolidColorBrush(Color.FromArgb(255, 248, 250, 252)), // #F8FAFC
                 FontSize = 12.5,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
@@ -43057,7 +42932,23 @@ private static bool HasExactCalendarPhase(
                 MaxLines = 4,
                 Margin = new Thickness(0, 3, 0, 4)
             };
-            root.Children.Add(titleBlock);
+            var titleButton = new Button
+            {
+                Content = titleBlock,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(0),
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                IsEnabled = !activity.IsReviewMirror
+            };
+            ToolTipService.SetToolTip(titleButton, "Clic para fijar la actividad y editar el título");
+            titleButton.Click += async (_, __) =>
+            {
+                if (_calendarHoveredActivityButton is Button anchor)
+                    await PinCalendarActivityProjectPreviewAsync(anchor, activity);
+            };
+            root.Children.Add(titleButton);
 
             // ── 3. Information Card (Box) ──
             var stats = GetCalendarChecklistStats(activity);
@@ -43080,9 +42971,9 @@ private static bool HasExactCalendarPhase(
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
-            void AddInfoRow(string label, string value, Color? valueColor = null, bool isBold = false)
+            TextBlock? AddInfoRow(string label, string value, Color? valueColor = null, bool isBold = false)
             {
-                if (string.IsNullOrWhiteSpace(value)) return;
+                if (string.IsNullOrWhiteSpace(value)) return null;
                 var row = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, ColumnSpacing = 8 };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -43109,6 +43000,7 @@ private static bool HasExactCalendarPhase(
                 row.Children.Add(l);
                 row.Children.Add(v);
                 boxStack.Children.Add(row);
+                return v;
             }
 
             var personName = !string.IsNullOrWhiteSpace(activity.Person) ? activity.Person : (targetPerson ?? string.Empty);
@@ -43190,9 +43082,10 @@ private static bool HasExactCalendarPhase(
 
             // ── Avance Diario del día (H) ──
             var dailyText = stats.CompletedByDate != null && completedToday > 0
-                ? $"{completedToday}/{stats.Total} checks hoy ({dailyBadge})"
+                ? $"{completedToday}/{stats.Total} checks del día ({dailyBadge})"
                 : dailyBadge;
-            AddInfoRow("📅 Avance hoy (H):", dailyText, Color.FromArgb(255, 56, 189, 248), isBold: true);
+            var dailyValue = AddInfoRow(_calendarSelectedDate.Date == DateTime.Today ? "📅 Avance hoy (H):" : "📅 Avance del día (H):", dailyText, Color.FromArgb(255, 56, 189, 248), isBold: true);
+            var previewDay = _calendarSelectedDate.Date;
 
             if (!string.IsNullOrWhiteSpace(activity.UpdateText))
             {
@@ -43211,6 +43104,16 @@ private static bool HasExactCalendarPhase(
 
             innerBox.Child = boxStack;
             root.Children.Add(innerBox);
+            root.Children.Add(BuildCalendarActivityDayChecklist(activity, updated =>
+            {
+                checkVal.Text = $"{updated.Completed} / {updated.Total} ({GetChecklistPercentage(updated)}%)";
+                var ratio = updated.Total > 0 ? Math.Clamp(updated.Completed / (double)updated.Total, 0, 1) : 0;
+                barGrid.ColumnDefinitions[0].Width = new GridLength(Math.Max(0.0001, ratio), GridUnitType.Star);
+                barGrid.ColumnDefinitions[1].Width = new GridLength(Math.Max(0.0001, 1 - ratio), GridUnitType.Star);
+                fillPart.Visibility = ratio > 0 ? Visibility.Visible : Visibility.Collapsed;
+                if (dailyValue != null)
+                    dailyValue.Text = $"{updated.GetCompletedOn(previewDay)}/{updated.Total} checks del día";
+            }));
 
             // ── 4. Footer: Clic para ver tareas | Doble clic Notion ──
             var footerGrid = new Grid
@@ -43223,7 +43126,7 @@ private static bool HasExactCalendarPhase(
 
             var clickHint = new TextBlock
             {
-                Text = "💡 Clic para ver tareas",
+                Text = "💡 Clic en el título para editar",
                 Foreground = new SolidColorBrush(Color.FromArgb(170, 100, 116, 139)), // #64748B
                 FontSize = 10,
                 VerticalAlignment = VerticalAlignment.Center
@@ -43247,8 +43150,7 @@ private static bool HasExactCalendarPhase(
 
             var container = new Border
             {
-                Width = 380,
-                MaxWidth = 420,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 Background = new SolidColorBrush(Color.FromArgb(250, 15, 23, 42)), // #0F172A (98% opacity)
                 BorderBrush = new SolidColorBrush(Color.FromArgb(110, 56, 189, 248)), // Sky border
                 BorderThickness = new Thickness(1),
@@ -43516,7 +43418,8 @@ private static bool HasExactCalendarPhase(
                             HorizontalAlignment.Stretch,
                         MinHeight = 34,
                         IsReadOnly = !pinnedEditorMode,
-                        IsTabStop = pinnedEditorMode
+                        IsTabStop = pinnedEditorMode,
+                        Visibility = Visibility.Collapsed
                     };
 
                 ToolTipService.SetToolTip(
@@ -43529,18 +43432,59 @@ private static bool HasExactCalendarPhase(
                     titleEditor,
                     0);
 
-                titleRow.Children.Add(
-                    titleEditor);
+                titleRow.Children.Add(titleEditor);
+                var cleanTitleButton = new Button
+                {
+                    Content = new TextBlock
+                    {
+                        Text = GetCalendarOrderedCompactActivityTitle(activity),
+                        FontSize = 14,
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0),
+                    IsEnabled = pinnedEditorMode
+                };
+                var saveTitleButton = new Button
+                {
+                    Content = "Guardar título", Visibility = Visibility.Collapsed,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Margin = new Thickness(0, 5, 0, 0)
+                };
+                saveTitleButton.Click += async (_, __) =>
+                {
+                    saveTitleButton.IsEnabled = false;
+                    try
+                    {
+                        await SaveCalendarActivityEditorAsync(activity, titleEditor.Text, activity.Start, activity.End);
+                    }
+                    finally { saveTitleButton.IsEnabled = true; }
+                };
+                titleRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                titleRow.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                Grid.SetRow(saveTitleButton, 1);
+                titleRow.Children.Add(saveTitleButton);
+                ToolTipService.SetToolTip(cleanTitleButton, "Editar título original");
+                cleanTitleButton.Click += (_, __) =>
+                {
+                    cleanTitleButton.Visibility = Visibility.Collapsed;
+                    titleEditor.Visibility = Visibility.Visible;
+                    saveTitleButton.Visibility = Visibility.Visible;
+                    titleEditor.Focus(FocusState.Programmatic);
+                };
+                Grid.SetColumn(cleanTitleButton, 0);
+                titleRow.Children.Add(cleanTitleButton);
             }
             else
             {
                 var titleText =
                     new TextBlock
                     {
-                        Text = compactMeta
-                            ? GetCalendarOrderedCompactActivityTitle(
-                                activity)
-                            : activity.Title,
+                        Text = GetCalendarOrderedCompactActivityTitle(activity),
                         FontSize = 14,
                         FontWeight =
                             Microsoft.UI.Text.FontWeights.SemiBold,

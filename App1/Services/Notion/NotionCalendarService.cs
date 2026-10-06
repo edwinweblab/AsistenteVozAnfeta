@@ -51,47 +51,6 @@ namespace Anfeta.UI.Services.Notion
             DeletedOrTrashed > 0;
     }
 
-    public sealed record NotionCompletedChecklistItem(
-        string BlockId,
-        string Text,
-        DateTimeOffset CompletedAt,
-        string DateKey);
-
-    public sealed record NotionChecklistStats(
-        int Total,
-        int Completed,
-        IReadOnlyDictionary<string, int>? CompletedByDate = null,
-        int CommentCount = 0,
-        string LatestCommentText = "",
-        IReadOnlyList<NotionCompletedChecklistItem>? CompletedItems = null)
-    {
-        public int Pending =>
-            Math.Max(0, Total - Completed);
-
-        public bool HasChecklist =>
-            Total > 0;
-
-        public int GetCompletedOn(DateTime day)
-        {
-            var key = day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            return CompletedByDate != null &&
-                   CompletedByDate.TryGetValue(key, out var completed)
-                ? Math.Clamp(completed, 0, Total)
-                : 0;
-        }
-
-        public IReadOnlyList<NotionCompletedChecklistItem> GetCompletedItemsOn(DateTime day)
-        {
-            var key = day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            if (CompletedItems == null || CompletedItems.Count == 0)
-                return Array.Empty<NotionCompletedChecklistItem>();
-
-            return CompletedItems
-                .Where(item => string.Equals(item.DateKey, key, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
-    }
-
     public sealed record NotionCalendarScheduleUpdateResult(
         NotionCalendarActivity Activity,
         bool AuditLogWritten);
@@ -345,6 +304,7 @@ namespace Anfeta.UI.Services.Notion
             public Dictionary<string, int> CompletedByDate { get; set; } =
                 new(StringComparer.OrdinalIgnoreCase);
             public List<NotionCompletedChecklistItem> CompletedItems { get; set; } = new();
+            public List<NotionPendingChecklistItem>? PendingItems { get; set; }
             public DateTimeOffset StoredAtUtc { get; set; }
         }
 
@@ -1210,7 +1170,8 @@ namespace Anfeta.UI.Services.Notion
                             persisted.CompletedByDate,
                             Math.Max(0, persisted.CommentCount),
                             persisted.LatestCommentText ?? string.Empty,
-                            persisted.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>());
+                            persisted.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>(),
+                            persisted.PendingItems);
 
                     _checklistStatsCache[pageId] =
                         persistedStats;
@@ -1309,7 +1270,8 @@ namespace Anfeta.UI.Services.Notion
                     stored.CompletedByDate,
                     Math.Max(0, stored.CommentCount),
                     stored.LatestCommentText ?? string.Empty,
-                    stored.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>());
+                    stored.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>(),
+                    stored.PendingItems);
                 return true;
             }
 
@@ -1334,6 +1296,11 @@ namespace Anfeta.UI.Services.Notion
                         pageId,
                         depth: 0,
                         cancellationToken);
+
+                // Mantiene la fecha conocida mientras un elemento siga marcado.
+                // Editar su texto no debe moverlo al avance del día actual.
+                if (TryGetCachedChecklistStats(pageId, out var knownStats))
+                    stats = NotionChecklistHistory.PreserveCompletionDates(stats, knownStats);
 
                 // Comentarios y checklist comparten el mismo ciclo
                 // incremental. Si la integración no tiene el permiso de
@@ -1380,6 +1347,7 @@ namespace Anfeta.UI.Services.Notion
                                 StringComparer.OrdinalIgnoreCase) ??
                             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
                         CompletedItems = stats.CompletedItems?.ToList() ?? new List<NotionCompletedChecklistItem>(),
+                        PendingItems = stats.PendingItems?.ToList(),
                         StoredAtUtc = DateTimeOffset.UtcNow
                     };
 
@@ -1455,7 +1423,8 @@ namespace Anfeta.UI.Services.Notion
                             stored.CompletedByDate,
                             Math.Max(0, stored.CommentCount),
                             stored.LatestCommentText ?? string.Empty,
-                            stored.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>());
+                            stored.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>(),
+                            stored.PendingItems);
 
                     _checklistStatsCache[activity.PageId] = stats;
                     ApplyChecklistStatsToActivity(activity, stats);
@@ -1863,6 +1832,7 @@ namespace Anfeta.UI.Services.Notion
                 new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var completedItems =
                 new List<NotionCompletedChecklistItem>();
+            var pendingItems = new List<NotionPendingChecklistItem>();
             string? cursor = null;
             var hasMore = true;
 
@@ -1999,6 +1969,10 @@ namespace Anfeta.UI.Services.Notion
                                         parsedDate ? editedAt.ToLocalTime() : DateTimeOffset.Now,
                                         localDay));
                                 }
+                                else
+                                {
+                                    pendingItems.Add(new NotionPendingChecklistItem(ReadString(block, "id"), plainText));
+                                }
                             }
                         }
 
@@ -2038,6 +2012,8 @@ namespace Anfeta.UI.Services.Notion
                         {
                             completedItems.AddRange(childStats.CompletedItems);
                         }
+                        if (childStats.PendingItems != null)
+                            pendingItems.AddRange(childStats.PendingItems);
 
                         foreach (var item in childStats.CompletedByDate ??
                                      new Dictionary<string, int>())
@@ -2074,7 +2050,8 @@ namespace Anfeta.UI.Services.Notion
                 completedByDate,
                 0,
                 "",
-                completedItems);
+                completedItems,
+                pendingItems);
         }
 
         private static string ReadBlockPlainText(
@@ -6535,7 +6512,8 @@ namespace Anfeta.UI.Services.Notion
                             storedStats.CompletedByDate,
                             Math.Max(0, storedStats.CommentCount),
                             storedStats.LatestCommentText ?? string.Empty,
-                            storedStats.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>());
+                            storedStats.CompletedItems ?? (IReadOnlyList<NotionCompletedChecklistItem>)Array.Empty<NotionCompletedChecklistItem>(),
+                            storedStats.PendingItems);
 
                     _checklistStatsCache[pageId] =
                         cachedChecklist;
