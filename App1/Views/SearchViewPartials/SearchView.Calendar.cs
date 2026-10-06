@@ -14190,32 +14190,32 @@ private static bool HasExactCalendarPhase(
                         : $"\n{activity.LatestCommentText}"));
             }
 
-            activityTooltipParts.Add(
-                "H = avance observado en el día · " +
-                "A = checklist de esta actividad · " +
-                "P = avance total del proyecto");
-
-            // En un grupo empalmado el hover se usa exclusivamente para
-            // traer tarjetas al frente. Un ToolTip estándar de WinUI tapa el
-            // grupo y hace difícil seleccionar la tarjeta inferior.
-            ToolTipService.SetToolTip(
-                button,
-                overlapCount > 1
-                    ? null
-                    : activityTooltipParts.Count > 0
-                        ? string.Join(
-                            "\n",
-                            activityTooltipParts)
-                        : null);
-
-            // 19/08: el tooltip informativo se ancla ARRIBA de la tarjeta.
-            // Antes WinUI lo posicionaba alrededor del puntero y podía caer
-            // sobre las actividades inferiores. Al usar la propia tarjeta
-            // como PlacementTarget, el tooltip queda por encima del bloque
-            // que se está inspeccionando y libera el calendario de abajo.
-            if (overlapCount <= 1 &&
-                activityTooltipParts.Count > 0)
+            // Modal enriquecido en hover (idéntico a la versión web)
+            // mostrando estatus, responsable, horario, checklist con barra gradiente,
+            // avance diario registrado (H) y última actualización del día.
+            if (overlapCount <= 1)
             {
+                var hoverModal = BuildCalendarActivityHoverCard(
+                    activity,
+                    person,
+                    activityTooltipParts);
+
+                var hoverTip = new ToolTip
+                {
+                    Content = hoverModal,
+                    Background = new SolidColorBrush(Colors.Transparent),
+                    BorderBrush = new SolidColorBrush(Colors.Transparent),
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0),
+                    MaxWidth = 600,
+                    MaxHeight = 900,
+                    VerticalOffset = -6
+                };
+
+                ToolTipService.SetToolTip(
+                    button,
+                    hoverTip);
+
                 ToolTipService.SetPlacementTarget(
                     button,
                     button);
@@ -14223,6 +14223,12 @@ private static bool HasExactCalendarPhase(
                 ToolTipService.SetPlacement(
                     button,
                     PlacementMode.Top);
+            }
+            else
+            {
+                ToolTipService.SetToolTip(
+                    button,
+                    null);
             }
 
             // WinUI aplica un visual PointerOver semitransparente a Button.
@@ -40384,23 +40390,11 @@ private static bool HasExactCalendarPhase(
 
             StopCalendarPreviewCloseTimer();
 
-            if (_calendarActivityHoverTimer == null)
+            if (button.Tag is NotionCalendarActivity act)
             {
-                _calendarActivityHoverTimer =
-                    new DispatcherTimer
-                    {
-                        // Debe mantenerse sobre una actividad antes de
-                        // abrir/cambiar la checklist del proyecto.
-                        Interval =
-                            TimeSpan.FromMilliseconds(650)
-                    };
-
-                _calendarActivityHoverTimer.Tick +=
-                    CalendarActivityHoverTimer_Tick;
+                StatusText.Text =
+                    $"Actividad: {act.Title} · {act.TimeLabel}";
             }
-
-            _calendarActivityHoverTimer.Stop();
-            _calendarActivityHoverTimer.Start();
         }
 
         private async void CalendarActivityHoverTimer_Tick(
@@ -42920,6 +42914,535 @@ private static bool HasExactCalendarPhase(
             }
         }
 
+        private static (Color Background, Color Foreground) GetStatusBadgeColors(
+            string? status,
+            string? notionColor = null)
+        {
+            var normalized = (status ?? string.Empty).Trim().ToLowerInvariant();
+
+            if (normalized.Contains("suspendid"))
+            {
+                return (
+                    Color.FromArgb(255, 88, 28, 135),    // #581C87 Deep Purple (como en web)
+                    Color.FromArgb(255, 233, 213, 255)   // #E9D5FF Light Purple
+                );
+            }
+
+            if (normalized.Contains("terminad") || normalized.Contains("hech") || normalized.Contains("complet"))
+            {
+                return (
+                    Color.FromArgb(255, 6, 78, 59),      // #064E3B Deep Emerald
+                    Color.FromArgb(255, 167, 243, 208)   // #A7F3D0 Mint
+                );
+            }
+
+            if (normalized.Contains("curso") || normalized.Contains("proceso"))
+            {
+                return (
+                    Color.FromArgb(255, 30, 58, 138),    // #1E3A8A Deep Blue
+                    Color.FromArgb(255, 191, 219, 254)   // #BFDBFE Light Blue
+                );
+            }
+
+            if (normalized.Contains("revision") || normalized.Contains("revisión") || normalized.Contains("sprtuzrevision"))
+            {
+                return (
+                    Color.FromArgb(255, 112, 26, 117),   // #701A75 Deep Fuchsia
+                    Color.FromArgb(255, 251, 207, 232)   // #FBCFE8 Light Pink
+                );
+            }
+
+            if (normalized.Contains("hacer") || normalized.Contains("pendiente"))
+            {
+                return (
+                    Color.FromArgb(255, 15, 118, 110),   // #0F766E Deep Teal
+                    Color.FromArgb(255, 204, 251, 241)   // #CCFBF1 Light Teal
+                );
+            }
+
+            if (normalized.Contains("atrasad") || normalized.Contains("rezagad") || normalized.Contains("urgente") || normalized.Contains("crítico") || normalized.Contains("critico"))
+            {
+                return (
+                    Color.FromArgb(255, 153, 27, 27),    // #991B1B Deep Red
+                    Color.FromArgb(255, 254, 202, 202)   // #FECACA Light Red
+                );
+            }
+
+            return (
+                Color.FromArgb(255, 51, 65, 85),     // #334155 Slate
+                Color.FromArgb(255, 241, 245, 249)   // #F1F5F9 Off-white
+            );
+        }
+
+        private FrameworkElement BuildCalendarActivityHoverCard(
+            NotionCalendarActivity activity,
+            string? targetPerson = null,
+            IReadOnlyList<string>? extraNotes = null)
+        {
+            var root = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Spacing = 7,
+                Padding = new Thickness(14, 12, 14, 12)
+            };
+
+            var (statusBg, statusFg) = GetStatusBadgeColors(activity.Status, activity.StatusColor);
+
+            // ── 1. Top Header: Status Pill | Domain | Lock Icon ──
+            var headerGrid = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                ColumnSpacing = 8
+            };
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var statusBadge = new Border
+            {
+                Background = new SolidColorBrush(statusBg),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 2, 6, 2),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = (string.IsNullOrWhiteSpace(activity.Status) ? "ACTIVIDAD" : activity.Status).ToUpperInvariant(),
+                    Foreground = new SolidColorBrush(statusFg),
+                    FontSize = 10,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    CharacterSpacing = 20
+                }
+            };
+            Grid.SetColumn(statusBadge, 0);
+            headerGrid.Children.Add(statusBadge);
+
+            var domainName = !string.IsNullOrWhiteSpace(activity.ParsedDomain)
+                ? activity.ParsedDomain
+                : (!string.IsNullOrWhiteSpace(activity.Project) ? activity.Project : string.Empty);
+
+            var domainText = new TextBlock
+            {
+                Text = domainName,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)), // #38BDF8 Sky
+                FontSize = 12,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            Grid.SetColumn(domainText, 1);
+            headerGrid.Children.Add(domainText);
+
+            var lockText = new TextBlock
+            {
+                Text = activity.IsAutomationLocked ? "🔒" : "🔓",
+                Foreground = new SolidColorBrush(activity.IsAutomationLocked
+                    ? Color.FromArgb(255, 245, 158, 11)   // #F59E0B Amber
+                    : Color.FromArgb(140, 148, 163, 184)), // Subtle
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(lockText, 2);
+            headerGrid.Children.Add(lockText);
+
+            root.Children.Add(headerGrid);
+
+            // ── 2. Full Activity Title ──
+            var titleBlock = new TextBlock
+            {
+                Text = activity.Title ?? string.Empty,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 248, 250, 252)), // #F8FAFC
+                FontSize = 12.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 4,
+                Margin = new Thickness(0, 3, 0, 4)
+            };
+            root.Children.Add(titleBlock);
+
+            // ── 3. Information Card (Box) ──
+            var stats = GetCalendarChecklistStats(activity);
+            var completedToday = stats.CompletedByDate != null ? stats.GetCompletedOn(_calendarSelectedDate) : 0;
+            var dailyBadge = BuildCalendarTodayProgressBadgeText(activity, false, out var _);
+
+            var innerBox = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(190, 8, 14, 26)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(70, 51, 65, 85)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 8, 10, 8),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var boxStack = new StackPanel
+            {
+                Spacing = 5,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            void AddInfoRow(string label, string value, Color? valueColor = null, bool isBold = false)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return;
+                var row = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, ColumnSpacing = 8 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var l = new TextBlock
+                {
+                    Text = label,
+                    Foreground = new SolidColorBrush(Color.FromArgb(180, 148, 163, 184)), // #94A3B8
+                    FontSize = 10.5,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                var v = new TextBlock
+                {
+                    Text = value,
+                    Foreground = new SolidColorBrush(valueColor ?? Color.FromArgb(255, 241, 245, 249)),
+                    FontSize = 10.5,
+                    FontWeight = isBold ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(l, 0);
+                Grid.SetColumn(v, 1);
+                row.Children.Add(l);
+                row.Children.Add(v);
+                boxStack.Children.Add(row);
+            }
+
+            var personName = !string.IsNullOrWhiteSpace(activity.Person) ? activity.Person : (targetPerson ?? string.Empty);
+            AddInfoRow("Responsable:", personName, Color.FromArgb(255, 241, 245, 249), isBold: true);
+
+            var durationText = activity.TimeLabel;
+            AddInfoRow("Horario:", durationText, Color.FromArgb(255, 56, 189, 248), isBold: true);
+
+            // Checklist row
+            var checklistPercent = stats.Total > 0 ? (int)Math.Round(stats.Completed * 100d / stats.Total) : activity.ChecklistPercentage;
+            var checklistValue = stats.Total > 0
+                ? $"{stats.Completed} / {stats.Total} ({checklistPercent}%)"
+                : (activity.ChecklistScanned ? "0 / 0 (0%)" : "…");
+
+            var checkRow = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, ColumnSpacing = 8 };
+            checkRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            checkRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var checkLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            checkLabel.Children.Add(new TextBlock
+            {
+                Text = "☑",
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 45, 212, 191)), // #2DD4BF
+                FontSize = 10.5
+            });
+            checkLabel.Children.Add(new TextBlock
+            {
+                Text = "Checklist:",
+                Foreground = new SolidColorBrush(Color.FromArgb(180, 148, 163, 184)),
+                FontSize = 10.5
+            });
+
+            var checkVal = new TextBlock
+            {
+                Text = checklistValue,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 45, 212, 191)), // #2DD4BF
+                FontSize = 10.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            Grid.SetColumn(checkLabel, 0);
+            Grid.SetColumn(checkVal, 1);
+            checkRow.Children.Add(checkLabel);
+            checkRow.Children.Add(checkVal);
+            boxStack.Children.Add(checkRow);
+
+            // Modern gradient progress bar (Cyan to Emerald)
+            var barTrack = new Grid
+            {
+                Height = 6,
+                Background = new SolidColorBrush(Color.FromArgb(255, 30, 41, 59)), // #1E293B
+                CornerRadius = new CornerRadius(3),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Margin = new Thickness(0, 2, 0, 4)
+            };
+
+            var barGrad = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0.5),
+                EndPoint = new Windows.Foundation.Point(1, 0.5)
+            };
+            barGrad.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 6, 182, 212), Offset = 0 });   // #06B6D4 Cyan
+            barGrad.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 16, 185, 129), Offset = 1 });  // #10B981 Emerald
+
+            var progressRatio = stats.Total > 0 ? Math.Clamp(stats.Completed / (double)stats.Total, 0, 1) : 0;
+            var barGrid = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, Height = 6 };
+            barGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, progressRatio), GridUnitType.Star) });
+            barGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, 1 - progressRatio), GridUnitType.Star) });
+
+            var fillPart = new Border
+            {
+                Background = barGrad,
+                CornerRadius = new CornerRadius(3)
+            };
+            Grid.SetColumn(fillPart, 0);
+            barGrid.Children.Add(fillPart);
+            barTrack.Children.Add(barGrid);
+            boxStack.Children.Add(barTrack);
+
+            // ── Avance Diario del día (H) ──
+            var dailyText = stats.CompletedByDate != null && completedToday > 0
+                ? $"{completedToday}/{stats.Total} checks hoy ({dailyBadge})"
+                : dailyBadge;
+            AddInfoRow("📅 Avance hoy (H):", dailyText, Color.FromArgb(255, 56, 189, 248), isBold: true);
+
+            if (!string.IsNullOrWhiteSpace(activity.UpdateText))
+            {
+                var updateBlock = new TextBlock
+                {
+                    Text = $"📝 Actualización: {activity.UpdateText}",
+                    Foreground = new SolidColorBrush(Color.FromArgb(220, 203, 213, 225)), // #CBD5E1
+                    FontSize = 10,
+                    FontStyle = Windows.UI.Text.FontStyle.Italic,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxLines = 2,
+                    Margin = new Thickness(0, 2, 0, 0)
+                };
+                boxStack.Children.Add(updateBlock);
+            }
+
+            innerBox.Child = boxStack;
+            root.Children.Add(innerBox);
+
+            // ── 4. Footer: Clic para ver tareas | Doble clic Notion ──
+            var footerGrid = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Margin = new Thickness(1, 4, 1, 0)
+            };
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var clickHint = new TextBlock
+            {
+                Text = "💡 Clic para ver tareas",
+                Foreground = new SolidColorBrush(Color.FromArgb(170, 100, 116, 139)), // #64748B
+                FontSize = 10,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(clickHint, 0);
+            footerGrid.Children.Add(clickHint);
+
+            var notionHint = new TextBlock
+            {
+                Text = "↗ Doble clic Notion",
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)), // #38BDF8
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(notionHint, 1);
+            footerGrid.Children.Add(notionHint);
+
+            root.Children.Add(footerGrid);
+
+            var container = new Border
+            {
+                Width = 380,
+                MaxWidth = 420,
+                Background = new SolidColorBrush(Color.FromArgb(250, 15, 23, 42)), // #0F172A (98% opacity)
+                BorderBrush = new SolidColorBrush(Color.FromArgb(110, 56, 189, 248)), // Sky border
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Child = root
+            };
+
+            return container;
+        }
+
+        private FrameworkElement BuildCalendarActivityDailyProgressCard(
+            NotionCalendarActivity activity)
+        {
+            var stats = GetCalendarChecklistStats(activity);
+            var completedToday = stats.CompletedByDate != null ? stats.GetCompletedOn(_calendarSelectedDate) : 0;
+            var dailyBadge = BuildCalendarTodayProgressBadgeText(activity, false, out var _);
+            var dailyPercent = stats.Total > 0
+                ? Math.Clamp((int)Math.Round(completedToday * 100d / stats.Total), 0, 100)
+                : (activity.ChecklistCompleted > 0 ? activity.ChecklistPercentage : 0);
+
+            var root = new StackPanel
+            {
+                Spacing = 6,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            // Header row: 📊 AVANCE DIARIO REGISTRADO | Badge
+            var headerRow = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var title = new TextBlock
+            {
+                Text = "📊 AVANCE DIARIO REGISTRADO",
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)), // #38BDF8
+                CharacterSpacing = 25,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(title, 0);
+            headerRow.Children.Add(title);
+
+            var pillText = stats.CompletedByDate != null && completedToday > 0
+                ? $"{dailyPercent}% hoy"
+                : (stats.Total > 0 ? $"{activity.ChecklistPercentage}% total" : dailyBadge);
+
+            var pill = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(255, 2, 132, 199)), // #0284C7
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 2, 6, 2),
+                Child = new TextBlock
+                {
+                    Text = pillText,
+                    FontSize = 9.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Colors.White)
+                }
+            };
+            Grid.SetColumn(pill, 1);
+            headerRow.Children.Add(pill);
+
+            root.Children.Add(headerRow);
+
+            // Gradient Progress Bar
+            var barTrack = new Grid
+            {
+                Height = 7,
+                Background = new SolidColorBrush(Color.FromArgb(255, 30, 41, 59)),
+                CornerRadius = new CornerRadius(3.5),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Margin = new Thickness(0, 1, 0, 2)
+            };
+
+            var barGrad = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0.5),
+                EndPoint = new Windows.Foundation.Point(1, 0.5)
+            };
+            barGrad.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 6, 182, 212), Offset = 0 });
+            barGrad.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 16, 185, 129), Offset = 1 });
+
+            var pct = stats.Total > 0 ? Math.Clamp(stats.Completed / (double)stats.Total, 0, 1) : 0;
+            var barGrid = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, Height = 7 };
+            var filledStar = Math.Max(0.0001, pct);
+            var emptyStar = Math.Max(0.0001, 1 - pct);
+            barGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(filledStar, GridUnitType.Star) });
+            barGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(emptyStar, GridUnitType.Star) });
+
+            var filledPart = new Border
+            {
+                Background = barGrad,
+                CornerRadius = new CornerRadius(3.5)
+            };
+            Grid.SetColumn(filledPart, 0);
+            barGrid.Children.Add(filledPart);
+            barTrack.Children.Add(barGrid);
+            root.Children.Add(barTrack);
+
+            // Grid with Metrics
+            var metricsGrid = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                ColumnSpacing = 12
+            };
+            metricsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            metricsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var col1 = new StackPanel { Spacing = 2 };
+            col1.Children.Add(new TextBlock
+            {
+                Text = "Observado hoy (H):",
+                FontSize = 9.5,
+                Opacity = 0.65
+            });
+            col1.Children.Add(new TextBlock
+            {
+                Text = completedToday > 0 ? $"{completedToday} check(s) en fecha" : dailyBadge,
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248))
+            });
+            Grid.SetColumn(col1, 0);
+            metricsGrid.Children.Add(col1);
+
+            var col2 = new StackPanel { Spacing = 2 };
+            col2.Children.Add(new TextBlock
+            {
+                Text = "Checklist total (A):",
+                FontSize = 9.5,
+                Opacity = 0.65
+            });
+            col2.Children.Add(new TextBlock
+            {
+                Text = stats.Total > 0 ? $"{stats.Completed} / {stats.Total} ({activity.ChecklistPercentage}%)" : "0 / 0",
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 45, 212, 191))
+            });
+            Grid.SetColumn(col2, 1);
+            metricsGrid.Children.Add(col2);
+
+            root.Children.Add(metricsGrid);
+
+            // Highlighted Update Text (Actualización del día)
+            if (!string.IsNullOrWhiteSpace(activity.UpdateText))
+            {
+                var updateBorder = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(40, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(80, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8, 5, 8, 5),
+                    Margin = new Thickness(0, 2, 0, 0)
+                };
+                var updateTextPanel = new StackPanel { Spacing = 2 };
+                updateTextPanel.Children.Add(new TextBlock
+                {
+                    Text = "ÚLTIMA ACTUALIZACIÓN DEL DÍA",
+                    FontSize = 9,
+                    FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 125, 211, 252))
+                });
+                updateTextPanel.Children.Add(new TextBlock
+                {
+                    Text = activity.UpdateText,
+                    FontSize = 11,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 248, 250, 252)),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                updateBorder.Child = updateTextPanel;
+                root.Children.Add(updateBorder);
+            }
+
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(45, 15, 23, 42)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(70, 56, 189, 248)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 8, 10, 8),
+                Margin = new Thickness(0, 2, 0, 4),
+                Child = root
+            };
+
+            return card;
+        }
+
         private FrameworkElement BuildCalendarActivityPreviewShell(
             NotionCalendarActivity activity,
             UIElement? content,
@@ -43107,6 +43630,14 @@ private static bool HasExactCalendarPhase(
 
             root.Children.Add(
                 titleRow);
+
+            // ── NUEVO APARTADO: AVANCE DIARIO REGISTRADO ──────────
+            // Conforme a los requerimientos:
+            // - Indicar de forma rápida porcentaje, progreso o actualización del día.
+            // - Mantener la vista clara, rápida y sin saturar la tarjeta.
+            // - Dar prioridad a esta información frente a controles secundarios.
+            var dailyProgressCard = BuildCalendarActivityDailyProgressCard(activity);
+            root.Children.Add(dailyProgressCard);
 
             DatePicker? editorDate =
                 null;
@@ -43378,33 +43909,47 @@ private static bool HasExactCalendarPhase(
                 editorPanel.Children.Add(
                     saveRow);
 
-                root.Children.Add(
-                    new Border
+                // En modo fijado, la edición de fecha y horario se ofrece como opción
+                // colapsable para priorizar el avance diario y no saturar la tarjeta verticalmente.
+                // En hover / vista previa no se despliegan controles deshabilitados.
+                if (pinnedEditorMode)
+                {
+                    var editorToggle = new Button
                     {
-                        Padding =
-                            new Thickness(
-                                9, 7, 9, 7),
-                        CornerRadius =
-                            new CornerRadius(7),
-                        Background =
-                            new SolidColorBrush(
-                                Color.FromArgb(
-                                    22,
-                                    56,
-                                    189,
-                                    248)),
-                        BorderBrush =
-                            new SolidColorBrush(
-                                Color.FromArgb(
-                                    60,
-                                    56,
-                                    189,
-                                    248)),
-                        BorderThickness =
-                            new Thickness(1),
-                        Child =
-                            editorPanel
-                    });
+                        Content = "✏ Modificar fecha y hora…",
+                        FontSize = 10,
+                        Height = 26,
+                        Padding = new Thickness(8, 0, 8, 0),
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        Background = new SolidColorBrush(Color.FromArgb(22, 255, 255, 255)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(50, 255, 255, 255)),
+                        CornerRadius = new CornerRadius(5),
+                        Margin = new Thickness(0, 1, 0, 2)
+                    };
+
+                    var editorBorder = new Border
+                    {
+                        Padding = new Thickness(9, 7, 9, 7),
+                        CornerRadius = new CornerRadius(7),
+                        Background = new SolidColorBrush(Color.FromArgb(22, 56, 189, 248)),
+                        BorderBrush = new SolidColorBrush(Color.FromArgb(60, 56, 189, 248)),
+                        BorderThickness = new Thickness(1),
+                        Child = editorPanel,
+                        Visibility = Visibility.Collapsed
+                    };
+
+                    editorToggle.Click += (_, __) =>
+                    {
+                        var isVisible = editorBorder.Visibility == Visibility.Visible;
+                        editorBorder.Visibility = isVisible ? Visibility.Collapsed : Visibility.Visible;
+                        editorToggle.Content = isVisible
+                            ? "✏ Modificar fecha y hora…"
+                            : "▲ Ocultar edición de fecha y hora";
+                    };
+
+                    root.Children.Add(editorToggle);
+                    root.Children.Add(editorBorder);
+                }
 
                 editorSave.Click +=
                     async (_, __) =>
