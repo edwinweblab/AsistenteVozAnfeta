@@ -375,6 +375,7 @@ namespace Anfeta.UI.Views
         // Un clic sobre la tarjeta fija ESA MISMA checklist para poder
         // interactuar después con checks, calendario, alarma, +/-15, etc.
         private bool _calendarActivityPreviewPinned;
+        private bool _calendarActivityPreviewSizeFlyoutOpen;
         private string _calendarActivityPreviewPinnedPageId =
             string.Empty;
         private Border? _calendarActivityPreviewPinBar;
@@ -1462,6 +1463,12 @@ namespace Anfeta.UI.Views
                 return (Color.FromArgb(50, 168, 85, 247), Color.FromArgb(140, 192, 132, 252), Color.FromArgb(255, 243, 232, 255));
             if (t.Contains("DISE"))
                 return (Color.FromArgb(50, 234, 88, 12), Color.FromArgb(140, 251, 146, 60), Color.FromArgb(255, 255, 237, 213));
+            if (t.Contains("FACTUR"))
+                return (Color.FromArgb(50, 16, 185, 129), Color.FromArgb(140, 52, 211, 153), Color.FromArgb(255, 167, 243, 208));
+            if (t.Contains("INSPIR"))
+                return (Color.FromArgb(50, 245, 158, 11), Color.FromArgb(140, 251, 191, 36), Color.FromArgb(255, 254, 243, 199));
+            if (t.Contains("LOGO"))
+                return (Color.FromArgb(50, 236, 72, 153), Color.FromArgb(140, 244, 114, 182), Color.FromArgb(255, 252, 231, 243));
             return (Color.FromArgb(45, 71, 85, 105), Color.FromArgb(120, 148, 163, 184), Color.FromArgb(255, 226, 232, 240));
         }
 
@@ -3613,6 +3620,8 @@ namespace Anfeta.UI.Views
                 UpdateActiveTodayProjects(
                     activities);
             }
+
+            UpdatePersonalCalendarContent();
 
             var expandedActivities =
                 ExpandCalendarReviewActivities(activities);
@@ -22365,6 +22374,9 @@ private static bool HasExactCalendarPhase(
                 root.Children.Add(cardChecksSection);
             }
 
+            // Checklist interactiva con inserción de checks resaltados y comentarios
+            root.Children.Add(BuildCalendarActivityDayChecklist(activity));
+
             root.Children.Add(contentHost);
 
             return new Border
@@ -40396,7 +40408,7 @@ private static bool HasExactCalendarPhase(
 
             _calendarActivityHoverTimer?.Stop();
 
-            if (!_calendarActivityPreviewPinned)
+            if (!_calendarActivityPreviewPinned && !_calendarActivityPreviewSizeFlyoutOpen)
                 StartCalendarPreviewCloseTimer();
         }
 
@@ -40406,9 +40418,6 @@ private static bool HasExactCalendarPhase(
         // grandes sin modificar el calendario ni la lógica de Notion.
         private double GetCalendarActivityPreviewUiScale()
         {
-            if (!_calendarActivityPreviewPinned)
-                return 1d;
-
             var mode =
                 GetCalendarActivityPreviewSizeMode();
 
@@ -40426,40 +40435,46 @@ private static bool HasExactCalendarPhase(
                     XamlRoot?.Size.Height ??
                     800d);
 
-            var veryLargeScreen =
-                rootWidth >= 3000d ||
-                rootHeight >= 1600d;
+            var isUltraScreen =
+                rootWidth >= 2800d ||
+                rootHeight >= 1500d;
 
             var isLargeScreen =
-                rootWidth >= 2400d ||
-                rootHeight >= 1350d;
+                rootWidth >= 2100d ||
+                rootHeight >= 1200d;
+
+            var isMediumScreen =
+                rootWidth >= 1600d ||
+                rootHeight >= 900d;
 
             return mode switch
             {
-                "normal" => 1d,
+                "normal" =>
+                    isUltraScreen
+                        ? 1.15d
+                        : (isLargeScreen ? 1.08d : (isMediumScreen ? 1.03d : 1.0d)),
 
                 "large" =>
-                    veryLargeScreen
-                        ? 1.15d
-                        : (isLargeScreen ? 1.06d : 1.0d),
+                    isUltraScreen
+                        ? 1.25d
+                        : (isLargeScreen ? 1.16d : (isMediumScreen ? 1.09d : 1.04d)),
 
                 "xlarge" =>
-                    veryLargeScreen
-                        ? 1.25d
-                        : (isLargeScreen ? 1.12d : 1.0d),
+                    isUltraScreen
+                        ? 1.36d
+                        : (isLargeScreen ? 1.25d : (isMediumScreen ? 1.16d : 1.08d)),
 
-                // En pantallas estándar (1080p y laptops), Máximo conserva una escala
-                // compacta (1.02x) para que toda la información y botones quepan sin desbordar.
-                // En pantallas 2K/1440p escala a 1.16x, y en monitores gigantes/4K (John) a 1.38x.
+                // Muy grande / Máximo: modo accesible y amplio para monitores grandes (John)
                 "max" =>
-                    veryLargeScreen
-                        ? 1.38d
-                        : (isLargeScreen ? 1.16d : 1.02d),
+                    isUltraScreen
+                        ? 1.48d
+                        : (isLargeScreen ? 1.32d : (isMediumScreen ? 1.20d : 1.10d)),
 
+                // Automático: escala de forma proporcional al monitor
                 "auto" =>
-                    veryLargeScreen
-                        ? 1.12d
-                        : 1d,
+                    isUltraScreen
+                        ? 1.35d
+                        : (isLargeScreen ? 1.22d : (isMediumScreen ? 1.10d : 1.0d)),
 
                 _ => 1d
             };
@@ -40759,8 +40774,7 @@ private static bool HasExactCalendarPhase(
         private void ApplyCalendarActivityPreviewUiScale(
             FrameworkElement content)
         {
-            if (!_calendarActivityPreviewPinned ||
-                content == null)
+            if (content == null)
             {
                 return;
             }
@@ -40811,8 +40825,8 @@ private static bool HasExactCalendarPhase(
                 "normal" => "Normal",
                 "large" => "Grande",
                 "xlarge" => "Extra grande",
-                "max" => "Máximo",
-                _ => "Automático"
+                "max" => "Muy grande (Máximo)",
+                _ => "Automático (proporcional)"
             };
         }
 
@@ -40840,12 +40854,14 @@ private static bool HasExactCalendarPhase(
             ApplicationData.Current.LocalSettings.Values[
                 LS_CalendarActivityPreviewSizeMode] = mode;
 
+            StopCalendarPreviewCloseTimer();
+            _calendarActivityPreviewSizeFlyoutOpen = false;
+
             if (_calendarActivityPreviewPopup?.IsOpen == true &&
                 _calendarHoveredActivityButton != null)
             {
-                // El tamaño ahora también cambia la ESTRUCTURA del modal
-                // (vertical ↔ dos columnas). Por eso no basta con redimensionar
-                // el Popup: reconstruye el contenido ya resuelto sin tocar Notion.
+                // El tamaño cambia la escala y estructura del modal.
+                // Reconstruye el contenido correspondiente para reflejar el cambio de inmediato.
                 if (_calendarActivityPreviewPinned &&
                     _calendarActivityPreviewLastCriteria != null &&
                     _calendarActivityPreviewLastProjectActivities.Count > 0)
@@ -40865,35 +40881,63 @@ private static bool HasExactCalendarPhase(
                             _calendarActivityPreviewLastCriteria,
                             _calendarActivityPreviewLastProjectActivities));
                 }
+                else if (!_calendarActivityPreviewPinned &&
+                         _calendarHoveredActivityButton.Tag is NotionCalendarActivity act)
+                {
+                    UpdateCalendarActivityPreviewContent(
+                        BuildCalendarActivityHoverCard(act));
+                }
 
                 PositionCalendarActivityPreviewPopup(
                     _calendarHoveredActivityButton);
             }
 
+            if (!_calendarActivityPreviewPinned)
+            {
+                StartCalendarPreviewCloseTimer(extendedDelay: true);
+            }
+
             StatusText.Text =
-                $"Estado: Tamaño de checklist → " +
+                $"Estado: Tamaño de preview → " +
                 $"{GetCalendarActivityPreviewSizeModeLabel(mode)} ✅";
         }
 
         private MenuFlyout BuildCalendarActivityPreviewSizeFlyout()
         {
             var flyout = new MenuFlyout();
+            flyout.Opened += (_, _) =>
+            {
+                _calendarActivityPreviewSizeFlyoutOpen = true;
+                StopCalendarPreviewCloseTimer();
+            };
+            flyout.Closed += (_, _) =>
+            {
+                _calendarActivityPreviewSizeFlyoutOpen = false;
+                if (!_calendarPointerOverPreview && !_calendarPointerOverActivity && !_calendarActivityPreviewPinned)
+                {
+                    StartCalendarPreviewCloseTimer(extendedDelay: true);
+                }
+            };
+
+            var currentMode = GetCalendarActivityPreviewSizeMode();
 
             var options = new[]
             {
-                (Mode: "auto", Label: "Automático (según pantalla)"),
+                (Mode: "auto", Label: "Automático (proporcional a la pantalla)"),
                 (Mode: "normal", Label: "Normal"),
                 (Mode: "large", Label: "Grande"),
-                (Mode: "xlarge", Label: "Extra grande · pantalla grande"),
-                (Mode: "max", Label: "Máximo · pantalla muy grande")
+                (Mode: "xlarge", Label: "Extra grande"),
+                (Mode: "max", Label: "Muy grande (Máximo)")
             };
 
             foreach (var option in options)
             {
+                var isSelected = string.Equals(option.Mode, currentMode, StringComparison.OrdinalIgnoreCase);
                 var item = new MenuFlyoutItem
                 {
-                    Text = option.Label,
-                    Tag = option.Mode
+                    Text = isSelected ? $"✓ {option.Label}" : option.Label,
+                    Tag = option.Mode,
+                    FontWeight = isSelected ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal
                 };
 
                 item.Click +=
@@ -41613,18 +41657,13 @@ private static bool HasExactCalendarPhase(
                         1,
                         rootHeight - (edge * 2));
 
-                // Hover = vistazo compacto.
-                // Clic/fijado = editor completo.
+                // El tamaño preferido configurado aplica tanto al fijar como al previsualizar,
+                // asegurando que en pantallas grandes no se vea diminuto ni comprimido.
                 var sizeMode =
-                    _calendarActivityPreviewPinned
-                        ? GetCalendarActivityPreviewSizeMode()
-                        : "hover";
+                    GetCalendarActivityPreviewSizeMode();
 
-                // Reaplica SIEMPRE la escala al contenido ya visible. Como las
-                // medidas se calculan desde baseline, también reduce fuentes,
-                // botones y espacios al volver de Máximo/Extra grande.
-                if (_calendarActivityPreviewPinned &&
-                    _calendarActivityPreviewHost?.Content is
+                // Reaplica SIEMPRE la escala al contenido ya visible.
+                if (_calendarActivityPreviewHost?.Content is
                         FrameworkElement currentPreviewContent)
                 {
                     ApplyCalendarActivityPreviewUiScale(
@@ -41639,91 +41678,92 @@ private static bool HasExactCalendarPhase(
                         "normal",
                         StringComparison.OrdinalIgnoreCase))
                 {
-                    preferredWidth = 600d;
-                    preferredHeight = 760d;
+                    preferredWidth =
+                        Math.Clamp(
+                            usableWidth * 0.48,
+                            620d,
+                            850d);
+                    preferredHeight =
+                        Math.Clamp(
+                            availableHeight * 0.86,
+                            700d,
+                            960d);
                 }
                 else if (string.Equals(
                              sizeMode,
                              "large",
                              StringComparison.OrdinalIgnoreCase))
                 {
-                    // Grande: organizado en 2 columnas, con ancho responsivo que
-                    // aprovecha pantallas medianas/grandes sin crecer infinitamente hacia abajo.
+                    // Grande: 2 columnas, amplio y cómodo
                     preferredWidth =
                         Math.Clamp(
-                            usableWidth * 0.62,
-                            880d,
-                            1300d);
-
+                            usableWidth * 0.65,
+                            900d,
+                            1400d);
                     preferredHeight =
                         Math.Clamp(
-                            availableHeight * 0.88,
-                            680d,
-                            1100d);
+                            availableHeight * 0.90,
+                            780d,
+                            1200d);
                 }
                 else if (string.Equals(
                              sizeMode,
                              "xlarge",
                              StringComparison.OrdinalIgnoreCase))
                 {
-                    // Extra grande: 2 columnas amplias y confortables.
+                    // Extra grande: 2 columnas amplias y confortables
                     preferredWidth =
                         Math.Clamp(
-                            usableWidth * 0.78,
-                            1080d,
-                            1900d);
-
+                            usableWidth * 0.80,
+                            1120d,
+                            2000d);
                     preferredHeight =
                         Math.Clamp(
-                            availableHeight * 0.92,
-                            760d,
-                            1500d);
+                            availableHeight * 0.94,
+                            840d,
+                            1600d);
                 }
                 else if (string.Equals(
                              sizeMode,
                              "max",
                              StringComparison.OrdinalIgnoreCase))
                 {
-                    // Máximo: modo accesible para pantallas muy grandes.
-                    // Puede ocupar casi toda ANFETA pero conserva margen,
-                    // cabecera de arrastre y scroll interno.
+                    // Muy grande (Máximo): aprovecha monitores grandes y 4K
                     preferredWidth =
                         Math.Clamp(
-                            usableWidth * 0.90,
-                            1200d,
-                            3000d);
-
-                    preferredHeight =
-                        availableHeight * 0.96;
-                }
-                else if (_calendarActivityPreviewPinned)
-                {
-                    // Por defecto para fijada: Máximo muy grande en 2 columnas
-                    preferredWidth =
-                        Math.Clamp(
-                            usableWidth * 0.90,
-                            1200d,
-                            3000d);
-
+                            usableWidth * 0.92,
+                            1300d,
+                            3200d);
                     preferredHeight =
                         availableHeight * 0.96;
                 }
                 else
                 {
-                    // Hover temporal más discreto que antes.
-                    preferredWidth =
-                        rootWidth >= 3000
-                            ? 600d
-                            : rootWidth >= 2200
-                                ? 520d
-                                : 460d;
-
-                    preferredHeight =
-                        rootHeight >= 1400
-                            ? 860d
-                            : rootHeight >= 1000
-                                ? 760d
-                                : 680d;
+                    // Automático: Proporcional a la resolución real de la pantalla
+                    if (rootWidth >= 2800 || rootHeight >= 1500)
+                    {
+                        // 4K o pantallas gigantes
+                        preferredWidth = Math.Clamp(usableWidth * 0.76, 1200d, 2800d);
+                        preferredHeight = availableHeight * 0.94;
+                    }
+                    else if (rootWidth >= 2100 || rootHeight >= 1200)
+                    {
+                        // 2K / 1440p
+                        preferredWidth = Math.Clamp(usableWidth * 0.68, 980d, 1600d);
+                        preferredHeight = availableHeight * 0.90;
+                    }
+                    else if (rootWidth >= 1600 || rootHeight >= 900)
+                    {
+                        // 1080p estándar
+                        preferredWidth = Math.Clamp(usableWidth * 0.56, 720d, 1150d);
+                        preferredHeight = Math.Clamp(availableHeight * 0.88, 700d, 960d);
+                    }
+                    else
+                    {
+                        // Pantallas compactas / laptops
+                        preferredWidth = Math.Clamp(usableWidth * 0.85, 560d, 780d);
+                        preferredHeight = Math.Clamp(availableHeight * 0.92, 600d, 820d);
+                    }
                 }
 
                 var previewWidth =
@@ -42164,23 +42204,19 @@ private static bool HasExactCalendarPhase(
         {
             _calendarPointerOverPreview = false;
 
-            if (!_calendarActivityPreviewPinned)
+            if (!_calendarActivityPreviewPinned && !_calendarActivityPreviewSizeFlyoutOpen)
                 StartCalendarPreviewCloseTimer();
         }
 
-        private void StartCalendarPreviewCloseTimer()
+        private void StartCalendarPreviewCloseTimer(bool extendedDelay = false)
         {
+            if (_calendarActivityPreviewSizeFlyoutOpen)
+                return;
+
             if (_calendarPreviewCloseTimer == null)
             {
                 _calendarPreviewCloseTimer =
-                    new DispatcherTimer
-                    {
-                        // Da tiempo suficiente para cruzar desde la tarjeta
-                        // hasta el popup sin cerrarlo. Una vez dentro, el borde
-                        // exterior completo mantiene vivo el hover, incluido scroll.
-                        Interval =
-                            TimeSpan.FromMilliseconds(650)
-                    };
+                    new DispatcherTimer();
 
                 _calendarPreviewCloseTimer.Tick +=
                     (_, __) =>
@@ -42189,7 +42225,8 @@ private static bool HasExactCalendarPhase(
 
                         if (!_calendarActivityPreviewPinned &&
                             !_calendarPointerOverActivity &&
-                            !_calendarPointerOverPreview)
+                            !_calendarPointerOverPreview &&
+                            !_calendarActivityPreviewSizeFlyoutOpen)
                         {
                             HideCalendarActivityPreviewFlyout();
                         }
@@ -42197,6 +42234,11 @@ private static bool HasExactCalendarPhase(
             }
 
             _calendarPreviewCloseTimer.Stop();
+            // 1300ms habitual para evitar cierres accidentales al mover el mouse,
+            // o 4 segundos si el usuario acaba de interactuar con el menú de tamaños.
+            _calendarPreviewCloseTimer.Interval = extendedDelay
+                ? TimeSpan.FromSeconds(4)
+                : TimeSpan.FromMilliseconds(1300);
             _calendarPreviewCloseTimer.Start();
         }
 
@@ -42863,7 +42905,7 @@ private static bool HasExactCalendarPhase(
 
             var (statusBg, statusFg) = GetStatusBadgeColors(activity.Status, activity.StatusColor);
 
-            // ── 1. Top Header: Status Pill | Domain | Lock Icon ──
+            // ── 1. Top Header: Status Pill | Domain | Lock Icon | Size Button ──
             var headerGrid = new Grid
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -42871,6 +42913,8 @@ private static bool HasExactCalendarPhase(
             };
             headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var statusBadge = new Border
@@ -42899,7 +42943,7 @@ private static bool HasExactCalendarPhase(
             {
                 Text = domainName,
                 Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)), // #38BDF8 Sky
-                FontSize = 12,
+                FontSize = 12.5,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -42919,6 +42963,48 @@ private static bool HasExactCalendarPhase(
             Grid.SetColumn(lockText, 2);
             headerGrid.Children.Add(lockText);
 
+            var sizeButton = new Button
+            {
+                Content = "⛶",
+                Width = 28,
+                Height = 24,
+                Padding = new Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Background = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255)),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(5),
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                Flyout = BuildCalendarActivityPreviewSizeFlyout()
+            };
+            ToolTipService.SetToolTip(sizeButton, "Ajustar tamaño de preview (Normal, Grande, Extra grande, Máximo, Automático)");
+            Grid.SetColumn(sizeButton, 3);
+            headerGrid.Children.Add(sizeButton);
+
+            var pinButton = new Button
+            {
+                Content = "📌",
+                Width = 28,
+                Height = 24,
+                Padding = new Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Background = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255)),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(5),
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            ToolTipService.SetToolTip(pinButton, "Fijar actividad en pantalla para interactuar y que no se cierre");
+            pinButton.Click += (_, _) =>
+            {
+                SetCalendarActivityPreviewPinned(activity.PageId, true);
+                StatusText.Text = $"Estado: Actividad fijada 📌 · {activity.Title}";
+            };
+            Grid.SetColumn(pinButton, 4);
+            headerGrid.Children.Add(pinButton);
+
             root.Children.Add(headerGrid);
 
             // ── 2. Full Activity Title ──
@@ -42926,7 +43012,7 @@ private static bool HasExactCalendarPhase(
             {
                 Text = GetCalendarOrderedCompactActivityTitle(activity),
                 Foreground = new SolidColorBrush(Color.FromArgb(255, 248, 250, 252)), // #F8FAFC
-                FontSize = 12.5,
+                FontSize = 13.5,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
                 MaxLines = 4,
@@ -42950,7 +43036,7 @@ private static bool HasExactCalendarPhase(
             };
             root.Children.Add(titleButton);
 
-            // ── 3. Information Card (Box) ──
+            // ── 3. Information Card (Box con distribución en 2 columnas) ──
             var stats = GetCalendarChecklistStats(activity);
             var completedToday = stats.CompletedByDate != null ? stats.GetCompletedOn(_calendarSelectedDate) : 0;
             var dailyBadge = BuildCalendarTodayProgressBadgeText(activity, false, out var _);
@@ -42961,17 +43047,33 @@ private static bool HasExactCalendarPhase(
                 BorderBrush = new SolidColorBrush(Color.FromArgb(70, 51, 65, 85)),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
-                Padding = new Thickness(10, 8, 10, 8),
+                Padding = new Thickness(12, 10, 12, 10),
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
             var boxStack = new StackPanel
             {
-                Spacing = 5,
+                Spacing = 6,
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
-            TextBlock? AddInfoRow(string label, string value, Color? valueColor = null, bool isBold = false)
+            var columnsGrid = new Grid
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                ColumnSpacing = 16,
+                RowSpacing = 6
+            };
+            columnsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            columnsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var colLeft = new StackPanel { Spacing = 5 };
+            var colRight = new StackPanel { Spacing = 5 };
+            Grid.SetColumn(colLeft, 0);
+            Grid.SetColumn(colRight, 1);
+            columnsGrid.Children.Add(colLeft);
+            columnsGrid.Children.Add(colRight);
+
+            TextBlock? AddInfoRow(StackPanel parent, string label, string value, Color? valueColor = null, bool isBold = false)
             {
                 if (string.IsNullOrWhiteSpace(value)) return null;
                 var row = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, ColumnSpacing = 8 };
@@ -42999,17 +43101,17 @@ private static bool HasExactCalendarPhase(
                 Grid.SetColumn(v, 1);
                 row.Children.Add(l);
                 row.Children.Add(v);
-                boxStack.Children.Add(row);
+                parent.Children.Add(row);
                 return v;
             }
 
             var personName = !string.IsNullOrWhiteSpace(activity.Person) ? activity.Person : (targetPerson ?? string.Empty);
-            AddInfoRow("Responsable:", personName, Color.FromArgb(255, 241, 245, 249), isBold: true);
+            AddInfoRow(colLeft, "Responsable:", personName, Color.FromArgb(255, 241, 245, 249), isBold: true);
 
             var durationText = activity.TimeLabel;
-            AddInfoRow("Horario:", durationText, Color.FromArgb(255, 56, 189, 248), isBold: true);
+            AddInfoRow(colLeft, "Horario:", durationText, Color.FromArgb(255, 56, 189, 248), isBold: true);
 
-            // Checklist row
+            // Checklist row (en columna derecha)
             var checklistPercent = stats.Total > 0 ? (int)Math.Round(stats.Completed * 100d / stats.Total) : activity.ChecklistPercentage;
             var checklistValue = stats.Total > 0
                 ? $"{stats.Completed} / {stats.Total} ({checklistPercent}%)"
@@ -43045,7 +43147,7 @@ private static bool HasExactCalendarPhase(
             Grid.SetColumn(checkVal, 1);
             checkRow.Children.Add(checkLabel);
             checkRow.Children.Add(checkVal);
-            boxStack.Children.Add(checkRow);
+            colRight.Children.Add(checkRow);
 
             // Modern gradient progress bar (Cyan to Emerald)
             var barTrack = new Grid
@@ -43078,14 +43180,16 @@ private static bool HasExactCalendarPhase(
             Grid.SetColumn(fillPart, 0);
             barGrid.Children.Add(fillPart);
             barTrack.Children.Add(barGrid);
-            boxStack.Children.Add(barTrack);
+            colRight.Children.Add(barTrack);
 
             // ── Avance Diario del día (H) ──
             var dailyText = stats.CompletedByDate != null && completedToday > 0
                 ? $"{completedToday}/{stats.Total} checks del día ({dailyBadge})"
                 : dailyBadge;
-            var dailyValue = AddInfoRow(_calendarSelectedDate.Date == DateTime.Today ? "📅 Avance hoy (H):" : "📅 Avance del día (H):", dailyText, Color.FromArgb(255, 56, 189, 248), isBold: true);
+            var dailyValue = AddInfoRow(colRight, _calendarSelectedDate.Date == DateTime.Today ? "📅 Avance hoy (H):" : "📅 Avance del día (H):", dailyText, Color.FromArgb(255, 56, 189, 248), isBold: true);
             var previewDay = _calendarSelectedDate.Date;
+
+            boxStack.Children.Add(columnsGrid);
 
             if (!string.IsNullOrWhiteSpace(activity.UpdateText))
             {
@@ -45568,5 +45672,635 @@ private static bool HasExactCalendarPhase(
             return char.ToUpper(text[0], culture) +
                    text.Substring(1);
         }
+
+        #region ===== Calendario Personal (Panel Derecho) =====
+
+        private NotionCalendarActivity? _selectedCalendarActivity;
+        private DateTime _personalCalendarDate = DateTime.Today;
+        private string? _personalCalendarPerson;
+        private CancellationTokenSource? _personalCalendarCts;
+        private bool _isUpdatingPersonalCalendarCombo;
+
+        private void InitializePersonalCalendarIfNeeded()
+        {
+            if (PersonalCalendarPersonCombo == null)
+                return;
+
+            if (PersonalCalendarPersonCombo.Items.Count == 0)
+            {
+                _isUpdatingPersonalCalendarCombo = true;
+                try
+                {
+                    foreach (var person in ActiveCalendarPeople)
+                    {
+                        PersonalCalendarPersonCombo.Items.Add(person);
+                    }
+
+                    var currentPerson = GetCurrentCalendarUserName();
+                    var matchedIndex = -1;
+
+                    for (int i = 0; i < ActiveCalendarPeople.Length; i++)
+                    {
+                        if (string.Equals(ActiveCalendarPeople[i], currentPerson, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matchedIndex = i;
+                            break;
+                        }
+                    }
+
+                    if (matchedIndex >= 0)
+                    {
+                        PersonalCalendarPersonCombo.SelectedIndex = matchedIndex;
+                        _personalCalendarPerson = ActiveCalendarPeople[matchedIndex];
+                    }
+                    else if (PersonalCalendarPersonCombo.Items.Count > 0)
+                    {
+                        PersonalCalendarPersonCombo.SelectedIndex = 0;
+                        _personalCalendarPerson = ActiveCalendarPeople[0];
+                    }
+                }
+                finally
+                {
+                    _isUpdatingPersonalCalendarCombo = false;
+                }
+            }
+
+            if (PersonalCalendarDatePicker != null && !PersonalCalendarDatePicker.Date.HasValue)
+            {
+                PersonalCalendarDatePicker.Date = new DateTimeOffset(_personalCalendarDate);
+            }
+
+            if (PersonalCalendarDateBadge != null)
+            {
+                PersonalCalendarDateBadge.Text = _personalCalendarDate.Date == DateTime.Today
+                    ? "Hoy"
+                    : _personalCalendarDate.ToString("dd/MM/yyyy");
+            }
+        }
+
+        private void PersonalCalendarPersonCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isUpdatingPersonalCalendarCombo)
+                return;
+
+            var selected = PersonalCalendarPersonCombo?.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(selected))
+                return;
+
+            // Requisito 5: Al cambiar de persona, actualizar la agenda y evitar conservar información de la persona anterior
+            if (PersonalCalendarActivitiesHost != null)
+            {
+                PersonalCalendarActivitiesHost.Children.Clear();
+            }
+
+            if (_selectedCalendarActivity != null &&
+                !string.Equals(NormalizeCalendarPerson(_selectedCalendarActivity.Person), NormalizeCalendarPerson(selected), StringComparison.OrdinalIgnoreCase))
+            {
+                _selectedCalendarActivity = null;
+                if (BtnPersonalCalendarViewDetails != null)
+                    BtnPersonalCalendarViewDetails.Visibility = Visibility.Collapsed;
+            }
+
+            _personalCalendarPerson = selected;
+            _ = LoadPersonalCalendarActivitiesAsync(forceRefresh: false);
+        }
+
+        private void PersonalCalendarDatePicker_DateChanged(CalendarDatePicker sender, CalendarDatePickerDateChangedEventArgs args)
+        {
+            var newDate = args.NewDate?.Date ?? DateTime.Today;
+            if (_personalCalendarDate.Date == newDate.Date && PersonalCalendarActivitiesHost?.Children.Count > 0)
+                return;
+
+            _personalCalendarDate = newDate;
+
+            if (PersonalCalendarActivitiesHost != null)
+            {
+                PersonalCalendarActivitiesHost.Children.Clear();
+            }
+
+            if (PersonalCalendarDateBadge != null)
+            {
+                PersonalCalendarDateBadge.Text = _personalCalendarDate.Date == DateTime.Today
+                    ? "Hoy"
+                    : _personalCalendarDate.ToString("dd/MM/yyyy");
+            }
+
+            _ = LoadPersonalCalendarActivitiesAsync(forceRefresh: false);
+        }
+
+        private void BtnPersonalCalendarToday_Click(object sender, RoutedEventArgs e)
+        {
+            _personalCalendarDate = DateTime.Today;
+
+            if (PersonalCalendarDatePicker != null)
+            {
+                PersonalCalendarDatePicker.Date = new DateTimeOffset(DateTime.Today);
+            }
+
+            if (PersonalCalendarDateBadge != null)
+            {
+                PersonalCalendarDateBadge.Text = "Hoy";
+            }
+
+            if (PersonalCalendarActivitiesHost != null)
+            {
+                PersonalCalendarActivitiesHost.Children.Clear();
+            }
+
+            _ = LoadPersonalCalendarActivitiesAsync(forceRefresh: false);
+        }
+
+        private void UpdatePersonalCalendarContent()
+        {
+            if (PersonalCalendarPane == null || PersonalCalendarActivitiesHost == null)
+                return;
+
+            InitializePersonalCalendarIfNeeded();
+            _ = LoadPersonalCalendarActivitiesAsync(forceRefresh: false);
+        }
+
+        private async void BtnRefreshPersonalCalendar_Click(object sender, RoutedEventArgs e)
+        {
+            if (BtnRefreshPersonalCalendar != null)
+                BtnRefreshPersonalCalendar.IsEnabled = false;
+
+            try
+            {
+                await LoadPersonalCalendarActivitiesAsync(forceRefresh: true);
+            }
+            finally
+            {
+                if (BtnRefreshPersonalCalendar != null)
+                    BtnRefreshPersonalCalendar.IsEnabled = true;
+            }
+        }
+
+        private async Task LoadPersonalCalendarActivitiesAsync(bool forceRefresh = false)
+        {
+            if (PersonalCalendarPane == null || PersonalCalendarActivitiesHost == null)
+                return;
+
+            try
+            {
+                _personalCalendarCts?.Cancel();
+                _personalCalendarCts?.Dispose();
+            }
+            catch { }
+
+            _personalCalendarCts = new CancellationTokenSource();
+            var ct = _personalCalendarCts.Token;
+
+            // Requisito 6: Diferenciar estado de carga
+            PersonalCalendarActivitiesHost.Children.Clear();
+            PersonalCalendarActivitiesHost.Visibility = Visibility.Collapsed;
+
+            if (PersonalCalendarLoadingPanel != null)
+                PersonalCalendarLoadingPanel.Visibility = Visibility.Visible;
+            if (PersonalCalendarErrorPanel != null)
+                PersonalCalendarErrorPanel.Visibility = Visibility.Collapsed;
+            if (PersonalCalendarEmptyPanel != null)
+                PersonalCalendarEmptyPanel.Visibility = Visibility.Collapsed;
+            if (PersonalCalendarSummaryText != null)
+                PersonalCalendarSummaryText.Text = "Cargando actividades…";
+
+            try
+            {
+                IReadOnlyList<NotionCalendarActivity>? dayActivities = null;
+
+                // Reutilizar actividades en memoria si coinciden con la fecha seleccionada
+                if (_personalCalendarDate.Date == _calendarSelectedDate.Date &&
+                    _calendarActivities != null &&
+                    _calendarActivities.Count > 0 &&
+                    !forceRefresh)
+                {
+                    dayActivities = _calendarActivities;
+                }
+                else
+                {
+                    // Consultar caché primero para evitar consultas duplicadas
+                    if (!forceRefresh)
+                    {
+                        dayActivities = await _notionCalendarService.TryGetCachedDayAsync(_personalCalendarDate.Date, ct);
+                    }
+
+                    if (dayActivities == null || forceRefresh)
+                    {
+                        var token = GetSavedNotionToken();
+                        if (!string.IsNullOrWhiteSpace(token))
+                        {
+                            dayActivities = await _notionCalendarService.GetDayAsync(
+                                token,
+                                _personalCalendarDate.Date,
+                                progress: null,
+                                cancellationToken: ct,
+                                forceRefresh: forceRefresh);
+
+                            if (_personalCalendarDate.Date == _calendarSelectedDate.Date && dayActivities != null)
+                            {
+                                _calendarActivities = dayActivities;
+                                DrawCalendar(_calendarActivities);
+                            }
+                        }
+                    }
+                }
+
+                if (ct.IsCancellationRequested)
+                    return;
+
+                var targetPerson = _personalCalendarPerson;
+                if (string.IsNullOrWhiteSpace(targetPerson))
+                    targetPerson = GetCurrentCalendarUserName();
+
+                var allActivities = dayActivities ?? Array.Empty<NotionCalendarActivity>();
+                var expanded = ExpandCalendarReviewActivities(allActivities);
+
+                // Filtrar por la persona seleccionada respetando normalización
+                var filtered = expanded
+                    .Where(a =>
+                    {
+                        if (string.Equals(targetPerson, "Sin asignar", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return string.IsNullOrWhiteSpace(a.Person) ||
+                                   string.Equals(NormalizeCalendarPerson(a.Person), "Sin asignar", StringComparison.OrdinalIgnoreCase);
+                        }
+
+                        return SplitPersons(a.Person)
+                            .Select(NormalizeCalendarPerson)
+                            .Any(p => string.Equals(p, targetPerson, StringComparison.OrdinalIgnoreCase));
+                    })
+                    .GroupBy(a => string.Join("|", a.PageId, a.Person, a.IsReviewMirror, a.Start.ToString("O")), StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .OrderBy(a => a.Start)
+                    .ToList();
+
+                if (ct.IsCancellationRequested)
+                    return;
+
+                if (PersonalCalendarLoadingPanel != null)
+                    PersonalCalendarLoadingPanel.Visibility = Visibility.Collapsed;
+
+                // Requisito 6: Diferenciar ausencia de actividades (Vacío)
+                if (filtered.Count == 0)
+                {
+                    PersonalCalendarActivitiesHost.Visibility = Visibility.Collapsed;
+                    if (PersonalCalendarEmptyPanel != null)
+                        PersonalCalendarEmptyPanel.Visibility = Visibility.Visible;
+                    if (PersonalCalendarEmptyText != null)
+                        PersonalCalendarEmptyText.Text = $"No hay actividades para {targetPerson} en esta fecha.";
+                    if (PersonalCalendarSummaryText != null)
+                        PersonalCalendarSummaryText.Text = "0 actividades para esta fecha";
+                    return;
+                }
+
+                if (PersonalCalendarEmptyPanel != null)
+                    PersonalCalendarEmptyPanel.Visibility = Visibility.Collapsed;
+
+                PersonalCalendarActivitiesHost.Visibility = Visibility.Visible;
+                if (PersonalCalendarSummaryText != null)
+                {
+                    PersonalCalendarSummaryText.Text = filtered.Count == 1
+                        ? "1 actividad para esta fecha"
+                        : $"{filtered.Count} actividades para esta fecha";
+                }
+
+                // Requisito 1: Mostrar agenda personal con horarios en cyan, títulos y estados
+                foreach (var act in filtered)
+                {
+                    var card = BuildPersonalAgendaCard(act);
+                    PersonalCalendarActivitiesHost.Children.Add(card);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancelado por nueva selección o cambio de fecha
+            }
+            catch (Exception ex)
+            {
+                if (ct.IsCancellationRequested)
+                    return;
+
+                // Requisito 6: Diferenciar error de conexión
+                if (PersonalCalendarLoadingPanel != null)
+                    PersonalCalendarLoadingPanel.Visibility = Visibility.Collapsed;
+                if (PersonalCalendarActivitiesHost != null)
+                    PersonalCalendarActivitiesHost.Visibility = Visibility.Collapsed;
+                if (PersonalCalendarEmptyPanel != null)
+                    PersonalCalendarEmptyPanel.Visibility = Visibility.Collapsed;
+                if (PersonalCalendarErrorPanel != null)
+                    PersonalCalendarErrorPanel.Visibility = Visibility.Visible;
+                if (PersonalCalendarErrorText != null)
+                    PersonalCalendarErrorText.Text = $"Error al cargar calendario: {ex.Message}";
+                if (PersonalCalendarSummaryText != null)
+                    PersonalCalendarSummaryText.Text = "Error de conexión";
+            }
+        }
+
+        private FrameworkElement BuildPersonalAgendaCard(NotionCalendarActivity activity)
+        {
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(255, 15, 20, 28)), // #0F141C (igual a Web)
+                BorderBrush = new SolidColorBrush(Color.FromArgb(255, 30, 41, 59)), // #1E2836
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 8, 10, 8)
+            };
+
+            var layout = new StackPanel { Spacing = 5 };
+
+            // Horario en cyan monoespaciado (paridad con Web: calendarTime(start) – calendarTime(end))
+            var timeText = new TextBlock
+            {
+                Text = $"{activity.Start:HH:mm} – {activity.End:HH:mm}",
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 11,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)) // #38BDF8
+            };
+            layout.Children.Add(timeText);
+
+            // Título de la actividad
+            var displayTitle = GetCalendarDisplayTitle(activity);
+            var titleText = new TextBlock
+            {
+                Text = displayTitle,
+                FontSize = 11.5,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 241, 245, 249)),
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 2,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            layout.Children.Add(titleText);
+
+            // Footer con Estado y botón Abrir Notion ↗
+            var footerGrid = new Grid();
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var statusText = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(activity.Status) ? "Sin estado" : activity.Status,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 148, 163, 184)), // #94A3B8
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            footerGrid.Children.Add(statusText);
+            Grid.SetColumn(statusText, 0);
+
+            var openNotionBtn = new Button
+            {
+                Content = "Abrir Notion ↗",
+                FontSize = 10.5,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)),
+                Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 2, 4, 2),
+                Height = 22,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            openNotionBtn.Click += async (s, e) =>
+            {
+                await OpenCalendarActivityAsync(activity);
+            };
+            footerGrid.Children.Add(openNotionBtn);
+            Grid.SetColumn(openNotionBtn, 1);
+
+            layout.Children.Add(footerGrid);
+            card.Child = layout;
+
+            // Hover effects
+            card.PointerEntered += (s, e) =>
+            {
+                card.Background = new SolidColorBrush(Color.FromArgb(255, 22, 34, 53)); // #162235
+                card.BorderBrush = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)); // #38BDF8
+            };
+            card.PointerExited += (s, e) =>
+            {
+                card.Background = new SolidColorBrush(Color.FromArgb(255, 15, 20, 28));
+                card.BorderBrush = new SolidColorBrush(Color.FromArgb(255, 30, 41, 59));
+            };
+
+            // Requisito 2: Al seleccionar una actividad de la agenda: mostrar sus detalles y permitir las acciones existentes del calendario
+            card.PointerPressed += (s, e) =>
+            {
+                SelectCalendarActivity(activity);
+            };
+
+            return card;
+        }
+
+        private string GetCalendarDisplayTitle(NotionCalendarActivity activity)
+        {
+            if (activity == null)
+                return string.Empty;
+
+            var compact = GetCalendarCompactActivityTitle(activity);
+            if (!string.IsNullOrWhiteSpace(activity.Project) &&
+                !compact.Contains(activity.Project, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"[{activity.Project}] {compact}";
+            }
+
+            return compact;
+        }
+
+        private void SelectCalendarActivity(NotionCalendarActivity activity)
+        {
+            if (activity == null)
+                return;
+
+            _selectedCalendarActivity = activity;
+            if (ResultsList != null)
+                ResultsList.SelectedItem = null;
+
+            ShowDetailsPane();
+
+            if (DetailsHeaderTitle != null)
+                DetailsHeaderTitle.Text = "DETALLES DE ACTIVIDAD";
+
+            if (DetailsTitle != null)
+                DetailsTitle.Text = GetCalendarDisplayTitle(activity);
+
+            if (DetailsDisplayPath != null)
+                DetailsDisplayPath.Text = !string.IsNullOrWhiteSpace(activity.Project) ? activity.Project : "Notion / Revisiones";
+
+            if (DetailsMeta != null)
+            {
+                DetailsMeta.Text =
+                    $"Persona: {activity.Person}\n" +
+                    $"Horario: {activity.Start:HH:mm} – {activity.End:HH:mm}\n" +
+                    $"Estado: {(!string.IsNullOrWhiteSpace(activity.Status) ? activity.Status : "—")}\n" +
+                    $"Fecha: {activity.Start:yyyy-MM-dd}\n" +
+                    $"Actualización: {(!string.IsNullOrWhiteSpace(activity.UpdateText) ? activity.UpdateText : "—")}";
+            }
+
+            if (StatusText != null)
+                StatusText.Text = $"Estado: Actividad seleccionada ✅ ({activity.Person} · {activity.Start:HH:mm})";
+
+            if (BtnDetailsLocation != null)
+                BtnDetailsLocation.Content = "Abrir Notion";
+
+            if (LocalImagePreviewCard != null)
+                LocalImagePreviewCard.Visibility = Visibility.Collapsed;
+            if (NotionPreviewCard != null)
+                NotionPreviewCard.Visibility = Visibility.Collapsed;
+            if (DetailsMetaCard != null)
+                DetailsMetaCard.Visibility = Visibility.Collapsed;
+
+            // Requisito 2: Acciones del calendario + checklist y comentarios
+            if (CalendarActivityCard != null && CalendarActivityContentHost != null)
+            {
+                CalendarActivityCard.Visibility = Visibility.Visible;
+                CalendarActivityContentHost.Children.Clear();
+
+                // 1. Fila de badges: Horario, Persona, Estado
+                var infoWrap = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    Margin = new Thickness(0, 0, 0, 4)
+                };
+
+                var timeBadge = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(30, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(80, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 2, 6, 2)
+                };
+                timeBadge.Child = new TextBlock
+                {
+                    Text = $"⏰ {activity.Start:HH:mm} – {activity.End:HH:mm}",
+                    FontSize = 10.5,
+                    FontFamily = new FontFamily("Consolas"),
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 125, 211, 252))
+                };
+                infoWrap.Children.Add(timeBadge);
+
+                var personBadge = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(30, 168, 85, 247)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(80, 168, 85, 247)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 2, 6, 2)
+                };
+                personBadge.Child = new TextBlock
+                {
+                    Text = $"👤 {activity.Person}",
+                    FontSize = 10.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 216, 180, 254))
+                };
+                infoWrap.Children.Add(personBadge);
+
+                var statusBadge = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(30, 34, 197, 94)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(80, 34, 197, 94)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 2, 6, 2)
+                };
+                statusBadge.Child = new TextBlock
+                {
+                    Text = $"📌 {activity.Status}",
+                    FontSize = 10.5,
+                    Foreground = new SolidColorBrush(Color.FromArgb(255, 134, 239, 172))
+                };
+                infoWrap.Children.Add(statusBadge);
+
+                CalendarActivityContentHost.Children.Add(infoWrap);
+
+                // 2. Acciones del calendario: Abrir Notion, Cronómetro, Copiar Enlace
+                var actionsRow = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    Margin = new Thickness(0, 4, 0, 4)
+                };
+
+                var btnOpenNotion = new Button
+                {
+                    Content = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 4,
+                        Children =
+                        {
+                            new FontIcon { Glyph = "\uE8A7", FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)) },
+                            new TextBlock { Text = "Abrir Notion", FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromArgb(255, 56, 189, 248)) }
+                        }
+                    },
+                    Background = new SolidColorBrush(Color.FromArgb(30, 56, 189, 248)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(80, 56, 189, 248)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8, 4, 8, 4)
+                };
+                btnOpenNotion.Click += async (_, __) => await OpenCalendarActivityAsync(activity);
+                actionsRow.Children.Add(btnOpenNotion);
+
+                var btnTimer = new Button
+                {
+                    Content = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 4,
+                        Children =
+                        {
+                            new FontIcon { Glyph = "\uE916", FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(255, 245, 158, 11)) },
+                            new TextBlock { Text = IsCalendarWorkTimerFor(activity) ? (_calendarWorkTimerState?.IsRunning == true ? "⏸ Pausar" : "▶ Continuar") : "▶ Cronómetro", FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(255, 253, 230, 138)) }
+                        }
+                    },
+                    Background = new SolidColorBrush(Color.FromArgb(25, 245, 158, 11)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(70, 245, 158, 11)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8, 4, 8, 4)
+                };
+                btnTimer.Click += async (_, __) =>
+                {
+                    if (IsCalendarWorkTimerFor(activity) && _calendarWorkTimerState?.IsRunning == true)
+                        PauseCalendarWorkTimer(activity);
+                    else
+                        await StartCalendarWorkTimerAsync(activity);
+                };
+                actionsRow.Children.Add(btnTimer);
+
+                var btnCopyLink = new Button
+                {
+                    Content = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 4,
+                        Children =
+                        {
+                            new FontIcon { Glyph = "\uE8C8", FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(255, 148, 163, 184)) },
+                            new TextBlock { Text = "Copiar enlace", FontSize = 11, Foreground = new SolidColorBrush(Color.FromArgb(255, 226, 232, 240)) }
+                        }
+                    },
+                    Background = new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
+                    BorderBrush = new SolidColorBrush(Color.FromArgb(40, 148, 163, 184)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8, 4, 8, 4)
+                };
+                btnCopyLink.Click += (_, __) => CopyCalendarText(activity.PageUrl, "Estado: URL de Notion copiada ✅");
+                actionsRow.Children.Add(btnCopyLink);
+
+                CalendarActivityContentHost.Children.Add(actionsRow);
+
+                // 3. Checklist interactiva completa con inserción de checks resaltados (⚡) y comentarios
+                var checklistElement = BuildCalendarActivityDayChecklist(activity);
+                CalendarActivityContentHost.Children.Add(checklistElement);
+            }
+        }
+
+        #endregion
     }
 }

@@ -586,16 +586,6 @@ namespace Anfeta.UI.Views
 
         #region ===== Comandos Predefinidos (Sidebar) =====
 
-        private sealed class SavedSearch
-        {
-            public string Id { get; set; } = Guid.NewGuid().ToString("N");
-            public string Title { get; set; } = "";
-            public string Description { get; set; } = "";
-            public string Query { get; set; } = "";
-            public string ScheduledDate { get; set; } = "";
-            public bool IsPendingTask { get; set; }
-            public Anfeta.UI.Models.SearchCriteriaState? Criteria { get; set; }
-        }
 
         private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _savedSearches = new();
         private readonly System.Collections.ObjectModel.ObservableCollection<SavedSearch> _pendingTasks = new();
@@ -678,65 +668,29 @@ namespace Anfeta.UI.Views
 
         private void SearchBox_GotFocus(object sender, RoutedEventArgs e)
         {
-            RefreshQuickFlyoutContent();
-
-            // Las búsquedas rápidas (PDF, prtuzREVISION, zClientes, etc.) deben
-            // estar disponibles desde el propio input aunque todavía esté vacío.
-            // Se difiere un tick para no pelear con el foco interno del AutoSuggestBox.
-            if (!_calendarViewActive)
-            {
-                DispatcherQueue.TryEnqueue(() =>
-                    ShowQuickCommandsInputFlyout());
-            }
+            // Predictivos desactivados para optimizar el buscador y evitar saltos
+            QuickCommandsInputFlyout?.Hide();
         }
 
         private void SearchBox_Tapped(object sender, TappedRoutedEventArgs e)
         {
-            RefreshQuickFlyoutContent();
-
-            if (!_calendarViewActive)
-                ShowQuickCommandsInputFlyout();
+            // Predictivos desactivados para optimizar el buscador y evitar saltos
+            QuickCommandsInputFlyout?.Hide();
         }
 
         private void RefreshQuickFlyoutContent(string? input = null)
         {
-            var rawInput = input ?? SearchBox?.Text ?? string.Empty;
-            var q = rawInput.Trim();
-
-            RebuildVisibleSavedSearches(q);
-            RebuildPredictiveSuggestions(rawInput);
-            UpdateQuickFlyoutVisibility();
-
-            if (_quickFlyoutOpen)
-                ResizeQuickCommandsFlyout();
+            // Optimización: No calcular predictivos pesados en cada pulsación
         }
 
         private void ShowQuickCommandsInputFlyout()
         {
-            RefreshQuickFlyoutContent();
-
-            if (!ShouldShowQuickFlyout(SearchBox?.Text ?? string.Empty))
-                return;
-
-            ResizeQuickCommandsFlyout();
-
-            if (!_quickFlyoutOpen)
-                FlyoutBase.ShowAttachedFlyout(SearchBox);
-
-            QueueSearchBoxFocusRestore();
+            QuickCommandsInputFlyout?.Hide();
         }
 
         private bool ShouldShowQuickFlyout(string query)
         {
-            if (_visibleSavedSearches.Count == 0 && _predictiveSuggestions.Count == 0)
-                return false;
-
-            var q = (query ?? string.Empty).Trim();
-
-            return string.IsNullOrWhiteSpace(q) ||
-                   q.StartsWith("z", StringComparison.OrdinalIgnoreCase) ||
-                   _predictiveSuggestions.Count > 0 ||
-                   _visibleSavedSearches.Count > 0;
+            return false;
         }
 
 
@@ -2144,6 +2098,7 @@ namespace Anfeta.UI.Views
             var list = _pendingTasks.ToList();
             var raw = JsonSerializer.Serialize(list);
             ApplicationData.Current.LocalSettings.Values[LS_PendingTasks] = raw;
+            Anfeta.UI.Services.Search.PendingTasksService.NotifyTasksChanged();
         }
 
         private void RefreshSavedSearchesUi()
@@ -2175,6 +2130,12 @@ namespace Anfeta.UI.Views
             {
                 PendientesToolbarCount.Text = _pendingTasks.Count.ToString();
                 PendientesToolbarBadge.Visibility = _pendingTasks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (PendientesCollapsedBadge != null && PendientesCollapsedCountText != null)
+            {
+                PendientesCollapsedCountText.Text = _pendingTasks.Count.ToString();
+                PendientesCollapsedBadge.Visibility = _pendingTasks.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             }
 
             RefreshQuickFlyoutContent(SearchBox?.Text ?? string.Empty);
@@ -2744,6 +2705,35 @@ namespace Anfeta.UI.Views
 
         private async void BtnAddPendingTask_Click(object sender, RoutedEventArgs e)
         {
+            if (sender is FrameworkElement fe)
+            {
+                var flyout = new MenuFlyout();
+                var quick = new MenuFlyoutItem { Text = "⚡ Captura rápida flotante (Ctrl+Espacio)" };
+                quick.Click += (_, _) =>
+                {
+                    try
+                    {
+                        var win = new QuickPendingWindow();
+                        win.ShowAndFocus();
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[QuickPending] Error: {ex.Message}");
+                    }
+                };
+
+                var detailed = new MenuFlyoutItem { Text = "📅 Editor detallado con fecha..." };
+                detailed.Click += async (_, _) =>
+                {
+                    await ShowPendingTaskEditorDialogAsync(null);
+                };
+
+                flyout.Items.Add(quick);
+                flyout.Items.Add(detailed);
+                flyout.ShowAt(fe);
+                return;
+            }
+
             await ShowPendingTaskEditorDialogAsync(null);
         }
 
@@ -2793,6 +2783,82 @@ namespace Anfeta.UI.Views
 
             flyout.Items.Add(deleteAll);
             flyout.ShowAt(fe, e.GetPosition(fe));
+        }
+
+        private void PendingTaskCheck_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.DataContext is not SavedSearch task)
+                return;
+
+            var previousCompleted = task.IsCompleted;
+            task.IsCompleted = !task.IsCompleted;
+            if (task.IsCompleted && sender is Button button && button.Content is FontIcon icon)
+            {
+                var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(icon);
+                var animation = visual.Compositor.CreateScalarKeyFrameAnimation();
+                animation.InsertKeyFrame(0f, 0f); animation.InsertKeyFrame(1f, 1f);
+                animation.Duration = TimeSpan.FromMilliseconds(160);
+                visual.StartAnimation("Opacity", animation);
+            }
+            try { SavePendingTasks(); }
+            catch (Exception ex) { task.IsCompleted = previousCompleted; StatusText.Text = "Estado: No se guardó el cambio del pendiente: " + ex.Message; return; }
+            RefreshSavedSearchesUi();
+            StatusText.Text = task.IsCompleted
+                ? $"Estado: Pendiente completado ✅ {task.Title}"
+                : $"Estado: Pendiente pendiente ⏳ {task.Title}";
+        }
+
+        private async void PendingTaskSearch_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.DataContext is not SavedSearch task)
+                return;
+
+            await ApplySavedQuickSearchAsync(task);
+        }
+
+        private void PendingTaskCopy_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.DataContext is not SavedSearch task)
+                return;
+
+            var textToCopy = string.IsNullOrWhiteSpace(task.Query) || task.Query == task.Title
+                ? task.Title
+                : $"{task.Title} ({task.Query})";
+
+            try
+            {
+                var dp = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                dp.SetText(textToCopy);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+                StatusText.Text = $"Estado: Pendiente copiado al portapapeles 📋 '{task.Title}'";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Estado: No se pudo copiar el pendiente: " + ex.Message;
+            }
+        }
+        private async void PendingTaskOpen_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.DataContext is not SavedSearch task || !task.CanOpen) return;
+            try
+            {
+                var opened = await Windows.System.Launcher.LaunchUriAsync(new Uri(task.OpenTarget));
+                StatusText.Text = opened ? "Estado: Pendiente abierto ↗" : "Estado: Windows no pudo abrir el enlace.";
+            }
+            catch (Exception ex) { StatusText.Text = "Estado: No se pudo abrir el pendiente: " + ex.Message; }
+        }
+
+        private void PendingTaskDelete_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement fe || fe.DataContext is not SavedSearch task)
+                return;
+
+            var position = _pendingTasks.IndexOf(task);
+            _pendingTasks.Remove(task);
+            try { SavePendingTasks(); }
+            catch (Exception ex) { _pendingTasks.Insert(Math.Max(0, Math.Min(position, _pendingTasks.Count)), task); RefreshSavedSearchesUi(); StatusText.Text = "Estado: No se eliminó el pendiente: " + ex.Message; return; }
+            RefreshSavedSearchesUi();
+            StatusText.Text = $"Estado: Pendiente eliminado 🗑️ '{task.Title}'";
         }
 
         #endregion

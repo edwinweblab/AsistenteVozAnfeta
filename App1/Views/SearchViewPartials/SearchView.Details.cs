@@ -28,7 +28,24 @@ namespace Anfeta.UI.Views
                     removed.IsMarked = false;
             }
 
-            if (ResultsList.SelectedItem is not SearchResultRow row) return;
+            if (ResultsList.SelectedItem is not SearchResultRow row)
+            {
+                if (_selectedCalendarActivity == null)
+                {
+                    ShowPersonalCalendarPane();
+                }
+                return;
+            }
+
+            _selectedCalendarActivity = null;
+            if (CalendarActivityCard != null)
+                CalendarActivityCard.Visibility = Visibility.Collapsed;
+            if (DetailsMetaCard != null)
+                DetailsMetaCard.Visibility = Visibility.Visible;
+            if (DetailsHeaderTitle != null)
+                DetailsHeaderTitle.Text = "DETALLES";
+
+            ShowDetailsPane();
 
             try
             {
@@ -107,6 +124,52 @@ namespace Anfeta.UI.Views
                 : "Estado: Seleccionado ✅";
 
             await LoadLocalPreviewForSelectionAsync(row);
+        }
+
+        private void ShowPersonalCalendarPane()
+        {
+            if (PersonalCalendarPane != null)
+                PersonalCalendarPane.Visibility = Visibility.Visible;
+            if (DetailsPane != null)
+                DetailsPane.Visibility = Visibility.Collapsed;
+
+            if (BtnPersonalCalendarViewDetails != null)
+            {
+                BtnPersonalCalendarViewDetails.Visibility =
+                    (_selectedCalendarActivity != null || ResultsList?.SelectedItem != null)
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+            }
+
+            UpdatePersonalCalendarContent();
+        }
+
+        private void ShowDetailsPane()
+        {
+            if (PersonalCalendarPane != null)
+                PersonalCalendarPane.Visibility = Visibility.Collapsed;
+            if (DetailsPane != null)
+                DetailsPane.Visibility = Visibility.Visible;
+        }
+
+        private void BtnCloseDetailsToPersonalCalendar_Click(object sender, RoutedEventArgs e)
+        {
+            _selectedCalendarActivity = null;
+            if (ResultsList != null)
+                ResultsList.SelectedItem = null;
+            ShowPersonalCalendarPane();
+        }
+
+        private void BtnPersonalCalendarViewDetails_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedCalendarActivity != null)
+            {
+                SelectCalendarActivity(_selectedCalendarActivity);
+            }
+            else if (ResultsList?.SelectedItem is SearchResultRow)
+            {
+                ShowDetailsPane();
+            }
         }
 
         private async void ResultsList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)

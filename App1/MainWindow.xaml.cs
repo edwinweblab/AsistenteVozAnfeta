@@ -2,6 +2,7 @@ using Anfeta.UI.FunctionTests;
 using Anfeta.UI.Services.Search;
 using Anfeta.UI.ViewModels;
 using Anfeta.UI.Views;
+using Anfeta.UI.Views.Dialogs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -129,6 +130,7 @@ namespace Anfeta.UI
             CheckGoogleCalendarStatusOnStartup();
             _hotkeyService = App.AppHost.Services.GetRequiredService<GlobalHotkeyService>();
             _hotkeyService.SearchHotkeyPressed += OnSearchHotkeyPressed;
+            _hotkeyService.QuickPendingHotkeyPressed += OnQuickPendingHotkeyPressed;
 
             _indexedReminderService =
                 App.AppHost.Services.GetRequiredService<
@@ -2631,7 +2633,16 @@ namespace Anfeta.UI
             Debug.WriteLine("MAINWINDOW: Closed");
 
             if (_hotkeyService != null)
+            {
                 _hotkeyService.SearchHotkeyPressed -= OnSearchHotkeyPressed;
+                _hotkeyService.QuickPendingHotkeyPressed -= OnQuickPendingHotkeyPressed;
+            }
+
+            if (_quickPendingWindow != null)
+            {
+                try { _quickPendingWindow.Close(); } catch { }
+                _quickPendingWindow = null;
+            }
 
             ((App)Application.Current).CleanupAndExit();
         }
@@ -2672,6 +2683,29 @@ namespace Anfeta.UI
         private void OnSearchHotkeyPressed(object? sender, EventArgs e)
         {
             ToggleSearchFromHotkey();
+        }
+
+        private QuickPendingWindow? _quickPendingWindow;
+
+        private void OnQuickPendingHotkeyPressed(object? sender, EventArgs e)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    if (_quickPendingWindow == null)
+                    {
+                        _quickPendingWindow = new QuickPendingWindow();
+                        _quickPendingWindow.Closed += (_, _) => _quickPendingWindow = null;
+                    }
+                    _quickPendingWindow.ShowAndFocus();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[QuickPending] Error: {ex.Message}");
+                    _quickPendingWindow = null;
+                }
+            });
         }
         private static bool IsAppForeground(IntPtr hwnd)
         {

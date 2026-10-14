@@ -1366,6 +1366,159 @@ namespace Anfeta.UI.Services.Notion
             }
         }
 
+        public async Task<bool> AddChecklistItemAsync(
+            string token,
+            string pageId,
+            string text,
+            bool isHighlighted = false,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token) ||
+                string.IsNullOrWhiteSpace(pageId) ||
+                string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var cleanId = pageId.Trim().Replace("-", "");
+            var targetPageId = Guid.TryParse(cleanId, out var parsedGuid) ? parsedGuid.ToString() : pageId.Trim();
+
+            using var http = CreateClient(token);
+
+            var contentText = isHighlighted && !text.StartsWith("⚡")
+                ? $"⚡ {text.Trim()}"
+                : text.Trim();
+            if (contentText.Length > 2000) throw new ArgumentException("El check no puede superar 2,000 caracteres incluyendo el prefijo.");
+
+            var textDict = new Dictionary<string, object?>
+            {
+                ["type"] = "text",
+                ["text"] = new Dictionary<string, object?>
+                {
+                    ["content"] = contentText
+                }
+            };
+
+            if (isHighlighted)
+            {
+                textDict["annotations"] = new Dictionary<string, object?>
+                {
+                    ["bold"] = true,
+                    ["color"] = "orange"
+                };
+            }
+
+            var blockPayload = new Dictionary<string, object?>
+            {
+                ["object"] = "block",
+                ["type"] = "to_do",
+                ["to_do"] = new Dictionary<string, object?>
+                {
+                    ["rich_text"] = new object[] { textDict },
+                    ["checked"] = false
+                }
+            };
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["children"] = new object[] { blockPayload },
+                ["position"] = new Dictionary<string, object?> { ["type"] = "start" }
+            };
+
+            var json = JsonSerializer.Serialize(payload);
+            using var response = await SendCreationOnceAsync(
+                http,
+                HttpMethod.Patch,
+                $"blocks/{targetPageId}/children",
+                json,
+                cancellationToken);
+
+            var respBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException("agregar checklist a la actividad", response, respBody);
+            }
+            using (var confirmation = JsonDocument.Parse(respBody))
+            {
+                if (!confirmation.RootElement.TryGetProperty("results", out var results) || results.GetArrayLength() != 1 || !results[0].TryGetProperty("id", out var savedId) || string.IsNullOrWhiteSpace(savedId.GetString()))
+                    throw new InvalidOperationException("Notion no confirmó el check. Revisa la página antes de repetirlo.");
+            }
+
+            _checklistStatsCache.TryRemove(pageId, out _);
+            PersistentChecklistStats.TryRemove(pageId, out _);
+            _checklistStatsCache.TryRemove(targetPageId, out _);
+            PersistentChecklistStats.TryRemove(targetPageId, out _);
+            return true;
+        }
+
+        public async Task<bool> AddCommentAsync(
+            string token,
+            string pageId,
+            string text,
+            bool isHighlighted = false,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(token) ||
+                string.IsNullOrWhiteSpace(pageId) ||
+                string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var contentText = isHighlighted && !text.Trim().StartsWith("⚡") ? "⚡ " + text.Trim() : text.Trim();
+            if (contentText.Length > 2000) throw new ArgumentException("El comentario no puede superar 2,000 caracteres incluyendo el prefijo.");
+
+            var cleanId = pageId.Trim().Replace("-", "");
+            var targetPageId = Guid.TryParse(cleanId, out var parsedGuid) ? parsedGuid.ToString() : pageId.Trim();
+
+            using var http = CreateClient(token);
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["parent"] = new Dictionary<string, object?>
+                {
+                    ["page_id"] = targetPageId
+                },
+                ["rich_text"] = new object[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["type"] = "text",
+                        ["text"] = new Dictionary<string, object?>
+                        {
+                            ["content"] = contentText
+                        },
+                        ["annotations"] = new Dictionary<string, object?> { ["bold"] = isHighlighted, ["color"] = isHighlighted ? "orange" : "default" }
+                    }
+                }
+            };
+
+            var json = JsonSerializer.Serialize(payload);
+            using var response = await SendCreationOnceAsync(
+                http,
+                HttpMethod.Post,
+                "comments",
+                json,
+                cancellationToken);
+
+            var respBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw CreateNotionException("agregar comentario a la actividad", response, respBody);
+            }
+            using (var confirmation = JsonDocument.Parse(respBody))
+            {
+                if (!confirmation.RootElement.TryGetProperty("id", out var savedId) || string.IsNullOrWhiteSpace(savedId.GetString()))
+                    throw new InvalidOperationException("Notion no confirmó el comentario. Revisa la página antes de repetirlo.");
+            }
+
+            _checklistStatsCache.TryRemove(pageId, out _);
+            PersistentChecklistStats.TryRemove(pageId, out _);
+            _checklistStatsCache.TryRemove(targetPageId, out _);
+            PersistentChecklistStats.TryRemove(targetPageId, out _);
+            return true;
+        }
+
         public async Task WarmChecklistStatsForActivitiesAsync(
             string token,
             IEnumerable<NotionCalendarActivity> activities,
@@ -1927,6 +2080,20 @@ namespace Anfeta.UI.Services.Notion
                             {
                                 total++;
 
+                                var createdRaw =
+                                    ReadString(block, "created_time");
+
+                                DateTimeOffset createdAt = DateTimeOffset.MinValue;
+                                if (!string.IsNullOrWhiteSpace(createdRaw) &&
+                                    DateTimeOffset.TryParse(
+                                        createdRaw,
+                                        CultureInfo.InvariantCulture,
+                                        DateTimeStyles.AssumeUniversal,
+                                        out var parsedCreated))
+                                {
+                                    createdAt = parsedCreated.ToLocalTime();
+                                }
+
                                 if (block.TryGetProperty(
                                         "to_do",
                                         out var toDo) &&
@@ -1967,11 +2134,15 @@ namespace Anfeta.UI.Services.Notion
                                         childBlockId,
                                         plainText,
                                         parsedDate ? editedAt.ToLocalTime() : DateTimeOffset.Now,
-                                        localDay));
+                                        localDay,
+                                        createdAt));
                                 }
                                 else
                                 {
-                                    pendingItems.Add(new NotionPendingChecklistItem(ReadString(block, "id"), plainText));
+                                    pendingItems.Add(new NotionPendingChecklistItem(
+                                        ReadString(block, "id"),
+                                        plainText,
+                                        createdAt));
                                 }
                             }
                         }
@@ -7884,6 +8055,14 @@ namespace Anfeta.UI.Services.Notion
                     requestUri),
                 cancellationToken,
                 MaxRetryAttempts);
+        }
+
+        private static Task<HttpResponseMessage> SendCreationOnceAsync(HttpClient http, HttpMethod method, string requestUri, string json, CancellationToken cancellationToken)
+        {
+            return NotionRequestCoordinator.SendAsync(http, () => new HttpRequestMessage(method, requestUri)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            }, cancellationToken, 1);
         }
 
         private static Task<HttpResponseMessage> SendPostWithRetryAsync(

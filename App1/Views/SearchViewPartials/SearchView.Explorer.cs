@@ -305,11 +305,38 @@ namespace Anfeta.UI.Views
             await BrowseFolderAsync(DROPBOX_ROOT, pushHistory: false);
         }
 
+        public void SetPendientesPaneVisible(bool visible)
+        {
+            if (visible)
+            {
+                if (PendientesPane != null) PendientesPane.Visibility = Visibility.Visible;
+                if (PendientesCollapsedBar != null) PendientesCollapsedBar.Visibility = Visibility.Collapsed;
+                if (PendientesPaneCol != null) PendientesPaneCol.Width = new GridLength(270);
+                if (TogglePendientesPane != null) TogglePendientesPane.IsChecked = true;
+            }
+            else
+            {
+                if (PendientesPane != null) PendientesPane.Visibility = Visibility.Collapsed;
+                if (PendientesCollapsedBar != null) PendientesCollapsedBar.Visibility = Visibility.Visible;
+                if (PendientesPaneCol != null) PendientesPaneCol.Width = new GridLength(44);
+                if (TogglePendientesPane != null) TogglePendientesPane.IsChecked = false;
+            }
+        }
+
         private void TogglePendientesPane_Click(object sender, RoutedEventArgs e)
         {
             var show = TogglePendientesPane.IsChecked == true;
-            PendientesPane.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            PendientesPaneCol.Width = show ? new GridLength(270) : new GridLength(0);
+            SetPendientesPaneVisible(show);
+        }
+
+        private void BtnCollapsePendientesPane_Click(object sender, RoutedEventArgs e)
+        {
+            SetPendientesPaneVisible(false);
+        }
+
+        private void BtnExpandPendientesPane_Click(object sender, RoutedEventArgs e)
+        {
+            SetPendientesPaneVisible(true);
         }
 
         private void ToggleFoldersPane_Click(object sender, RoutedEventArgs e)
@@ -338,7 +365,21 @@ namespace Anfeta.UI.Views
 
                 DetailsSplitterCol.Width = new GridLength(12);
                 DetailsPaneSplitter.Visibility = Visibility.Visible;
-                DetailsPane.Visibility = Visibility.Visible;
+
+                if (ResultsList.SelectedItem != null)
+                {
+                    DetailsPane.Visibility = Visibility.Visible;
+                    if (PersonalCalendarPane != null)
+                        PersonalCalendarPane.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    if (PersonalCalendarPane != null)
+                        PersonalCalendarPane.Visibility = Visibility.Visible;
+                    if (DetailsPane != null)
+                        DetailsPane.Visibility = Visibility.Collapsed;
+                    UpdatePersonalCalendarContent();
+                }
 
                 LoadDetailsPaneWidth();
             }
@@ -355,7 +396,10 @@ namespace Anfeta.UI.Views
                             DETAILS_PANE_MAX);
                 }
 
-                DetailsPane.Visibility = Visibility.Collapsed;
+                if (PersonalCalendarPane != null)
+                    PersonalCalendarPane.Visibility = Visibility.Collapsed;
+                if (DetailsPane != null)
+                    DetailsPane.Visibility = Visibility.Collapsed;
                 DetailsPaneSplitter.Visibility = Visibility.Collapsed;
                 DetailsSplitterCol.Width = new GridLength(0);
 

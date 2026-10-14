@@ -1,0 +1,152 @@
+<Window
+    x:Class="Anfeta.UI.Views.Dialogs.QuickPendingWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Background="Transparent">
+        <!-- Tarjeta Flotante -->
+        <Border Margin="10"
+                Background="#111822"
+                BorderBrush="#253549"
+                BorderThickness="1.5"
+                CornerRadius="14"
+                Padding="16,12">
+
+            <Grid RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Header: Título y botón cerrar -->
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border Background="#26F59E0B" BorderBrush="#80F59E0B" BorderThickness="1" CornerRadius="6" Padding="5,3">
+                            <FontIcon FontSize="11" Glyph="&#xE787;" Foreground="#F59E0B" />
+                        </Border>
+                        <TextBlock Text="NUEVO PENDIENTE"
+                                   FontSize="11.5"
+                                   FontWeight="Bold"
+                                   Foreground="#F1F5F9"
+                                   CharacterSpacing="50"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="· Captura rápida"
+                                   FontSize="10.5"
+                                   Foreground="#64748B"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Botón cerrar X -->
+                    <Button Grid.Column="1"
+                            Width="24" Height="24"
+                            Padding="0"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="BtnClose_Click"
+                            ToolTipService.ToolTip="Cerrar (Esc)">
+                        <FontIcon FontSize="10" Glyph="&#xE711;" Foreground="#94A3B8" />
+                    </Button>
+                </Grid>
+
+                <!-- Input TextBox -->
+                <TextBox x:Name="TaskInputBox"
+                         Grid.Row="1"
+                         Height="42"
+                         FontSize="13.5"
+                         FontWeight="SemiBold"
+                         Foreground="#FFFFFF"
+                         Background="#162235"
+                         BorderBrush="#334E68"
+                         BorderThickness="1"
+                         CornerRadius="8"
+                         PlaceholderText="Ej. Revisar cotización de acabados mañana #Neftalí p1"
+                         PlaceholderForeground="#64748B"
+                         Padding="12,8"
+                         TextChanged="TaskInputBox_TextChanged"
+                         KeyDown="TaskInputBox_KeyDown" />
+
+                <!-- Footer: Chips de detección en tiempo real y botones -->
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Preview Chips detectados en tiempo real -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <!-- Chip Fecha Detectada -->
+                        <Border x:Name="DatePreviewChip"
+                                Background="#26D97706"
+                                BorderBrush="#60F59E0B"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="6,2">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <FontIcon FontSize="10" Glyph="&#xE787;" Foreground="#FDE68A" />
+                                <TextBlock x:Name="DatePreviewText" FontSize="10" FontWeight="Bold" Foreground="#FDE68A" Text="Hoy" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Chip Prioridad Detectada -->
+                        <Border x:Name="PriorityPreviewChip"
+                                Background="#26EF4444"
+                                BorderBrush="#60EF4444"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="6,2"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <FontIcon FontSize="10" Glyph="&#xE7BA;" Foreground="#FCA5A5" />
+                                <TextBlock x:Name="PriorityPreviewText" FontSize="10" FontWeight="Bold" Foreground="#FCA5A5" Text="P1" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Chip Persona / Tag Detectado -->
+                        <Border x:Name="TagPreviewChip"
+                                Background="#268B5CF6"
+                                BorderBrush="#608B5CF6"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="6,2"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <FontIcon FontSize="10" Glyph="&#xE77B;" Foreground="#C4B5FD" />
+                                <TextBlock x:Name="TagPreviewText" FontSize="10" FontWeight="Bold" Foreground="#C4B5FD" Text="#Tag" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Acciones derecha -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock FontSize="10" Foreground="#64748B" VerticalAlignment="Center">
+                            <Run Text="[Enter ↵] Guardar  ·  [Esc] Salir" />
+                        </TextBlock>
+                        <Button x:Name="BtnSaveTask"
+                                Height="28"
+                                Padding="12,0"
+                                Background="#0284C7"
+                                BorderThickness="0"
+                                CornerRadius="6"
+                                Click="BtnSaveTask_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <FontIcon FontSize="11" Glyph="&#xE73E;" Foreground="#FFFFFF" />
+                                <TextBlock FontSize="11" FontWeight="Bold" Foreground="#FFFFFF" Text="Guardar" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

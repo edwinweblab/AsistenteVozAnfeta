@@ -48,7 +48,7 @@ namespace Anfeta.UI.Views
 
             _searchDebounceTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromMilliseconds(250)
+                Interval = TimeSpan.FromMilliseconds(400)
             };
 
             _searchDebounceTimer.Tick += async (_, __) =>
@@ -98,62 +98,35 @@ namespace Anfeta.UI.Views
             if (_suppressSuggest)
                 return;
 
-            // El buscador usa únicamente el panel predictivo personalizado
-            // (tarjetas azules). Se desactiva el desplegable nativo del
-            // AutoSuggestBox para evitar mostrar dos predictivos a la vez.
             sender.ItemsSource = null;
             sender.IsSuggestionListOpen = false;
-
-            EnsureSearchDebounce();
+            QuickCommandsInputFlyout?.Hide();
 
             var q = (sender.Text ?? string.Empty).Trim();
 
+            // Cancelar cualquier búsqueda previa en proceso para evitar saltos
+            CancelPendingSearch();
+
             // MULTI-MONITOR · Si existe un Calendario independiente abierto,
-            // replica automáticamente el filtro del Buscador después de un
-            // debounce corto. No abre la ventana si está cerrada.
-            if (!_calendarViewActive)
+            // replica el filtro al presionar Enter o limpiar
+            if (!_calendarViewActive && string.IsNullOrWhiteSpace(q))
             {
                 QueueCalendarWindowFilterSync(q);
             }
 
-            if (_calendarViewActive)
-            {
-                CancelPendingSearch();
-                QuickCommandsInputFlyout?.Hide();
-                ApplyCalendarSearchFilter(q);
-                return;
-            }
-
-            SyncBaseChipsFromQuery(q);
-            RefreshQuickFlyoutContent(q);
-
-            // Prioriza dominios completos dentro del predictivo personalizado.
-            // Ejemplo: al escribir "weblab" o "weblab." se muestran primero
-            // weblab.mx, weblab.com y weblab.com.mx, conservando los puntos.
-            _ = PromoteDomainPredictiveSuggestionsAsync(q);
-
-            if (args.Reason ==
-                    AutoSuggestionBoxTextChangeReason.UserInput &&
-                !string.IsNullOrWhiteSpace(q) &&
-                ShouldShowQuickFlyout(q))
-            {
-                ShowQuickCommandsInputFlyout();
-            }
-            else if (string.IsNullOrWhiteSpace(q))
-            {
-                QuickCommandsInputFlyout?.Hide();
-            }
-
             // ─────────────────────────────────────────────
-            // Si el usuario limpió el buscador
+            // Si el usuario limpió el buscador (query vacío)
             // ─────────────────────────────────────────────
             if (string.IsNullOrWhiteSpace(q))
             {
-                CancelPendingSearch();
-
-                // Guardar que el query quedó vacío.
                 SetTabTitle("");
                 NotifyWorkspaceChanged();
+
+                if (_calendarViewActive)
+                {
+                    ApplyCalendarSearchFilter("");
+                    return;
+                }
 
                 if (DropboxIndexCoordinator.IsIndexing)
                 {
@@ -168,43 +141,23 @@ namespace Anfeta.UI.Views
                     return;
                 }
 
-                // Si hay índice cargado, mostrar todos los resultados.
-                // Aquí entran Notion, local o local + Notion.
-                // Importante: esta es una vista global de búsqueda, no navegación
-                // por carpeta. Si no se limpia este estado, al renombrar un archivo
-                // ANFETA intenta refrescar la carpeta raíz y cambia de vista.
                 _isBrowsing = false;
                 _currentFolder = string.Empty;
                 _currentFolderPath = string.Empty;
 
                 BreadcrumbText.Text = "Todos los resultados";
-
                 await PaintLoadedIndexAsync();
-
                 return;
             }
 
             // ─────────────────────────────────────────────
-            // Si el usuario escribió una búsqueda
+            // Si el usuario está escribiendo:
+            // Optimización: No refrescar por cada palabra para evitar saltos.
+            // La búsqueda se ejecuta al presionar Enter (QuerySubmitted).
             // ─────────────────────────────────────────────
-            if (DropboxIndexCoordinator.IsIndexing)
-            {
-                StatusText.Text = "Estado: Ruta nueva detectada, indexando…";
-                return;
-            }
-
             SetTabTitle(SearchBox.Text);
             NotifyWorkspaceChanged();
-
-            if (!App.LocalIndex.HasData)
-            {
-                ResetSearchModuleState();
-                StatusText.Text = "Estado: No hay índice cargado. Ve a Settings y selecciona la ruta para indexar.";
-                return;
-            }
-
-            _searchDebounceTimer!.Stop();
-            _searchDebounceTimer.Start();
+            SyncBaseChipsFromQuery(q);
         }
 
 
@@ -949,7 +902,7 @@ namespace Anfeta.UI.Views
                     {
                         var prefixMatch = Regex.Match(
                             value,
-                            @"^(?<prefix>tzp|tzs|ads|aads|seo|sseo|webs?|wwebs|maps?|mmaps|app|apli|aapli|software|prog|pprog|coti|cotizacion|cotización|redes|rrede|disen[oó]|diseñ[oó]|ddise)\.(?<rest>.+)$",
+                            @"^(?<prefix>tzp|tzs|ads|aads|seo|sseo|webs?|wwebs|maps?|mmaps|app|apli|aapli|software|prog|pprog|coti|cotizacion|cotización|redes|rrede|disen[oó]|diseñ[oó]|ddise|facturaci[oó]n|facturas?|inspiraci[oó]n|inspo|logos?)\.(?<rest>.+)$",
                             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
                         if (prefixMatch.Success)

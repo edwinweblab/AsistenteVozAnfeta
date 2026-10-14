@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -9,6 +9,7 @@ namespace Anfeta.UI.Services
         private const int WM_HOTKEY = 0x0312;
         private const int MIC_HOTKEY_ID = 9001;
         private const int SEARCH_HOTKEY_ID = 9002;
+        private const int QUICK_PENDING_HOTKEY_ID = 9003;
         private readonly AppStateService _appState;
         private readonly SettingsService _settingsService;
         private IntPtr _hwnd = IntPtr.Zero;
@@ -16,6 +17,7 @@ namespace Anfeta.UI.Services
         private WndProcDelegate? _wndProc;
         private GCHandle _wndProcHandle;
         private bool _searchRegistered;
+        private bool _quickPendingRegistered;
         // Backup del último hotkey que funcionó
         private uint _lastWorkingModifiers;
         private uint _lastWorkingKey;
@@ -23,6 +25,7 @@ namespace Anfeta.UI.Services
         public event EventHandler? HotkeyPressed;
         public event EventHandler<string>? RegistrationFailed;
         public event EventHandler? SearchHotkeyPressed;
+        public event EventHandler? QuickPendingHotkeyPressed;
 
         public GlobalHotkeyService(AppStateService appState, SettingsService settingsService)
         {
@@ -66,6 +69,13 @@ namespace Anfeta.UI.Services
                 _appState.SearchHotkeyModifiers,
                 _appState.SearchHotkeyKey);
             Debug.WriteLine($"[HOTKEY] Search registro: Mods={_appState.SearchHotkeyModifiers} Key={_appState.SearchHotkeyKey} => {_searchRegistered}");
+
+            _quickPendingRegistered = RegisterHotKey(
+                _hwnd,
+                QUICK_PENDING_HOTKEY_ID,
+                0x0002, // MOD_CONTROL
+                0x20);  // VK_SPACE
+            Debug.WriteLine($"[HOTKEY] QuickPending registro: Mods=Ctrl Key=Space => {_quickPendingRegistered}");
             if (!_registered)
             {
                 var err = Marshal.GetLastWin32Error();
@@ -112,6 +122,12 @@ namespace Anfeta.UI.Services
                 _searchRegistered = false;
             }
 
+            if (_quickPendingRegistered)
+            {
+                UnregisterHotKey(_hwnd, QUICK_PENDING_HOTKEY_ID);
+                _quickPendingRegistered = false;
+            }
+
             RegisterCurrentHotkey();
         }
 
@@ -130,6 +146,12 @@ namespace Anfeta.UI.Services
             {
                 UnregisterHotKey(_hwnd, SEARCH_HOTKEY_ID);
                 _searchRegistered = false;
+            }
+
+            if (_quickPendingRegistered)
+            {
+                UnregisterHotKey(_hwnd, QUICK_PENDING_HOTKEY_ID);
+                _quickPendingRegistered = false;
             }
 
             DestroyMessageWindow();
@@ -201,6 +223,11 @@ namespace Anfeta.UI.Services
                     Debug.WriteLine("[HOTKEY] Buscador detectado");
                     SearchHotkeyPressed?.Invoke(this, EventArgs.Empty);
                 }
+                else if (id == QUICK_PENDING_HOTKEY_ID)
+                {
+                    Debug.WriteLine("[HOTKEY] Quick Pending detectado (Ctrl+Space)");
+                    QuickPendingHotkeyPressed?.Invoke(this, EventArgs.Empty);
+                }
             }
 
             return DefWindowProc(hWnd, msg, wParam, lParam);
@@ -221,6 +248,12 @@ namespace Anfeta.UI.Services
                 UnregisterHotKey(_hwnd, SEARCH_HOTKEY_ID);
                 _searchRegistered = false;
             }
+
+            if (_quickPendingRegistered)
+            {
+                UnregisterHotKey(_hwnd, QUICK_PENDING_HOTKEY_ID);
+                _quickPendingRegistered = false;
+            }
         }
 
         public void Resume()
@@ -228,7 +261,7 @@ namespace Anfeta.UI.Services
             if (_hwnd == IntPtr.Zero)
                 return;
 
-            if (_registered && _searchRegistered)
+            if (_registered && _searchRegistered && _quickPendingRegistered)
                 return;
 
             if (_registered)
@@ -241,6 +274,12 @@ namespace Anfeta.UI.Services
             {
                 UnregisterHotKey(_hwnd, SEARCH_HOTKEY_ID);
                 _searchRegistered = false;
+            }
+
+            if (_quickPendingRegistered)
+            {
+                UnregisterHotKey(_hwnd, QUICK_PENDING_HOTKEY_ID);
+                _quickPendingRegistered = false;
             }
 
             RegisterCurrentHotkey();

@@ -36,6 +36,9 @@ namespace Anfeta.UI.Helpers
         public const string SUFFIX_PREPROYECTO = "preproyecto";
         public const string SUFFIX_SOFTWARE = "software";
         public const string SUFFIX_APLICACION = "aplicacion";
+        public const string SUFFIX_FACTURACION = "facturacion";
+        public const string SUFFIX_INSPIRACION = "inspiracion";
+        public const string SUFFIX_LOGO = "logo";
 
         // Categorías preestablecidas para PROYECTO (John Shaw)
         public static readonly IReadOnlyList<string> ProjectCategories = new[]
@@ -43,8 +46,11 @@ namespace Anfeta.UI.Helpers
             "cotizacion",
             "disenos",
             "facebook",
+            "facturacion",
+            "inspiracion",
             "instagram",
             "linkedin",
+            "logo",
             "proyecto",
             "presentacion",
             "seo",
@@ -66,12 +72,20 @@ namespace Anfeta.UI.Helpers
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 { "cotizacion", "💰 Cotización" },
+                { "cotización", "💰 Cotización" },
                 { "disenos", "🎨 Diseños" },
+                { "diseños", "🎨 Diseños" },
                 { "facebook", "📘 Facebook" },
+                { "facturacion", "🧾 Facturación" },
+                { "facturación", "🧾 Facturación" },
+                { "inspiracion", "💡 Inspiración" },
+                { "inspiración", "💡 Inspiración" },
                 { "instagram", "📸 Instagram" },
                 { "linkedin", "💼 LinkedIn" },
+                { "logo", "🏷️ Logo" },
                 { "proyecto", "📁 Proyecto General" },
                 { "presentacion", "📊 Presentación" },
+                { "presentación", "📊 Presentación" },
                 { "seo", "🔍 SEO" },
                 { "tiktok", "🎵 TikTok" },
                 { "webs", "🌐 Webs" },
@@ -97,12 +111,20 @@ namespace Anfeta.UI.Helpers
                 { "pre-proyecto", "🚀 Pre-Proyecto / Onboarding" },
                 { SUFFIX_SOFTWARE, "💻 Herramientas / Software" },
                 { SUFFIX_APLICACION, "📱 Aplicación" },
-                { "aplicación", "📱 Aplicación" }
+                { "aplicación", "📱 Aplicación" },
+                { SUFFIX_FACTURACION, "🧾 Facturación" },
+                { "facturación", "🧾 Facturación" },
+                { "factura", "🧾 Facturación" },
+                { SUFFIX_INSPIRACION, "💡 Inspiración" },
+                { "inspiración", "💡 Inspiración" },
+                { SUFFIX_LOGO, "🏷️ Logo" },
+                { "logos", "🏷️ Logo" },
+                { "logotipo", "🏷️ Logo" }
             };
 
         // Regex para capturar {dominio.com}.{sufijo} o {dominio.com.mx}.{sufijo}
         private static readonly Regex ProjectSuffixRegex = new(
-            @"(?<![\w@])(?<domain>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev))(?:\.(?<suffix>webs?|ads?|ceo|seo|auditor[ií]a|cotizaci[oó]n|preproyecto|pre-proyecto|software|aplicaci[oó]n|apli))?",
+            @"(?<![\w@])(?<domain>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com\.mx|org\.mx|gob\.mx|edu\.mx|net\.mx|com|mx|org|net|io|co|app|dev))(?:\.(?<suffix>webs?|ads?|ceo|seo|auditor[ií]a|cotizaci[oó]n|facturaci[oó]n|facturas?|inspiraci[oó]n|logos?|logotipo|preproyecto|pre-proyecto|software|aplicaci[oó]n|apli))?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         public static ProjectSuffixInfo Parse(string? text)
@@ -173,6 +195,9 @@ namespace Anfeta.UI.Helpers
                 "preproyecto" or "pre-proyecto" => SUFFIX_PREPROYECTO,
                 "software" or "prog" or "pprog" or "pro" => SUFFIX_SOFTWARE,
                 "aplicacion" or "aplicación" or "apli" or "aapli" => SUFFIX_APLICACION,
+                "facturacion" or "facturación" or "factura" or "facturas" => SUFFIX_FACTURACION,
+                "inspiracion" or "inspiración" or "inspo" => SUFFIX_INSPIRACION,
+                "logo" or "logos" or "logotipo" => SUFFIX_LOGO,
                 _ => s
             };
         }
@@ -203,13 +228,28 @@ namespace Anfeta.UI.Helpers
 
         /// <summary>
         /// Sugiere la categoría de carpeta preestablecida según el nombre del archivo.
+        /// Soporta pasar el dominio para evitar falsos positivos (ej. dominio 'weblab.mx' activando 'webs').
         /// </summary>
-        public static string GuessCategory(string? fileName, bool isSoftware)
+        public static string GuessCategory(string? fileName, bool isSoftware, string? domain = null)
         {
             if (string.IsNullOrWhiteSpace(fileName))
                 return isSoftware ? "software" : "proyecto";
 
             var lower = fileName.ToLowerInvariant();
+
+            // Limpieza de dominio del texto para evitar falsos positivos
+            var dom = !string.IsNullOrWhiteSpace(domain) ? domain.ToLowerInvariant() : ExtractDomain(lower);
+            if (!string.IsNullOrWhiteSpace(dom))
+            {
+                var cleanDom = dom.Trim().Trim('.');
+                var dotIdx = cleanDom.IndexOf('.');
+                var baseDom = dotIdx > 0 ? cleanDom.Substring(0, dotIdx) : cleanDom;
+                lower = lower.Replace(cleanDom, " ");
+                if (baseDom.Length >= 3)
+                {
+                    lower = lower.Replace(baseDom, " ");
+                }
+            }
 
             if (isSoftware)
             {
@@ -222,25 +262,52 @@ namespace Anfeta.UI.Helpers
                 return "software";
             }
 
+            // 1. Facturación (facturación, factura, cfdi, xml, sat, recibo, fiscal, invoice)
+            if (lower.Contains("facturaci") || lower.Contains("factura") || lower.Contains("invoic") || lower.Contains("cfdi") || lower.Contains("recibo") || lower.Contains("fiscal") || lower.Contains(".xml"))
+                return "facturacion";
+
+            // 2. Inspiración (inspiración, inspiracion, inspo, moodboard, referencia, referencias, benchmark)
+            if (lower.Contains("inspiraci") || lower.Contains("inspo") || lower.Contains("moodboard") || lower.Contains("referencia") || lower.Contains("benchmark"))
+                return "inspiracion";
+
+            // 3. Logo (logo, logos, logotipo, isotipo, imagotipo, isologo, branding)
+            if (lower.Contains("logo") || lower.Contains("logotipo") || lower.Contains("isotipo") || lower.Contains("imagotipo") || lower.Contains("isologo") || lower.Contains("branding"))
+                return "logo";
+
+            // 4. Cotización (coti, presupuesto, precio)
             if (lower.Contains("coti") || lower.Contains("presupuesto") || lower.Contains("precio"))
                 return "cotizacion";
-            if (lower.Contains("disen") || lower.Contains("diseñ") || lower.Contains("logo") || lower.Contains("flyer") || lower.Contains("banner") || lower.Contains(".png") || lower.Contains(".jpg") || lower.Contains(".jpeg") || lower.Contains(".svg"))
+
+            // 5. Diseños (disen, diseñ, flyer, banner, vector, mockup)
+            if (lower.Contains("disen") || lower.Contains("diseñ") || lower.Contains("flyer") || lower.Contains("banner") || lower.Contains("vector") || lower.Contains("mockup"))
                 return "disenos";
+
+            // 6. Redes Sociales
             if (lower.Contains("face") || lower.Contains("fb"))
                 return "facebook";
             if (lower.Contains("insta") || lower.Contains("ig"))
                 return "instagram";
             if (lower.Contains("link") || lower.Contains("linkedin"))
                 return "linkedin";
-            if (lower.Contains("present") || lower.Contains("pitch") || lower.Contains("slide") || lower.Contains("propuesta"))
-                return "presentacion";
-            if (lower.Contains("seo") || lower.Contains("posicion"))
-                return "seo";
             if (lower.Contains("tiktok") || lower.Contains("tik"))
                 return "tiktok";
-            if (lower.Contains("web") || lower.Contains("sitio") || lower.Contains("wpress") || lower.Contains("wordpress"))
+
+            // 7. Presentación
+            if (lower.Contains("present") || lower.Contains("pitch") || lower.Contains("slide") || lower.Contains("propuesta"))
+                return "presentacion";
+
+            // 8. SEO
+            if (lower.Contains("seo") || lower.Contains("posicion"))
+                return "seo";
+
+            // 9. Webs (webs, web, sitio, wpress, wordpress, landing, html, css)
+            // Delimitado para no confundir palabras compuestas
+            if (Regex.IsMatch(lower, @"(?<![\p{L}\p{Nd}_])(?:webs?|sitio|wpress|wordpress|landing|html|css)(?![\p{L}\p{Nd}_])", RegexOptions.IgnoreCase) ||
+                lower.Contains(".web") || lower.Contains(".webs"))
                 return "webs";
-            if (lower.Contains("biblio"))
+
+            // 10. Biblioteca
+            if (lower.Contains("biblio") || lower.Contains("libreria") || lower.Contains("librería"))
                 return "biblioteca";
 
             return "proyecto";

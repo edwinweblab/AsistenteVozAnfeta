@@ -941,7 +941,7 @@ namespace Anfeta.UI.Models.Weblab
             // Extraer área codificada de Notion (ej. sseo, wwebs, aads, bbibl, ccoti, etc.)
             var encodedAreaMatch = Regex.Match(
                 withoutWorkflow,
-                @"(?<![\p{L}\p{Nd}_])(?<area>sseo|seo|wwebs|webs|web|aads|ads|ad|aapli|apli|apps?|aplicaci[oó]n|pprog|prog|programas?|software|ddise|dise[nñ]o|rrede|redes|mmaps|maps|map|bbibl|bblib|biblia|biblioteca|ccoti|coti|cotizaci[oó]n|cchat|chat|rrapi|api)(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?<area>sseo|seo|wwebs|webs|web|aads|ads|ad|aapli|apli|apps?|aplicaci[oó]n|pprog|prog|programas?|software|ddise|dise[nñ]o|facturaci[oó]n|facturas?|inspiraci[oó]n|inspo|logos?|logotipo|rrede|redes|mmaps|maps|map|bbibl|bblib|biblia|biblioteca|ccoti|coti|cotizaci[oó]n|cchat|chat|rrapi|api)(?![\p{L}\p{Nd}_])",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             var encodedArea = encodedAreaMatch.Success
                 ? NormalizeEncodedArea(encodedAreaMatch.Groups["area"].Value)
@@ -1059,7 +1059,7 @@ namespace Anfeta.UI.Models.Weblab
             // Extraer tags textuales iniciales (APLICACIÓN, SEO, ADS, etc.)
             var tagMatch = Regex.Match(
                 titleSource,
-                @"^\s*(?:(?:\([^)]*\)|\d+(?:\.\d+)?)\s+)*(?<tags>(?:(?:APLICACI[ÓO]N|PROGRAMAS?|CLIENTE|ADS|REDES|WEBS?|SEO|MAPS|COTI|BIBLIA|COBROS?|PAGOS?)\s+){1,4})",
+                @"^\s*(?:(?:\([^)]*\)|\d+(?:\.\d+)?)\s+)*(?<tags>(?:(?:APLICACI[ÓO]N|PROGRAMAS?|CLIENTE|ADS|REDES|WEBS?|SEO|MAPS|COTI|FACTURACI[ÓO]N|FACTURAS?|INSPIRACI[ÓO]N|LOGOS?|BIBLIA|COBROS?|PAGOS?)\s+){1,4})",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             var tags = tagMatch.Success
@@ -1222,7 +1222,7 @@ namespace Anfeta.UI.Models.Weblab
         private static string FindAreaPrefix(string value)
         {
             var match = Regex.Match(value ?? string.Empty,
-                @"^\s*(?:(?:\([^)]*\)|\d+(?:\.\d+)?)\s+)*(?<area>APLICACI[ÓO]N|PROGRAMAS?|CLIENTE|ADS|REDES|WEBS?|SEO|MAPS|COTI|BIBLIA|COBROS?|PAGOS?)(?![\p{L}\p{Nd}_])",
+                @"^\s*(?:(?:\([^)]*\)|\d+(?:\.\d+)?)\s+)*(?<area>APLICACI[ÓO]N|PROGRAMAS?|CLIENTE|ADS|REDES|WEBS?|SEO|MAPS|COTI|FACTURACI[ÓO]N|FACTURAS?|INSPIRACI[ÓO]N|LOGOS?|BIBLIA|COBROS?|PAGOS?)(?![\p{L}\p{Nd}_])",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             return match.Success ? NormalizeArea(match.Groups["area"].Value) : string.Empty;
         }
@@ -1234,6 +1234,9 @@ namespace Anfeta.UI.Models.Weblab
             if (upper is "COBRO" or "COBROS") return "COBROS";
             if (upper is "PAGO" or "PAGOS") return "PAGOS";
             if (upper is "PROGRAMA" or "PROGRAMAS") return "PROGRAMAS";
+            if (upper is "FACTURACION" or "FACTURACIÓN" or "FACTURA" or "FACTURAS") return "FACTURACIÓN";
+            if (upper is "INSPIRACION" or "INSPIRACIÓN" or "INSPO") return "INSPIRACIÓN";
+            if (upper is "LOGO" or "LOGOS" or "LOGOTIPO") return "LOGO";
             return upper;
         }
 
@@ -1250,6 +1253,9 @@ namespace Anfeta.UI.Models.Weblab
                 "rrede" or "rede" or "redes" => "REDES",
                 "mmaps" or "maps" or "map" or "mmapi" => "MAPS",
                 "ccoti" or "coti" or "cotizacion" or "cotización" => "COTIZACIÓN",
+                "facturacion" or "facturación" or "factura" or "facturas" => "FACTURACIÓN",
+                "inspiracion" or "inspiración" or "inspo" => "INSPIRACIÓN",
+                "logo" or "logos" or "logotipo" => "LOGO",
                 "cchat" or "chat" => "CHAT",
                 "rrapi" or "api" => "API",
                 _ => string.Empty
@@ -1263,7 +1269,7 @@ namespace Anfeta.UI.Models.Weblab
 
             var match = Regex.Match(
                 text,
-                @"(?<![\p{L}\p{Nd}_])(?<area>ccoti|coti|cotizaci[oó]n|sseo|seo|wwebs|webs?|aads|ads?|pprog|prog|programas?|software|aapli|apli|apps?|aplicaci[oó]n|bbibl|bblib|biblia|biblioteca|mmaps|maps?|mmapi|rrede|redes?|ddise|dise[nñ]o|cchat|chat|rrapi|api)(?![\p{L}\p{Nd}_])",
+                @"(?<![\p{L}\p{Nd}_])(?<area>ccoti|coti|cotizaci[oó]n|facturaci[oó]n|facturas?|inspiraci[oó]n|inspo|logos?|logotipo|sseo|seo|wwebs|webs?|aads|ads?|pprog|prog|programas?|software|aapli|apli|apps?|aplicaci[oó]n|bbibl|bblib|biblia|biblioteca|mmaps|maps?|mmapi|rrede|redes?|ddise|dise[nñ]o|cchat|chat|rrapi|api)(?![\p{L}\p{Nd}_])",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
             if (match.Success)
@@ -1313,6 +1319,12 @@ namespace Anfeta.UI.Models.Weblab
                 ("coti.", "COTIZACIÓN"),
                 ("cotizacion.", "COTIZACIÓN"),
                 ("cotización.", "COTIZACIÓN"),
+                ("facturacion.", "FACTURACIÓN"),
+                ("facturación.", "FACTURACIÓN"),
+                ("factura.", "FACTURACIÓN"),
+                ("inspiracion.", "INSPIRACIÓN"),
+                ("inspiración.", "INSPIRACIÓN"),
+                ("logo.", "LOGO"),
                 ("redes.", "REDES"),
                 ("rrede.", "REDES"),
                 ("diseno.", "DISEÑO"),

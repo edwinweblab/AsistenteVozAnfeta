@@ -9,9 +9,13 @@ namespace Anfeta.UI.Services.Notion
         string BlockId,
         string Text,
         DateTimeOffset CompletedAt,
-        string DateKey);
+        string DateKey,
+        DateTimeOffset CreatedAt = default);
 
-    public sealed record NotionPendingChecklistItem(string BlockId, string Text);
+    public sealed record NotionPendingChecklistItem(
+        string BlockId,
+        string Text,
+        DateTimeOffset CreatedAt = default);
 
     public sealed record NotionChecklistStats(
         int Total,

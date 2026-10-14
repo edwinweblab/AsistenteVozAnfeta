@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../App1/Helpers/ProjectSuffixHelper.cs" Link="ProjectSuffixHelper.cs" />
+    <Compile Include="../../App1/Models/Weblab/SearchResultRow.cs" Link="SearchResultRow.cs" />
+    <Compile Include="../../App1/Models/Weblab/SearchSource.cs" Link="SearchSource.cs" />
+  </ItemGroup>
+</Project>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -111,6 +112,48 @@ namespace Anfeta.UI.Services.Presence
             };
         }
 
+        private static readonly HttpClient PresenceClient = new()
+        {
+            Timeout = TimeSpan.FromSeconds(8)
+        };
+
+        public async Task SyncFromWebPresenceAsync()
+        {
+            try
+            {
+                var webUrl = ApplicationData.Current.LocalSettings.Values["Search.WebPresenceUrl"] as string;
+                if (string.IsNullOrWhiteSpace(webUrl))
+                {
+                    webUrl = "http://localhost:3000/api/presence";
+                }
+
+                using var response = await PresenceClient.GetAsync(webUrl);
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("people", out var peopleEl) && peopleEl.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in peopleEl.EnumerateArray())
+                        {
+                            if (item.TryGetProperty("name", out var nameEl) &&
+                                item.TryGetProperty("lastSeen", out var seenEl) &&
+                                seenEl.ValueKind == JsonValueKind.String &&
+                                DateTimeOffset.TryParse(seenEl.GetString(), out var dt))
+                            {
+                                var person = NormalizeToCanonicalPerson(nameEl.GetString());
+                                _lastSeenUtc[person] = dt;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Silencioso
+            }
+        }
+
         public bool IsUserOnline(string person)
         {
             var canonical = NormalizeToCanonicalPerson(person);
@@ -123,7 +166,7 @@ namespace Anfeta.UI.Services.Presence
             // Consultar timestamp en caché o archivo compartido
             if (_lastSeenUtc.TryGetValue(canonical, out var lastSeen))
             {
-                return (DateTimeOffset.UtcNow - lastSeen).TotalMinutes <= 12;
+                return (DateTimeOffset.UtcNow - lastSeen).TotalMinutes <= 3.5;
             }
 
             // Consultar disco
@@ -131,7 +174,7 @@ namespace Anfeta.UI.Services.Presence
             if (fileLastSeen.HasValue)
             {
                 _lastSeenUtc[canonical] = fileLastSeen.Value;
-                return (DateTimeOffset.UtcNow - fileLastSeen.Value).TotalMinutes <= 12;
+                return (DateTimeOffset.UtcNow - fileLastSeen.Value).TotalMinutes <= 3.5;
             }
 
             return false;
@@ -145,14 +188,37 @@ namespace Anfeta.UI.Services.Presence
             if (string.Equals(canonical, current, StringComparison.OrdinalIgnoreCase))
                 return $"{canonical} · Conectado (Tú)";
 
-            if (_lastSeenUtc.TryGetValue(canonical, out var lastSeen))
+            if (!_lastSeenUtc.TryGetValue(canonical, out var lastSeen))
             {
-                var minutes = (int)(DateTimeOffset.UtcNow - lastSeen).TotalMinutes;
-                if (minutes <= 12)
-                    return $"{canonical} · Conectado (Activo)";
-                if (minutes <= 60)
-                    return $"{canonical} · Ausente (Hace {minutes} min)";
-                return $"{canonical} · Desconectado";
+                var fileLastSeen = ReadPersonLastSeenFromFile(canonical);
+                if (fileLastSeen.HasValue)
+                {
+                    _lastSeenUtc[canonical] = fileLastSeen.Value;
+                    lastSeen = fileLastSeen.Value;
+                }
+            }
+
+            if (lastSeen != default)
+            {
+                var diff = DateTimeOffset.UtcNow - lastSeen;
+                if (diff.TotalMinutes <= 3.5)
+                    return $"{canonical} · En línea 🟢";
+
+                var local = lastSeen.ToLocalTime();
+                if (diff.TotalMinutes < 60)
+                {
+                    var mins = Math.Max(1, (int)diff.TotalMinutes);
+                    return $"{canonical} · Ausente (Hace {mins} min)";
+                }
+                if (local.Date == DateTime.Today)
+                {
+                    return $"{canonical} · Última conexión: Hoy {local:hh:mm tt}";
+                }
+                if (local.Date == DateTime.Today.AddDays(-1))
+                {
+                    return $"{canonical} · Última conexión: Ayer {local:hh:mm tt}";
+                }
+                return $"{canonical} · Última conexión: {local:dd/MM/yyyy hh:mm tt}";
             }
 
             return $"{canonical} · Desconectado";
@@ -164,6 +230,7 @@ namespace Anfeta.UI.Services.Presence
             {
                 var user = GetCurrentConfiguredUser();
                 _lastSeenUtc[user] = DateTimeOffset.UtcNow;
+                _ = SyncFromWebPresenceAsync();
 
                 var data = new Dictionary<string, string>();
                 var targetPaths = GetHeartbeatFilePaths();

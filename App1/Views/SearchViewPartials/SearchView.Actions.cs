@@ -2214,7 +2214,7 @@ namespace Anfeta.UI.Views
             // such as "web" when choosing the project category (e.g. web.png).
             var categoryText = string.Join(" ", new[] { suggestedTitle, SearchBox?.Text }
                 .Concat(selectedFiles.Select(file => Path.GetFileNameWithoutExtension(file.Name))));
-            var detectedCategory = ProjectSuffixHelper.GuessCategory(categoryText, detectedSoftware);
+            var detectedCategory = ProjectSuffixHelper.GuessCategory(categoryText, detectedSoftware, detectedDomain);
             string[] monthNames = { "ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC" };
             var today = DateTime.Today;
             var currentMonth = $"{today:yy}-[{today:MM}{monthNames[today.Month - 1]}]";
@@ -2348,7 +2348,8 @@ namespace Anfeta.UI.Views
                 var filename = selectedFiles.Count == 0 ? "Sin archivos" :
                     GetDropboxUploadFileName(selectedFiles[0].Name, title, 0, selectedFiles.Count);
                 var rootCategory = IsUploadRootCategory(category, suffix);
-                var route = rootCategory ? $"DRX → {domain}.{suffix}" : $"DRX → {domain}.{suffix} → {domain}.{category}";
+                var subfolderName = rootCategory ? "" : (!string.IsNullOrEmpty(localPath) ? Path.GetFileName(localPath) : $"{domain}.{category}");
+                var route = rootCategory ? $"DRX → {domain}.{suffix}" : $"DRX → {domain}.{suffix} → {subfolderName}";
                 pathPreview.Text = $"📁 Ruta: {route} → {filename}" + (selectedFiles.Count > 1 ? $" (+{selectedFiles.Count - 1})" : "");
                 ToolTipService.SetToolTip(pathPreview, localPath + "\n" + string.Join("\n", selectedFiles.Select((file, index) =>
                     GetDropboxUploadFileName(file.Name, title, index, selectedFiles.Count))));
@@ -2376,7 +2377,7 @@ namespace Anfeta.UI.Views
                     var category = (categoryCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
                     var serviceType = typeCombo.SelectedIndex == 1 ? "pprog" : category switch
                     {
-                        "webs" => "wwebs", "seo" => "sseo", "cotizacion" => "ccoti",
+                        "webs" => "wwebs", "seo" => "sseo", "cotizacion" => "ccoti", "disenos" => "ddise",
                         "facebook" or "instagram" or "linkedin" or "tiktok" => "rrede", _ => structuredPasteTitle ? "proyecto" : ""
                     };
                     var prefix = string.Join(" ", new[] { domain, serviceType, monthBox.Text?.Trim() }.Where(p => !string.IsNullOrWhiteSpace(p)));
@@ -2585,17 +2586,52 @@ namespace Anfeta.UI.Views
             };
             var knownDomains = (App.LocalIndex?.GetAll() ?? Enumerable.Empty<SearchResultRow>()).Select(r => r.DomainChipText)
                 .Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(d => d).ToList();
+            bool userSelectedCategory = false;
+            void CheckAutoDetectCategory()
+            {
+                if (userSelectedCategory || populatingCategories) return;
+                var currentTitle = titleBox.Text ?? "";
+                var currentDomain = domainSuggestBox.Text ?? "";
+                var isSoftware = typeCombo.SelectedIndex == 1;
+                var autoCat = ProjectSuffixHelper.GuessCategory(currentTitle, isSoftware, currentDomain);
+                if (!string.IsNullOrEmpty(autoCat) && autoCat != "proyecto")
+                {
+                    var matchingItem = categoryCombo.Items.OfType<ComboBoxItem>().FirstOrDefault(i => string.Equals(i.Tag?.ToString(), autoCat, StringComparison.OrdinalIgnoreCase));
+                    if (matchingItem != null && categoryCombo.SelectedItem != matchingItem)
+                    {
+                        categoryCombo.SelectedItem = matchingItem;
+                    }
+                }
+            }
+
             domainSuggestBox.TextChanged += (sender, args) =>
             {
                 if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
                     sender.ItemsSource = knownDomains.Where(d => d.Contains(sender.Text ?? "", StringComparison.OrdinalIgnoreCase)).Take(12).ToList();
+                CheckAutoDetectCategory();
                 ApplyComposedTitle();
             };
-            domainSuggestBox.SuggestionChosen += (sender, args) => sender.Text = args.SelectedItem?.ToString() ?? "";
+            domainSuggestBox.SuggestionChosen += (sender, args) =>
+            {
+                sender.Text = args.SelectedItem?.ToString() ?? "";
+                CheckAutoDetectCategory();
+            };
             typeCombo.SelectionChanged += (_, __) => PopulateCategories();
-            categoryCombo.SelectionChanged += (_, __) => ApplyComposedTitle();
+            categoryCombo.SelectionChanged += (_, __) =>
+            {
+                if (!populatingCategories)
+                    userSelectedCategory = true;
+                ApplyComposedTitle();
+            };
             monthBox.TextChanged += (_, __) => ApplyComposedTitle();
-            titleBox.TextChanged += (_, __) => { if (!updatingTitle) RefreshPreview(); };
+            titleBox.TextChanged += (_, __) =>
+            {
+                if (!updatingTitle)
+                {
+                    CheckAutoDetectCategory();
+                    RefreshPreview();
+                }
+            };
             backupOption.Checked += (_, __) => RefreshPreview();
             dropboxOption.Checked += (_, __) => RefreshPreview();
             notionOption.Checked += (_, __) => RefreshPreview();
@@ -2633,7 +2669,20 @@ namespace Anfeta.UI.Views
         private static string GetUploadDropboxDestination(string root, string domain, string suffix, string? category)
         {
             var projectRoot = Path.Combine(root, "DRX", $"{domain}.{suffix}");
-            return IsUploadRootCategory(category, suffix) ? projectRoot : Path.Combine(projectRoot, $"{domain}.{category!.Trim()}");
+            if (IsUploadRootCategory(category, suffix)) return projectRoot;
+            var cat = category!.Trim();
+            if (Directory.Exists(projectRoot))
+            {
+                var existing = Directory.EnumerateDirectories(projectRoot).FirstOrDefault(d =>
+                {
+                    var name = Path.GetFileName(d);
+                    return string.Equals(name, $"{domain}.{cat}", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, $"{cat}.{domain}", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(name, cat, StringComparison.OrdinalIgnoreCase);
+                });
+                if (!string.IsNullOrEmpty(existing)) return existing;
+            }
+            return Path.Combine(projectRoot, $"{domain}.{cat}");
         }
 
         private static string ReplaceUploadReviewerTag(string text, string previousTag, string selectedTag)
@@ -2656,7 +2705,7 @@ namespace Anfeta.UI.Views
             else
             {
                 var tags = Regex.Match(text, @"^(?:(?:john|jjohn|nneft|aandr|ggena|kkarl|bbria|iisai)(?:0000|001|002|003|00)?\s+)*", RegexOptions.IgnoreCase).Value;
-                const string pattern = @"^(?:[\w.-]+\.(?:com|mx|org|net|io|co|app|dev)(?=\s|$)\s*)?(?:(?:sseo|aads|wwebs|aapli|rrede|pprog|ccoti|proyecto|software)(?=\s|$)\s*)?(?:(?:\d{2}-\[\d{2}[A-Z]{3}\]|jjane|ffebr|mmarz|aabri|mmayo|jjuni|jjuli|aagos|ssept|ooctu|nnovi|ddici)(?=\s|$)\s*)?";
+                const string pattern = @"^(?:[\w.-]+\.(?:com|mx|org|net|io|co|app|dev)(?=\s|$)\s*)?(?:(?:sseo|aads|wwebs|aapli|rrede|pprog|ccoti|ddise|facturacion|facturación|inspiracion|inspiración|logo|proyecto|software)(?=\s|$)\s*)?(?:(?:\d{2}-\[\d{2}[A-Z]{3}\]|jjane|ffebr|mmarz|aabri|mmayo|jjuni|jjuli|aagos|ssept|ooctu|nnovi|ddici)(?=\s|$)\s*)?";
                 remainder = tags + Regex.Replace(text[tags.Length..], pattern, "", RegexOptions.IgnoreCase);
             }
             var domain = ProjectSuffixHelper.ExtractDomain(newPrefix);

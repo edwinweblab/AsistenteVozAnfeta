@@ -501,6 +501,7 @@ namespace Anfeta.UI.Views
             }
 
             NotifyTabModeChanged(CurrentTabMode);
+            UpdatePersonalCalendarContent();
             ForceHideLoadingState();
 
             // Precalentamiento silencioso en segundo plano de Ollama para eliminar el retraso de arranque en frío
@@ -563,8 +564,17 @@ namespace Anfeta.UI.Views
 
             DropboxIndexCoordinator.StateChanged += OnIndexStateChanged;
             SearchFocusBridge.FocusRequested += OnSearchFocusRequested;
+            Anfeta.UI.Services.Search.PendingTasksService.TasksChanged += OnPendingTasksChanged;
             _isIndexStateHooked = true;
             AttachMessagesNavigationBridge();
+        }
+
+        private void OnPendingTasksChanged(object? sender, EventArgs e)
+        {
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                LoadSavedSearches();
+            });
         }
 
         private void SearchView_Unloaded(object sender, RoutedEventArgs e)
@@ -573,6 +583,7 @@ namespace Anfeta.UI.Views
             {
                 DropboxIndexCoordinator.StateChanged -= OnIndexStateChanged;
                 SearchFocusBridge.FocusRequested -= OnSearchFocusRequested;
+                Anfeta.UI.Services.Search.PendingTasksService.TasksChanged -= OnPendingTasksChanged;
                 _isIndexStateHooked = false;
             }
 
