@@ -1421,8 +1421,7 @@ namespace Anfeta.UI.Services.Notion
 
             var payload = new Dictionary<string, object?>
             {
-                ["children"] = new object[] { blockPayload },
-                ["position"] = new Dictionary<string, object?> { ["type"] = "start" }
+                ["children"] = new object[] { blockPayload }
             };
 
             var json = JsonSerializer.Serialize(payload);
@@ -1440,8 +1439,40 @@ namespace Anfeta.UI.Services.Notion
             }
             using (var confirmation = JsonDocument.Parse(respBody))
             {
-                if (!confirmation.RootElement.TryGetProperty("results", out var results) || results.GetArrayLength() != 1 || !results[0].TryGetProperty("id", out var savedId) || string.IsNullOrWhiteSpace(savedId.GetString()))
+                var root = confirmation.RootElement;
+                var confirmed = false;
+
+                if (root.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array)
+                {
+                    if (results.GetArrayLength() > 0)
+                    {
+                        if (results[0].TryGetProperty("id", out var firstId) && !string.IsNullOrWhiteSpace(firstId.GetString()))
+                        {
+                            confirmed = true;
+                        }
+                    }
+                    else
+                    {
+                        confirmed = true;
+                    }
+                }
+                else if (root.TryGetProperty("id", out var singleId) && !string.IsNullOrWhiteSpace(singleId.GetString()))
+                {
+                    confirmed = true;
+                }
+                else if (root.TryGetProperty("object", out var objProp))
+                {
+                    var objStr = objProp.GetString();
+                    if (objStr == "list" || objStr == "block")
+                    {
+                        confirmed = true;
+                    }
+                }
+
+                if (!confirmed)
+                {
                     throw new InvalidOperationException("Notion no confirmó el check. Revisa la página antes de repetirlo.");
+                }
             }
 
             _checklistStatsCache.TryRemove(pageId, out _);
@@ -1508,8 +1539,33 @@ namespace Anfeta.UI.Services.Notion
             }
             using (var confirmation = JsonDocument.Parse(respBody))
             {
-                if (!confirmation.RootElement.TryGetProperty("id", out var savedId) || string.IsNullOrWhiteSpace(savedId.GetString()))
+                var root = confirmation.RootElement;
+                var confirmed = false;
+
+                if (root.TryGetProperty("id", out var savedId) && !string.IsNullOrWhiteSpace(savedId.GetString()))
+                {
+                    confirmed = true;
+                }
+                else if (root.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array && results.GetArrayLength() > 0)
+                {
+                    if (results[0].TryGetProperty("id", out var firstId) && !string.IsNullOrWhiteSpace(firstId.GetString()))
+                    {
+                        confirmed = true;
+                    }
+                }
+                else if (root.TryGetProperty("object", out var objProp))
+                {
+                    var objStr = objProp.GetString();
+                    if (objStr == "comment" || objStr == "list")
+                    {
+                        confirmed = true;
+                    }
+                }
+
+                if (!confirmed)
+                {
                     throw new InvalidOperationException("Notion no confirmó el comentario. Revisa la página antes de repetirlo.");
+                }
             }
 
             _checklistStatsCache.TryRemove(pageId, out _);
